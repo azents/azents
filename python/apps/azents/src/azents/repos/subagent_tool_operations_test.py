@@ -80,6 +80,7 @@ async def test_subagent_tool_operations_close_before_returning_effect_targets() 
         mailbox_repository=mailbox,
         source_repository=sources,
         coordination_repository=coordination,
+        owner=None,
     )
 
     assert await operations.get_agent("agent-1") is agent

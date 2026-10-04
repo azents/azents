@@ -18,7 +18,7 @@ from azents.core.enums import (
 )
 from azents.core.mailbox_data import MailboxItem
 from azents.engine.events.types import AgentRunState
-from azents.rdb.session_capabilities import ReadSession, ReadWriteSession
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
@@ -149,18 +149,24 @@ class _AgentSessionRepository(AgentSessionRepository):
             parent_id=None,
         )
 
-    async def lock_by_id(
+    async def get_by_id(
         self,
         session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession:
         del session
-        self.locked_session_ids.append(agent_session_id)
         return AgentSession.model_construct(
             id=agent_session_id,
             status=self.target_status,
             stop_requested_at=_NOW if self.target_stopping else None,
         )
+
+    async def fence_active_mailbox_target(
+        self, session: WriteSession, agent_session_id: str
+    ) -> AgentSession | None:
+        self.locked_session_ids.append(agent_session_id)
+        current = await self.get_by_id(session, agent_session_id)
+        return current if current.status is AgentSessionStatus.ACTIVE else None
 
     async def mark_session_agent_message_activity(
         self,

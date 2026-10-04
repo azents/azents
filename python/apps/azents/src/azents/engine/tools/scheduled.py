@@ -54,7 +54,6 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferService,
 )
@@ -173,11 +172,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         ):
             self.operations = dataclasses.replace(
                 self.operations,
-                session_manager=OwnerBoundSessionManager(
-                    session_manager=self.operations.session_manager,
-                    session_id=owner.session_id,
-                    owner_generation=owner.owner_generation,
-                ),
+                owner=owner,
             )
             self.terminal_service = self.terminal_service.for_execution(owner)
             self.channel_service = self.channel_service.for_execution(owner)

@@ -1880,7 +1880,7 @@ class TestResolveAgentTools:
                 store=_FakeClaudeRulesAppendixDedupeStateStore()
             ),
             goal_toolkit_provider=GoalToolkitProvider(
-                store=GoalStateStore(session_manager=goal_session_manager)
+                store=GoalStateStore(session_manager=goal_session_manager, owner=None)
             ),
             scheduled_toolkit_provider=_make_scheduled_provider(),
             memory_enabled=True,

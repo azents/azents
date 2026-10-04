@@ -860,7 +860,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
     assert queue_repository.lock_claimed_batch.await_count == 1
 
 
-async def test_preparation_locks_connection_before_owner() -> None:
+async def test_preparation_claims_owners_before_plain_trigger_capture() -> None:
     """Provider completion follows the callback's connection-first lock order."""
     transaction = _Session()
     calls: list[str] = []
@@ -897,7 +897,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
         trigger_position="00000000000000000001",
     )
 
-    async def lock_first_item(
+    async def get_first_item(
         _session: WriteSession,
         *,
         owner_id: str,
@@ -906,8 +906,8 @@ async def test_preparation_locks_connection_before_owner() -> None:
         calls.append("item")
         return first_item
 
-    queue_repository.lock_first_authoritative_item = AsyncMock(
-        side_effect=lock_first_item
+    queue_repository.get_first_authoritative_item = AsyncMock(
+        side_effect=get_first_item
     )
     queue_repository.mark_owner_ready = AsyncMock()
     provider_control = MagicMock(spec=ExternalChannelProviderControlService)
@@ -990,7 +990,7 @@ async def test_unready_discord_nonmention_starts_hidden_without_progress() -> No
     )
     queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
     queue_repository.lock_leased_owner = AsyncMock(return_value=owner)
-    queue_repository.lock_first_authoritative_item = AsyncMock(return_value=first_item)
+    queue_repository.get_first_authoritative_item = AsyncMock(return_value=first_item)
     queue_repository.mark_owner_ready = AsyncMock()
     provider_control = MagicMock(spec=ExternalChannelProviderControlService)
     provider_control.attempt = AsyncMock()

@@ -155,6 +155,7 @@ def _service(
         runtime_token_resolver=Mock(),
         sdk_factories=Mock(),
         watchdog=Mock(clock=AsyncioModelStreamClock()),
+        read_session_manager=manager,
     )
 
 

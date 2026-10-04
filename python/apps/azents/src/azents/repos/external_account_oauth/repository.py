@@ -276,28 +276,22 @@ class ExternalAccountOAuthAttemptRepository:
         if limit <= 0:
             return ExternalAccountOAuthAttemptCleanupSummary(deleted_count=0)
         async with self.session_manager() as session:
-            rows = (
-                await session.write_session.scalars(
-                    sa.select(RDBExternalAccountOAuthAttempt.id)
-                    .where(
-                        sa.or_(
-                            RDBExternalAccountOAuthAttempt.created_at <= cutoff,
-                            RDBExternalAccountOAuthAttempt.expires_at <= cutoff,
-                        )
-                    )
-                    .order_by(
-                        RDBExternalAccountOAuthAttempt.created_at,
-                        RDBExternalAccountOAuthAttempt.id,
-                    )
-                    .with_for_update(skip_locked=True)
-                    .limit(limit)
+            expired = sa.or_(
+                RDBExternalAccountOAuthAttempt.created_at <= cutoff,
+                RDBExternalAccountOAuthAttempt.expires_at <= cutoff,
+            )
+            candidates = (
+                sa.select(RDBExternalAccountOAuthAttempt.id)
+                .where(expired)
+                .order_by(
+                    RDBExternalAccountOAuthAttempt.created_at,
+                    RDBExternalAccountOAuthAttempt.id,
                 )
-            ).all()
-            if not rows:
-                return ExternalAccountOAuthAttemptCleanupSummary(deleted_count=0)
+                .limit(limit)
+            )
             result = await session.write_session.execute(
                 sa.delete(RDBExternalAccountOAuthAttempt)
-                .where(RDBExternalAccountOAuthAttempt.id.in_(rows))
+                .where(RDBExternalAccountOAuthAttempt.id.in_(candidates), expired)
                 .returning(RDBExternalAccountOAuthAttempt.id)
             )
             return ExternalAccountOAuthAttemptCleanupSummary(

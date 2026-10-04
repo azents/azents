@@ -8,7 +8,7 @@ import pytest
 import sqlalchemy as sa
 from cryptography.fernet import Fernet
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import ExternalChannelProvider
@@ -39,6 +39,110 @@ from azents.repos.session import SessionRepository
 from azents.repos.session.data import SessionCreate
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.user import UserRepository
+
+
+async def test_cleanup_deletes_only_bounded_expired_rows_without_read_locks(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> None:
+    """Expired deletion is conditional SQL, not a capability claim or read gate."""
+    writes = create_read_write_session_manager(rdb_engine)
+    key = Fernet.generate_key().decode()
+    attempts = ExternalAccountOAuthAttemptRepository(
+        writes,
+        SystemSettingRepository(),
+        get_system_setting_registry(),
+        CredentialCipher(key),
+        SystemSettingEnvironment(values={}),
+        SystemSettingGenerationHasher(key),
+    )
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=30)
+    async with _committed_authority(rdb_engine) as fixture:
+        async with writes() as session:
+            auth = await SessionRepository().create(
+                session,
+                SessionCreate(
+                    user_id=fixture.user_id,
+                    refresh_token=uuid4().hex,
+                    expires_at=now + timedelta(hours=1),
+                    max_expires_at=None,
+                    user_agent=None,
+                    ip_address=None,
+                ),
+            )
+        ids = []
+        for expired in [True, True, True, False]:
+            created = await attempts.create(
+                create=ExternalAccountOAuthAttemptCreate(
+                    id=uuid4().hex,
+                    state_hash=uuid4().hex,
+                    user_id=fixture.user_id,
+                    auth_session_id=auth.id,
+                    provider=ExternalChannelProvider.DISCORD,
+                    setting_generation="synthetic",
+                    redirect_uri="https://example.test/callback",
+                    encrypted_pkce_verifier=None,
+                    expires_at=(
+                        cutoff - timedelta(minutes=1)
+                        if expired
+                        else now + timedelta(minutes=10)
+                    ),
+                )
+            )
+            ids.append(created.id)
+        observed = []
+
+        def capture(
+            _connection: object,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: object,
+            _executemany: object,
+        ) -> None:
+            observed.append(statement)
+
+        try:
+            async with AsyncSession(rdb_engine) as holder:
+                assert (
+                    await holder.scalar(
+                        sa.select(RDBExternalAccountOAuthAttempt)
+                        .where(RDBExternalAccountOAuthAttempt.id == ids[-1])
+                        .with_for_update()
+                    )
+                    is not None
+                )
+                event.listen(rdb_engine.sync_engine, "before_cursor_execute", capture)
+                try:
+                    first = await asyncio.wait_for(
+                        attempts.cleanup(cutoff=cutoff, limit=2), timeout=2
+                    )
+                    assert first.deleted_count == 2
+                    second = await asyncio.wait_for(
+                        attempts.cleanup(cutoff=cutoff, limit=2), timeout=2
+                    )
+                    assert second.deleted_count == 1
+                finally:
+                    event.remove(
+                        rdb_engine.sync_engine, "before_cursor_execute", capture
+                    )
+                assert all("FOR UPDATE" not in sql for sql in observed)
+                async with writes() as session:
+                    retained = (
+                        await session.read_session.scalars(
+                            sa.select(RDBExternalAccountOAuthAttempt.id).where(
+                                RDBExternalAccountOAuthAttempt.id.in_(ids)
+                            )
+                        )
+                    ).all()
+                    assert retained == [ids[-1]]
+        finally:
+            async with writes() as session:
+                await session.write_session.execute(
+                    sa.delete(RDBExternalAccountOAuthAttempt).where(
+                        RDBExternalAccountOAuthAttempt.id.in_(ids)
+                    )
+                )
 
 
 @pytest.mark.parametrize(

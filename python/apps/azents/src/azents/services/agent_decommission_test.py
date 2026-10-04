@@ -92,6 +92,7 @@ class _DecommissionRepositoryDouble:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         status: AgentDecommissionStatus,
         now: datetime.datetime,
     ) -> bool:
@@ -105,6 +106,7 @@ class _DecommissionRepositoryDouble:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
@@ -284,7 +286,7 @@ class _RetentionSettings:
 class _RetentionRepositoryDouble:
     """Provide a finite retention policy and record purge scheduling."""
 
-    async def lock_settings(self, session: ReadSession) -> _RetentionSettings:
+    async def get_settings(self, session: ReadSession) -> _RetentionSettings:
         """Return a deterministic finite retention setting."""
         del session
         return _RetentionSettings(archived_session_retention_days=7, revision=3)
@@ -427,6 +429,7 @@ class _DecommissionStatusRepositoryDouble:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         status: AgentDecommissionStatus,
         now: datetime.datetime,
     ) -> bool:
@@ -440,6 +443,7 @@ class _DecommissionStatusRepositoryDouble:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,

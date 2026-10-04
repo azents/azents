@@ -1430,23 +1430,21 @@ async def test_recreation_claim_respects_existing_global_concurrency(
                 actor_workspace_user_id=None,
             ),
         )
-        provider_target_version = await repository.get_recreation_target_version(
+        provider_target_version = await repository.lock_recreation_target_for_dispatch(
             session,
             target_kind=RuntimeRecreationTargetKind.PROVIDER,
             target_id=provider_id,
-            for_share=True,
         )
-        infrastructure_target_version = await repository.get_recreation_target_version(
+        lock_target = repository.lock_recreation_target_for_dispatch
+        infrastructure_target_version = await lock_target(
             session,
             target_kind=RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
             target_id=infrastructure.id,
-            for_share=True,
         )
-        workspace_target_version = await repository.get_recreation_target_version(
+        workspace_target_version = await repository.lock_recreation_target_for_dispatch(
             session,
             target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
             target_id=workspace_profile.id,
-            for_share=True,
         )
         assert provider_target_version is not None
         assert provider_target_version.endswith(f":{contract.id}")

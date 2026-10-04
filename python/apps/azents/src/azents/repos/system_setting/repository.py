@@ -482,16 +482,6 @@ class SystemSettingRepository:
 class SystemDataMigrationRepository:
     """Persist application data-migration completion markers."""
 
-    async def acquire_lock(self, session: WriteSession, *, name: str) -> None:
-        """Serialize one application migration across processes."""
-        await session.write_session.execute(
-            sa.select(
-                sa.func.pg_advisory_xact_lock(
-                    _advisory_lock_id("system-data-migration", name)
-                )
-            )
-        )
-
     async def get(
         self,
         session: ReadSession,

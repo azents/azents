@@ -27,7 +27,12 @@ from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadWriteSession,
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -116,6 +121,7 @@ async def _harness(
             agent_run_repository=AgentRunRepository(),
             workspace_user_repository=WorkspaceUserRepository(),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         session_manager=session_manager,
         workspace_id=workspace_id,
@@ -1132,3 +1138,95 @@ async def test_concurrent_finalize_and_cleanup_claims_have_one_exact_winner(
                     RDBUser.id.in_([harness.user_id, harness.other_user_id])
                 )
             )
+
+
+async def test_finalized_publication_read_finishes_under_upload_and_agent_writers(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> None:
+    """The real readonly observer acquires neither upload nor Agent mutation locks."""
+    writes = create_read_write_session_manager(rdb_engine)
+    reads = create_read_only_session_manager(rdb_engine)
+    harness = await _harness(writes)
+    observer = replace(harness.repository, read_session_manager=reads)
+    task: asyncio.Task[None] | None = None
+    held, release = asyncio.Event(), asyncio.Event()
+    try:
+        operation = await _prepare(harness)
+        await _claim(harness, operation, claim_id="finalize", now=_NOW)
+        published = await harness.repository.finalize_agent_upload_operation(
+            agent_id=harness.agent_id,
+            user_id=harness.user_id,
+            upload_id=operation.upload_id,
+            claim_id="finalize",
+            now=_NOW,
+            batch=_batch(operation, preview=True),
+        )
+        assert isinstance(published, Success)
+
+        async def holder() -> None:
+            async with writes() as session:
+                await session.write_session.execute(
+                    sa.select(RDBExchangeUploadOperation.id)
+                    .where(RDBExchangeUploadOperation.id == operation.upload_id)
+                    .with_for_update()
+                )
+                await session.write_session.execute(
+                    sa.select(RDBAgent.id)
+                    .where(RDBAgent.id == harness.agent_id)
+                    .with_for_update()
+                )
+                held.set()
+                await release.wait()
+
+        task = asyncio.create_task(holder())
+        await asyncio.wait_for(held.wait(), timeout=5)
+        observed = await asyncio.wait_for(
+            observer.load_agent_upload_publication(
+                agent_id=harness.agent_id,
+                user_id=harness.user_id,
+                upload_id=operation.upload_id,
+                now=_NOW,
+            ),
+            timeout=5,
+        )
+        assert isinstance(observed, Success)
+        assert observed.value.id == published.value.id
+        assert observed.value == published.value
+        assert not release.is_set()
+        denied = await observer.load_agent_upload_publication(
+            agent_id=harness.agent_id,
+            user_id=harness.other_user_id,
+            upload_id=operation.upload_id,
+            now=_NOW,
+        )
+        assert denied == Failure(ExchangeUploadError.ACCESS_DENIED)
+    finally:
+        release.set()
+        try:
+            if task is not None:
+                await task
+        finally:
+            async with writes() as session:
+                await session.write_session.execute(
+                    sa.delete(RDBExchangeFile).where(
+                        RDBExchangeFile.workspace_id == harness.workspace_id
+                    )
+                )
+                await session.write_session.execute(
+                    sa.delete(RDBExchangeUploadOperation).where(
+                        RDBExchangeUploadOperation.workspace_id == harness.workspace_id
+                    )
+                )
+                await session.write_session.execute(
+                    sa.delete(RDBAgent).where(RDBAgent.id == harness.agent_id)
+                )
+                await session.write_session.execute(
+                    sa.delete(RDBWorkspace).where(
+                        RDBWorkspace.id == harness.workspace_id
+                    )
+                )
+                await session.write_session.execute(
+                    sa.delete(RDBUser).where(
+                        RDBUser.id.in_([harness.user_id, harness.other_user_id])
+                    )
+                )

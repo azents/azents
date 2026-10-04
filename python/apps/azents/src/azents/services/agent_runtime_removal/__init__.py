@@ -294,6 +294,7 @@ class AgentRuntimeRemovalService:
                     current = await self._set_stage(
                         operation_id=current.id,
                         lease_owner=lease_owner,
+                        expected_attempt=current.attempt_count,
                         stage=AgentRuntimeRemovalStage.INTERRUPTING_WORK,
                     )
                 case AgentRuntimeRemovalStage.INTERRUPTING_WORK:
@@ -304,6 +305,7 @@ class AgentRuntimeRemovalService:
                         current = await self._set_stage(
                             operation_id=current.id,
                             lease_owner=lease_owner,
+                            expected_attempt=current.attempt_count,
                             stage=AgentRuntimeRemovalStage.CLEANING_PRODUCT_STATE,
                         )
                     else:
@@ -333,6 +335,7 @@ class AgentRuntimeRemovalService:
                     current = await self._set_stage(
                         operation_id=current.id,
                         lease_owner=lease_owner,
+                        expected_attempt=current.attempt_count,
                         stage=AgentRuntimeRemovalStage.DELETING_RUNTIME,
                     )
                 case AgentRuntimeRemovalStage.DELETING_RUNTIME:
@@ -353,6 +356,7 @@ class AgentRuntimeRemovalService:
                     current = await self._set_stage(
                         operation_id=current.id,
                         lease_owner=lease_owner,
+                        expected_attempt=current.attempt_count,
                         stage=AgentRuntimeRemovalStage.FINALIZING,
                     )
                 case AgentRuntimeRemovalStage.FINALIZING:
@@ -361,6 +365,7 @@ class AgentRuntimeRemovalService:
                             session,
                             operation_id=current.id,
                             lease_owner=lease_owner,
+                            expected_attempt=current.attempt_count,
                             now=datetime.datetime.now(datetime.UTC),
                         )
                     if not completed:
@@ -390,6 +395,7 @@ class AgentRuntimeRemovalService:
                 session,
                 operation_id=operation.id,
                 lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
             )
             interrupted = await self.scope_repository.interrupt_work(
                 session,
@@ -423,6 +429,7 @@ class AgentRuntimeRemovalService:
                 session,
                 operation_id=operation.id,
                 lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
             )
             batch = await self.scope_repository.cleanup_batch(
                 session,
@@ -437,6 +444,7 @@ class AgentRuntimeRemovalService:
                 session,
                 operation_id=current.id,
                 lease_owner=lease_owner,
+                expected_attempt=current.attempt_count,
                 expected_cursor_context_id=current.cleanup_cursor_context_id,
                 cursor_context_id=batch.cursor_context_id,
                 scanned_count=batch.scanned_count,
@@ -460,13 +468,33 @@ class AgentRuntimeRemovalService:
         operation: AgentRuntimeRemovalOperation,
         lease_owner: str,
     ) -> bool:
-        """Request and verify exact terminal Runtime deletion."""
-        now = datetime.datetime.now(datetime.UTC)
+        """Observe pending deletion without locking; fence actual target/ack writes."""
+        async with self.session_manager() as session:
+            current = await self.removal_repository.get_by_id(session, operation.id)
+            if (
+                current is None
+                or current.status is not AgentRuntimeRemovalStatus.RUNNING
+                or current.lease_owner != lease_owner
+                or current.attempt_count != operation.attempt_count
+            ):
+                raise RuntimeError("Agent Runtime removal lease was lost")
+            if current.physical_deletion_required is not None:
+                if current.physical_deletion_required is False:
+                    return True
+                runtime = await self.runtime_repository.get_by_agent_id(
+                    session, current.agent_id
+                )
+                if not self._delete_ack_matches(current, runtime):
+                    return False
+                if current.physical_delete_acknowledged_at is not None:
+                    return True
+
         async with self.session_manager() as session:
             current = await self._require_owned(
                 session,
                 operation_id=operation.id,
                 lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
             )
             runtime = await self._lock_operation_runtime(session, current)
             if current.physical_deletion_required is None:
@@ -475,41 +503,50 @@ class AgentRuntimeRemovalService:
                     operation=current,
                     lease_owner=lease_owner,
                     runtime=runtime,
-                    now=now,
+                    now=datetime.datetime.now(datetime.UTC),
                 )
                 runtime = await self._lock_operation_runtime(session, current)
             if current.physical_deletion_required is False:
                 return True
-            if runtime is None:
-                raise RuntimeError("Removal target AgentRuntime is missing")
-            target_generation = current.target_terminal_delete_generation
-            if target_generation is None:
-                raise RuntimeError("Runtime deletion target generation is missing")
-            if (
-                runtime.terminal_delete_requested_generation != target_generation
-                or runtime.terminal_delete_acknowledged_generation != target_generation
-                or runtime.terminal_delete_acknowledgement_kind is None
-                or runtime.terminal_delete_acknowledged_at is None
-            ):
+            if not self._delete_ack_matches(current, runtime):
                 return False
+            assert runtime is not None
+            assert runtime.terminal_delete_acknowledgement_kind is not None
+            assert runtime.terminal_delete_acknowledged_at is not None
             if current.physical_delete_acknowledged_at is None:
-                removal_repository = self.removal_repository
-                recorded = (
-                    await removal_repository.record_physical_delete_acknowledgement(
-                        session,
-                        operation_id=current.id,
-                        lease_owner=lease_owner,
-                        acknowledgement_kind=(
-                            runtime.terminal_delete_acknowledgement_kind
-                        ),
-                        acknowledged_at=runtime.terminal_delete_acknowledged_at,
-                    )
+                record_ack = (
+                    self.removal_repository.record_physical_delete_acknowledgement
+                )
+                recorded = await record_ack(
+                    session,
+                    operation_id=current.id,
+                    lease_owner=lease_owner,
+                    expected_attempt=current.attempt_count,
+                    acknowledgement_kind=runtime.terminal_delete_acknowledgement_kind,
+                    acknowledged_at=runtime.terminal_delete_acknowledged_at,
                 )
                 if not recorded:
                     raise RuntimeError(
                         "Runtime deletion acknowledgement lease was lost"
                     )
             return True
+
+    @staticmethod
+    def _delete_ack_matches(
+        operation: AgentRuntimeRemovalOperation, runtime: AgentRuntime | None
+    ) -> bool:
+        """Match only the immutable admitted Runtime and current target generation."""
+        target = operation.target_terminal_delete_generation
+        return (
+            runtime is not None
+            and runtime.id == operation.agent_runtime_id
+            and target is not None
+            and runtime.desired_generation == target
+            and runtime.terminal_delete_requested_generation == target
+            and runtime.terminal_delete_acknowledged_generation == target
+            and runtime.terminal_delete_acknowledgement_kind is not None
+            and runtime.terminal_delete_acknowledged_at is not None
+        )
 
     async def _record_delete_target(
         self,
@@ -566,6 +603,7 @@ class AgentRuntimeRemovalService:
             session,
             operation_id=operation.id,
             lease_owner=lease_owner,
+            expected_attempt=operation.attempt_count,
             required=required,
             target_generation=target_generation,
             requested_at=requested_at,
@@ -603,20 +641,17 @@ class AgentRuntimeRemovalService:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         stage: AgentRuntimeRemovalStage,
     ) -> AgentRuntimeRemovalOperation:
         """Advance one owned stage and reload its durable evidence."""
         async with self.session_manager() as session:
             now = datetime.datetime.now(datetime.UTC)
-            await self._require_owned(
-                session,
-                operation_id=operation_id,
-                lease_owner=lease_owner,
-            )
             updated = await self.removal_repository.set_stage(
                 session,
                 operation_id=operation_id,
                 lease_owner=lease_owner,
+                expected_attempt=expected_attempt,
                 stage=stage,
                 now=now,
             )
@@ -636,6 +671,7 @@ class AgentRuntimeRemovalService:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
     ) -> AgentRuntimeRemovalOperation:
         """Lock one running operation and validate lease ownership."""
         operation = await self.removal_repository.lock_by_id(session, operation_id)
@@ -643,6 +679,7 @@ class AgentRuntimeRemovalService:
             operation is None
             or operation.status is not AgentRuntimeRemovalStatus.RUNNING
             or operation.lease_owner != lease_owner
+            or operation.attempt_count != expected_attempt
         ):
             raise RuntimeError("Agent Runtime removal lease was lost")
         return operation
@@ -664,6 +701,7 @@ class AgentRuntimeRemovalService:
                 session,
                 operation_id=operation.id,
                 lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
                 next_attempt_at=now + delay,
                 error_kind=error_kind,
                 error_summary=error_summary,

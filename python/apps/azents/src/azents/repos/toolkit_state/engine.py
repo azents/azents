@@ -2,7 +2,6 @@
 
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import Protocol
 
 from azents.core.engine_tool_state import (
     AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
@@ -25,23 +24,8 @@ from azents.core.engine_tool_state import (
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
-
-
-class SessionExecutionOwnerLike(Protocol):
-    """Durable Session execution owner fields used for transaction fencing."""
-
-    @property
-    def session_id(self) -> str:
-        """Return the durable Session identity."""
-        ...
-
-    @property
-    def owner_generation(self) -> int:
-        """Return the durable owner generation."""
-        ...
 
 
 @dataclasses.dataclass
@@ -196,19 +180,6 @@ class ToolkitAgentsAppendixDedupeStateStore:
 
     session_manager: SessionManager[WriteSession]
 
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "ToolkitAgentsAppendixDedupeStateStore":
-        """Bind dedupe operations to one durable Session owner."""
-        return ToolkitAgentsAppendixDedupeStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
-
     async def load_appendix_dedupe(
         self,
         agent_id: str,
@@ -261,19 +232,6 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
     """Own completed Claude rules appendix dedupe operations."""
 
     session_manager: SessionManager[WriteSession]
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "ToolkitClaudeRulesAppendixDedupeStateStore":
-        """Bind dedupe operations to one durable Session owner."""
-        return ToolkitClaudeRulesAppendixDedupeStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
 
     async def load_appendix_dedupe(
         self,
@@ -347,19 +305,6 @@ class TodoStateStore:
 
     session_manager: SessionManager[WriteSession]
 
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "TodoStateStore":
-        """Bind Todo operations to one durable Session owner."""
-        return TodoStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
-
     async def load(self, agent_id: str, session_id: str) -> TodoState:
         """Fetch Todo state in a completed transaction."""
         async with self.session_manager() as session:
@@ -422,20 +367,6 @@ class McpToolSnapshotStore:
     session_id: str
     toolkit_namespace: str
     state_name: str
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "McpToolSnapshotStore":
-        """Bind snapshot operations to one durable Session owner."""
-        manager = self.session_manager
-        if manager is not None:
-            manager = OwnerBoundSessionManager(
-                session_manager=manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        return dataclasses.replace(self, session_manager=manager)
 
     async def load(self) -> McpToolSnapshotState | None:
         """Load one snapshot in a completed transaction."""
@@ -501,22 +432,6 @@ class GitHubSelectedInstallationStore:
     read_session_manager: SessionManager[ReadSession]
     agent_id: str
     session_id: str
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwnerLike,
-    ) -> "GitHubSelectedInstallationStore":
-        """Bind selection operations to one durable Session owner."""
-        return GitHubSelectedInstallationStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
-            read_session_manager=self.read_session_manager,
-            agent_id=self.agent_id,
-            session_id=self.session_id,
-        )
 
     async def load(self) -> str | None:
         """Load the selected installation in a completed transaction."""

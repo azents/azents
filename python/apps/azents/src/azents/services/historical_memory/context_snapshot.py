@@ -25,7 +25,7 @@ class MemoryContextSnapshotService:
     """Delegate complete database operations; ordinary turns only filter authority."""
 
     repository: Annotated[
-        MemoryContextSnapshotRepository, Depends(MemoryContextSnapshotRepository)
+        MemoryContextSnapshotRepository, Depends(MemoryContextSnapshotRepository.create)
     ]
 
     def with_owner(

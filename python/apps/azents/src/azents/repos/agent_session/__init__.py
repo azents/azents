@@ -1186,18 +1186,34 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
+    async def fence_active_mailbox_target(
+        self,
+        session: WriteSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Retain exact active target admission through its mailbox transaction."""
+        result = await session.write_session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == agent_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+            .values(
+                owner_generation=RDBAgentSession.owner_generation,
+                updated_at=RDBAgentSession.updated_at,
+            )
+            .returning(RDBAgentSession)
+            .execution_options(populate_existing=True)
+        )
+        current = result.scalar_one_or_none()
+        return None if current is None else self._build(current)
+
     async def lock_by_id(
         self,
         session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        """Lock one AgentSession after its referenced Agent in stable FK order."""
-        if not await self._lock_agent_parent_for_session_write(
-            session,
-            agent_session_id,
-            nowait=False,
-        ):
-            return None
+        """Fence the exact Session mutation without excluding unrelated Agent work."""
         result = await session.write_session.execute(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
@@ -1212,98 +1228,12 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
-    async def wait_for_execution_lock_by_id(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Acquire execution admission before the caller takes other row locks.
-
-        A failed attempt releases its root gate and FK locks before retrying.
-        Call only at the beginning of a transaction; callers with existing
-        mutations must use the single-attempt ``lock_execution_by_id`` instead.
-        """
-        while True:
-            try:
-                return await self.lock_execution_by_id(session, agent_session_id)
-            except OperationalError as exc:
-                if not isinstance(exc.orig, LockNotAvailable):
-                    raise
-                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
-
-    async def lock_execution_by_id(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Acquire one tree-ordered execution lock attempt without lock waits.
-
-        Lock the existing root tree gate before Agent, Session, and Run work.
-        Source, root, and direct-parent Sessions are acquired together so later
-        terminal parent delivery cannot wait on an inverse Session-to-root path.
-        NOWAIT and the savepoint release all locks from a failed attempt.
-        """
-        async with session.write_session.begin_nested():
-            source = await self.get_session_agent_by_session_id(
-                session,
-                agent_session_id,
-            )
-            if source is None:
-                return None
-            root = await session.write_session.scalar(
-                sa.select(RDBSessionAgent)
-                .where(RDBSessionAgent.id == source.root_session_agent_id)
-                .with_for_update(nowait=True)
-            )
-            if root is None:
-                return None
-            session_ids = {agent_session_id, root.agent_session_id}
-            if source.parent_session_agent_id is not None:
-                parent = await self.get_session_agent_by_id(
-                    session,
-                    source.parent_session_agent_id,
-                )
-                if parent is not None:
-                    session_ids.add(parent.agent_session_id)
-            agent_ids = (
-                await session.write_session.scalars(
-                    sa.select(RDBAgentSession.agent_id)
-                    .where(RDBAgentSession.id.in_(session_ids))
-                    .distinct()
-                )
-            ).all()
-            await session.write_session.execute(
-                sa.select(RDBAgent.id)
-                .where(RDBAgent.id.in_(agent_ids))
-                .order_by(RDBAgent.id)
-                .with_for_update(read=True, key_share=True, nowait=True)
-            )
-            locked_sessions = (
-                await session.write_session.scalars(
-                    sa.select(RDBAgentSession)
-                    .where(RDBAgentSession.id.in_(session_ids))
-                    .order_by(RDBAgentSession.id)
-                    .with_for_update(key_share=True, nowait=True)
-                    .execution_options(populate_existing=True)
-                )
-            ).all()
-            for locked_session in locked_sessions:
-                if locked_session.id == agent_session_id:
-                    return self._build(locked_session)
-            return None
-
     async def lock_by_id_nowait(
         self,
         session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        """Try to lock one Session and its Agent parent without waiting."""
-        if not await self._lock_agent_parent_for_session_write(
-            session,
-            agent_session_id,
-            nowait=True,
-        ):
-            return None
+        """Try to fence the exact Session mutation without waiting."""
         result = await session.write_session.execute(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
@@ -1312,71 +1242,6 @@ class AgentSessionRepository:
         )
         rdb = result.scalar_one_or_none()
         return None if rdb is None else self._build(rdb)
-
-    async def _lock_agent_parent_for_session_write(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-        *,
-        nowait: bool,
-    ) -> bool:
-        """Serialize Session writes without blocking Agent FK references."""
-        agent_id = await session.write_session.scalar(
-            sa.select(RDBAgentSession.agent_id).where(
-                RDBAgentSession.id == agent_session_id
-            )
-        )
-        if agent_id is None:
-            return False
-        locked_agent_id = await session.write_session.scalar(
-            sa.select(RDBAgent.id)
-            .where(RDBAgent.id == agent_id)
-            # Match AgentRepository.lock_by_id's ``FOR NO KEY UPDATE``.
-            # Escalating to ``FOR UPDATE`` can deadlock with root creation,
-            # which holds an FK key-share lock before its final Agent CAS.
-            .with_for_update(key_share=True, nowait=nowait)
-        )
-        return locked_agent_id is not None
-
-    async def lock_agent_parent_for_session(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> bool:
-        """Lock the Session's Agent parent in FK-compatible order."""
-        agent_id = await session.write_session.scalar(
-            sa.select(RDBAgentSession.agent_id).where(
-                RDBAgentSession.id == agent_session_id
-            )
-        )
-        if agent_id is None:
-            return False
-        locked_agent_id = await session.write_session.scalar(
-            sa.select(RDBAgent.id)
-            .where(RDBAgent.id == agent_id)
-            .with_for_update(read=True, key_share=True)
-        )
-        return locked_agent_id is not None
-
-    async def lock_agent_parent_for_session_nowait(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> bool:
-        """Try to lock the Session's Agent parent without waiting."""
-        agent_id = await session.write_session.scalar(
-            sa.select(RDBAgentSession.agent_id).where(
-                RDBAgentSession.id == agent_session_id
-            )
-        )
-        if agent_id is None:
-            return False
-        locked_agent_id = await session.write_session.scalar(
-            sa.select(RDBAgent.id)
-            .where(RDBAgent.id == agent_id)
-            .with_for_update(read=True, key_share=True, nowait=True)
-        )
-        return locked_agent_id is not None
 
     async def set_pinned(
         self,
@@ -1407,75 +1272,29 @@ class AgentSessionRepository:
         session: WriteSession,
         agent_session_id: str,
     ) -> int:
-        """Claim ownership only while the authoritative root remains active.
-
-        Session-owned transactions can already hold an AgentSession row before
-        they reach the root tree lifecycle lock. Use non-blocking Session row
-        locks and roll back the nested attempt so this root-first claim never
-        completes an inverse lock cycle.
-        """
-        while True:
-            try:
-                async with session.write_session.begin_nested():
-                    return await self._claim_owner_generation_once(
-                        session,
-                        agent_session_id,
-                    )
-            except OperationalError as exc:
-                if not isinstance(exc.orig, LockNotAvailable):
-                    raise
-                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
-
-    async def _claim_owner_generation_once(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> int:
-        """Attempt one root-first owner claim without waiting on Session rows."""
-        root_session_agent_id = await session.write_session.scalar(
-            sa.select(RDBSessionAgent.root_session_agent_id).where(
-                RDBSessionAgent.agent_session_id == agent_session_id
-            )
-        )
-        if root_session_agent_id is None:
+        """Advance the exact Session owner row, serializing critical commits only."""
+        source = await self.get_session_agent_by_session_id(session, agent_session_id)
+        if source is None:
             raise ValueError("AgentSession tree not found")
-        root_agent = await session.write_session.scalar(
-            sa.select(RDBSessionAgent)
-            .where(
-                RDBSessionAgent.id == root_session_agent_id,
-                RDBSessionAgent.kind == SessionAgentKind.ROOT,
-            )
-            .with_for_update()
-        )
-        if root_agent is None:
+        root = await self.get_session_agent_by_id(session, source.root_session_agent_id)
+        if root is None:
             raise ValueError("Root SessionAgent not found")
-        root_session = await session.write_session.scalar(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == root_agent.agent_session_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
+        root_session = await self.get_by_id(session, root.agent_session_id)
         if root_session is None or root_session.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("Root AgentSession is not active")
-
-        if root_session.id == agent_session_id:
-            claimed_session = root_session
-        else:
-            claimed_session = await session.write_session.scalar(
-                sa.select(RDBAgentSession)
-                .where(RDBAgentSession.id == agent_session_id)
-                .with_for_update(nowait=True)
-                .execution_options(populate_existing=True)
+        result = await session.write_session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == agent_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
-        if (
-            claimed_session is None
-            or claimed_session.status is not AgentSessionStatus.ACTIVE
-        ):
+            .values(owner_generation=RDBAgentSession.owner_generation + 1)
+            .returning(RDBAgentSession.owner_generation)
+        )
+        generation = result.scalar_one_or_none()
+        if generation is None:
             raise ValueError("AgentSession not found")
-
-        claimed_session.owner_generation += 1
-        await session.write_session.flush()
-        return claimed_session.owner_generation
+        return generation
 
     async def fence_purge_owner_generations(
         self,
@@ -1499,7 +1318,7 @@ class AgentSessionRepository:
 
     async def list_session_agent_subtree_session_ids(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         agent_session_id: str,
     ) -> list[str]:
@@ -1509,12 +1328,6 @@ class AgentSessionRepository:
             agent_session_id,
         )
         if linked_agent is None:
-            return [agent_session_id]
-        locked_root = await self.lock_session_agent_by_id(
-            session,
-            linked_agent.root_session_agent_id,
-        )
-        if locked_root is None:
             return [agent_session_id]
         descendants = await self.list_descendant_session_agents(
             session,
@@ -1804,29 +1617,42 @@ class AgentSessionRepository:
         *,
         root_session_id: str,
     ) -> list[AgentSession]:
-        """Lock all AgentSessions in one root SessionAgent tree."""
-        root_agent = await session.write_session.scalar(
-            sa.select(RDBSessionAgent)
-            .where(
-                RDBSessionAgent.agent_session_id == root_session_id,
-                RDBSessionAgent.kind == SessionAgentKind.ROOT,
-            )
-            .with_for_update()
-        )
-        if root_agent is None:
-            return []
-        session_ids = sa.select(RDBSessionAgent.agent_session_id).where(
-            RDBSessionAgent.root_session_agent_id == root_agent.id
-        )
-        rows = (
-            await session.write_session.execute(
-                sa.select(RDBAgentSession)
-                .where(RDBAgentSession.id.in_(session_ids))
-                .order_by(RDBAgentSession.id)
-                .with_for_update()
-            )
-        ).scalars()
-        return [self._build(row) for row in rows]
+        """Admit a hierarchy mutation without waiting on a partial row set.
+
+        Child creation shares the root gate. Execution mutations may already
+        own a child and then admit a parent result, so a failed subtree attempt
+        releases every newly acquired row before retrying.
+        """
+        while True:
+            try:
+                async with session.write_session.begin_nested():
+                    root_agent = await session.write_session.scalar(
+                        sa.select(RDBSessionAgent)
+                        .where(
+                            RDBSessionAgent.agent_session_id == root_session_id,
+                            RDBSessionAgent.kind == SessionAgentKind.ROOT,
+                        )
+                        .with_for_update(nowait=True)
+                    )
+                    if root_agent is None:
+                        return []
+                    session_ids = sa.select(RDBSessionAgent.agent_session_id).where(
+                        RDBSessionAgent.root_session_agent_id == root_agent.id
+                    )
+                    rows = (
+                        await session.write_session.execute(
+                            sa.select(RDBAgentSession)
+                            .where(RDBAgentSession.id.in_(session_ids))
+                            .order_by(RDBAgentSession.id)
+                            .with_for_update(key_share=True, nowait=True)
+                            .execution_options(populate_existing=True)
+                        )
+                    ).scalars()
+                    return [self._build(row) for row in rows]
+            except OperationalError as exc:
+                if not isinstance(exc.orig, LockNotAvailable):
+                    raise
+                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
 
     async def archive_tree(
         self,
@@ -2282,8 +2108,6 @@ class AgentSessionRepository:
         session_id: str,
     ) -> None:
         """Transition AgentSession to RUNNING recovery target on buffered input."""
-        if not await self.lock_agent_parent_for_session(session, session_id):
-            raise ValueError("AgentSession parent Agent not found")
         updated_id = await session.write_session.scalar(
             sa.update(RDBAgentSession)
             .where(
@@ -2321,8 +2145,6 @@ class AgentSessionRepository:
         session_id: str,
     ) -> AgentSession | None:
         """Atomically validate an input-eligible Session and request its wake."""
-        if not await self.lock_agent_parent_for_session(session, session_id):
-            return None
         result = await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(

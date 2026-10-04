@@ -334,7 +334,9 @@ def get_worker_external_channel_file_transfer_service(
 
 
 def get_worker_external_channel_toolkit_provider(
-    service: Annotated[ExternalChannelActionService, Depends()],
+    service: Annotated[
+        ExternalChannelActionService, Depends(ExternalChannelActionService.create)
+    ],
     file_transfer_service: Annotated[
         ExternalChannelFileTransferService,
         Depends(get_worker_external_channel_file_transfer_service),

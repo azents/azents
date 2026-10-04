@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-10-04
-spec_version: 28
+last_verified_at: 2026-10-05
+spec_version: 29
 ---
 
 # External Channel Authorization
@@ -270,14 +270,18 @@ membership, origin/candidate, connection generation, and active uniqueness in on
 commit. Conflicts and cross-user lookup remain nondisclosing.
 
 A linked human may open and Apply private model settings only for the exact connected
-Binding and root Session for which both provider participation and current
-web-equivalent User authority succeed. The operation revalidates active User,
-membership, link, connection, Resource, Binding, Session, Agent, model options,
-grant/block policy, actor and draft ownership. Relevant revoke, block, membership,
-account, unlink, archive, and connection writes share row or transaction fences.
-Native lock acquisition is nonblocking and the complete DB-only operation has a
-bounded retry; exhaustion returns a retryable busy result without mutation or
-provider I/O. An observed applied-profile generation rejects stale and ABA drafts.
+Binding and root Session for which provider participation and web-equivalent User
+authority succeed. Editor/draft descriptions use ordinary authorization reads and
+private draft persistence retains its live expiry/unapplied/uncancelled conditions.
+Actual Apply revalidates active User, membership, link, connection, Resource,
+Binding, Session, Agent, model options, grant/block policy, actor and draft ownership
+under its exact final mutation guards. The existing Agent/principal authorization
+key protects absent-row block creation and grant deletion through final acceptance;
+it is not inherited by ordinary participation descriptions. Relevant revoke,
+account, unlink, archive and configuration writes remain ordered with actual Apply.
+The final native mutation lock acquisition is nonblocking and its DB-only bounded
+retry returns a retryable busy result on exhaustion without mutation or provider
+I/O. An observed applied-profile generation rejects stale and ABA drafts.
 
 Execution-option group metadata does not grant model or integration authority.
 Private model handlers validate exclusive selections against the bounded selected
@@ -310,6 +314,8 @@ Binding before Edit or Delete. A valid provider principal for another Binding or
 Session cannot mutate the Task.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 29) — Clarified ordinary model-editor authorization versus final Apply/security guards and the exact Agent/principal absent-block/grant-revocation protocol.
 
 - **2026-09-12** (spec_version 26) — Added two-sided external-account proof and
   exact-target linked User model-setting authorization while preserving independent

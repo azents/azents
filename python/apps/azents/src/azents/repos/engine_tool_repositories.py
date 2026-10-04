@@ -28,7 +28,6 @@ from azents.repos.scheduled_task.tool_operations import (
     ScheduledTaskToolOperationRepository,
 )
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit_state.engine import (
     GitHubSelectedInstallationStore,
@@ -38,28 +37,12 @@ from azents.repos.toolkit_state.engine import (
 )
 
 
-def _owner_manager(
-    manager: SessionManager[WriteSession], owner: SessionExecutionOwner
-) -> OwnerBoundSessionManager:
-    return OwnerBoundSessionManager(
-        session_manager=manager,
-        session_id=owner.session_id,
-        owner_generation=owner.owner_generation,
-    )
-
-
 @dataclasses.dataclass(frozen=True)
 class EngineMcpSnapshotFactory:
     """Create completed snapshot operations for explicit nullable identities."""
 
     session_manager: SessionManager[WriteSession] | None
     read_session_manager: SessionManager[ReadSession] | None
-
-    def with_owner(self, owner: SessionExecutionOwner) -> "EngineMcpSnapshotFactory":
-        manager = self.session_manager
-        if manager is None:
-            return self
-        return dataclasses.replace(self, session_manager=_owner_manager(manager, owner))
 
     def create(
         self,
@@ -120,19 +103,10 @@ class EngineToolRepositories:
     appendix: ToolkitAgentsAppendixDedupeStateStore
 
     def with_owner(self, owner: SessionExecutionOwner) -> "EngineToolRepositories":
-        """Rebind every execution-owned database operation within this layer."""
+        """Bind critical Memory mutations without gating descriptive operations."""
         return dataclasses.replace(
             self,
-            memory=dataclasses.replace(
-                self.memory,
-                session_manager=_owner_manager(self.memory.session_manager, owner),
-            ),
-            mcp_oauth=dataclasses.replace(
-                self.mcp_oauth,
-                session_manager=_owner_manager(self.mcp_oauth.session_manager, owner),
-            ),
-            snapshots=self.snapshots.with_owner(owner),
-            appendix=self.appendix.for_execution(owner),
+            memory=dataclasses.replace(self.memory, owner=owner),
         )
 
 
@@ -161,6 +135,7 @@ def get_engine_tool_repositories(
     """Wire concrete tool database collaborators at the repository boundary."""
     return EngineToolRepositories(
         memory=MemoryOperationRepository(
+            owner=None,
             session_manager=session_manager,
             memory_repository=memory_repository,
             agent_session_repository=agent_session_repository,
@@ -207,6 +182,7 @@ def get_engine_scheduled_tool_operations(
 ) -> ScheduledTaskToolOperationRepository:
     """Compose completed Scheduled tool operations without exposing a session."""
     return ScheduledTaskToolOperationRepository(
+        owner=None,
         session_manager=session_manager,
         task_repository=task_repository,
         cycle_repository=cycle_repository,

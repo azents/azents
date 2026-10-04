@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
 from uuid6 import uuid7
 
+from azents.core.enums import AgentLifecycleStatus
 from azents.core.historical_memory_consolidation import (
     ConsolidationAttemptState,
     ConsolidationJobPrincipal,
@@ -20,6 +21,7 @@ from azents.core.historical_memory_publication import (
     ValidatedConsolidationOverview,
     validate_consolidation_overview,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationAttempt,
     RDBConsolidationDraft,
@@ -31,14 +33,14 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationUnit,
     RDBConsolidationWork,
 )
+from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     consolidation_job_session,
-    consolidation_session,
+    consolidation_read_session,
     database_now,
-    lock_unit_authority,
     require_commit_owner,
     unit_predicate,
 )
@@ -138,6 +140,7 @@ class ConsolidationPublicationRepository:
     """The sole publication authority; no model tool submits a publication payload."""
 
     session_manager: SessionManager[WriteSession]
+    read_session_manager: SessionManager[ReadSession]
 
     async def freeze(
         self, principal: ConsolidationJobPrincipal
@@ -181,12 +184,35 @@ class ConsolidationPublicationRepository:
         self, principal: ConsolidationJobPrincipal
     ) -> ConsolidationPublicationOutcome | None:
         """Resolve an uncertain result from durable completion, without republishing."""
-        async with consolidation_session(self.session_manager) as session:
-            grant = await lock_unit_authority(session, principal.unit)
-            unit = await session.write_session.scalar(
+        async with consolidation_read_session(self.read_session_manager) as session:
+            agent = await session.read_session.scalar(
+                sa.select(RDBAgent.id).where(
+                    RDBAgent.id == principal.unit.agent_id,
+                    RDBAgent.workspace_id == principal.unit.workspace_id,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    RDBAgent.memory_enabled.is_(True),
+                )
+            )
+            if agent is None:
+                raise ConsolidationAuthorityError(
+                    "Consolidation outcome is unavailable."
+                )
+            grant = None
+            if principal.unit.associated_user_id is not None:
+                grant = await session.read_session.scalar(
+                    sa.select(RDBWorkspaceUser.memory_grant_identity).where(
+                        RDBWorkspaceUser.workspace_id == principal.unit.workspace_id,
+                        RDBWorkspaceUser.user_id == principal.unit.associated_user_id,
+                    )
+                )
+                if grant is None:
+                    raise ConsolidationAuthorityError(
+                        "Consolidation outcome is unavailable."
+                    )
+            unit = await session.read_session.scalar(
                 sa.select(RDBConsolidationUnit).where(unit_predicate(principal.unit))
             )
-            attempt = await session.write_session.get(
+            attempt = await session.read_session.get(
                 RDBConsolidationAttempt, principal.attempt_id
             )
             if (
@@ -206,7 +232,7 @@ class ConsolidationPublicationRepository:
                 raise ConsolidationAuthorityError(
                     "Consolidation completion is unavailable."
                 )
-            revision = await session.write_session.get(
+            revision = await session.read_session.get(
                 RDBConsolidationRevision, attempt.completed_revision_id
             )
             if (

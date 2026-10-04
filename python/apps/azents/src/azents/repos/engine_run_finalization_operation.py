@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from azents.core.enums import AgentRunStatus
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.terminal_projection import terminal_result_from_events
 from azents.engine.events.types import Event
 from azents.rdb.session import SessionManager
@@ -13,6 +14,10 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.engine_event_contracts import RunStateRepository
 from azents.repos.engine_event_mutation import EngineEventMutationRepository
 from azents.repos.model_operation_completion import ModelOperationCompletion
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
+)
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 
 
@@ -52,10 +57,13 @@ class EngineRunFinalizationOperationRepository:
     model_operation_repository: TerminalModelOperationRepository
     terminal_finalization_repository: TerminalRunFinalizationRepository | None
     model_file_pin_repository: TerminalModelFilePinRepository | None
+    owner: SessionExecutionOwner | None
 
     async def interrupt_before_turn(self, *, run_id: str) -> None:
         """Interrupt the Run before a turn without adding a marker."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self._mark_terminal(
                 session,
                 run_id=run_id,
@@ -70,6 +78,8 @@ class EngineRunFinalizationOperationRepository:
     ) -> None:
         """Complete a polled Run with its existing parent-result disposition."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self._mark_terminal(
                 session,
                 run_id=run_id,
@@ -93,6 +103,8 @@ class EngineRunFinalizationOperationRepository:
     ) -> Event:
         """Commit marker, successful operation, terminal delivery and pin release."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             marker = await self.event_mutation_repository.append_run_marker(
                 session, session_id=session_id, run_id=run_id, status="completed"
             )
@@ -116,9 +128,16 @@ class EngineRunFinalizationOperationRepository:
     ) -> Event | None:
         """Interrupt only a currently running Run after its Tool-stop repair."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await validate_session_execution_owner(session, self.owner)
             current = await self.run_repository.get_by_id(session, run_id)
             if current is None or current.status is not AgentRunStatus.RUNNING:
                 return None
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
+                current = await self.run_repository.lock_by_id(session, run_id)
+                if current is None or current.status is not AgentRunStatus.RUNNING:
+                    return None
             marker = await self.event_mutation_repository.append_run_marker(
                 session, session_id=session_id, run_id=run_id, status="interrupted"
             )
@@ -135,6 +154,8 @@ class EngineRunFinalizationOperationRepository:
     async def interrupt_turn_limit(self, *, session_id: str, run_id: str) -> None:
         """Commit a turn-limit interruption without adding a publication effect."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self.event_mutation_repository.append_run_marker(
                 session, session_id=session_id, run_id=run_id, status="interrupted"
             )
@@ -152,6 +173,8 @@ class EngineRunFinalizationOperationRepository:
     ) -> InterruptedModelOutput:
         """Durabilize partial assistant text and its interrupted terminal marker."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             events = await self.event_mutation_repository.append_events(
                 session, assistant_events, tool_call_run_id=None
             )
@@ -178,6 +201,8 @@ class EngineRunFinalizationOperationRepository:
     ) -> Event | None:
         """Recover an eligible durable scheduled result without model replay."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await validate_session_execution_owner(session, self.owner)
             run = await self.run_repository.get_by_id(session, run_id)
             if (
                 run is None
@@ -187,6 +212,17 @@ class EngineRunFinalizationOperationRepository:
                 or run.terminal_result_message is None
             ):
                 return None
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
+                run = await self.run_repository.lock_by_id(session, run_id)
+                if (
+                    run is None
+                    or run.status is not AgentRunStatus.RUNNING
+                    or run.scheduled_task_cycle_id is None
+                    or run.terminal_result_event_id is None
+                    or run.terminal_result_message is None
+                ):
+                    return None
             marker = await self.event_mutation_repository.append_run_marker(
                 session, session_id=session_id, run_id=run_id, status="completed"
             )

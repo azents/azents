@@ -59,8 +59,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-03
-spec_version: 64
+last_verified_at: 2026-10-05
+spec_version: 65
 ---
 
 # External Channel Delivery and Channel Work
@@ -172,10 +172,17 @@ revalidates the current Agent, Session, binding, resource, route, connection,
 credentials, capability, and effect-specific authority before attempting each effect
 without an open database transaction.
 
-For an Agent execution, the initial transition and every effect admission or
-settlement transaction additionally lock and validate the exact PostgreSQL Session
-owner generation. A stale Worker cannot commit Work progress, finish or request
-input, start a not-yet-admitted provider effect, or settle an already-started effect.
+For an Agent execution, effect admission observes the exact PostgreSQL Session
+owner generation without a root-tree lock. An observed stale Worker cannot begin
+a not-yet-admitted provider effect. This completed check does not hold ownership
+across external I/O. Private canonical Work/progress updates use existing Toolkit
+State CAS, and delayed effect settlement is conditioned on its exact Work cycle
+and desired progress revision; it cannot overwrite replacement Work. Harmless
+projection settlement does not inherit a generic Session owner mutation fence.
+First-control creation claims the exact request projection before returning a
+process-local provider plan; delete-control capture only observes retained identity.
+Actual outcome settlement compares the exact message/cycle/revision identity.
+These boundaries do not create replay authority for an ambiguous provider write.
 Scheduled presentation uses the same execution-bound action service. The binding's
 process-local serialization lock is shared by execution-bound service clones.
 
@@ -635,6 +642,8 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 65) — Documented short nonlocking effect admission and Work cycle/revision CAS settlement independently of exact critical Session output fencing; control delete capture does not claim execution.
 
 - **2026-10-03** (spec_version 64) — Required running Session and AgentRun authority
   for Discord typing, preserving retained Work after stop, failure, or completion.

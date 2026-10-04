@@ -250,9 +250,7 @@ class ModelMetadataSourceRepository:
             sa.select(
                 RDBModelMetadataSourceModel.provider,
                 RDBModelMetadataSourceModel.source_model_key,
-            )
-            .where(RDBModelMetadataSourceModel.source_key == owner.source_key)
-            .with_for_update()
+            ).where(RDBModelMetadataSourceModel.source_key == owner.source_key)
         )
         obsolete = sorted(
             {(row.provider, row.source_model_key) for row in existing_result} - keys

@@ -4,6 +4,7 @@ import datetime
 from dataclasses import dataclass
 
 import sqlalchemy as sa
+from uuid6 import uuid7
 
 from azents.core.historical_memory_consolidation import (
     ConsolidationDisposition,
@@ -22,6 +23,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationUnit,
     RDBConsolidationWork,
 )
+from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
@@ -104,7 +106,9 @@ async def _ready(
             DraftFileChange("coverage.json", None, coverage.model_dump_json()),
         ],
     )
-    frozen = await ConsolidationPublicationRepository(manager).freeze(claim.principal)
+    frozen = await ConsolidationPublicationRepository(
+        session_manager=manager, read_session_manager=manager
+    ).freeze(claim.principal)
     await ConsolidationWorkRepository(manager).record_coverage(
         claim.principal,
         expected_draft_revision_id=frozen.revision_id,
@@ -137,6 +141,106 @@ async def test_live_owner_protects_even_expired_draft_and_receipts(
             ready.principal, path="summary.md"
         )
     ).content is not None
+
+
+async def test_collect_revisions_deletes_only_unreferenced_noncurrent_bytes(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Revision collection preserves current bytes and removes an orphan."""
+    ready = await _ready(rdb_session_manager, extra_source=False)
+    publication = ConsolidationPublicationRepository(
+        session_manager=rdb_session_manager,
+        read_session_manager=rdb_session_manager,
+    )
+    frozen = await publication.freeze(ready.principal)
+    outcome = await publication.publish(
+        ready.principal,
+        expected_draft_revision_id=frozen.revision_id,
+        expected_observation_epoch=frozen.observation_epoch,
+        overview=validate_consolidation_overview(
+            key=ready.principal.unit, markdown=frozen.markdown
+        ),
+    )
+    orphan_id = uuid7().hex
+    async with rdb_session_manager() as session:
+        session.write_session.add(
+            RDBConsolidationRevision(
+                id=orphan_id,
+                unit_id=ready.unit_id,
+                attempt_id=ready.principal.attempt_id,
+                markdown="orphan",
+                rendered_block="orphan",
+            )
+        )
+    assert (
+        await ConsolidationCleanupRepository(rdb_session_manager).collect_revisions(
+            limit=50
+        )
+        == 1
+    )
+    async with rdb_session_manager() as session:
+        assert (
+            await session.read_session.get(RDBConsolidationRevision, orphan_id) is None
+        )
+        assert (
+            await session.read_session.get(
+                RDBConsolidationRevision, outcome.revision_id
+            )
+        ) is not None
+
+
+async def test_collect_revisions_preserves_selected_snapshot_reference(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Revision collection retains bytes selected by a durable Memory snapshot."""
+    ready = await _ready(rdb_session_manager, extra_source=False)
+    publication = ConsolidationPublicationRepository(
+        session_manager=rdb_session_manager,
+        read_session_manager=rdb_session_manager,
+    )
+    frozen = await publication.freeze(ready.principal)
+    await publication.publish(
+        ready.principal,
+        expected_draft_revision_id=frozen.revision_id,
+        expected_observation_epoch=frozen.observation_epoch,
+        overview=validate_consolidation_overview(
+            key=ready.principal.unit, markdown=frozen.markdown
+        ),
+    )
+    orphan_id = uuid7().hex
+    async with rdb_session_manager() as session:
+        session.write_session.add(
+            RDBConsolidationRevision(
+                id=orphan_id,
+                unit_id=ready.unit_id,
+                attempt_id=ready.principal.attempt_id,
+                markdown="selected",
+                rendered_block="selected",
+            )
+        )
+        session.write_session.add(
+            RDBToolkitState(
+                agent_id=ready.principal.unit.agent_id,
+                session_id=ready.source_id,
+                toolkit_namespace="memory",
+                state_name="context_snapshot",
+                schema_version=1,
+                state_json={
+                    "schema_version": 1,
+                    "historical_entries": [{"revision_id": orphan_id}],
+                },
+            )
+        )
+    assert (
+        await ConsolidationCleanupRepository(rdb_session_manager).collect_revisions(
+            limit=50
+        )
+        == 0
+    )
+    async with rdb_session_manager() as session:
+        assert (
+            await session.read_session.get(RDBConsolidationRevision, orphan_id)
+        ) is not None
 
 
 async def test_expired_inactive_draft_resets_unpublished_choices_not_sources(
@@ -194,7 +298,9 @@ async def test_completed_private_payload_cleanup_keeps_published_bytes_and_manif
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=False)
-    publication = ConsolidationPublicationRepository(rdb_session_manager)
+    publication = ConsolidationPublicationRepository(
+        session_manager=rdb_session_manager, read_session_manager=rdb_session_manager
+    )
     frozen = await publication.freeze(ready.principal)
     outcome = await publication.publish(
         ready.principal,
@@ -257,7 +363,9 @@ async def test_completed_slice_cleanup_preserves_its_unfinished_finite_pass(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=True)
-    publication = ConsolidationPublicationRepository(rdb_session_manager)
+    publication = ConsolidationPublicationRepository(
+        session_manager=rdb_session_manager, read_session_manager=rdb_session_manager
+    )
     frozen = await publication.freeze(ready.principal)
     await publication.publish(
         ready.principal,

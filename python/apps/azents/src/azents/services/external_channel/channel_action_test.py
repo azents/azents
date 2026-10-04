@@ -218,6 +218,7 @@ def _service(
     return require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             config=SimpleNamespace(
                 web_url="https://azents.example",
                 avatar_cdn_base_url=None,
@@ -315,6 +316,7 @@ async def test_execute_serializes_actions_for_the_same_binding() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             binding_locks={},
             _execute_serialized=execute_mock,
         ),
@@ -388,6 +390,7 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             session_manager=session_manager,
             repository=repository,
             _execute_direct_effect=execute_direct_effect,
@@ -461,6 +464,7 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             session_manager=session_manager,
             repository=repository,
             _execute_direct_effect=execute_direct_effect,
@@ -529,6 +533,7 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             session_manager=session_manager,
             repository=repository,
             _execute_direct_effect=AsyncMock(return_value=delivered),
@@ -600,6 +605,7 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             session_manager=session_manager,
             repository=repository,
             _execute_direct_effect=AsyncMock(return_value=failed),
@@ -684,6 +690,7 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             session_manager=session_manager,
             repository=repository,
             _execute_direct_effect=AsyncMock(side_effect=execute_effect),
@@ -765,6 +772,7 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
+            _owner_for_authority=MagicMock(return_value=None),
             session_manager=session_manager,
             repository=repository,
             _execute_direct_effect=execute_effect,
@@ -1730,6 +1738,7 @@ def _owned_service(
 ) -> ExternalChannelActionService:
     """Create one concrete service with mocked non-database collaborators."""
     return ExternalChannelActionService(
+        execution_owner=None,
         session_manager=session_manager,
         repository=repository,  # ty: ignore[invalid-argument-type] — test double implements only exercised repository methods.
         credentials_codec=MagicMock(),
@@ -1813,10 +1822,10 @@ async def test_stale_execution_cannot_start_direct_provider_effect(
     deliver.assert_not_awaited()
 
 
-async def test_takeover_after_provider_effect_rejects_old_settlement(
+async def test_takeover_after_provider_effect_defers_settlement_to_work_cas(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    """An admitted provider effect cannot settle after its owner is replaced."""
+    """Already attempted effects settle by Work cycle/revision, not root ownership."""
     authority = await _create_execution_authority(
         rdb_session_manager,
         slug="channel-effect-stale-settlement",
@@ -1860,7 +1869,6 @@ async def test_takeover_after_provider_effect_rejects_old_settlement(
         )
     release_delivery.set()
 
-    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
-        await execution
-
-    repository.apply_direct_effect_outcome.assert_not_awaited()
+    result = await execution
+    assert result.status == "delivered"
+    repository.apply_direct_effect_outcome.assert_awaited_once()

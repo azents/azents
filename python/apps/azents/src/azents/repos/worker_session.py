@@ -15,6 +15,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
@@ -23,8 +24,11 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.data import PendingCommandSnapshot
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
+)
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.worker_session_data import (
     CanonicalExecutionWorkDriftError,
@@ -35,7 +39,7 @@ from azents.repos.worker_session_data import (
 
 @dataclasses.dataclass(frozen=True)
 class WorkerSessionOperationRepository:
-    """Own Worker database lifetimes and the existing tree-ordered generation guard."""
+    """Own Worker descriptions and exact Session critical mutation fences."""
 
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
@@ -56,18 +60,10 @@ class WorkerSessionOperationRepository:
         session_id: str,
         owner_generation: int,
     ) -> AgentSession:
-        """Retain the exact Worker missing/stale errors and existing lock retry."""
-        current = await self.agent_session_repository.wait_for_execution_lock_by_id(
-            session,
-            session_id,
+        """Fence critical writes with the existing missing/stale errors."""
+        return await fence_owned_session_mutation(
+            session, SessionExecutionOwner(session_id, owner_generation)
         )
-        if current is None:
-            raise ValueError("AgentSession not found")
-        if current.owner_generation != owner_generation:
-            raise CanonicalExecutionOwnerGenerationStaleError(
-                "Session owner generation is stale"
-            )
-        return current
 
     async def assert_owner_generation_in_session(
         self,
@@ -91,10 +87,8 @@ class WorkerSessionOperationRepository:
     ) -> None:
         """Complete the owner check before any application external side effect."""
         async with self.session_manager() as session:
-            await self.assert_owner_generation_in_session(
-                session,
-                session_id=session_id,
-                owner_generation=owner_generation,
+            await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
             )
 
     async def claim_owner_generation(self, session_id: str) -> int:
@@ -187,12 +181,10 @@ class WorkerSessionOperationRepository:
         owner_generation: int,
         command: PendingCommandSnapshot,
     ) -> None:
-        """Compare the same five command fields under the current owner fence."""
+        """Compare the same five command fields against the observed current owner."""
         async with self.session_manager() as session:
-            current_session = await self._lock_owned_session(
-                session,
-                session_id=session_id,
-                owner_generation=owner_generation,
+            current_session = await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
             )
             current = (
                 current_session.pending_command_id,
@@ -268,10 +260,10 @@ class WorkerSessionOperationRepository:
     async def heartbeat_session(
         self, session_id: str, *, owner_generation: int
     ) -> None:
-        """Commit the fenced database heartbeat before broker renewal."""
+        """Commit harmless heartbeat metadata before broker renewal."""
         async with self.session_manager() as session:
-            await self.assert_owner_generation_in_session(
-                session, session_id=session_id, owner_generation=owner_generation
+            await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
             )
             await self.agent_session_repository.heartbeat_running(session, session_id)
 
@@ -290,8 +282,8 @@ class WorkerSessionOperationRepository:
     ) -> AgentRunState | None:
         """Read only the current activated Run under the Worker guard."""
         async with self.session_manager() as session:
-            await self.assert_owner_generation_in_session(
-                session, session_id=session_id, owner_generation=owner_generation
+            await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
             )
             return await self.agent_run_repository.get_running_by_session_id(
                 session, session_id=session_id
@@ -305,8 +297,8 @@ class WorkerSessionOperationRepository:
     ) -> AgentRunState | None:
         """Read the newest pending/running Run without claiming it."""
         async with self.session_manager() as session:
-            await self.assert_owner_generation_in_session(
-                session, session_id=session_id, owner_generation=owner_generation
+            await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
             )
             return await self.agent_run_repository.get_active_by_session_id(
                 session, session_id=session_id
@@ -320,6 +312,14 @@ class WorkerSessionOperationRepository:
     ) -> AgentRunState | None:
         """Prefer running work, otherwise retain the pending claim/commit group."""
         async with self.session_manager() as session:
+            await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
+            )
+            running = await self.agent_run_repository.get_running_by_session_id(
+                session, session_id=session_id
+            )
+            if running is not None:
+                return running
             await self.assert_owner_generation_in_session(
                 session, session_id=session_id, owner_generation=owner_generation
             )

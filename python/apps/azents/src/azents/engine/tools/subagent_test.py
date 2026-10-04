@@ -542,6 +542,14 @@ class _AgentSessionRepository:
         """Return one locked AgentSession fixture."""
         return await self.get_by_id(session, agent_session_id)
 
+    async def lock_by_id_nowait(
+        self,
+        session: ReadSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        """Return the exact Session admitted by the collaboration mutation."""
+        return await self.get_by_id(session, agent_session_id)
+
     async def request_stop(
         self,
         session: ReadSession,
@@ -821,6 +829,7 @@ async def _make_toolkit() -> _SubagentToolkitFixture:
         published_events.append(event)
 
     operations = SubagentToolOperationRepository(
+        owner=None,
         session_manager=_session_manager,
         agent_repository=_typed_fake(agent_repository, AgentRepository),
         agent_session_repository=_typed_fake(
@@ -1366,7 +1375,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
     result = await tool.handler(json.dumps({"agent_name": "child"}))
 
     assert json.loads(_text_result(result)) == {"previous_status": "running"}
-    assert repo.locked_session_agents == ["root-agent"]
+    assert repo.locked_session_agents == []
     assert repo.stop_requests == [("child-session", "subagent_interrupt", None)]
     assert len(broker.messages) == 1
     assert isinstance(broker.messages[0], SessionStopSignal)

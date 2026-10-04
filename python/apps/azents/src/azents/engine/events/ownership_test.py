@@ -62,7 +62,6 @@ from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.ownership import (
-    OwnerBoundSessionManager,
     SessionExecutionAuthorityRepository,
 )
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
@@ -73,7 +72,8 @@ from azents.testing.model_stream import make_test_model_stream_watchdog
 class _ExecutionState:
     session_id: str
     run_id: str
-    owner: OwnerBoundSessionManager
+    owner: SessionExecutionOwner
+    session_manager: SessionManager[WriteSession]
     input_event: Event
 
 
@@ -119,11 +119,11 @@ async def _create_execution(
     return _ExecutionState(
         session_id=created.id,
         run_id=run.id,
-        owner=OwnerBoundSessionManager(
-            session_manager=session_manager,
+        owner=SessionExecutionOwner(
             session_id=created.id,
             owner_generation=generation,
         ),
+        session_manager=session_manager,
         input_event=event,
     )
 
@@ -164,18 +164,21 @@ def _execution(
     transcript = EventTranscriptRepository()
     mutations = EngineEventMutationRepository(transcript_repository=transcript)
     results = EngineToolResultOperationRepository(
-        session_manager=state.owner,
+        owner=state.owner,
+        session_manager=state.session_manager,
         run_repository=runs,
         transcript_repository=transcript,
     )
     return AgentRunExecution(
         execution_operation_repository=EngineExecutionOperationRepository(
-            session_manager=state.owner,
+            owner=state.owner,
+            session_manager=state.session_manager,
             run_repository=runs,
             model_file_pin_repository=None,
         ),
         model_input_operation_repository=EngineModelInputOperationRepository(
-            session_manager=state.owner,
+            owner=state.owner,
+            session_manager=state.session_manager,
             run_repository=runs,
             transcript_repository=transcript,
             session_head_repository=None,
@@ -184,7 +187,8 @@ def _execution(
         ),
         tool_result_operation_repository=results,
         output_operation_repository=EngineOutputOperationRepository(
-            session_manager=state.owner,
+            owner=state.owner,
+            session_manager=state.session_manager,
             run_repository=runs,
             event_mutation_repository=mutations,
             metadata_repository=_OutputMetadataRepository(failure=None),
@@ -192,14 +196,15 @@ def _execution(
             system_prompt_repository=None,
         ),
         run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
-            session_manager=state.owner,
+            owner=state.owner,
+            session_manager=state.session_manager,
             run_repository=runs,
             event_mutation_repository=mutations,
             model_operation_repository=ModelOperationCompletionRepository(
                 agent_session_repository=AgentSessionRepository(),
                 agent_run_repository=runs,
                 model_candidate_health_repository=ModelCandidateHealthRepository(
-                    session_manager=state.owner
+                    session_manager=state.session_manager
                 ),
             ),
             terminal_finalization_repository=None,
@@ -378,7 +383,8 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
 
     compactor = EventCompactor(
         operation_repository=CompactionOperationRepository(
-            session_manager=state.owner,
+            owner=state.owner,
+            session_manager=state.session_manager,
             transcript_repository=EventTranscriptRepository(),
             agent_session_repository=AgentSessionRepository(),
             model_operation_completion_repository=(
@@ -392,7 +398,9 @@ async def test_old_compaction_summary_cannot_move_new_owner_input_head(
                     ),
                 )
             ),
-            tool_working_set_store=ToolWorkingSetStore(session_manager=state.owner),
+            tool_working_set_store=ToolWorkingSetStore(
+                session_manager=state.session_manager
+            ),
         ),
     )
     task = asyncio.create_task(

@@ -95,7 +95,7 @@ class ExternalChannelSelectorService:
     ) -> ExternalChannelSelectorCatalog:
         """Load one bounded catalog page from trusted selector state."""
         async with self.session_manager() as session:
-            interaction = await self.repository.lock_interaction(
+            interaction = await self.repository.get_interaction(
                 session,
                 interaction_id=selector_interaction_id,
             )
@@ -384,7 +384,7 @@ class ExternalChannelSelectorService:
     ) -> None:
         """Revalidate Discord component actor and conversation scope."""
         async with self.session_manager() as session:
-            interaction = await self.repository.lock_interaction(
+            interaction = await self.repository.get_interaction(
                 session,
                 interaction_id=selector_interaction_id,
             )

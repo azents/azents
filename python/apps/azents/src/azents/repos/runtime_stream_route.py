@@ -6,9 +6,9 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
 from azents.repos.runtime_web.data import RuntimeWebSessionRoute
 from azents.repos.runtime_web.session_route_repository import (
@@ -25,6 +25,9 @@ class RuntimeStreamRouteOperationRepository:
     ]
     route_repository: Annotated[
         RuntimeWebSessionRouteRepository, Depends(RuntimeWebSessionRouteRepository)
+    ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
 
     async def acquire(
@@ -83,7 +86,7 @@ class RuntimeStreamRouteOperationRepository:
         protocol_fingerprint: str,
     ) -> RuntimeWebSessionRoute | None:
         """Retain exact stale/expired/draining suppression in the narrow query."""
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.route_repository.resolve(
                 session,
                 runtime_id=runtime_id,

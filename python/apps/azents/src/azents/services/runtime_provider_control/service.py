@@ -16,7 +16,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderAuditEventCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
@@ -341,12 +341,54 @@ class RuntimeProviderEnrollmentService:
 
     async def validate_connection_authority_in_transaction(
         self,
+        session: ReadSession,
+        *,
+        authentication: RuntimeProviderCredentialAuthentication,
+        validated_at: datetime.datetime,
+    ) -> None:
+        """Observe current Provider evidence without an acceptance fence."""
+        provider = await self.provider_repository.get_by_id(
+            session,
+            provider_id=authentication.provider_resource_id,
+        )
+        if provider is None or provider.lifecycle_state in _TERMINAL:
+            raise RuntimeProviderCredentialUnavailable("provider_unavailable")
+        binding = await self.binding_repository.get_by_id(
+            session,
+            binding_id=authentication.binding_id,
+        )
+        if (
+            binding is None
+            or binding.provider_id != authentication.provider_resource_id
+            or binding.auth_method is not authentication.auth_method
+            or binding.subject != authentication.auth_subject
+            or binding.state is not RuntimeProviderBindingState.ACTIVE
+        ):
+            raise RuntimeProviderCredentialUnavailable("binding_unavailable")
+        if (
+            authentication.evidence_expires_at is not None
+            and authentication.evidence_expires_at <= validated_at
+        ):
+            raise RuntimeProviderCredentialUnavailable("evidence_expired")
+        if authentication.credential_id is not None and not (
+            await self.repository.credential_active(
+                session,
+                credential_id=authentication.credential_id,
+                provider_id=authentication.provider_resource_id,
+                binding_id=authentication.binding_id,
+                now=validated_at,
+            )
+        ):
+            raise RuntimeProviderCredentialUnavailable("credential_unavailable")
+
+    async def fence_connection_authority_in_transaction(
+        self,
         session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         validated_at: datetime.datetime,
     ) -> None:
-        """Validate Provider authority inside a caller-owned transaction."""
+        """Fence Provider/binding authority through actual connection publication."""
         provider = await self.provider_repository.lock_by_id_for_authority(
             session,
             provider_id=authentication.provider_resource_id,
@@ -395,7 +437,7 @@ class RuntimeProviderEnrollmentService:
         connected_at: datetime.datetime,
     ) -> RuntimeProviderConnection:
         """Persist Provider acceptance inside a caller-owned transaction."""
-        await self.validate_connection_authority_in_transaction(
+        await self.fence_connection_authority_in_transaction(
             session,
             authentication=authentication,
             validated_at=authorized_at,

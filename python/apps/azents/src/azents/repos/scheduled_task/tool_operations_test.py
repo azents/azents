@@ -66,6 +66,7 @@ async def test_scheduled_tool_operations_close_every_transaction() -> None:
         cycle_repository=cycles,
         mailbox_repository=mailbox,
         run_repository=runs,
+        owner=None,
     )
 
     assert (

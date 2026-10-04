@@ -408,7 +408,7 @@ class AgentOperationsRepository:
     ]:
         """Request Agent decommission in one completed transaction."""
         async with self.session_manager() as session:
-            settings = await self.archived_session_retention_repository.lock_settings(
+            settings = await self.archived_session_retention_repository.get_settings(
                 session
             )
             if settings.archived_session_retention_days is None:

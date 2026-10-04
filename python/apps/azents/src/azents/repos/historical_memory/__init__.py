@@ -204,21 +204,6 @@ class HistoricalMemoryRepository:
         )
         return None if row is None else self._build(row)
 
-    async def lock_in_session(
-        self,
-        session: WriteSession,
-        source_session_id: str,
-    ) -> HistoricalMemorySource | None:
-        """Lock and return one source record."""
-        row = (
-            await session.write_session.execute(
-                sa.select(RDBHistoricalMemorySource)
-                .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        return None if row is None else self._build(row)
-
     async def list_due_for_agent(
         self,
         *,

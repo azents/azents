@@ -141,10 +141,10 @@ class WorkerExecutorModelOperationRepository:
     ) -> RequestedProfileSelection:
         """Apply explicit, Session-applied, then Agent-default profile precedence."""
         async with self.session_manager() as session:
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
+            agent = await self.agent_repository.get_by_id(session, agent_id)
             if not isinstance(agent, Agent):
                 raise ValueError("Agent not found")
-            agent_session = await self.agent_session_repository.lock_by_id(
+            agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
             )

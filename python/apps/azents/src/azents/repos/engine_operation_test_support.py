@@ -471,11 +471,13 @@ def operation_fixture(
     return EngineOperationFixture(
         manager=manager,
         output=EngineOutputOperationRepository(
+            owner=None,
             session_manager=manager,
             run_repository=runs,
             event_mutation_repository=mutations,
             metadata_repository=RecordingMetadataRepository(manager),
             tool_result_repository=EngineToolResultOperationRepository(
+                owner=None,
                 session_manager=manager,
                 run_repository=runs,
                 transcript_repository=transcript,
@@ -483,6 +485,7 @@ def operation_fixture(
             system_prompt_repository=RecordingPromptRepository(manager),
         ),
         finalization=EngineRunFinalizationOperationRepository(
+            owner=None,
             session_manager=manager,
             run_repository=runs,
             event_mutation_repository=mutations,

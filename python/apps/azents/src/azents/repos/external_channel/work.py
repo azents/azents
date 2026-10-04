@@ -779,13 +779,11 @@ class ExternalChannelWorkRepository:
     ) -> ProviderEffectPlan | None:
         """Capture the current access-control message for one direct delete."""
         request = await session.write_session.scalar(
-            sa.select(RDBExternalChannelAccessRequest)
-            .where(
+            sa.select(RDBExternalChannelAccessRequest).where(
                 RDBExternalChannelAccessRequest.id == access_request_id,
                 RDBExternalChannelAccessRequest.status
                 != ExternalChannelAccessRequestStatus.PENDING,
             )
-            .with_for_update()
         )
         if (
             request is None
@@ -1209,13 +1207,11 @@ class ExternalChannelWorkRepository:
             raise ValueError("Channel file publication requires a message.")
 
         session_row = await session.write_session.scalar(
-            sa.select(RDBAgentSession)
-            .where(
+            sa.select(RDBAgentSession).where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
-            .with_for_update()
         )
         if session_row is None:
             raise ValueError("AgentSession is not active.")

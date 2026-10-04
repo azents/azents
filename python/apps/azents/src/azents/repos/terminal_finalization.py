@@ -77,16 +77,6 @@ class TerminalRunFinalizationRepository:
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
                 mailbox_item_id=None,
             )
-        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-            session,
-            source.root_session_agent_id,
-        )
-        if locked_root is None:
-            return TerminalFinalizationOutcome(
-                run_id=run_id,
-                disposition=TerminalDeliveryDisposition.INELIGIBLE,
-                mailbox_item_id=None,
-            )
         run = await self.agent_run_repository.lock_by_id(session, run_id)
         if run is None or run.session_id != source.agent_session_id:
             return TerminalFinalizationOutcome(
@@ -123,15 +113,17 @@ class TerminalRunFinalizationRepository:
             return await self._suppress(session, run_id=run_id)
         if source.parent_session_agent_id is None:
             return await self._suppress(session, run_id=run_id)
-        parent = await self.agent_session_repository.lock_session_agent_by_id(
+        parent = await self.agent_session_repository.get_session_agent_by_id(
             session,
             source.parent_session_agent_id,
         )
         if parent is None:
             return await self._suppress(session, run_id=run_id)
-        parent_session = await self.agent_session_repository.lock_by_id(
-            session,
-            parent.agent_session_id,
+        parent_session = (
+            await self.agent_session_repository.fence_active_mailbox_target(
+                session,
+                parent.agent_session_id,
+            )
         )
         if (
             parent_session is None
@@ -171,17 +163,8 @@ class TerminalRunFinalizationRepository:
         *,
         run_id: str,
     ) -> None:
-        """Prelock tree and Session authority before a composing Run mutation.
-
-        This single attempt never retries while the caller may retain locks.
-        Execution admission normally owns these same locks already.
-        """
-        candidate = await self.agent_run_repository.get_by_id(session, run_id)
-        if candidate is not None:
-            await self.agent_session_repository.lock_execution_by_id(
-                session,
-                candidate.session_id,
-            )
+        """Lock the exact Run delivery state before dependent terminal mutation."""
+        await self.agent_run_repository.lock_by_id(session, run_id)
 
     async def finalize_runs_in_session(
         self,

@@ -113,6 +113,7 @@ async def test_phase_update_closes_transaction_before_returning() -> None:
         session_manager=manager,
         run_repository=runs,
         model_file_pin_repository=None,
+        owner=None,
     )
 
     started_at = await repository.update_phase(
@@ -134,6 +135,7 @@ async def test_conditional_phase_update_skips_non_running_run() -> None:
         session_manager=manager,
         run_repository=runs,
         model_file_pin_repository=None,
+        owner=None,
     )
 
     result = await repository.update_phase_if_running(
@@ -156,6 +158,7 @@ async def test_model_file_pin_closes_transaction_before_returning() -> None:
         session_manager=manager,
         run_repository=_RunRepository(manager),
         model_file_pin_repository=pins,
+        owner=None,
     )
 
     await repository.pin_model_files(

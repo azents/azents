@@ -121,7 +121,7 @@ class SessionWorkingFolderBindingRepository:
         session_id: str,
     ) -> None:
         """Reject terminal binding states in one completed transaction."""
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             await self.require_context_state_in_session(
                 session,
                 agent_id=agent_id,
@@ -136,7 +136,7 @@ class SessionWorkingFolderBindingRepository:
         session_id: str,
     ) -> None:
         """Require a bound context in one completed transaction."""
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             await self.require_context_state_in_session(
                 session,
                 agent_id=agent_id,
@@ -164,29 +164,27 @@ class SessionWorkingFolderBindingRepository:
 
     async def require_context_state_in_session(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
         allow_pending: bool,
     ) -> None:
         """Check current Agent and binding state for a composing repository."""
-        agent = await self.agent_repository.lock_by_id(session, agent_id)
+        agent = await self.agent_repository.get_by_id(session, agent_id)
         if (
             agent is None
             or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
         ):
             raise SessionWorkingFolderBindingError("runtime_capability_unavailable")
-        lock_binding = (
-            self.agent_session_repository.lock_working_folder_binding_by_session_id
+        context = await (
+            self.agent_session_repository.get_working_folder_context_by_session_id(
+                session, session_id=session_id
+            )
         )
-        locked = await lock_binding(
-            session,
-            session_id=session_id,
-        )
-        if locked is None or locked.context.agent_id != agent_id:
+        if context is None or context.agent_id != agent_id:
             raise SessionWorkingFolderBindingError("binding_context_unavailable")
-        match locked.context.binding_state:
+        match context.binding_state:
             case SessionWorkingFolderBindingState.NONE:
                 raise SessionWorkingFolderBindingError("binding_none")
             case SessionWorkingFolderBindingState.INVALIDATED:
@@ -206,7 +204,41 @@ class SessionWorkingFolderBindingRepository:
         target: SessionWorkingFolderTarget,
         bind_pending: bool,
     ) -> SessionWorkingFolderAuthority:
-        """Resolve exact authority for a database-only composing repository."""
+        """Project BOUND authority; fence only the actual PENDING mutation."""
+        bound = await self.project_bound_authority_in_session(
+            session, agent_id=agent_id, session_id=session_id, target=target
+        )
+        if bound is not None:
+            return bound
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if agent is None:
+            raise SessionWorkingFolderBindingError("agent_unavailable")
+        if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
+            raise SessionWorkingFolderBindingError("runtime_capability_unavailable")
+        if agent.runtime_capability_version != target.capability_snapshot_version:
+            raise SessionWorkingFolderBindingError("runtime_capability_stale")
+        if (
+            target.runtime_target_capability_version
+            != target.capability_snapshot_version
+        ):
+            raise SessionWorkingFolderBindingError("runtime_target_stale")
+        context = await (
+            self.agent_session_repository.get_working_folder_context_by_session_id(
+                session, session_id=session_id
+            )
+        )
+        if context is None or context.agent_id != agent_id:
+            raise SessionWorkingFolderBindingError("binding_context_unavailable")
+        match context.binding_state:
+            case SessionWorkingFolderBindingState.NONE:
+                raise SessionWorkingFolderBindingError("binding_none")
+            case SessionWorkingFolderBindingState.INVALIDATED:
+                raise SessionWorkingFolderBindingError("binding_invalidated")
+            case SessionWorkingFolderBindingState.PENDING:
+                if not bind_pending:
+                    raise SessionWorkingFolderBindingError("binding_pending")
+            case SessionWorkingFolderBindingState.BOUND:
+                raise SessionWorkingFolderBindingError("binding_stale")
         agent = await self.agent_repository.lock_by_id(session, agent_id)
         if agent is None:
             raise SessionWorkingFolderBindingError("agent_unavailable")

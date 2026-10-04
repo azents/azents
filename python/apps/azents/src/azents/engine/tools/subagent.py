@@ -50,7 +50,6 @@ from azents.engine.events.fork_context import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.repos.agent.data import Agent
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.subagent_tool_operations import (
     SubagentToolOperationError,
     SubagentToolOperationRepository,
@@ -210,11 +209,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         ):
             self.operations = dataclasses.replace(
                 self.operations,
-                session_manager=OwnerBoundSessionManager(
-                    session_manager=self.operations.session_manager,
-                    session_id=owner.session_id,
-                    owner_generation=owner.owner_generation,
-                ),
+                owner=owner,
             )
             self._execution_owner = owner
 

@@ -121,8 +121,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-10-04
-spec_version: 83
+last_verified_at: 2026-10-05
+spec_version: 84
 ---
 
 # External Channel
@@ -153,12 +153,12 @@ state, Session execution identity, or any existing guest capability.
 ## Ownership and Security Boundaries
 
 Direct Agent Channel Work transitions are also bound to the executing Session's
-PostgreSQL owner generation. Initial Work commit, effect admission, awaiting-input
-settlement, provider outcome settlement, and provisioned Discord thread recording
-all reject a superseded Worker. Provider and file I/O remain outside database
-transactions. An effect admitted before takeover may finish externally, but the old
-owner cannot settle that result or change the newer Work revision, and ambiguous
-effects are not replayed.
+PostgreSQL owner generation. Current effect admission observes that owner without
+holding a root-tree lock or extending a transaction across provider I/O. Canonical
+private Work updates and delayed outcomes use existing Toolkit State version,
+work-cycle and desired-progress-revision conditions. A replacement cycle or
+revision cannot be overwritten by an old outcome; ordinary snapshots do not
+inherit a Session mutation fence.
 
 - Connection and route records are Workspace/Agent administration state.
 - Provider resources, principals, conversation positions, access requests, and
@@ -279,7 +279,9 @@ effects are not replayed.
   connection and provider parent channel. A later eligible explicit mention replaces
   the pending claim's source and increments its revision. The first valid location
   selection freezes the latest revision and releases exactly one canonical continuation.
-- Durable execution mutations are fenced by the current Session owner generation.
+- Critical durable execution output uses the exact current Session owner mutation
+  fence. Private Channel Work/progress payloads use their existing cycle/revision
+  CAS rather than a generic execution transaction manager.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
 - Account-link completion requires an authenticated OAuth attempt, the same live
@@ -289,7 +291,9 @@ effects are not replayed.
   are nondisclosing and never overwrite another owner.
 - Account linking and private drafts are PostgreSQL correctness state. OAuth attempt
   expiry is enforced synchronously; hourly bounded cleanup removes only attempts
-  older than the 24-hour retention window. Redis, cleanup timing, provider delivery,
+  older than the 24-hour retention window through bounded conditional deletion,
+  without a cleanup read lock. Actual callback consumption and link finalization
+  keep their exact security fences. Redis, cleanup timing, provider delivery,
   and public message state are not correctness authority.
 - A resource is `active`, `unavailable`, or `deleted`. Provider history is read on
   demand by a leased Session drain after durable callback admission and has no durable
@@ -694,6 +698,8 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 84) — Separated plain Work descriptions/private CAS and short effect-owner admission from critical finalization; made bounded OAuth cleanup and interaction projection/mode metadata writes independent of read gates.
 
 - **2026-10-03** (spec_version 82) — Required running execution for Discord typing,
   separating retained Channel Work from actual Run activity.

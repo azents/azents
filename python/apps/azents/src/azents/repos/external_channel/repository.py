@@ -68,7 +68,6 @@ from azents.repos.external_channel.work import terminate_binding_with_plans
 from azents.repos.external_channel.work_state import (
     CHANNEL_WORK_STATE_NAME_PREFIX,
     ChannelWorkState,
-    ChannelWorkStateMutation,
     ExternalChannelWorkStateStore,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
@@ -1639,20 +1638,6 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelConnection, rdb)
 
-    async def lock_connection(
-        self,
-        session: WriteSession,
-        *,
-        connection_id: str,
-    ) -> ExternalChannelConnection | None:
-        """Lock one connection for a connection-state transition."""
-        rdb = await session.write_session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == connection_id)
-            .with_for_update()
-        )
-        return self._as(ExternalChannelConnection, rdb)
-
     async def terminate_connection_for_provider_event(
         self,
         session: WriteSession,
@@ -2032,6 +2017,20 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelInteraction, rdb)
 
+    async def get_interaction(
+        self,
+        session: ReadSession,
+        *,
+        interaction_id: str,
+    ) -> ExternalChannelInteraction | None:
+        """Read retained interaction scope without claiming provider mutation."""
+        rdb = await session.read_session.scalar(
+            sa.select(RDBExternalChannelInteraction).where(
+                RDBExternalChannelInteraction.id == interaction_id
+            )
+        )
+        return self._as(ExternalChannelInteraction, rdb)
+
     async def lock_interaction(
         self,
         session: WriteSession,
@@ -2107,18 +2106,28 @@ class ExternalChannelRepository:
         interaction_id: str,
         projection: dict[str, Any],
     ) -> ExternalChannelInteraction | None:
-        """Replace bounded interaction metadata under the interaction lock."""
+        """Replace bounded interaction metadata without a separate read gate."""
         validate_interaction_projection(projection)
         rdb = await session.write_session.scalar(
-            sa.select(RDBExternalChannelInteraction)
+            sa.update(RDBExternalChannelInteraction)
             .where(RDBExternalChannelInteraction.id == interaction_id)
-            .with_for_update()
+            .values(
+                projection=projection,
+                updated_at=sa.case(
+                    (
+                        RDBExternalChannelInteraction.projection.is_distinct_from(
+                            projection
+                        ),
+                        sa.func.now(),
+                    ),
+                    else_=RDBExternalChannelInteraction.updated_at,
+                ),
+            )
+            .returning(RDBExternalChannelInteraction)
+            .execution_options(populate_existing=True, synchronize_session=False)
         )
         if rdb is None:
             return None
-        rdb.projection = projection
-        await session.write_session.flush()
-        await session.write_session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelInteraction.model_validate(rdb)
 
     async def create_channel_default(
@@ -2360,54 +2369,31 @@ class ExternalChannelRepository:
     ) -> ExternalChannelBinding | None:
         """Update one connected binding behind its concrete current mode."""
         rdb = await session.write_session.scalar(
-            sa.select(RDBExternalChannelBinding)
+            sa.update(RDBExternalChannelBinding)
             .where(
                 RDBExternalChannelBinding.id == binding_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
                 RDBExternalChannelBinding.response_mode == expected_response_mode,
                 RDBExternalChannelBinding.updated_at == expected_updated_at,
             )
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        rdb.response_mode = response_mode
-        await session.write_session.flush()
-        await session.write_session.refresh(rdb, attribute_names=["updated_at"])
-        return ExternalChannelBinding.model_validate(rdb)
-
-    async def invalidate_participation_setting(
-        self,
-        session: WriteSession,
-        *,
-        setting_id: str,
-        expected_settings_generation: int,
-        invalidated_at: datetime.datetime,
-        invalidation_reason: str,
-    ) -> ExternalChannelParticipationSetting | None:
-        """Terminally invalidate one current setting behind its generation."""
-        if not invalidation_reason:
-            raise ValueError("Participation invalidation reason must not be blank.")
-        rdb = await session.write_session.scalar(
-            sa.select(RDBExternalChannelParticipationSetting)
-            .where(
-                RDBExternalChannelParticipationSetting.id == setting_id,
-                RDBExternalChannelParticipationSetting.status
-                == ExternalChannelParticipationSettingStatus.ACTIVE,
-                RDBExternalChannelParticipationSetting.settings_generation
-                == expected_settings_generation,
+            .values(
+                response_mode=response_mode,
+                updated_at=sa.case(
+                    (
+                        RDBExternalChannelBinding.response_mode.is_distinct_from(
+                            response_mode
+                        ),
+                        sa.func.now(),
+                    ),
+                    else_=RDBExternalChannelBinding.updated_at,
+                ),
             )
-            .with_for_update()
+            .returning(RDBExternalChannelBinding)
+            .execution_options(populate_existing=True, synchronize_session=False)
         )
         if rdb is None:
             return None
-        rdb.status = ExternalChannelParticipationSettingStatus.INVALIDATED
-        rdb.settings_generation += 1
-        rdb.invalidated_at = invalidated_at
-        rdb.invalidation_reason = invalidation_reason
-        await session.write_session.flush()
-        await session.write_session.refresh(rdb, attribute_names=["updated_at"])
-        return ExternalChannelParticipationSetting.model_validate(rdb)
+        return ExternalChannelBinding.model_validate(rdb)
 
     async def lock_connection_for_routing(
         self,
@@ -2806,87 +2792,6 @@ class ExternalChannelRepository:
             .returning(RDBExternalChannelResource.id)
         )
         return result.scalar_one_or_none() is not None
-
-    async def terminate_resource_for_provider_loss(
-        self,
-        session: WriteSession,
-        *,
-        resource_id: str,
-        reason: str,
-        now: datetime.datetime,
-    ) -> bool:
-        """Fence one unavailable resource and its Session-owned activity."""
-        resource = await session.write_session.scalar(
-            sa.select(RDBExternalChannelResource)
-            .where(RDBExternalChannelResource.id == resource_id)
-            .with_for_update()
-        )
-        if resource is None:
-            return False
-        bindings = list(
-            await session.write_session.scalars(
-                sa.select(RDBExternalChannelBinding)
-                .where(
-                    RDBExternalChannelBinding.resource_id == resource_id,
-                    RDBExternalChannelBinding.disconnected_at.is_(None),
-                )
-                .order_by(RDBExternalChannelBinding.id)
-                .with_for_update()
-            )
-        )
-        for binding in bindings:
-            agent_session = await session.write_session.get(
-                RDBAgentSession,
-                binding.agent_session_id,
-            )
-            if agent_session is None:
-                raise RuntimeError("External Channel binding Session disappeared.")
-
-            def finish_work(state: ChannelWorkState) -> ChannelWorkStateMutation[None]:
-                if state.status is ExternalChannelWorkStatus.FINISHED:
-                    return ChannelWorkStateMutation(state=state, result=None)
-                return ChannelWorkStateMutation(
-                    state=state.model_copy(
-                        update={
-                            "status": ExternalChannelWorkStatus.FINISHED,
-                            "state_revision": state.state_revision + 1,
-                            "desired_progress_revision": (
-                                state.desired_progress_revision + 1
-                            ),
-                            "desired_progress": None,
-                            "awaiting_input_run_id": None,
-                            "finished_at": now,
-                        }
-                    ),
-                    result=None,
-                )
-
-            await self.work_state_store.update_existing(
-                session,
-                agent_id=agent_session.agent_id,
-                session_id=agent_session.id,
-                binding_id=binding.id,
-                mutator=finish_work,
-            )
-            binding.disconnected_at = now
-            binding.disconnect_reason = reason
-        await session.write_session.execute(
-            sa.update(RDBExternalChannelAccessRequest)
-            .where(
-                RDBExternalChannelAccessRequest.resource_id == resource_id,
-                RDBExternalChannelAccessRequest.status
-                == ExternalChannelAccessRequestStatus.PENDING,
-            )
-            .values(
-                status=ExternalChannelAccessRequestStatus.EXPIRED,
-                decision_summary="The external conversation became unavailable.",
-                decided_at=now,
-            )
-        )
-        resource.status = ExternalChannelResourceStatus.UNAVAILABLE
-        resource.unavailable_at = now
-        await session.write_session.flush()
-        return True
 
     async def create_principal_idempotent(
         self,
@@ -3896,17 +3801,30 @@ class ExternalChannelRepository:
     ) -> ExternalChannelBlock | None:
         """Remove one active block while retaining its policy history."""
         rdb = await session.write_session.scalar(
-            sa.select(RDBExternalChannelBlock)
+            sa.update(RDBExternalChannelBlock)
             .where(RDBExternalChannelBlock.id == block_id)
-            .with_for_update()
+            .values(
+                removed_by_user_id=sa.case(
+                    (
+                        RDBExternalChannelBlock.removed_at.is_(None),
+                        removed_by_user_id,
+                    ),
+                    else_=RDBExternalChannelBlock.removed_by_user_id,
+                ),
+                removed_at=sa.case(
+                    (RDBExternalChannelBlock.removed_at.is_(None), removed_at),
+                    else_=RDBExternalChannelBlock.removed_at,
+                ),
+                updated_at=sa.case(
+                    (RDBExternalChannelBlock.removed_at.is_(None), sa.func.now()),
+                    else_=RDBExternalChannelBlock.updated_at,
+                ),
+            )
+            .returning(RDBExternalChannelBlock)
+            .execution_options(populate_existing=True, synchronize_session=False)
         )
         if rdb is None:
             return None
-        if rdb.removed_at is None:
-            rdb.removed_by_user_id = removed_by_user_id
-            rdb.removed_at = removed_at
-            await session.write_session.flush()
-        await session.write_session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBlock.model_validate(rdb)
 
     async def _create(

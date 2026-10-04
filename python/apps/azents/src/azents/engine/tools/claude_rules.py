@@ -52,9 +52,6 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
 )
-from azents.repos.toolkit_state.engine import (
-    ToolkitClaudeRulesAppendixDedupeStateStore,
-)
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
@@ -194,8 +191,6 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
             session_id=self._session_id,
         ):
             return
-        if isinstance(self.store, ToolkitClaudeRulesAppendixDedupeStateStore):
-            self.store = self.store.for_execution(owner)
         self._execution_owner = owner
 
     def set_agent_id(self, agent_id: str) -> None:

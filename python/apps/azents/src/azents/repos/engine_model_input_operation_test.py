@@ -404,11 +404,13 @@ def _operation(
     elif failure_at == "cancelled":
         projection_failure = asyncio.CancelledError()
     repository = EngineModelInputOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=runs,
         transcript_repository=transcript,
         session_head_repository=_SessionHeadRepository(manager, head=head),
         tool_result_repository=EngineToolResultOperationRepository(
+            owner=None,
             session_manager=manager,
             run_repository=runs,
             transcript_repository=transcript,

@@ -85,12 +85,6 @@ class SubagentTerminalResultRepository:
             )
             if source is None or source.kind != SessionAgentKind.SUBAGENT:
                 return False
-            locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-                session,
-                source.root_session_agent_id,
-            )
-            if locked_root is None:
-                return False
             run = await self.agent_run_repository.lock_by_id(session, run_id)
             if run is None or run.session_id != source.agent_session_id:
                 return False

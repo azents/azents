@@ -64,7 +64,7 @@ class RuntimeLifecycleDispatchRepository:
     ) -> RuntimeLifecycleDispatchPreflightResult:
         """Validate one selected Runtime without consuming its lifecycle claim."""
         async with self.session_manager() as session:
-            agent = await self.agent_repository.lock_by_id(
+            agent = await self.agent_repository.get_by_id(
                 session,
                 request.runtime.agent_id,
             )
@@ -75,7 +75,7 @@ class RuntimeLifecycleDispatchRepository:
                 return _rejection(
                     RuntimeLifecycleDispatchRejectionReason.AGENT_CAPABILITY_CHANGED
                 )
-            current = await self.runtime_repository.get_by_id_for_update(
+            current = await self.runtime_repository.get_by_id(
                 session,
                 request.runtime.id,
             )

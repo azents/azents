@@ -254,8 +254,8 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     session.refresh.assert_awaited_once_with(item, attribute_names=["updated_at"])
 
 
-async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -> None:
-    """Provisioning reads the first queued trigger while its owner remains locked."""
+async def test_get_first_authoritative_item_returns_oldest_retained_trigger() -> None:
+    """Provisioning observes the first queued trigger without a separate item gate."""
     repository = ExternalChannelIngressQueueRepository()
     session = _session()
     first = _item(1)
@@ -263,7 +263,7 @@ async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -
     first.invocation = False
     session.scalar.return_value = first
 
-    item = await repository.lock_first_authoritative_item(
+    item = await repository.get_first_authoritative_item(
         ReadWriteSession(session),
         owner_id="owner-1",
     )
@@ -274,7 +274,7 @@ async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -
     assert item.invocation is False
     statement = session.scalar.await_args.args[0]
     assert statement._limit_clause.value == 1  # noqa: SLF001
-    assert statement._for_update_arg is not None  # noqa: SLF001
+    assert statement._for_update_arg is None  # noqa: SLF001
 
 
 async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -> None:

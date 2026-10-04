@@ -1040,7 +1040,7 @@ class ExternalChannelInteractionProcessor:
     ) -> _ProcessingInteractionScope:
         """Reload one authenticated processing interaction and its connection."""
         async with self.session_manager() as session:
-            interaction = await self.repository.lock_interaction(
+            interaction = await self.repository.get_interaction(
                 session,
                 interaction_id=handoff.interaction_id,
             )
@@ -1094,7 +1094,7 @@ class ExternalChannelInteractionProcessor:
     ) -> _SelectorScope:
         """Reload trusted interaction and selector owners before provider I/O."""
         async with self.session_manager() as session:
-            interaction = await self.repository.lock_interaction(
+            interaction = await self.repository.get_interaction(
                 session,
                 interaction_id=handoff.interaction_id,
             )
@@ -1110,7 +1110,7 @@ class ExternalChannelInteractionProcessor:
             ):
                 raise ValueError("Slack selector interaction is unavailable.")
             selector_id = handoff.selector_interaction_id or interaction.id
-            selector = await self.repository.lock_interaction(
+            selector = await self.repository.get_interaction(
                 session,
                 interaction_id=selector_id,
             )
@@ -1141,7 +1141,7 @@ class ExternalChannelInteractionProcessor:
             secret=self.config.auth.jwt.secret_key,
         )
         async with self.session_manager() as session:
-            interaction = await self.repository.lock_interaction(
+            interaction = await self.repository.get_interaction(
                 session,
                 interaction_id=handoff.interaction_id,
             )
@@ -1157,7 +1157,7 @@ class ExternalChannelInteractionProcessor:
                 }
             ):
                 raise ValueError("Slack selector submission is unavailable.")
-            selector = await self.repository.lock_interaction(
+            selector = await self.repository.get_interaction(
                 session,
                 interaction_id=metadata.selector_interaction_id,
             )
@@ -1168,7 +1168,7 @@ class ExternalChannelInteractionProcessor:
                 now=now,
             )
             assert selector is not None
-            opened = await self.repository.lock_interaction(
+            opened = await self.repository.get_interaction(
                 session,
                 interaction_id=metadata.interaction_id,
             )

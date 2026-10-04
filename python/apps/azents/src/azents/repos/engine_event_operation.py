@@ -4,6 +4,7 @@ import dataclasses
 from collections.abc import Sequence
 
 from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import (
     AgentRunState,
     Event,
@@ -19,6 +20,7 @@ from azents.repos.engine_event_contracts import (
     SessionHeadRepository,
     TranscriptRepository,
 )
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,6 +40,7 @@ class EngineEventOperationRepository:
     agent_session_repository: AgentSessionRepository
     session_head_repository: SessionHeadRepository
     transcript_repository: TranscriptRepository
+    owner: SessionExecutionOwner | None
 
     async def append_system_error(
         self,
@@ -47,6 +50,8 @@ class EngineEventOperationRepository:
     ) -> Event:
         """Append a recoverable system error in one completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self.transcript_repository.append(
                 session,
                 EventCreate(
@@ -91,6 +96,8 @@ class EngineEventOperationRepository:
     ) -> EngineRunPreparation:
         """Append initial inputs and validate the active Run atomically."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self._ensure_agent_session(session, session_id)
             user_message_events = await self._append_user_messages(
                 session,
@@ -115,6 +122,8 @@ class EngineEventOperationRepository:
     ) -> list[Event]:
         """Append polled input messages in one completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self._append_user_messages(
                 session,
                 session_id,

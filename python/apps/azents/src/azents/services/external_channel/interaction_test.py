@@ -157,6 +157,15 @@ class _Repository:
             self.selector.id: self.selector,
         }
 
+    async def get_interaction(
+        self,
+        session: ReadSession,
+        *,
+        interaction_id: str,
+    ) -> ExternalChannelInteraction | None:
+        del session
+        return self.interactions.get(interaction_id)
+
     async def lock_interaction(
         self,
         session: ReadSession,

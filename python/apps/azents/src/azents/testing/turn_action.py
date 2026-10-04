@@ -34,7 +34,7 @@ def make_test_mailbox_promotion_repository(
         event_repository=EventTranscriptRepository(),
         run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
-        goal_store=GoalStateStore(session_manager=session_manager),
+        goal_store=GoalStateStore(session_manager=session_manager, owner=None),
         skill_state_repository=SkillStateRepository(
             session_manager=session_manager,
         ),

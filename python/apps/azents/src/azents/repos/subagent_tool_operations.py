@@ -1,9 +1,13 @@
 """Completed database operations for Engine Subagent collaboration tools."""
 
+import asyncio
 import dataclasses
 from collections.abc import Sequence
 from textwrap import dedent
 from typing import NamedTuple
+
+from psycopg.errors import LockNotAvailable
+from sqlalchemy.exc import OperationalError
 
 from azents.core.agent import SubagentSettings
 from azents.core.agent_session_data import AgentSession, SessionAgent
@@ -18,6 +22,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.mailbox_data import MailboxItemCreate
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -31,6 +36,10 @@ from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import (
     CapturedContextSource,
     ContextModelRequest,
+)
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
 )
 from azents.repos.subagent_coordination.data import SubagentCoordinationSnapshot
 from azents.repos.subagent_coordination.repository import (
@@ -90,10 +99,60 @@ class SubagentToolOperationRepository:
     mailbox_repository: MailboxRepository
     source_repository: ModelMetadataSourceRepository
     coordination_repository: SubagentCoordinationRepository
+    owner: SessionExecutionOwner | None
+
+    async def _validate_owner(self, session: ReadSession) -> None:
+        if self.owner is not None:
+            await validate_session_execution_owner(session, self.owner)
+
+    async def _admit_mutation(
+        self,
+        session: WriteSession,
+        *,
+        source: SessionAgent,
+        target: SessionAgent | None,
+        hierarchy_root_session_agent_id: str | None,
+    ) -> None:
+        """Admit only the hierarchy and Session rows this mutation consumes."""
+        session_ids = {source.agent_session_id}
+        if target is not None:
+            session_ids.add(target.agent_session_id)
+        while True:
+            try:
+                async with session.write_session.begin_nested():
+                    if hierarchy_root_session_agent_id is not None:
+                        lock_root = (
+                            self.agent_session_repository.lock_session_agent_by_id
+                        )
+                        root = await lock_root(session, hierarchy_root_session_agent_id)
+                        if root is None:
+                            raise SubagentToolOperationError(
+                                "Root SessionAgent was not found"
+                            )
+                    for session_id in sorted(session_ids):
+                        current = await self.agent_session_repository.lock_by_id_nowait(
+                            session, session_id
+                        )
+                        if current is None:
+                            raise SubagentToolOperationError(
+                                "AgentSession was not found"
+                            )
+                    if self.owner is not None:
+                        if self.owner.session_id != source.agent_session_id:
+                            raise SubagentToolOperationError(
+                                "Session execution owner mismatch"
+                            )
+                        await fence_owned_session_mutation(session, self.owner)
+                return
+            except OperationalError as exc:
+                if not isinstance(exc.orig, LockNotAvailable):
+                    raise
+                await asyncio.sleep(0.01)
 
     async def get_agent(self, agent_id: str) -> Agent | None:
         """Return one current Agent policy snapshot."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             return await self.agent_repository.get_by_id(session, agent_id)
 
     async def get_current_session_agent(
@@ -102,6 +161,7 @@ class SubagentToolOperationRepository:
     ) -> SessionAgent | None:
         """Return the SessionAgent linked to one current Session."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             return await self.agent_session_repository.get_session_agent_by_session_id(
                 session,
                 session_id,
@@ -112,6 +172,7 @@ class SubagentToolOperationRepository:
     ) -> CapturedContextSource:
         """Return only requested current context maximums."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             return await self.source_repository.capture_for_context(
                 session,
                 requests=requests,
@@ -127,6 +188,7 @@ class SubagentToolOperationRepository:
     ) -> SubagentSpawnPreparation:
         """Load and validate detached spawn inputs in one read transaction."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             current = (
                 await self.agent_session_repository.get_session_agent_by_session_id(
                     session,
@@ -198,6 +260,12 @@ class SubagentToolOperationRepository:
             )
             if current is None:
                 raise SubagentToolOperationError("Current SessionAgent was not found")
+            await self._admit_mutation(
+                session,
+                source=current,
+                target=None,
+                hierarchy_root_session_agent_id=current.root_session_agent_id,
+            )
             next_depth = _session_agent_depth(current) + 1
             if next_depth > settings.max_depth:
                 raise SubagentToolOperationError(
@@ -316,6 +384,12 @@ class SubagentToolOperationRepository:
                 session_id=session_id,
                 agent_name=agent_name,
             )
+            await self._admit_mutation(
+                session,
+                source=current,
+                target=target,
+                hierarchy_root_session_agent_id=None,
+            )
             if target is None:
                 return SubagentTargetResult(target=None)
             await self._enqueue_instruction(
@@ -347,6 +421,12 @@ class SubagentToolOperationRepository:
                 session,
                 session_id=session_id,
                 agent_name=agent_name,
+            )
+            await self._admit_mutation(
+                session,
+                source=current,
+                target=target,
+                hierarchy_root_session_agent_id=current.root_session_agent_id,
             )
             if target is None:
                 return SubagentTargetResult(target=None)
@@ -400,6 +480,12 @@ class SubagentToolOperationRepository:
                 session_id=session_id,
                 agent_name=agent_name,
             )
+            await self._admit_mutation(
+                session,
+                source=current,
+                target=target,
+                hierarchy_root_session_agent_id=None,
+            )
             if target is None:
                 return SubagentTargetResult(
                     target=None,
@@ -412,12 +498,6 @@ class SubagentToolOperationRepository:
                     "an agent cannot interrupt itself; return your result and let "
                     "the parent interrupt you if needed"
                 )
-            locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-                session,
-                current.root_session_agent_id,
-            )
-            if locked_root is None:
-                raise SubagentToolOperationError("Root SessionAgent was not found")
             target_session = await self.agent_session_repository.lock_by_id(
                 session,
                 target.agent_session_id,
@@ -448,6 +528,7 @@ class SubagentToolOperationRepository:
     ) -> SubagentCoordinationSnapshot | None:
         """Return one bounded coordination snapshot."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             return await self.coordination_repository.project_root_tree(
                 session,
                 current_session_id=session_id,
@@ -527,12 +608,6 @@ class SubagentToolOperationRepository:
             raise SubagentToolOperationError(
                 "Mailbox agents must belong to the same root tree"
             )
-        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-            session,
-            source.root_session_agent_id,
-        )
-        if locked_root is None:
-            raise SubagentToolOperationError("Root SessionAgent not found")
         locked_target = await self.agent_session_repository.lock_by_id(
             session,
             target.agent_session_id,

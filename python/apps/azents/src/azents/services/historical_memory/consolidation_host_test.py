@@ -331,7 +331,9 @@ async def _host(
         ConsolidationExecutionRepository(manager),
         ownership,
         work,
-        ConsolidationPublicationRepository(manager),
+        ConsolidationPublicationRepository(
+            session_manager=manager, read_session_manager=manager
+        ),
         HistoricalMemoryExecutionConfig(),
     )
 
@@ -493,7 +495,10 @@ async def test_uncertain_commit_inspects_original_outcome_without_repeat_publica
         invalid_final=False,
         hard_input=False,
     )
-    host.publication_repository = _UncertainPublication(rdb_session_manager)
+    host.publication_repository = _UncertainPublication(
+        session_manager=rdb_session_manager,
+        read_session_manager=rdb_session_manager,
+    )
     outcome = await host.run()
     assert host.closed and host.messages == []
     assert (

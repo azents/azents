@@ -925,6 +925,7 @@ class TestEventExecutionRepositories:
         with pytest.raises(CompactionPlanStaleError):
             await EventCompactor(
                 operation_repository=CompactionOperationRepository(
+                    owner=None,
                     session_manager=session_manager,
                     transcript_repository=transcript_repo,
                     agent_session_repository=session_repo,

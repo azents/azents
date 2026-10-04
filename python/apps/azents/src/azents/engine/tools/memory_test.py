@@ -85,6 +85,7 @@ class _MemoryRepository(MemoryRepository):
 
 def _operations(repository: MemoryRepository) -> MemoryOperationRepository:
     return MemoryOperationRepository(
+        owner=None,
         session_manager=_session_manager,
         memory_repository=repository,
         agent_session_repository=AgentSessionRepository(),

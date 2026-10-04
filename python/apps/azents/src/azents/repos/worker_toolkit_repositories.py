@@ -58,4 +58,5 @@ def get_worker_subagent_operations(
         mailbox_repository=mailbox_repository,
         source_repository=source_repository,
         coordination_repository=coordination_repository,
+        owner=None,
     )

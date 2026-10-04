@@ -132,23 +132,21 @@ class ConsolidationCleanupRepository:
                     .where(~current, ~referenced)
                     .order_by(revision.id)
                     .limit(limit)
-                    .with_for_update(skip_locked=True)
                 )
             )
-            # Recheck in a fresh READ COMMITTED statement after locking bytes.
-            # A snapshot reference may have committed just before this lock.
-            removable = set(
+            # Recheck current pointers and retained snapshot references in the
+            # DELETE statement itself under its READ COMMITTED snapshot.
+            removable = list(
                 await session.write_session.scalars(
-                    sa.select(revision.id).where(
+                    sa.delete(revision)
+                    .where(
                         revision.id.in_([row.id for row in candidates]),
                         ~current,
                         ~referenced,
                     )
+                    .returning(revision.id)
                 )
             )
-            for row in candidates:
-                if row.id in removable:
-                    await session.write_session.delete(row)
         return len(removable)
 
     async def sweep(self, *, limit: int) -> ConsolidationCleanupSummary:

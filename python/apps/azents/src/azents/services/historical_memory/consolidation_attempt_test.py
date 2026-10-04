@@ -276,6 +276,7 @@ async def _harness(
         Mock(spec=EngineRuntimeTokenResolver),
         ModelSDKFactories(client_factory, unused_provider),
         watchdog,
+        manager,
     )
     return _Harness(service, corpus.team, block, clock, claims, clients, hosts)
 
@@ -295,9 +296,9 @@ async def _assert_no_dispatch_or_publication(
     assert len(harness.hosts) == harness.block.block_at - 1
     assert all(host.closed and host.messages == [] for host in harness.hosts)
     assert (
-        await ConsolidationPublicationRepository(manager).inspect_outcome(
-            claim.principal
-        )
+        await ConsolidationPublicationRepository(
+            session_manager=manager, read_session_manager=manager
+        ).inspect_outcome(claim.principal)
         is None
     )
 

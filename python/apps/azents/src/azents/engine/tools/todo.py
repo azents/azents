@@ -102,7 +102,6 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            self.store = self.store.for_execution(owner)
             self._execution_owner = owner
 
     def bind_execution_authority(

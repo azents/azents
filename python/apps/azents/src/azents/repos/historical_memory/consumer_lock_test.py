@@ -78,8 +78,13 @@ async def test_snapshot_consumer_coexists_with_agent_parent_key_share(
         AsyncSession(rdb_engine, expire_on_commit=False) as parent,
         AsyncSession(rdb_engine, expire_on_commit=False) as consumer,
     ):
-        assert await AgentSessionRepository().lock_agent_parent_for_session(
-            ReadWriteSession(parent), source.session_id
+        assert (
+            await ReadWriteSession(parent).write_session.scalar(
+                sa.select(RDBAgent.id)
+                .where(RDBAgent.id == source.agent_id)
+                .with_for_update()
+            )
+            == source.agent_id
         )
         snapshot = await asyncio.wait_for(
             repository.get_snapshot_consumer_in_session(
@@ -135,9 +140,6 @@ async def test_concurrent_snapshot_consumers_keep_parent_fk_locks(
 
             async def consume(session_id: str) -> None:
                 async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-                    assert await AgentSessionRepository().lock_agent_parent_for_session(
-                        ReadWriteSession(session), session_id
-                    )
                     await ready.wait()
                     snapshot = await repository.get_snapshot_consumer_in_session(
                         ReadWriteSession(session), session_id=session_id

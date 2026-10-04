@@ -8,7 +8,7 @@ from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredentialVerifier,
 )
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 
 
@@ -39,10 +39,24 @@ class RuntimeRunnerAuthenticationService:
 
     async def authorize_runner_in_transaction(
         self,
+        session: ReadSession,
+        credential: RuntimeRunnerCredential,
+    ) -> bool:
+        """Describe retained Runner authority without a registration fence."""
+        runtime = await self.runtime_repository.get_by_id(
+            session,
+            credential.runtime_id,
+        )
+        return runtime is not None and runtime.desired_generation == (
+            credential.desired_generation
+        )
+
+    async def fence_runner_registration_in_transaction(
+        self,
         session: WriteSession,
         credential: RuntimeRunnerCredential,
     ) -> bool:
-        """Validate Runner authority inside a caller-owned transaction."""
+        """Exclude Runtime replacement through actual connection acceptance."""
         runtime = await self.runtime_repository.get_by_id_for_update(
             session,
             credential.runtime_id,

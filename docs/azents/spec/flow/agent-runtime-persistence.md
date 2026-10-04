@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - proto/azents/runtime_control/v1/**
   - python/libs/azents-runtime-control/**
@@ -26,6 +27,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime_removal/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
+  - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
+  - python/apps/azents/src/azents/services/agent_runtime_removal/**
+  - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/repos/runtime_report*
   - python/apps/azents/src/azents/repos/runtime_stream_route*
@@ -40,6 +45,10 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
+  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
+  - python/apps/azents/src/azents/repos/session_git_worktree/**
+  - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
@@ -53,8 +62,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-10-02
-spec_version: 41
+last_verified_at: 2026-10-05
+spec_version: 42
 ---
 
 # Agent Runtime Persistence
@@ -76,6 +85,11 @@ An Agent stores capability `none`, `managed`, or `removing` independently from o
 Runtime Profile selection or no selection. Existing Agents were backfilled to `managed`; new Agents
 default to `none` and do not create a logical Runtime. Explicit add from `none` requires an
 available Profile and creates or rearms the logical row in stopped desired state.
+
+An existing logical Runtime is observed without a row lock. Actual creation uses the
+unique Agent identity and conditional INSERT to return one winner; ordinary getters
+remain read-only and never create a Runtime. Descriptive snapshots do not authorize
+later lifecycle, configuration or resource mutations.
 
 Interactive Terminal policy is independent durable configuration on infrastructure
 Profile, Workspace Profile, and Agent rows. Each default-true flag contributes to a
@@ -114,6 +128,12 @@ existing exact epoch/generation predicates govern acquisition, renewal, resoluti
 nonce consumption, and draining. Exact-epoch release has no added expiry or draining
 predicate. One-time nonce consumption remains committed if the subsequent local
 offer-deadline check rejects registration; local cleanup cannot remove a replacement epoch.
+
+Route resolution is an ordinary read-only observation: it checks retained Runtime
+and Runner generations, protocol, lease expiry and drain state without locking the
+route or Runtime. Actual acquisition, renewal, join consumption and drain/release
+mutations retain their exact epoch fences. A lagged description does not authorize
+a replacement ownership epoch or a consumed nonce.
 
 Runtime Web stream counts, pending opens, buffer and bandwidth grants, fair-scheduler
 state, logical-stream registries, tombstones, and live session state are ephemeral.
@@ -319,6 +339,16 @@ fence, cleanup cursor/counts, interruption evidence, retry/lease state, exact ta
 generation, acknowledgement kind/time, and bounded failures. PostgreSQL is sufficient for
 correctness; Redis may only accelerate wake-up.
 
+Each removal or Agent-decommission claim increments its existing `attempt_count`.
+Coordinators carry that returned attempt with the lease-owner identity into actual
+phase/progress, retry and finalization predicates. An old attempt cannot complete a
+reclaimed job even when the Scheduler or Worker retains the same lease-owner label.
+Deletion-wait/acknowledgement observations do not lock the job or Runtime. Actual
+target recording, acknowledgement publication and irreversible finalization fence the
+admitted resource and current generation. When physical deletion is required, removal
+completion also compares the recorded acknowledgement kind/time. No new lease token,
+resource identity or retry mode is introduced.
+
 Removal clears Session Project/worktree metadata, Runtime-only Toolkit projections, Agent Project
 defaults/presets/catalog, and automatic Project policy items while preserving the automatic policy
 settings row. It terminally invalidates every retained `pending` or `bound` Session folder binding.
@@ -449,6 +479,15 @@ Project mode by default, keeps `All files` as an explicit Agent Workspace root i
 uses backend Project browser manifest capabilities so Project root removal is registry-scoped rather
 than filesystem-destructive.
 
+Existing BOUND folder authority, Project/worktree inventory and filesystem-status
+projection use ordinary reads without an inherited execution-owner transaction gate.
+Only an actual PENDING bind changes binding state. Actual worktree action/resource
+publication and terminal handoff explicitly fence the captured Session owner through
+their database commit. Allocation, registration and destructive claims preserve
+transaction-scoped Runtime/path overlap exclusion, including ancestor/descendant
+targets; ordinary inventory does not inherit it. These changes do not alter Runner
+target revalidation or the reset/terminal-delete storage boundary.
+
 ## Validation
 
 Required checks:
@@ -482,6 +521,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-10-05** (spec_version 42) — Recorded nonlocking Runtime/binding/worktree
+  observations and exact mutation-only owner, reclaim-attempt and resource-ack
+  boundaries while preserving path overlap and Workspace durability.
 - **2026-10-02** (spec_version 41) — Recorded completed route/report transaction
   ownership with unchanged nonce, epoch, atomicity, and retained-applied evidence semantics.
 - **2026-09-30** (spec_version 40) — Included the exact Platform object-storage route

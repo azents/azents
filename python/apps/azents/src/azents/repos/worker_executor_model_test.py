@@ -722,7 +722,7 @@ class ExternalWitness:
         (True, "lightweight", InferenceProfileSource.EXPLICIT_INPUT),
     ],
 )
-async def test_requested_profile_precedence_lock_order_and_no_new_owner_fence(
+async def test_requested_profile_precedence_without_mutation_locks(
     rdb_session_manager: SessionManager[WriteSession],
     explicit: bool,
     label: str,
@@ -757,7 +757,7 @@ async def test_requested_profile_precedence_lock_order_and_no_new_owner_fence(
         explicit_profile=profile,
     )
     assert result.profile.model_target_label == label and result.source is source
-    assert fixture.fault.trace == ["agent_lock", "session_lock"]
+    assert fixture.fault.trace == []
     fixture.manager.assert_closed()
 
 

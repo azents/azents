@@ -4,6 +4,7 @@ import dataclasses
 from typing import Protocol
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.client_tools import ClientToolWireDialect
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -13,6 +14,7 @@ from azents.engine.events.types import (
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution.data import EventCreate
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 class ToolCallIdentity(Protocol):
@@ -95,6 +97,7 @@ class EngineToolResultOperationRepository:
     session_manager: SessionManager[WriteSession]
     run_repository: ToolResultRunRepository
     transcript_repository: ToolResultTranscriptRepository
+    owner: SessionExecutionOwner | None
 
     async def finalize(
         self,
@@ -106,6 +109,8 @@ class EngineToolResultOperationRepository:
     ) -> Event:
         """Finalize one tool result in a completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self.finalize_in_session(
                 session,
                 run_id=run_id,
@@ -124,6 +129,8 @@ class EngineToolResultOperationRepository:
         result: ClientToolResultPayload,
     ) -> Event:
         """Finalize one tool result inside a composing repository transaction."""
+        if self.owner is not None:
+            await fence_owned_session_mutation(session, self.owner)
         if result.call_id != call.call_id:
             raise ValueError("Tool result call ID does not match admitted call")
         if result.wire_dialect != call.wire_dialect:

@@ -173,17 +173,16 @@ class AgentMailboxRepository:
         idempotency_key: str | None,
         metadata: dict[str, str],
     ) -> MailboxItem:
-        locked_root = await self.agent_session_repository.lock_session_agent_by_id(
-            session,
-            source.root_session_agent_id,
-        )
-        if locked_root is None:
-            raise ValueError("Root SessionAgent not found")
-        locked_target = await self.agent_session_repository.lock_by_id(
-            session,
-            target.agent_session_id,
+        # Scope delivery exclusion to the exact target Session, not its root tree.
+        locked_target = await self.agent_session_repository.fence_active_mailbox_target(
+            session, target.agent_session_id
         )
         if locked_target is None:
+            observed = await self.agent_session_repository.get_by_id(
+                session, target.agent_session_id
+            )
+            if observed is not None:
+                raise ValueError("Target AgentSession is not active")
             raise ValueError("Target AgentSession not found")
         if locked_target.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("Target AgentSession is not active")

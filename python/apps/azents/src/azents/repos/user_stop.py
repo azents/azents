@@ -44,6 +44,7 @@ def get_user_stop_tool_result_repository(
 ) -> EngineToolResultOperationRepository:
     """Inject the narrow tool-result composition without application callbacks."""
     return EngineToolResultOperationRepository(
+        owner=None,
         session_manager=session_manager,
         run_repository=run_repository,
         transcript_repository=transcript_repository,

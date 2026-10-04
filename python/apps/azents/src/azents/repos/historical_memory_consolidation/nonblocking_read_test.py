@@ -137,6 +137,7 @@ async def test_exact_selected_revision_reads_with_held_writer(
             ToolkitStateRepository(),
             writes,
             reads,
+            owner=None,
         )
         assert await contexts.refresh_snapshot(
             session_id=corpus.personal_source, after_compaction=False
@@ -385,6 +386,7 @@ async def test_collection_between_selection_and_snapshot_save_is_unavailable(
             ToolkitStateRepository(),
             writes,
             reads,
+            owner=None,
         )
         assert await contexts.refresh_snapshot(
             session_id=corpus.team_source, after_compaction=False

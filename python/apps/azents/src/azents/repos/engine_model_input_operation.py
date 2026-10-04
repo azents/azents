@@ -5,6 +5,7 @@ import datetime
 from collections.abc import Sequence
 
 from azents.core.enums import AgentRunPhase
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.tool_results import cancelled_tool_result
 from azents.engine.events.types import (
     ClientToolCallPayload,
@@ -22,6 +23,10 @@ from azents.repos.engine_event_contracts import (
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
 from azents.repos.engine_tool_result_operation import (
     EngineToolResultOperationRepository,
+)
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
 )
 
 
@@ -44,6 +49,7 @@ class EngineModelInputOperationRepository:
     session_head_repository: SessionHeadRepository | None
     tool_result_repository: EngineToolResultOperationRepository
     input_projection_repository: EngineInputProjectionRepository | None
+    owner: SessionExecutionOwner | None
 
     async def prepare_input(
         self,
@@ -54,6 +60,8 @@ class EngineModelInputOperationRepository:
     ) -> PreparedEngineModelInput:
         """Return input only after its complete database atomic group commits."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await validate_session_execution_owner(session, self.owner)
             head_event_id: str | None = None
             if self.session_head_repository is not None:
                 state = await self.session_head_repository.get_by_id(
@@ -174,6 +182,8 @@ class EngineModelInputOperationRepository:
             if active.call_id in result_call_ids
         }
         if stale_resolved_ids:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             refreshed = await self.run_repository.get_by_id(session, run_id)
             if refreshed is None:
                 raise ValueError("Agent run not found")

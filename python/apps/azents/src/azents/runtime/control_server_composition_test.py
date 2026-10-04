@@ -303,6 +303,18 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     async def session_manager() -> AsyncIterator[object]:
         yield object()
 
+    @asynccontextmanager
+    async def read_session_manager() -> AsyncIterator[object]:
+        raise AssertionError("composition must not execute route description queries")
+        yield object()
+
+    read_factory_engines: list[_Engine] = []
+
+    def read_session_factory(selected_engine: _Engine) -> object:
+        assert selected_engine is engine
+        read_factory_engines.append(selected_engine)
+        return read_session_manager
+
     class _Cutover:
         allocator_version = 1
 
@@ -312,6 +324,9 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             return _Cutover()
 
     monkeypatch.setattr(control_server, "_session_manager", lambda _: session_manager)
+    monkeypatch.setattr(
+        control_server, "create_read_only_session_manager", read_session_factory
+    )
     monkeypatch.setattr(
         control_server,
         "RuntimeConnectionGenerationRepository",
@@ -348,6 +363,14 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert sessions["data_plane"] is not None
         assert sessions["owner_registry"] is not None
         assert sessions["offer_provider"] is not None
+        owner_registry = sessions["owner_registry"]
+        assert isinstance(
+            owner_registry, control_server.RuntimeStreamOwnerSessionRegistry
+        )
+        assert read_factory_engines == [engine]
+        assert owner_registry.repository.session_manager is session_manager
+        assert owner_registry.repository.read_session_manager is read_session_manager
+        assert read_session_manager is not session_manager
         assert "secret-key" not in repr(registrations)
 
     assert redis.closed

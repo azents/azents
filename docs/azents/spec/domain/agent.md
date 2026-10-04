@@ -6,6 +6,10 @@ spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
+  - python/apps/azents/src/azents/repos/agent_session/**
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
   - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/services/active_model_capabilities.py
@@ -140,8 +144,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-04
-spec_version: 92
+last_verified_at: 2026-10-05
+spec_version: 93
 ---
 
 # Agent Domain Spec
@@ -398,6 +402,28 @@ non-empty policy is cleared. It preserves the settings row as the required empty
 authority so Runtime-free and later re-added Agents can continue creating automatic root Sessions.
 
 ## 2. API Contract
+
+Agent, Session and coordination descriptions do not acquire an Agent-wide,
+root-tree or execution-owner row gate. Captured execution ownership can be
+validated by a plain read; a description is not ownership handover or lifecycle
+admission. Actual output and lifecycle mutations retain their existing exact
+Session generation, resource, claim and status conditions through commit.
+
+Subagent creation and follow-up capacity admission coordinate with the existing
+root SessionAgent hierarchy row. Ordinary path/tree/status reads, message
+inventory and single-target interruption do not inherit that root gate. Actual
+collaboration mutations admit only their source/target Session rows in stable
+order. A NOWAIT collision rolls back the complete admission savepoint before
+retry, allowing child terminal delivery to its parent to progress without an
+inverse parent-to-child wait. Source owner-generation validation is fenced only
+after the required mutation rows have been admitted.
+
+Stop, archive, restore, purge and decommission admit the existing root and its
+current Session tree as a mutation boundary shared with child creation. A child
+cannot escape an admitted transition through an enumeration race. Irreversible
+purge cutoffs, exact attempts/leases, participant snapshots, tombstones and
+already-started Scheduled results retain their existing semantics; policy and
+lifecycle status descriptions do not claim destructive work.
 
 ### 2.1 Agent create/update
 
@@ -803,6 +829,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-05** (spec_version 93) — Separated Agent/tree descriptions from
+  operation-scoped hierarchy and exact Session mutation admission, preserving
+  child-creation cutoffs and savepoint-safe collaboration ordering.
 - **2026-10-03** (spec_version 91) — Embedded normalized catalog prices in saved
   candidates and replaced whole-source context fallback with grouped exact current reads.
 - **2026-10-03** (spec_version 90) — Carried existing Agent-local top-k to

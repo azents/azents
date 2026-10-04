@@ -249,7 +249,9 @@ def get_goal_state_store(
 
 
 def get_external_channel_toolkit_provider(
-    service: Annotated[ExternalChannelActionService, Depends()],
+    service: Annotated[
+        ExternalChannelActionService, Depends(ExternalChannelActionService.create)
+    ],
     scheduled_channel_service: Annotated[
         ScheduledTaskChannelService,
         Depends(get_scheduled_task_channel_service),

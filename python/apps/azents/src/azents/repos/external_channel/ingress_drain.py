@@ -241,7 +241,7 @@ class ExternalChannelIngressDrainRepository:
             if locked is None:
                 await session.write_session.rollback()
                 return None
-            first_item = await self.queue_repository.lock_first_authoritative_item(
+            first_item = await self.queue_repository.get_first_authoritative_item(
                 session,
                 owner_id=locked.id,
             )

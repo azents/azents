@@ -137,7 +137,9 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
                 ),
             ],
         )
-        publication = ConsolidationPublicationRepository(manager)
+        publication = ConsolidationPublicationRepository(
+            session_manager=manager, read_session_manager=manager
+        )
         frozen = await publication.freeze(claim.principal)
         await work.record_coverage(
             claim.principal,

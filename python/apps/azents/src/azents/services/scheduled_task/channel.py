@@ -41,7 +41,6 @@ from azents.repos.scheduled_task_cycle.progress_data import (
 from azents.repos.scheduled_task_terminal_operations import (
     ScheduledTaskTerminalEffectSnapshot,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
@@ -90,12 +89,8 @@ class ScheduledTaskChannelService:
     ) -> "ScheduledTaskChannelService":
         """Bind Scheduled channel persistence to one durable Session owner."""
         return ScheduledTaskChannelService(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
-            progress_repository=self.progress_repository.for_execution(owner),
+            session_manager=self.session_manager,
+            progress_repository=self.progress_repository,
             provider_repository=self.provider_repository,
             action_service=self.action_service.for_execution_owner(owner),
             config=self.config,
@@ -493,7 +488,9 @@ def get_scheduled_task_channel_service(
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository.create),
     ],
-    action_service: Annotated[ExternalChannelActionService, Depends()],
+    action_service: Annotated[
+        ExternalChannelActionService, Depends(ExternalChannelActionService.create)
+    ],
     config: Annotated[Config, Depends(get_config)],
 ) -> ScheduledTaskChannelService:
     """Create the Scheduled-owned External Channel effect service."""

@@ -111,6 +111,16 @@ class _Repository:
         self.current_default: ExternalChannelAgentRoute | None = None
         self.created_default: ExternalChannelChannelDefaultCreate | None = None
 
+    async def get_interaction(
+        self,
+        session: ReadSession,
+        *,
+        interaction_id: str,
+    ) -> ExternalChannelInteraction | None:
+        del session
+        self.calls.append("interaction_read")
+        return self.selector if interaction_id == self.selector.id else None
+
     async def lock_interaction(
         self,
         session: ReadSession,

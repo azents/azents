@@ -10,7 +10,7 @@ import pytest
 from azcommon.uuid import uuid7
 
 from azents.core.agent import SelectableModelCandidate, SelectableModelOption
-from azents.core.agent_session_data import AgentSession, AgentSessionCreate
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunStatus,
@@ -84,19 +84,6 @@ class _ObservedSessionManager:
         finally:
             self.active_scopes -= 1
             self.closed_scopes += 1
-
-
-class _Sessions(AgentSessionRepository):
-    def __init__(self, trace: list[str]) -> None:
-        self.trace = trace
-
-    async def wait_for_execution_lock_by_id(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        self.trace.append("owner")
-        return await super().wait_for_execution_lock_by_id(session, agent_session_id)
 
 
 class _Transcript(EventTranscriptRepository):
@@ -238,7 +225,7 @@ async def _fixture(
         )
     trace: list[str] = []
     manager = _ObservedSessionManager(source)
-    tracked_sessions = _Sessions(trace)
+    tracked_sessions = AgentSessionRepository()
     tracked_runs = _Runs(trace)
     terminal = _Terminal(
         session_manager=manager,
@@ -355,8 +342,7 @@ async def test_failed_run_finalization_appends_events_delivery_and_closes(
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
     result = await fixture.repository.finalize(fixture.input)
     assert result is not None
-    assert fixture.trace[:6] == [
-        "owner",
+    assert fixture.trace[:5] == [
         "terminal_prelock",
         EventKind.SYSTEM_ERROR.value,
         EventKind.RUN_MARKER.value,
@@ -471,7 +457,7 @@ async def test_failed_run_finalization_yields_to_locked_stop_request(
         )
         assert stopped is not None
     assert await fixture.repository.finalize(fixture.input) is None
-    assert fixture.trace == ["owner"]
+    assert fixture.trace == []
     assert fixture.manager.committed_scopes == 1
     assert fixture.manager.closed_scopes == 1
     await _assert_no_failure_writes(rdb_session_manager, fixture)
@@ -492,7 +478,7 @@ async def test_stale_owner_fails_before_event_or_terminal_mutation(
         match="Session owner generation is stale",
     ):
         await fixture.repository.finalize(fixture.input)
-    assert fixture.trace == ["owner"]
+    assert fixture.trace == []
     assert fixture.manager.failed_scopes == 1
     await _assert_no_failure_writes(rdb_session_manager, fixture)
 
@@ -508,7 +494,7 @@ async def test_missing_owned_session_keeps_value_error_semantics(
                 session_id=uuid7().hex,
             )
         )
-    assert fixture.trace == ["owner"]
+    assert fixture.trace == []
     await _assert_no_failure_writes(rdb_session_manager, fixture)
 
 
@@ -559,7 +545,7 @@ async def test_multiple_terminal_operation_slots_abort_before_failure_events(
         RuntimeError, match="Failed Run has multiple terminal model operations"
     ):
         await fixture.repository.finalize(fixture.input)
-    assert fixture.trace == ["owner", "terminal_prelock"]
+    assert fixture.trace == ["terminal_prelock"]
     await _assert_no_failure_writes(rdb_session_manager, fixture)
 
 

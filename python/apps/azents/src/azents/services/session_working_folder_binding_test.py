@@ -104,10 +104,25 @@ def _service() -> SessionWorkingFolderBindingService:
     agent_repository = AsyncMock()
     agent_repository.lock_by_id.return_value = Agent.model_construct(
         id="agent-1",
+        workspace_id="workspace-1",
+        lifecycle_status=AgentLifecycleStatus.ACTIVE,
         runtime_capability=AgentRuntimeCapability.MANAGED,
         runtime_capability_version=4,
     )
+    agent_repository.get_by_id.return_value = agent_repository.lock_by_id.return_value
     agent_session_repository = AsyncMock()
+    agent_session_repository.get_root_session_agent_by_session_id.return_value = (
+        SessionAgent.model_construct(
+            context_id="context-1", agent_session_id="session-1"
+        )
+    )
+    agent_session_repository.get_by_id.return_value = AgentSession.model_construct(
+        id="session-1",
+        agent_id="agent-1",
+        workspace_id="workspace-1",
+        status=AgentSessionStatus.ACTIVE,
+        handle="root-handle",
+    )
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession]:
@@ -139,6 +154,9 @@ async def test_pending_context_binds_from_current_runner_workspace() -> None:
             root_session_handle="root-handle",
         )
     )
+    repository.get_working_folder_context_by_session_id.return_value = (
+        repository.lock_working_folder_binding_by_session_id.return_value.context
+    )
     repository.bind_pending_working_folder.return_value = pending.model_copy(
         update={
             "binding_state": SessionWorkingFolderBindingState.BOUND,
@@ -168,7 +186,7 @@ async def test_pending_context_binds_from_current_runner_workspace() -> None:
 
 @pytest.mark.asyncio
 async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
-    """Final write fencing retains the caller transaction's Agent/context locks."""
+    """Existing BOUND authority uses the caller scope without mutation locks."""
     service = _service()
     repository = require_instance(
         service.repository.agent_session_repository,
@@ -184,6 +202,9 @@ async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
             root_session_handle="root-handle",
         )
     )
+    repository.get_working_folder_context_by_session_id.return_value = (
+        repository.lock_working_folder_binding_by_session_id.return_value.context
+    )
     transaction = AsyncMock(spec=AsyncSession)
 
     authority = await service.resolve_bound_authority_in_transaction(
@@ -195,11 +216,8 @@ async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
 
     assert authority.working_folder_path == expected_path
     agent_repository = require_instance(service.repository.agent_repository, AsyncMock)
-    agent_repository.lock_by_id.assert_awaited_once_with(transaction, "agent-1")
-    repository.lock_working_folder_binding_by_session_id.assert_awaited_once_with(
-        transaction,
-        session_id="session-1",
-    )
+    agent_repository.lock_by_id.assert_not_awaited()
+    repository.lock_working_folder_binding_by_session_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -260,6 +278,9 @@ async def test_terminal_unbound_contexts_never_gain_authority(
             root_session_handle="root-handle",
         )
     )
+    repository.get_working_folder_context_by_session_id.return_value = (
+        repository.lock_working_folder_binding_by_session_id.return_value.context
+    )
 
     with pytest.raises(SessionWorkingFolderBindingError) as error:
         await service.resolve_authority(
@@ -307,6 +328,9 @@ async def test_terminal_states_fail_preflight_before_runtime_resolution(
             root_session_handle="root-handle",
         )
     )
+    repository.get_working_folder_context_by_session_id.return_value = (
+        repository.lock_working_folder_binding_by_session_id.return_value.context
+    )
 
     with pytest.raises(SessionWorkingFolderBindingError) as error:
         await service.require_bindable_context(
@@ -331,6 +355,9 @@ async def test_pending_context_fails_bound_only_preflight() -> None:
             context=_context(SessionWorkingFolderBindingState.PENDING),
             root_session_handle="root-handle",
         )
+    )
+    repository.get_working_folder_context_by_session_id.return_value = (
+        repository.lock_working_folder_binding_by_session_id.return_value.context
     )
 
     with pytest.raises(SessionWorkingFolderBindingError) as error:

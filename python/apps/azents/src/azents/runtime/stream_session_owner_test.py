@@ -66,6 +66,7 @@ async def _owned(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=session_manager,
         ),
         owner_replica_id="control-a",
         owner_boot_id="owner-boot-a",
@@ -148,6 +149,7 @@ async def test_owner_registry_binds_authenticated_runner_boot(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=rdb_session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=rdb_session_manager,
         ),
         clock=_now,
     )
@@ -177,6 +179,7 @@ async def test_owner_registry_rejects_invalid_profile(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=rdb_session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=rdb_session_manager,
         ),
         clock=_now,
     )
@@ -201,6 +204,7 @@ async def test_owner_registry_rejects_extended_offer_deadline(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=rdb_session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=rdb_session_manager,
         ),
         clock=_now,
     )
@@ -224,6 +228,7 @@ async def test_owner_registry_rejects_stale_snapshot_after_drain(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=rdb_session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=rdb_session_manager,
         ),
         clock=_now,
     )
@@ -244,6 +249,7 @@ async def test_owner_registry_rejects_stale_snapshot_after_release(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=rdb_session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=rdb_session_manager,
         ),
         clock=_now,
     )
@@ -270,6 +276,7 @@ async def test_owner_registry_rejects_generation_replacement(
         repository=RuntimeStreamRouteOperationRepository(
             session_manager=rdb_session_manager,
             route_repository=RuntimeWebSessionRouteRepository(),
+            read_session_manager=rdb_session_manager,
         ),
         clock=_now,
     )
@@ -337,6 +344,7 @@ async def test_owner_registry_rechecks_deadline_after_nonce_consumption(
     operation = RuntimeStreamRouteOperationRepository(
         rdb_session_manager,
         RuntimeWebSessionRouteRepository(),
+        read_session_manager=rdb_session_manager,
     )
 
     async def consume_join(

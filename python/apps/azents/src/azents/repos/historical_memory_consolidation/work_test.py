@@ -59,7 +59,9 @@ async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
     owners = ConsolidationOwnershipRepository(manager)
     work = ConsolidationWorkRepository(manager)
     drafts = ConsolidationDraftRepository(manager)
-    publication = ConsolidationPublicationRepository(manager)
+    publication = ConsolidationPublicationRepository(
+        session_manager=manager, read_session_manager=manager
+    )
     covered: set[str] = set()
     upper: int | None = None
     late_id: str | None = None

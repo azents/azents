@@ -36,7 +36,7 @@ from azents.repos.historical_memory_consolidation.foreground import (
 )
 from azents.repos.memory import MemoryRepository
 from azents.repos.message import MessageRepository
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.toolkit_state import ToolkitStateConflictError, ToolkitStateRepository
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
 
@@ -63,18 +63,44 @@ class MemoryContextSnapshotRepository:
     read_session_manager: Annotated[
         SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
+    owner: SessionExecutionOwner | None
+
+    @classmethod
+    def create(
+        cls,
+        historical_repository: Annotated[
+            HistoricalMemoryRepository, Depends(HistoricalMemoryRepository)
+        ],
+        memory_repository: Annotated[MemoryRepository, Depends(MemoryRepository)],
+        message_repository: Annotated[MessageRepository, Depends(MessageRepository)],
+        toolkit_state_repository: Annotated[
+            ToolkitStateRepository, Depends(ToolkitStateRepository)
+        ],
+        session_manager: Annotated[
+            SessionManager[WriteSession], Depends(get_session_manager)
+        ],
+        read_session_manager: Annotated[
+            SessionManager[ReadSession], Depends(get_read_only_session_manager)
+        ],
+    ) -> "MemoryContextSnapshotRepository":
+        """Construct an explicitly non-execution boundary operation."""
+        return cls(
+            historical_repository=historical_repository,
+            memory_repository=memory_repository,
+            message_repository=message_repository,
+            toolkit_state_repository=toolkit_state_repository,
+            session_manager=session_manager,
+            read_session_manager=read_session_manager,
+            owner=None,
+        )
 
     def with_owner(
         self, owner: SessionExecutionOwner
     ) -> "MemoryContextSnapshotRepository":
-        """Fence each complete operation against durable execution takeover."""
+        """Bind snapshot publication only, leaving prompt descriptions independent."""
         return dataclasses.replace(
             self,
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
+            owner=owner,
         )
 
     async def prompt_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
@@ -142,6 +168,10 @@ class MemoryContextSnapshotRepository:
         after_compaction: bool,
     ) -> bool:
         async with consolidation_session(self.session_manager) as session:
+            if self.owner is not None:
+                if self.owner.session_id != session_id:
+                    raise ValueError("Memory snapshot Session does not match owner")
+                await fence_owned_session_mutation(session, self.owner)
             await session.write_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )

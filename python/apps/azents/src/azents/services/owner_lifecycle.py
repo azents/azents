@@ -247,7 +247,7 @@ class OwnerLifecycleRetentionSettings(Protocol):
 class OwnerLifecycleRetentionRepositoryProtocol(Protocol):
     """Retention settings and purge scheduling consumed by owner lifecycle."""
 
-    async def lock_settings(
+    async def get_settings(
         self,
         session: WriteSession,
     ) -> OwnerLifecycleRetentionSettings:
@@ -724,7 +724,7 @@ class OwnerLifecycleService:
                 ):
                     # Account purge must not wait on prior retention schedules.
                     archived_at = datetime.datetime.now(datetime.UTC)
-                    settings = await self.retention_repository.lock_settings(session)
+                    settings = await self.retention_repository.get_settings(session)
                     await self.agent_session_repository.archive_tree(
                         session,
                         root_session_id=root_session_id,
@@ -785,7 +785,7 @@ class OwnerLifecycleService:
                 stop_session_ids = session_ids
 
             if not active or preserve_scheduled:
-                settings = await self.retention_repository.lock_settings(session)
+                settings = await self.retention_repository.get_settings(session)
                 archived_at = datetime.datetime.now(datetime.UTC)
                 if immediate_purge:
                     purge_after = archived_at

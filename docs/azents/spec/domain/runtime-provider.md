@@ -59,8 +59,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
-last_verified_at: 2026-10-04
-spec_version: 36
+last_verified_at: 2026-10-05
+spec_version: 37
 ---
 
 # Runtime Provider
@@ -290,6 +290,15 @@ operations snapshot exact target IDs and versions, use bounded concurrency and r
 or superseded targets, and preserve Workspace storage. PVC expansion may apply to the current
 claim; shrink waits for an explicit destructive reset or terminal delete.
 
+Recreation operation creation retains the Provider/Profile version already checked
+for that request rather than rereading and adopting a newer target version. Target
+version descriptions use ordinary reads with no hidden share-lock option. Only the
+actual dispatch transaction excludes replacement of the exact target while writing
+the Runtime configuration and item dispatched tuple. Successful completion requires
+evidence for the exact dispatched generation. Item status/retry mutations match the
+claimed attempt and update operation counts atomically. A retained description
+therefore cannot authorize recreation of a replacement target.
+
 Kubernetes Provider v3 reports Pod lifecycle directly and does not use process-local command or
 resource verification history as lifecycle authority. A current command completion may include one
 structured aggregate `network_enforcement` observation covering every resource required by the
@@ -374,6 +383,8 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **37 (2026-10-05):** Separated ordinary recreation target description from actual
+  dispatch fencing and retained the checked target version and item-attempt identity.
 - **35 (2026-10-04):** Removed row-lock modes from independent revision, Profile
   and retained configuration-state getters while preserving mutation fencing.
 
