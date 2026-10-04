@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+import pytest_asyncio
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
@@ -27,6 +28,10 @@ from azents.core.model_availability_operations import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
+from azents.rdb.models.runtime_connection_generation import (
+    RDBRuntimeConnectionGenerationCutover,
+)
+from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
@@ -98,6 +103,65 @@ from azents.services.subscription_usage.data import (
     SubscriptionUsageNotFound,
     SubscriptionUsageNotInWorkspace,
 )
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
+
+
+@pytest_asyncio.fixture
+async def committed_fixture_metadata(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> sa.MetaData:
+    """Reflect the actual FK graph once for this module's committed test seeds."""
+    del latest_db_schema
+    metadata = sa.MetaData()
+    async with rdb_engine.connect() as connection:
+        await connection.run_sync(metadata.reflect)
+    return metadata
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def cleanup_committed_fixture_graph(
+    rdb_engine: AsyncEngine, committed_fixture_metadata: sa.MetaData
+) -> AsyncIterator[None]:
+    """Always release only identities created by this committed evidence case."""
+    async with committed_fixture_graph(rdb_engine, committed_fixture_metadata):
+        yield
+
+
+@pytest.mark.parametrize("outcome", ["success", "exception", "cancellation"])
+async def test_fixture_cleanup_preserves_preexisting_graph_after_every_outcome(
+    rdb_engine: AsyncEngine,
+    committed_fixture_metadata: sa.MetaData,
+    outcome: str,
+) -> None:
+    """Exact new graph cleanup preserves prior users, Agents and schema markers."""
+    retained = await _model_fixture(rdb_engine)
+    reads = create_read_only_session_manager(rdb_engine)
+    async with reads() as session:
+        cutover = await session.read_session.get(
+            RDBRuntimeConnectionGenerationCutover, 1
+        )
+        assert cutover is not None
+        cutover_at = cutover.cutover_at
+    added: ModelFixture | None = None
+    try:
+        async with committed_fixture_graph(rdb_engine, committed_fixture_metadata):
+            added = await _model_fixture(rdb_engine)
+            if outcome == "exception":
+                raise RuntimeError("fixture outcome")
+            if outcome == "cancellation":
+                raise asyncio.CancelledError("fixture outcome")
+    except (RuntimeError, asyncio.CancelledError) as error:
+        assert outcome != "success" and str(error) == "fixture outcome"
+    assert added is not None
+    async with reads() as session:
+        assert await session.read_session.get(RDBAgent, added.fixture.agent_id) is None
+        assert await session.read_session.get(RDBUser, added.fixture.user_id) is None
+        assert await session.read_session.get(RDBAgent, retained.fixture.agent_id)
+        assert await session.read_session.get(RDBUser, retained.fixture.user_id)
+        cutover = await session.read_session.get(
+            RDBRuntimeConnectionGenerationCutover, 1
+        )
+        assert cutover is not None and cutover.cutover_at == cutover_at
 
 
 @dataclasses.dataclass
