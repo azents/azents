@@ -20,9 +20,15 @@ class RunnerDiagnosticReason(enum.StrEnum):
     CONTROL_CLOSE_TIMED_OUT = "runner_control_close_timed_out"
     WEB_PROTOCOL_FAILED = "runner_web_protocol_failed"
     WEB_RESOURCE_EXHAUSTED = "runner_web_resource_exhausted"
+    WEB_LOOPBACK_FAILED = "runner_web_loopback_failed"
+    WEB_DEADLINE = "runner_web_deadline"
+    TRANSFER_FAILED = "runner_transfer_failed"
+    TRANSFER_DELIVERY_FAILED = "runner_transfer_delivery_failed"
     TRANSFER_RESPONSE_INVALID = "direct_claim_renewal_response_invalid"
     TRANSFER_RENEWAL_FAILED = "direct_claim_renewal_failed"
+    TERMINAL_ADMISSION_FAILED = "runner_terminal_admission_failed"
     OPERATION_FAILED = "runner_operation_failed"
+    OPERATION_CLEANUP_TIMED_OUT = "runner_operation_cleanup_timed_out"
 
 
 class SafeExceptionInfo(NamedTuple):

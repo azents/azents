@@ -85,13 +85,13 @@ class RuntimeControlProtocolService:
         runner_generation_observer: RuntimeRunnerGenerationObserver | None = None,
     ) -> None:
         """Initialize the control protocol service."""
-        self._store = store
-        self._request_id_factory = request_id_factory or _new_request_id
+        self.store = store
+        self.request_id_factory = request_id_factory or _new_request_id
         self._heartbeat_interval_seconds = heartbeat_interval_seconds
         self._connection_ttl_seconds = connection_ttl_seconds
         self._operation_ttl_seconds = operation_ttl_seconds
         self._request_reclaim_idle_seconds = request_reclaim_idle_seconds
-        self._runner_generation_observer = runner_generation_observer
+        self.runner_generation_observer = runner_generation_observer
 
     async def heartbeat_provider(
         self,
@@ -101,7 +101,7 @@ class RuntimeControlProtocolService:
         heartbeat_at: datetime,
     ) -> bool:
         """Refresh provider connection TTL if generation fencing matches."""
-        return await self._store.heartbeat_connection(
+        return await self.store.heartbeat_connection(
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=provider_id,
             generation=generation,
@@ -116,7 +116,7 @@ class RuntimeControlProtocolService:
         generation: int,
     ) -> bool:
         """Revoke a Provider connection only when its generation is current."""
-        return await self._store.revoke_connection(
+        return await self.store.revoke_connection(
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=provider_id,
             generation=generation,
@@ -130,7 +130,7 @@ class RuntimeControlProtocolService:
         heartbeat_at: datetime,
     ) -> bool:
         """Refresh runner connection TTL if generation fencing matches."""
-        return await self._store.heartbeat_connection(
+        return await self.store.heartbeat_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=runtime_id,
             generation=generation,
@@ -145,14 +145,14 @@ class RuntimeControlProtocolService:
         generation: int,
     ) -> bool:
         """Revoke a Runner connection only when its generation is current."""
-        revoked = await self._store.revoke_connection(
+        revoked = await self.store.revoke_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=runtime_id,
             generation=generation,
         )
-        if revoked and self._runner_generation_observer is not None:
+        if revoked and self.runner_generation_observer is not None:
             try:
-                await self._runner_generation_observer.on_runner_revoked(
+                await self.runner_generation_observer.on_runner_revoked(
                     runtime_id=runtime_id,
                     generation=generation,
                 )
@@ -171,7 +171,7 @@ class RuntimeControlProtocolService:
         accepted_at: datetime,
     ) -> RuntimeSystemMetricsAppendResult:
         """Append one current-generation capable Runner metrics report."""
-        connection = await self._store.get_connection(
+        connection = await self.store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=report.runtime_id,
         )
@@ -183,7 +183,7 @@ class RuntimeControlProtocolService:
             or RUNNER_SYSTEM_METRICS_CAPABILITY not in capabilities
         ):
             return RuntimeSystemMetricsAppendResult.CAPABILITY_MISSING
-        appended = await self._store.append_runner_system_metrics(
+        appended = await self.store.append_runner_system_metrics(
             runtime_id=report.runtime_id,
             generation=generation,
             sample=RuntimeSystemMetricsSample(
@@ -213,7 +213,7 @@ class RuntimeControlProtocolService:
         | RuntimeProtocolStaleGeneration
     ):
         """Append a Provider command to the Provider request stream."""
-        connection = await self._store.get_connection(
+        connection = await self.store.get_connection(
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=command.provider_id,
         )
@@ -228,7 +228,7 @@ class RuntimeControlProtocolService:
                 subject_id=command.provider_id,
                 generation=command.provider_generation,
             )
-        request_id = self._request_id_factory()
+        request_id = self.request_id_factory()
         request_stream_id = _provider_request_stream_id(
             command.provider_id,
             command.provider_generation,
@@ -285,7 +285,7 @@ class RuntimeControlProtocolService:
         | RuntimeProtocolStaleGeneration
     ):
         """Append a Runner operation to the Runtime request stream."""
-        connection = await self._store.get_connection(
+        connection = await self.store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=operation.runtime_id,
         )
@@ -300,7 +300,7 @@ class RuntimeControlProtocolService:
                 subject_id=operation.runtime_id,
                 generation=operation.runner_generation,
             )
-        request_id = self._request_id_factory()
+        request_id = self.request_id_factory()
         request_stream_id = _runner_request_stream_id(
             operation.runtime_id,
             operation.runner_generation,
@@ -346,7 +346,7 @@ class RuntimeControlProtocolService:
         | None
     ):
         """Append an ordered cancellation command for one Runner operation."""
-        connection = await self._store.get_connection(
+        connection = await self.store.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=runtime_id,
         )
@@ -361,7 +361,7 @@ class RuntimeControlProtocolService:
                 subject_id=runtime_id,
                 generation=runner_generation,
             )
-        operation = await self._store.get_operation(operation_id)
+        operation = await self.store.get_operation(operation_id)
         if (
             operation is None
             or operation.status is RuntimeOperationStatus.FINAL
@@ -371,7 +371,7 @@ class RuntimeControlProtocolService:
             or operation.generation != runner_generation
         ):
             return None
-        request_id = self._request_id_factory()
+        request_id = self.request_id_factory()
         envelope = RuntimeRequestEnvelope(
             request_id=request_id,
             runtime_id=runtime_id,
@@ -383,7 +383,7 @@ class RuntimeControlProtocolService:
             deadline_at=operation.deadline_at,
             body_stream_id=None,
         )
-        cancellation = await self._store.request_operation_cancel_if_connection_current(
+        cancellation = await self.store.request_operation_cancel_if_connection_current(
             connection_kind=RuntimeConnectionKind.RUNNER,
             connection_subject_id=runtime_id,
             connection_generation=runner_generation,
@@ -430,7 +430,7 @@ class RuntimeControlProtocolService:
             return None
         stream_id = _provider_request_stream_id(provider_id, generation)
         consumer_group = _generation_group(provider_id, generation)
-        record = await self._store.claim_next_request(
+        record = await self.store.claim_next_request(
             stream_id,
             consumer_group=consumer_group,
             consumer_id=consumer_id,
@@ -463,7 +463,7 @@ class RuntimeControlProtocolService:
             return None
         stream_id = _runner_request_stream_id(runtime_id, generation)
         consumer_group = _generation_group(runtime_id, generation)
-        record = await self._store.claim_next_request(
+        record = await self.store.claim_next_request(
             stream_id,
             consumer_group=consumer_group,
             consumer_id=consumer_id,
@@ -488,7 +488,7 @@ class RuntimeControlProtocolService:
             raise ValueError("Claimed request cursor is required")
         if envelope.stream_id is None or envelope.consumer_group is None:
             raise ValueError("Claimed request stream metadata is required")
-        await self._store.ack_request(
+        await self.store.ack_request(
             envelope.stream_id,
             consumer_group=envelope.consumer_group,
             cursor=envelope.cursor,
@@ -514,7 +514,7 @@ class RuntimeControlProtocolService:
         already final so late events cannot replace the final cursor.
         """
         kind = _connection_kind(expected_target)
-        connection = await self._store.get_connection(
+        connection = await self.store.get_connection(
             kind=kind,
             subject_id=expected_subject_id,
         )
@@ -530,7 +530,7 @@ class RuntimeControlProtocolService:
                 generation=event.generation,
             )
         if operation_id is not None:
-            mutation = await self._store.append_operation_reply_if_connection_current(
+            mutation = await self.store.append_operation_reply_if_connection_current(
                 connection_kind=kind,
                 connection_subject_id=expected_subject_id,
                 connection_generation=event.generation,
@@ -557,7 +557,7 @@ class RuntimeControlProtocolService:
                 final=event.final,
                 operation_id=operation_id,
             )
-        mutation = await self._store.append_reply_if_connection_current(
+        mutation = await self.store.append_reply_if_connection_current(
             connection_kind=kind,
             connection_subject_id=expected_subject_id,
             connection_generation=event.generation,
@@ -596,7 +596,7 @@ class RuntimeControlProtocolService:
         | None
     ):
         """Append an event to the reply stream stored in operation metadata."""
-        operation = await self._store.get_operation(operation_id)
+        operation = await self.store.get_operation(operation_id)
         if operation is None:
             return None
         return await self.append_reply_event(
@@ -615,7 +615,7 @@ class RuntimeControlProtocolService:
         limit: int,
     ) -> list[RuntimeReplyRecord]:
         """Read reply events for foreground operation resume."""
-        return await self._store.read_replies(
+        return await self.store.read_replies(
             reply_stream_id,
             after_cursor=after_cursor,
             limit=limit,
@@ -630,7 +630,7 @@ class RuntimeControlProtocolService:
         block_ms: int,
     ) -> list[RuntimeReplyRecord]:
         """Wait boundedly for reply events for foreground operations."""
-        return await self._store.wait_replies(
+        return await self.store.wait_replies(
             reply_stream_id,
             after_cursor=after_cursor,
             limit=limit,
@@ -670,7 +670,7 @@ class RuntimeControlProtocolService:
             body_stream_id=body_stream_id,
         )
         operation_id = _operation_id(request_id)
-        mutation = await self._store.append_operation_request_if_connection_current(
+        mutation = await self.store.append_operation_request_if_connection_current(
             connection_kind=connection_kind,
             connection_subject_id=connection_subject_id,
             connection_generation=generation,
@@ -733,7 +733,7 @@ class RuntimeControlProtocolService:
         subject_id: str,
         generation: int,
     ) -> bool:
-        connection = await self._store.get_connection(kind=kind, subject_id=subject_id)
+        connection = await self.store.get_connection(kind=kind, subject_id=subject_id)
         return connection is not None and connection.generation == generation
 
 

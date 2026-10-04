@@ -13,7 +13,10 @@ from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
-from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublishError
+from azents.broker.broadcast import (
+    BaseWebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.broker.types import (
     SessionBroker,
     SessionWakeUp,
@@ -466,7 +469,7 @@ class RunExecutor:
         DynamicWorktreeToolkitProvider,
         Depends(get_dynamic_worktree_toolkit_provider),
     ]
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)]
     failed_run_finalizer: Annotated[
         FailedRunErrorFinalizer, Depends(FailedRunErrorFinalizer)
     ]

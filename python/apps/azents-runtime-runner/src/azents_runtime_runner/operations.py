@@ -44,6 +44,7 @@ from azents_runtime_runner.apply_patch import (
 )
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
+    bind_extra,
     runner_exception_diagnostic,
 )
 from azents_runtime_runner.execution import (
@@ -272,8 +273,8 @@ class RunnerOperations:
         apply_patch_fault_injector: ApplyPatchFaultInjector | None = None,
     ) -> None:
         """Initialize operation handlers."""
-        self._client = client
-        self._workspace = workspace
+        self.client = client
+        self.workspace = workspace
         self._processes: dict[str, _ManagedProcess] = {}
         self._missing_processes: dict[str, _MissingProcessRecord] = {}
         self._process_max_unread_bytes = max(process_max_unread_bytes, 1)
@@ -292,7 +293,7 @@ class RunnerOperations:
         self._apply_patch_lock = asyncio.Lock()
         self._apply_patch_limits = apply_patch_limits or ApplyPatchLimits()
         self._apply_patch_fault_injector = apply_patch_fault_injector
-        self._execution_backend = execution_backend
+        self.execution_backend = execution_backend
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Decode once, run one operation, and publish progress/final events."""
@@ -426,10 +427,8 @@ class RunnerOperations:
         if not records:
             return
         started_at = time.monotonic()
-        logger.info(
-            "Runtime Runner process cleanup started",
-            extra={"process_count": len(records)},
-        )
+        L = bind_extra(logger, {"process_count": len(records)})
+        L.info("Runtime Runner process cleanup started")
         tasks = tuple(
             asyncio.create_task(
                 self._terminate_process(
@@ -446,20 +445,23 @@ class RunnerOperations:
                 asyncio.gather(*tasks),
                 timeout=_PROCESS_CLOSE_TIMEOUT_SECONDS,
             )
-        except TimeoutError:
+        except TimeoutError as exc:
             timed_out = True
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             await self._force_terminate_processes(records)
-            logger.warning(
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.OPERATION_CLEANUP_TIMED_OUT
+            )
+            L.warning(
                 "Runtime Runner process cleanup timed out",
                 extra={
-                    "process_count": len(records),
                     "timeout_seconds": _PROCESS_CLOSE_TIMEOUT_SECONDS,
+                    **diagnostic.log_fields(),
                 },
-                exc_info=True,
+                exc_info=diagnostic.exc_info,
             )
         except asyncio.CancelledError:
             for task in tasks:
@@ -469,10 +471,9 @@ class RunnerOperations:
             await self._force_terminate_processes(records)
             raise
         finally:
-            logger.info(
+            L.info(
                 "Runtime Runner process cleanup finished",
                 extra={
-                    "process_count": len(records),
                     "duration_ms": round(
                         (time.monotonic() - started_at) * 1000,
                         3,
@@ -564,12 +565,12 @@ class RunnerOperations:
             return
         timeout_seconds = request.timeout_seconds
         try:
-            process = await self._execution_backend.start(
+            process = await self.execution_backend.start(
                 shell_execution_spec(
-                    backend=self._execution_backend,
+                    backend=self.execution_backend,
                     command=command,
-                    cwd=self._workspace.root,
-                    workspace_path=str(self._workspace.root),
+                    cwd=self.workspace.root,
+                    workspace_path=str(self.workspace.root),
                     operation_environment=request.env,
                     managed=False,
                 )
@@ -626,7 +627,7 @@ class RunnerOperations:
         self, operation: RunnerOperationEnvelope, request: payloads.FileReadPayload
     ) -> None:
         try:
-            path = self._workspace.resolve(request.path)
+            path = self.workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
@@ -664,7 +665,7 @@ class RunnerOperations:
     ) -> None:
         """Read a decoded character range without a Base64 file event."""
         try:
-            path = self._workspace.resolve(request.path)
+            path = self.workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
@@ -730,7 +731,7 @@ class RunnerOperations:
         self, operation: RunnerOperationEnvelope, request: payloads.FileWritePayload
     ) -> None:
         try:
-            path = self._workspace.resolve(
+            path = self.workspace.resolve(
                 request.path,
                 write=True,
             )
@@ -769,7 +770,7 @@ class RunnerOperations:
             )
             return
         try:
-            authorized_base_path = self._workspace.resolve(
+            authorized_base_path = self.workspace.resolve(
                 base_path,
                 write=True,
             )
@@ -810,7 +811,7 @@ class RunnerOperations:
         try:
             path = _resolve_lexical_path(
                 request.path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "FILE_EDIT_INVALID_PATH", str(exc))
@@ -901,7 +902,7 @@ class RunnerOperations:
         self, operation: RunnerOperationEnvelope, request: payloads.FileListPayload
     ) -> None:
         try:
-            path = self._workspace.resolve(request.path)
+            path = self.workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
@@ -911,7 +912,7 @@ class RunnerOperations:
             operation,
             lambda cancellation: _list_file_entries(
                 path,
-                workspace=self._workspace,
+                workspace=self.workspace,
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,
                 cancellation=cancellation,
@@ -932,7 +933,7 @@ class RunnerOperations:
                 operation,
                 lambda cancellation: _glob_file_entries(
                     pattern,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     exclude_patterns=exclude_patterns,
                     cancellation=cancellation,
                 ),
@@ -948,7 +949,7 @@ class RunnerOperations:
         try:
             path = _resolve_lexical_path(
                 request.path,
-                workspace=self._workspace,
+                workspace=self.workspace,
                 write=False,
             )
         except ValueError as exc:
@@ -959,7 +960,7 @@ class RunnerOperations:
                 operation,
                 lambda cancellation: _read_stat_payload(
                     path,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     cancellation=cancellation,
                 ),
             )
@@ -977,7 +978,7 @@ class RunnerOperations:
         try:
             path = _resolve_lexical_path(
                 request.path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
@@ -988,7 +989,7 @@ class RunnerOperations:
                 operation,
                 lambda cancellation: _delete_path(
                     path,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     recursive=recursive,
                     cancellation=cancellation,
                 ),
@@ -1004,7 +1005,7 @@ class RunnerOperations:
         try:
             path = _resolve_lexical_path(
                 request.path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
@@ -1015,7 +1016,7 @@ class RunnerOperations:
                 operation,
                 lambda cancellation: _make_directory(
                     path,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     parents=parents,
                     cancellation=cancellation,
                 ),
@@ -1031,11 +1032,11 @@ class RunnerOperations:
         try:
             source_path = _resolve_lexical_path(
                 request.source_path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
             destination_path = _resolve_lexical_path(
                 request.destination_path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
@@ -1047,7 +1048,7 @@ class RunnerOperations:
                 lambda cancellation: _move_path(
                     source_path,
                     destination_path,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     overwrite=overwrite,
                     cancellation=cancellation,
                 ),
@@ -1065,7 +1066,7 @@ class RunnerOperations:
         paths: list[Path] = []
         for raw_path in request.paths:
             try:
-                paths.append(_resolve_lexical_path(raw_path, workspace=self._workspace))
+                paths.append(_resolve_lexical_path(raw_path, workspace=self.workspace))
             except ValueError as exc:
                 await self._final_error(operation, "INVALID_PATH", str(exc))
                 return
@@ -1078,7 +1079,7 @@ class RunnerOperations:
                 operation,
                 lambda cancellation: _delete_paths(
                     paths,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     recursive=recursive,
                     cancellation=cancellation,
                 ),
@@ -1095,7 +1096,7 @@ class RunnerOperations:
         for raw_path in request.source_paths:
             try:
                 source_paths.append(
-                    _resolve_lexical_path(raw_path, workspace=self._workspace)
+                    _resolve_lexical_path(raw_path, workspace=self.workspace)
                 )
             except ValueError as exc:
                 await self._final_error(operation, "INVALID_PATH", str(exc))
@@ -1108,7 +1109,7 @@ class RunnerOperations:
         try:
             destination_directory = _resolve_lexical_path(
                 request.destination_directory,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
@@ -1120,7 +1121,7 @@ class RunnerOperations:
                 lambda cancellation: _move_paths(
                     source_paths,
                     destination_directory,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                     overwrite=overwrite,
                     cancellation=cancellation,
                 ),
@@ -1134,7 +1135,7 @@ class RunnerOperations:
         self, operation: RunnerOperationEnvelope, request: payloads.FileGrepPayload
     ) -> None:
         try:
-            path = self._workspace.resolve(request.path)
+            path = self.workspace.resolve(request.path)
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
@@ -1157,7 +1158,7 @@ class RunnerOperations:
             operation,
             lambda cancellation: _grep_files(
                 path,
-                workspace=self._workspace,
+                workspace=self.workspace,
                 regex=regex,
                 recursive=recursive,
                 exclude_patterns=exclude_patterns,
@@ -1254,7 +1255,7 @@ class RunnerOperations:
         try:
             worktree_path = _resolve_lexical_path(
                 request.worktree_path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "invalid_worktree_path", str(exc))
@@ -1310,7 +1311,7 @@ class RunnerOperations:
             operation,
             {
                 "base_commit": base_commit,
-                "worktree_path": self._workspace.display_lexical_path(worktree_path),
+                "worktree_path": self.workspace.display_lexical_path(worktree_path),
                 "branch_name": branch_name,
             },
         )
@@ -1331,7 +1332,7 @@ class RunnerOperations:
         if inspection is None:
             return
         payload: dict[str, JsonValue] = {
-            "worktree_path": self._workspace.display_lexical_path(
+            "worktree_path": self.workspace.display_lexical_path(
                 inspection.worktree_path
             ),
             "worktree_registered": inspection.registered,
@@ -1349,7 +1350,7 @@ class RunnerOperations:
         request: payloads.GitDiscoverManagedWorktreesPayload,
     ) -> None:
         """Discover Git worktrees below the fixed Agent Workspace managed root."""
-        root = self._workspace.root / _MANAGED_WORKTREE_ROOT
+        root = self.workspace.root / _MANAGED_WORKTREE_ROOT
         if root.is_symlink() or (root.exists() and not root.is_dir()):
             await self._final_error(
                 operation,
@@ -1461,7 +1462,7 @@ class RunnerOperations:
                 failure_code="worktree_ownership_ambiguous",
             )
         repository_anchor_path = Path(anchor_result.stdout.strip())
-        if not _path_is_within(repository_anchor_path, self._workspace.root):
+        if not _path_is_within(repository_anchor_path, self.workspace.root):
             return _discovered_worktree_result(
                 candidate,
                 registered=False,
@@ -1488,13 +1489,13 @@ class RunnerOperations:
         try:
             worktree_path = _resolve_lexical_path(
                 request.worktree_path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "invalid_worktree_path", str(exc))
             return
-        displayed_worktree_path = self._workspace.display_lexical_path(worktree_path)
-        managed_root = self._workspace.root / _MANAGED_WORKTREE_ROOT
+        displayed_worktree_path = self.workspace.display_lexical_path(worktree_path)
+        managed_root = self.workspace.root / _MANAGED_WORKTREE_ROOT
         if not _path_is_within(worktree_path, managed_root):
             await self._final_error(
                 operation,
@@ -1506,7 +1507,7 @@ class RunnerOperations:
             try:
                 repository_anchor_path = _resolve_lexical_path(
                     request.repository_anchor_path,
-                    workspace=self._workspace,
+                    workspace=self.workspace,
                 )
             except ValueError as exc:
                 await self._final_error(
@@ -1515,7 +1516,7 @@ class RunnerOperations:
                     str(exc),
                 )
                 return
-            if not _path_is_within(repository_anchor_path, self._workspace.root):
+            if not _path_is_within(repository_anchor_path, self.workspace.root):
                 await self._final_error(
                     operation,
                     "worktree_ownership_ambiguous",
@@ -1532,7 +1533,7 @@ class RunnerOperations:
                     "--force",
                     str(worktree_path),
                 ),
-                cwd=self._workspace.root,
+                cwd=self.workspace.root,
             )
             if result is None:
                 return
@@ -1652,7 +1653,7 @@ class RunnerOperations:
             await self._final_success(
                 operation,
                 {
-                    "removed_worktree_path": self._workspace.display_lexical_path(
+                    "removed_worktree_path": self.workspace.display_lexical_path(
                         inspection.worktree_path
                     ),
                     "outcome": "already_absent",
@@ -1676,7 +1677,7 @@ class RunnerOperations:
         await self._final_success(
             operation,
             {
-                "removed_worktree_path": self._workspace.display_lexical_path(
+                "removed_worktree_path": self.workspace.display_lexical_path(
                     inspection.worktree_path
                 ),
                 "outcome": (
@@ -1758,20 +1759,20 @@ class RunnerOperations:
         workdir = request.workdir
         try:
             cwd = (
-                self._workspace.root
+                self.workspace.root
                 if workdir is None
-                else self._workspace.resolve_process_directory(workdir)
+                else self.workspace.resolve_process_directory(workdir)
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_WORKDIR", str(exc))
             return
         try:
-            process = await self._execution_backend.start(
+            process = await self.execution_backend.start(
                 shell_execution_spec(
-                    backend=self._execution_backend,
+                    backend=self.execution_backend,
                     command=command,
                     cwd=cwd,
-                    workspace_path=str(self._workspace.root),
+                    workspace_path=str(self.workspace.root),
                     operation_environment=request.env,
                     managed=True,
                 )
@@ -2171,6 +2172,17 @@ class RunnerOperations:
         del self
         started_at = time.monotonic()
         process_group_id = process.pid
+        L = bind_extra(
+            logger,
+            {
+                **_operation_process_log_extra(
+                    operation,
+                    process_id=process.pid,
+                    process_group_id=process_group_id,
+                ),
+                "reason": reason,
+            },
+        )
         wait_task = asyncio.create_task(process.wait())
         escalated = False
         timed_out = False
@@ -2200,34 +2212,26 @@ class RunnerOperations:
                         asyncio.shield(wait_task),
                         timeout=_PROCESS_KILL_TIMEOUT_SECONDS,
                     )
-                except TimeoutError:
+                except TimeoutError as exc:
                     timed_out = True
-                    logger.warning(
+                    diagnostic = runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.OPERATION_CLEANUP_TIMED_OUT
+                    )
+                    L.warning(
                         "Runtime Runner operation process did not exit after SIGKILL",
                         extra={
-                            **_operation_process_log_extra(
-                                operation,
-                                process_id=process.pid,
-                                process_group_id=process_group_id,
-                            ),
-                            "reason": reason,
                             "timeout_seconds": _PROCESS_KILL_TIMEOUT_SECONDS,
+                            **diagnostic.log_fields(),
                         },
-                        exc_info=True,
+                        exc_info=diagnostic.exc_info,
                     )
         finally:
             if not wait_task.done():
                 wait_task.cancel()
             await asyncio.gather(wait_task, return_exceptions=True)
-            logger.info(
+            L.info(
                 "Runtime Runner operation process cleanup finished",
                 extra={
-                    **_operation_process_log_extra(
-                        operation,
-                        process_id=process.pid,
-                        process_group_id=process_group_id,
-                    ),
-                    "reason": reason,
                     "duration_ms": round(
                         (time.monotonic() - started_at) * 1000,
                         3,
@@ -2359,7 +2363,7 @@ class RunnerOperations:
         try:
             source_path = _resolve_lexical_path(
                 raw_source_project_path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "invalid_source_path", str(exc))
@@ -2439,13 +2443,13 @@ class RunnerOperations:
         try:
             authorized = _resolve_lexical_path(
                 str(anchor),
-                workspace=self._workspace,
+                workspace=self.workspace,
                 write=False,
             )
         except ValueError as exc:
             await self._final_error(operation, "invalid_source_path", str(exc))
             return None
-        return self._workspace.display_lexical_path(authorized)
+        return self.workspace.display_lexical_path(authorized)
 
     async def _git_branch_exists(
         self,
@@ -2479,7 +2483,7 @@ class RunnerOperations:
         try:
             worktree_path = _resolve_lexical_path(
                 raw_worktree_path,
-                workspace=self._workspace,
+                workspace=self.workspace,
             )
         except ValueError as exc:
             await self._final_error(operation, "invalid_worktree_path", str(exc))
@@ -2716,7 +2720,7 @@ class RunnerOperations:
         *,
         final: bool = False,
     ) -> None:
-        await self._client.append_runner_event(
+        await self.client.append_runner_event(
             RunnerOperationEvent(
                 request_id=operation.request_id,
                 runtime_id=operation.runtime_id,
@@ -3798,7 +3802,7 @@ def _stat_payload(path: Path, workspace: Workspace) -> dict[str, JsonValue]:
             payload["real_path"] = workspace.display_path(resolved)
             try:
                 payload["resolved_kind"] = _mode_kind(resolved.stat().st_mode)
-            except OSError:
+            except FileNotFoundError, NotADirectoryError:
                 payload["resolved_kind"] = "missing"
     return payload
 

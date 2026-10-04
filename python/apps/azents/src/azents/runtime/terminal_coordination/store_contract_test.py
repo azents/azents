@@ -571,7 +571,7 @@ async def test_redis_admission_prunes_stale_session_and_user_indexes(
     if not isinstance(store, RedisRuntimeTerminalCoordinationStore):
         pytest.skip("Redis-specific stale-index contract")
     first = await _admit(store)
-    await store._redis.delete(store._record_key(first.admission.terminal_id))
+    await store.redis.delete(store._record_key(first.admission.terminal_id))
 
     replacement = await store.admit_or_get(
         _admission(2, session_id=first.admission.session_id),
@@ -600,7 +600,7 @@ async def test_redis_admission_prunes_stale_runtime_quota_members(
         created = await store.admit_or_get(admission, admitted_at=_NOW)
         assert created.status is RuntimeTerminalMutationStatus.APPLIED
         terminal_ids.append(admission.terminal_id)
-    await store._redis.delete(*(store._record_key(item) for item in terminal_ids))
+    await store.redis.delete(*(store._record_key(item) for item in terminal_ids))
 
     replacement = await store.admit_or_get(
         dataclasses.replace(

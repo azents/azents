@@ -537,12 +537,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                     },
                     exc_info=diagnostic.exc_info,
                 )
-            except RuntimeRunnerControlStreamClosed:
-                L.warning(
-                    "Runtime Runner Control stream disconnected; reconnecting",
-                    exc_info=True,
-                    extra={},
-                )
+            except RuntimeRunnerControlStreamClosed as exc:
+                _log_control_stream_closed(L, exc)
             finally:
                 if shutting_down:
                     await terminal_manager.close()
@@ -577,6 +573,21 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         except asyncio.CancelledError:
             pass
         await execution_backend.close()
+
+
+def _log_control_stream_closed(
+    logger: logging.Logger | logging.LoggerAdapter[logging.Logger],
+    error: RuntimeRunnerControlStreamClosed,
+) -> None:
+    """Log closed-stream origin using the bounded Control failure projection."""
+    diagnostic = runner_exception_diagnostic(
+        error, RunnerDiagnosticReason.CONTROL_STREAM_FAILED
+    )
+    logger.warning(
+        "Runtime Runner Control stream disconnected; reconnecting",
+        exc_info=diagnostic.exc_info,
+        extra=diagnostic.log_fields(),
+    )
 
 
 def _log_control_client_close_timeout(

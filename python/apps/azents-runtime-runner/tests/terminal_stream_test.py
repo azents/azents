@@ -26,6 +26,7 @@ from azents_runtime_control.runner_terminal import (
 )
 
 import azents_runtime_runner.terminal_stream as terminal_stream_module
+from azents_runtime_runner.main import StructuredLogFormatter
 from azents_runtime_runner.terminal import (
     RunnerTerminalRegistry,
     TerminalExit,
@@ -512,6 +513,42 @@ async def test_natural_shell_exit_reports_process_exit_reason() -> None:
         )
     ]
     await asyncio.wait_for(clients[0].closed.wait(), timeout=1)
+
+
+async def test_admission_error_logs_only_bounded_origin(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Local admission preserves provenance without exception content."""
+
+    class RejectedBackend(_Backend):
+        async def open(self, spec: TerminalSpec) -> _Process:
+            del spec
+            raise PermissionError("TERMINAL_PRIVATE_VALUE") from RuntimeError(
+                "TERMINAL_PRIVATE_CAUSE"
+            )
+
+    manager, registry = _manager(
+        backend=RejectedBackend(_Process()), client_factory=_Client
+    )
+    assert manager.registry is registry
+    await manager._open_and_run(
+        _open_intent(), asyncio.get_running_loop().create_future()
+    )
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner Terminal open intent rejected"
+    )
+    rendered = StructuredLogFormatter().format(record)
+    assert record.__dict__["error_type"] == "PermissionError"
+    assert record.__dict__["error_frames"][-1]["function"] == "open"
+    assert "runner_terminal_admission_failed" in rendered
+    assert "TERMINAL_PRIVATE_VALUE" not in rendered
+    assert "TERMINAL_PRIVATE_CAUSE" not in rendered
+    assert "raise PermissionError" not in rendered
+    assert record.exc_info is not None
+    assert record.exc_info[2] is None
+    await manager.close()
 
 
 def _manager(
