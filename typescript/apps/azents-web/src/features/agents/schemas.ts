@@ -5,7 +5,7 @@ import {
   isSubagentGuidanceWithinLimit,
   MAX_SELECTABLE_MODEL_CANDIDATES,
   MAX_SELECTABLE_MODEL_OPTIONS,
-} from "./model-selection";
+} from "@/shared/model-options/model-selection";
 import type { ModelCapabilities } from "@azents/public-client";
 
 const selectableModelCandidateFormValueSchema = z.object({

@@ -4,7 +4,7 @@
 
 import { Alert, Box, Loader, rem, Stack, Text, Title } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { WorkspaceModelSettingsCard } from "./WorkspaceModelSettingsCard";
+import { WorkspaceModelSettingsCardContainer } from "../containers/WorkspaceModelSettingsCardContainer";
 import type { WorkspaceModelSettingsContainerOutput } from "../containers/useWorkspaceModelSettingsContainer";
 
 export function WorkspaceModelSettings(
@@ -26,7 +26,7 @@ export function WorkspaceModelSettings(
           <Alert color="red">{t("modelSelection.loadError")}</Alert>
         )}
         {props.state.type === "READY" && (
-          <WorkspaceModelSettingsCard
+          <WorkspaceModelSettingsCardContainer
             settings={props.state.settings}
             handle={props.handle}
             providerOptions={props.providerOptions}

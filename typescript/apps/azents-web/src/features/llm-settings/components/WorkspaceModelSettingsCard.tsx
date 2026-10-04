@@ -1,129 +1,31 @@
 "use client";
 
-/** Workspace default model selection settings card */
+/** Prop-driven Workspace default model settings card. */
 
 import { Alert, Button, Card, Group, Stack, Text } from "@mantine/core";
-import { useForm } from "@mantine/form";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
-import { SelectableModelOptionsEditorContainer } from "@/features/agents/containers/SelectableModelOptionsEditorContainer";
-import { useImageGenerationCatalogs } from "@/features/agents/containers/useImageGenerationCatalogs";
-import {
-  hasDuplicateSelectableModelCandidates,
-  hasInvalidImageGenerationSelections,
-  selectableModelOptionFormValuesFromStoredOptions,
-} from "@/features/agents/model-selection";
-import type {
-  ProviderIntegrationOption,
-  SelectableModelOptionFormValue,
-} from "@/features/agents/model-selection";
-import type { WorkspaceModelSettingsResponse } from "@azents/public-client";
-
-interface WorkspaceModelSettingsFormValues {
-  defaultSelectableModelOptions: SelectableModelOptionFormValue[];
-  defaultMainModelLabel: string | null;
-  defaultLightweightModelLabel: string | null;
-}
+import type { FormEventHandler, ReactNode } from "react";
 
 export interface WorkspaceModelSettingsCardProps {
-  settings: WorkspaceModelSettingsResponse | null;
-  handle: string;
-  providerOptions: ProviderIntegrationOption[];
+  modelOptionsEditor: ReactNode;
   canManage: boolean;
   submitting: boolean;
   error: string | null;
-  onSyncCatalog: (integrationId: string) => Promise<void>;
-  onSubmit: (values: WorkspaceModelSettingsFormValues) => void;
+  onSubmit: FormEventHandler<HTMLFormElement>;
 }
 
 export function WorkspaceModelSettingsCard({
-  settings,
-  handle,
-  providerOptions,
+  modelOptionsEditor,
   canManage,
   submitting,
   error,
-  onSyncCatalog,
   onSubmit,
 }: WorkspaceModelSettingsCardProps): React.ReactElement {
   const t = useTranslations("workspace.llmSettings.modelSelection");
-  const [hasSubmitAttempted, setHasSubmitAttempted] = useState(false);
-  const form = useForm<WorkspaceModelSettingsFormValues>({
-    mode: "controlled",
-    initialValues: {
-      defaultSelectableModelOptions: [],
-      defaultMainModelLabel: null,
-      defaultLightweightModelLabel: null,
-    },
-    validate: (values) => {
-      const hasEmptyLabel = values.defaultSelectableModelOptions.some(
-        (option) => option.label.trim().length === 0,
-      );
-      const labels = values.defaultSelectableModelOptions.map((option) =>
-        option.label.trim(),
-      );
-      const uniqueLabels = new Set(labels);
-      const hasMissingModel = values.defaultSelectableModelOptions.some(
-        (option) =>
-          option.candidates.length === 0 ||
-          option.candidates.some(
-            (candidate) => candidate.model_selection_value == null,
-          ),
-      );
-      if (
-        values.defaultSelectableModelOptions.length === 0 ||
-        hasEmptyLabel ||
-        uniqueLabels.size !== labels.length ||
-        hasMissingModel ||
-        hasDuplicateSelectableModelCandidates(
-          values.defaultSelectableModelOptions,
-        )
-      ) {
-        return { defaultSelectableModelOptions: t("invalidOptions") };
-      }
-      return {};
-    },
-  });
-
-  useEffect(() => {
-    form.setValues({
-      defaultSelectableModelOptions:
-        selectableModelOptionFormValuesFromStoredOptions(
-          settings?.default_selectable_model_options ?? [],
-        ),
-      defaultMainModelLabel: settings?.default_main_model_label ?? null,
-      defaultLightweightModelLabel:
-        settings?.default_lightweight_model_label ?? null,
-    });
-    form.resetDirty();
-    setHasSubmitAttempted(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Resynchronize form when server settings change.
-  }, [settings]);
-
-  const imageCatalogs = useImageGenerationCatalogs(
-    handle,
-    form.values.defaultSelectableModelOptions,
-  );
-
-  const submit = form.onSubmit(
-    (values) => {
-      setHasSubmitAttempted(true);
-      if (
-        hasInvalidImageGenerationSelections(
-          values.defaultSelectableModelOptions,
-          imageCatalogs.states,
-        )
-      ) {
-        return;
-      }
-      onSubmit(values);
-    },
-    () => setHasSubmitAttempted(true),
-  );
 
   return (
     <Card withBorder padding="md">
-      <form onSubmit={submit}>
+      <form onSubmit={onSubmit}>
         <Stack gap="md">
           <Stack gap="xs">
             <Text fw={600}>{t("title")}</Text>
@@ -131,30 +33,7 @@ export function WorkspaceModelSettingsCard({
               {t("description")}
             </Text>
           </Stack>
-          <SelectableModelOptionsEditorContainer
-            handle={handle}
-            title={t("optionsTitle")}
-            description={t("optionsDescription")}
-            options={form.values.defaultSelectableModelOptions}
-            mainModelLabel={form.values.defaultMainModelLabel}
-            lightweightModelLabel={form.values.defaultLightweightModelLabel}
-            providerOptions={providerOptions}
-            canEdit={canManage}
-            showValidationErrors={hasSubmitAttempted}
-            onSyncCatalog={onSyncCatalog}
-            imageGenerationCatalogStates={imageCatalogs.states}
-            canSyncImageCatalog={canManage}
-            onSyncImageCatalog={imageCatalogs.onSync}
-            onChangeOptions={(options) =>
-              form.setFieldValue("defaultSelectableModelOptions", options)
-            }
-            onChangeMainModelLabel={(label) =>
-              form.setFieldValue("defaultMainModelLabel", label)
-            }
-            onChangeLightweightModelLabel={(label) =>
-              form.setFieldValue("defaultLightweightModelLabel", label)
-            }
-          />
+          {modelOptionsEditor}
           {error && <Alert color="red">{error}</Alert>}
           {canManage && (
             <Group justify="flex-end">

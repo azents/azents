@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { partialReasoningCapabilities } from "../../shared/storybook/model-capability-fixtures.ts";
+import { partialReasoningCapabilities } from "../storybook/model-capability-fixtures.ts";
 import {
   copyCompatiblePrimarySettings,
   createSelectableModelCandidateFormValue,

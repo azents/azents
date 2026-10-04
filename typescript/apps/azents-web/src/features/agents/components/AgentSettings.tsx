@@ -12,13 +12,13 @@ import { AgentFormContainer } from "../containers/AgentFormContainer";
 import { AgentAvatarSection } from "./AgentAvatarSection";
 import { AgentDangerSection } from "./AgentDangerSection";
 import type { MemberItem } from "../containers/useAgentFormContainer";
+import type { AgentFormValues } from "../schemas";
+import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type {
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-} from "../model-selection";
-import type { AgentFormValues } from "../schemas";
-import type { AdminListState, AgentFormState, MutationState } from "../types";
+} from "@/shared/model-options/model-selection";
 import type {
   AgentAdminResponse,
   AgentResponse,

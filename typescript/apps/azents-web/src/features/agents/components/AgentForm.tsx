@@ -29,21 +29,21 @@ import {
 import { IconArrowLeft } from "@tabler/icons-react";
 import Link from "next/link";
 import { useId } from "react";
-import { hasInvalidImageGenerationSelections } from "../model-selection";
+import { hasInvalidImageGenerationSelections } from "@/shared/model-options/model-selection";
 import { shouldShowAgentTerminalSettings } from "../terminalSettingsVisibility";
 import { AgentAdminSection } from "./AgentAdminSection";
 import { AgentToolkitSection } from "./AgentToolkitSection";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type { AgentFormTranslator } from "../containers/useAgentFormTranslations";
+import type { AgentFormValues } from "../schemas";
+import type { AdminListState, AgentFormState, MutationState } from "../types";
+import type { SelectableModelOptionsEditorProps } from "@/shared/model-options/components/SelectableModelOptionsEditor";
 import type {
   ImageGenerationCatalogState,
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-} from "../model-selection";
-import type { AgentFormValues } from "../schemas";
-import type { AdminListState, AgentFormState, MutationState } from "../types";
-import type { SelectableModelOptionsEditorProps } from "./SelectableModelOptionsEditor";
+} from "@/shared/model-options/model-selection";
 import type {
   AgentAdminResponse,
   ModelReasoningEffort,

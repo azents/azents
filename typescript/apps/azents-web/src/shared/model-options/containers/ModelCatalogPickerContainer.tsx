@@ -2,12 +2,12 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { trpc } from "@/trpc/client";
 import {
   ModelCatalogPicker,
   type ModelCatalogPickerState,
   type PickerCatalogUiState,
 } from "../components/ModelCatalogPicker";
+import type { UseModelCatalogQuery } from "../catalog-query";
 import type {
   ModelCatalogState,
   ModelCatalogSyncStatus,
@@ -33,6 +33,10 @@ export interface ModelCatalogPickerContainerProps {
   onSelectIntegration: (integrationId: string) => void;
   onSelectModel: (model: SelectableModelCandidate) => void;
   onSyncCatalog: (integrationId: string) => Promise<void>;
+}
+
+interface ConnectedModelCatalogPickerProps extends ModelCatalogPickerContainerProps {
+  useCatalogQuery: UseModelCatalogQuery;
 }
 
 function catalogUiState(params: {
@@ -135,7 +139,8 @@ export function ModelCatalogPickerContainer({
   onSelectIntegration,
   onSelectModel,
   onSyncCatalog,
-}: ModelCatalogPickerContainerProps): React.ReactElement {
+  useCatalogQuery,
+}: ConnectedModelCatalogPickerProps): React.ReactElement {
   const t = useTranslations("workspace.agents.modelCatalogPicker");
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
@@ -179,7 +184,7 @@ export function ModelCatalogPickerContainer({
     return () => window.clearTimeout(timeout);
   }, [syncAvailableAtMillis]);
 
-  const query = trpc.llmProviderIntegration.listModels.useQuery(
+  const query = useCatalogQuery(
     {
       handle,
       integrationId: selectedIntegrationId ?? "",
@@ -222,23 +227,24 @@ export function ModelCatalogPickerContainer({
   }, [opened, selectedIntegrationId, search]);
 
   useEffect(() => {
-    if (query.data == null) {
+    const data = query.data;
+    if (data == null) {
       return;
     }
-    const page = catalogStateFromPage(query.data);
+    const page = catalogStateFromPage(data);
     // A refresh restarts browsing; this timestamp never authorizes model selection.
     const refreshChanged =
       refreshObservedRef.current &&
       lastSuccessAtRef.current !== page.catalog.lastSuccessAt;
     lastSuccessAtRef.current = page.catalog.lastSuccessAt;
     refreshObservedRef.current = true;
-    if (query.data.catalog.offset !== 0 && refreshChanged) {
+    if (data.catalog.offset !== 0 && refreshChanged) {
       setOffset(0);
       setPages([]);
       return;
     }
     setPages((current) => {
-      if (query.data.catalog.offset === 0) {
+      if (data.catalog.offset === 0) {
         return [page];
       }
       const pageIndex = current.findIndex(

@@ -7,13 +7,13 @@ import {
   buildProviderIntegrationOptions,
   fallbackSelectableModelLabel,
   selectableModelOptionInputsFromFormValues,
-} from "@/features/agents/model-selection";
+} from "@/shared/model-options/model-selection";
 import { trpc } from "@/trpc/client";
 import type { MutationState, WorkspaceModelSettingsState } from "../types";
 import type {
   ProviderIntegrationOption,
   SelectableModelOptionFormValue,
-} from "@/features/agents/model-selection";
+} from "@/shared/model-options/model-selection";
 
 export interface WorkspaceModelSettingsContainerProps {
   handle: string;
