@@ -4,7 +4,6 @@ import asyncio
 from contextlib import suppress
 from uuid import uuid4
 
-import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -117,14 +116,21 @@ class TestWorkspaceUserRepository:
                 expire_on_commit=False,
             ) as delete_session:
                 await repo.delete(delete_session, membership.value.id)
+                delete_pid = await delete_session.scalar(
+                    sa.text("SELECT pg_backend_pid()")
+                )
+                assert isinstance(delete_pid, int)
                 async with AsyncSession(
                     rdb_engine,
                     expire_on_commit=False,
                 ) as admission_session:
-                    admission_started = asyncio.Event()
+                    admission_pid = await admission_session.scalar(
+                        sa.text("SELECT pg_backend_pid()")
+                    )
+                    assert isinstance(admission_pid, int)
+                    assert delete_pid != admission_pid
 
                     async def lock_membership() -> object:
-                        admission_started.set()
                         return await repo.lock_by_workspace_and_user(
                             admission_session,
                             workspace_id=workspace_id,
@@ -133,12 +139,17 @@ class TestWorkspaceUserRepository:
 
                     admission_task = asyncio.create_task(lock_membership())
                     try:
-                        await asyncio.wait_for(admission_started.wait(), timeout=5)
-                        with pytest.raises(TimeoutError):
-                            await asyncio.wait_for(
-                                asyncio.shield(admission_task),
-                                timeout=0.1,
-                            )
+                        async with asyncio.timeout(5):
+                            async with AsyncSession(rdb_engine) as observer:
+                                while True:
+                                    blockers = await observer.scalar(
+                                        sa.text("SELECT pg_blocking_pids(:pid)"),
+                                        {"pid": admission_pid},
+                                    )
+                                    if delete_pid in blockers:
+                                        break
+                                    assert not admission_task.done()
+                        assert not admission_task.done()
                         await delete_session.commit()
                         admitted = await asyncio.wait_for(admission_task, timeout=5)
                         await admission_session.commit()

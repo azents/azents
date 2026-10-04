@@ -1,6 +1,8 @@
 """Runtime Profile, reconciliation, and recreation persistence."""
 
 import datetime
+from collections.abc import Sequence
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
@@ -59,6 +61,15 @@ from .data import (
     WorkspaceRuntimeProfileReplace,
     WorkspaceRuntimeProfileUsage,
 )
+
+
+class RuntimeRecreationTargetSnapshot(NamedTuple):
+    """Named Runtime identity and configuration fencing snapshot."""
+
+    runtime_id: str
+    configuration_sequence: int
+    configuration_digest: str
+    desired_generation: int
 
 
 class RuntimeProfileRepository:
@@ -1440,7 +1451,7 @@ class RuntimeProfileRepository:
         session: AsyncSession,
         *,
         operation_id: str,
-        items: list[tuple[str, int, str, int]],
+        items: Sequence[tuple[str, int, str, int]],
     ) -> list[RuntimeRecreationOperationItem]:
         """Attach a stable Runtime and expected current-state tuple set."""
         operation = await session.get(
@@ -1529,7 +1540,7 @@ class RuntimeProfileRepository:
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
-    ) -> list[tuple[str, int, str, int]]:
+    ) -> list[RuntimeRecreationTargetSnapshot]:
         """Snapshot configured physical Runtimes and current fencing tuples."""
         statement = (
             sa.select(
@@ -1572,7 +1583,12 @@ class RuntimeProfileRepository:
             raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
         result = await session.execute(statement)
         return [
-            (runtime_id, sequence, digest, generation)
+            RuntimeRecreationTargetSnapshot(
+                runtime_id=runtime_id,
+                configuration_sequence=sequence,
+                configuration_digest=digest,
+                desired_generation=generation,
+            )
             for runtime_id, sequence, digest, generation in result.tuples()
             if digest is not None
         ]

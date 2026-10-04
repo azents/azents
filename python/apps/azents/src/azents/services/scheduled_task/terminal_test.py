@@ -147,8 +147,8 @@ class _RunRepository:
         assert run_id == _RUN_ID
         self.order.append("update_run")
         self.patches.append(patch)
-        self.run.terminal_result_event_id = patch.terminal_result_event_id
-        self.run.terminal_result_message = patch.terminal_result_message
+        self.run.terminal_result_event_id = patch["terminal_result_event_id"]
+        self.run.terminal_result_message = patch["terminal_result_message"]
         return self.run
 
 

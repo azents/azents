@@ -120,6 +120,23 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
+class _RetainedDiscordDeliveryLocator:
+    """Consumed retained delivery identity, independent of opaque resource labels."""
+
+    delivery_channel_id: str | None
+
+    @classmethod
+    def from_labels(
+        cls, labels: dict[str, object] | None
+    ) -> "_RetainedDiscordDeliveryLocator":
+        """Preserve the historical non-empty-string rule and request fallback."""
+        value = None if labels is None else labels.get("delivery_channel_id")
+        return cls(
+            delivery_channel_id=(value if isinstance(value, str) and value else None)
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class _Conversation:
     """Current durable conversation routing state."""
 
@@ -1725,13 +1742,10 @@ class ExternalChannelMailboxIngestionRepository:
         trigger_position: str,
     ) -> None:
         delivery_thread_key = request.locator.delivery_thread_key
-        if (
-            request.locator.provider is ExternalChannelProvider.DISCORD
-            and resource.labels is not None
-        ):
-            retained = resource.labels.get("delivery_channel_id")
-            if isinstance(retained, str) and retained:
-                delivery_thread_key = retained
+        if request.locator.provider is ExternalChannelProvider.DISCORD:
+            retained = _RetainedDiscordDeliveryLocator.from_labels(resource.labels)
+            if retained.delivery_channel_id is not None:
+                delivery_thread_key = retained.delivery_channel_id
         if (
             parent_position.scope_kind
             is not ExternalChannelConversationScopeKind.PARENT_CHANNEL

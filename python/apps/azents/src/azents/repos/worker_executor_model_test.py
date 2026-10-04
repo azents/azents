@@ -238,7 +238,7 @@ class ModelRuns(AgentRunRepository):
         self, session: AsyncSession, run_id: str, patch: AgentRunPatch
     ) -> AgentRunState:
         result = await super().update(session, run_id, patch)
-        if "model_operation_state" in patch.model_fields_set:
+        if "model_operation_state" in patch:
             await self.fault.point("slot", session)
         return result
 

@@ -3,7 +3,7 @@
 import datetime
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Annotated, NamedTuple, Protocol, TypeVar, runtime_checkable
 
@@ -104,6 +104,101 @@ class _SavedExecutionOptionDisplay(BaseModel):
 
     id: ModelExecutionOptionId
     cost_hint: str = Field(min_length=1)
+
+
+def _saved_option_string(value: dict[str, object], key: str) -> str:
+    """Validate a required saved identity/display field at restoration ingress."""
+    result = value.get(key)
+    if not isinstance(result, str) or not result:
+        raise RuntimeError("External model draft option snapshot is invalid")
+    return result
+
+
+@dataclass(frozen=True)
+class _SavedModelOptionIdentity:
+    """Consumed saved identity independent of display fields replaced by refresh."""
+
+    option_id: str
+    target_label: str
+
+    @classmethod
+    def from_saved(cls, value: dict[str, object]) -> "_SavedModelOptionIdentity":
+        """Restore identity without validating obsolete display-only metadata."""
+        target_label = _saved_option_string(value, "target_label")
+        return cls(
+            option_id=_saved_option_string(value, "option_id"),
+            target_label=target_label,
+        )
+
+
+@dataclass(frozen=True)
+class _ModelOptionSnapshot(_SavedModelOptionIdentity):
+    """Fresh typed option identity/display with opaque execution-option egress."""
+
+    label: str
+    model_display_name: str
+    reasoning_efforts: list[str]
+    execution_options: list[dict[str, object]]
+
+    def to_storage(self) -> dict[str, object]:
+        """Serialize the existing flat saved-option shape without adding fields."""
+        return {
+            "option_id": self.option_id,
+            "target_label": self.target_label,
+            "label": self.label,
+            "model_display_name": self.model_display_name,
+            "reasoning_efforts": self.reasoning_efforts,
+            "execution_options": self.execution_options,
+        }
+
+
+@dataclass(frozen=True)
+class _SavedModelOptionDisplay:
+    """Validated saved public display, independent of unused target metadata."""
+
+    option_id: str
+    label: str
+    model_display_name: str
+    reasoning_efforts: list[str]
+    execution_options: list[_SavedExecutionOptionDisplay]
+
+    @classmethod
+    def from_saved(cls, value: dict[str, object]) -> "_SavedModelOptionDisplay":
+        """Restore the public fields in their historical validation order."""
+        execution = TypeAdapter(list[_SavedExecutionOptionDisplay]).validate_python(
+            value.get("execution_options")
+        )
+        supported_ids = [option.id for option in execution]
+        if len(supported_ids) != len(set(supported_ids)):
+            raise ValueError("Supported execution options must be unique.")
+        if set(supported_ids) - MODEL_EXECUTION_OPTION_DEFINITIONS.keys():
+            raise ValueError("Unknown supported execution option.")
+        return cls(
+            option_id=_saved_option_string(value, "option_id"),
+            label=_saved_option_string(value, "label"),
+            model_display_name=_saved_option_string(value, "model_display_name"),
+            reasoning_efforts=TypeAdapter(list[str]).validate_python(
+                value.get("reasoning_efforts")
+            ),
+            execution_options=execution,
+        )
+
+    def to_public(self) -> ExternalModelOption:
+        """Project validated fields using current option labels and retained cost."""
+        return ExternalModelOption(
+            option_id=self.option_id,
+            label=self.label,
+            model_display_name=self.model_display_name,
+            reasoning_efforts=self.reasoning_efforts,
+            execution_options=[
+                MODEL_EXECUTION_OPTION_DEFINITIONS[option.id].model_copy(
+                    update={"cost_hint": option.cost_hint}
+                )
+                for option in sorted(
+                    self.execution_options, key=lambda option: option.id.value
+                )
+            ],
+        )
 
 
 @dataclass(frozen=True)
@@ -277,7 +372,7 @@ class ExternalModelSettingsRepository:
                 reasoning_effort = selection.reasoning_effort
                 execution_options = selection.enabled_execution_options
             profile = RequestedInferenceProfile(
-                model_target_label=self._option_target_label(option),
+                model_target_label=option.target_label,
                 reasoning_effort=reasoning_effort,
                 enabled_execution_options=execution_options,
             )
@@ -936,9 +1031,9 @@ class ExternalModelSettingsRepository:
             agent_id=target.agent_id,
             owner_interaction_key=owner_interaction_key,
             expected_generation=authorized.session.applied_profile_generation,
-            options_snapshot=options,
-            selected_option_id=self._option_id(selected_option),
-            selected_model_target_label=self._option_target_label(selected_option),
+            options_snapshot=[option.to_storage() for option in options],
+            selected_option_id=selected_option.option_id,
+            selected_model_target_label=selected_option.target_label,
             selected_reasoning_effort=(
                 None if profile is None else profile.reasoning_effort
             ),
@@ -963,13 +1058,13 @@ class ExternalModelSettingsRepository:
             selected = self._option_for_target(options, agent.main_model_label)
             if selected is None:
                 selected = options[0]
-            draft.selected_option_id = self._option_id(selected)
-            draft.selected_model_target_label = self._option_target_label(selected)
+            draft.selected_option_id = selected.option_id
+            draft.selected_model_target_label = selected.target_label
             draft.selected_reasoning_effort = None
             draft.selected_enabled_execution_options = []
         else:
-            draft.selected_option_id = self._option_id(selected)
-        draft.options_snapshot = options
+            draft.selected_option_id = selected.option_id
+        draft.options_snapshot = [option.to_storage() for option in options]
 
     def _reset_stale_draft(
         self,
@@ -982,12 +1077,12 @@ class ExternalModelSettingsRepository:
         target_label = (
             agent.main_model_label if profile is None else profile.model_target_label
         )
-        selected = self._option_for_target(draft.options_snapshot, target_label)
+        selected = self._saved_option_for_target(draft.options_snapshot, target_label)
         if selected is None:
-            selected = draft.options_snapshot[0]
+            selected = _SavedModelOptionIdentity.from_saved(draft.options_snapshot[0])
             profile = None
-        draft.selected_option_id = self._option_id(selected)
-        draft.selected_model_target_label = self._option_target_label(selected)
+        draft.selected_option_id = selected.option_id
+        draft.selected_model_target_label = selected.target_label
         draft.selected_reasoning_effort = (
             None if profile is None else profile.reasoning_effort
         )
@@ -1002,11 +1097,9 @@ class ExternalModelSettingsRepository:
         agent: Agent,
         *,
         previous: list[dict[str, object]] | tuple[()],
-    ) -> list[dict[str, object]]:
-        old_ids = {
-            self._option_target_label(option): self._option_id(option)
-            for option in previous
-        }
+    ) -> list[_ModelOptionSnapshot]:
+        identities = [_SavedModelOptionIdentity.from_saved(value) for value in previous]
+        old_ids = {option.target_label: option.option_id for option in identities}
         return [
             self._snapshot_from_agent_option(
                 option,
@@ -1020,15 +1113,13 @@ class ExternalModelSettingsRepository:
         option: SelectableModelOption,
         *,
         option_id: str,
-    ) -> dict[str, object]:
-        return {
-            "option_id": option_id,
-            "target_label": option.label,
-            "label": option.label,
-            "model_display_name": option.candidates[
-                0
-            ].model_selection.model_display_name,
-            "reasoning_efforts": [
+    ) -> _ModelOptionSnapshot:
+        return _ModelOptionSnapshot(
+            option_id=option_id,
+            target_label=option.label,
+            label=option.label,
+            model_display_name=option.candidates[0].model_selection.model_display_name,
+            reasoning_efforts=[
                 value.value
                 for value in (
                     option.candidates[
@@ -1036,7 +1127,7 @@ class ExternalModelSettingsRepository:
                     ].model_selection.normalized_capabilities.configurable_reasoning_efforts()
                 )
             ],
-            "execution_options": [
+            execution_options=[
                 definition.model_dump(mode="json")
                 for definition in list_model_execution_option_definitions(
                     provider=option.candidates[0].model_selection.provider,
@@ -1045,7 +1136,7 @@ class ExternalModelSettingsRepository:
                     ].model_selection.supported_execution_options,
                 )
             ],
-        }
+        )
 
     def _editor(
         self,
@@ -1089,33 +1180,7 @@ class ExternalModelSettingsRepository:
 
     @staticmethod
     def _public_option(value: dict[str, object]) -> ExternalModelOption:
-        saved_execution = TypeAdapter(
-            list[_SavedExecutionOptionDisplay]
-        ).validate_python(value.get("execution_options"))
-        supported_ids = [option.id for option in saved_execution]
-        if len(supported_ids) != len(set(supported_ids)):
-            raise ValueError("Supported execution options must be unique.")
-        if set(supported_ids) - MODEL_EXECUTION_OPTION_DEFINITIONS.keys():
-            raise ValueError("Unknown supported execution option.")
-        return ExternalModelOption(
-            option_id=ExternalModelSettingsRepository._option_id(value),
-            label=ExternalModelSettingsRepository._required_string(value, "label"),
-            model_display_name=ExternalModelSettingsRepository._required_string(
-                value,
-                "model_display_name",
-            ),
-            reasoning_efforts=TypeAdapter(list[str]).validate_python(
-                value.get("reasoning_efforts")
-            ),
-            execution_options=[
-                MODEL_EXECUTION_OPTION_DEFINITIONS[option.id].model_copy(
-                    update={"cost_hint": option.cost_hint}
-                )
-                for option in sorted(
-                    saved_execution, key=lambda option: option.id.value
-                )
-            ],
-        )
+        return _SavedModelOptionDisplay.from_saved(value).to_public()
 
     @staticmethod
     def _requested_profile(
@@ -1298,45 +1363,40 @@ class ExternalModelSettingsRepository:
     def _snapshot_option(
         draft: RDBExternalModelDraft,
         option_id: str,
-    ) -> dict[str, object] | None:
-        return next(
-            (
-                option
-                for option in draft.options_snapshot
-                if ExternalModelSettingsRepository._option_id(option) == option_id
-            ),
-            None,
-        )
+    ) -> _SavedModelOptionIdentity | None:
+        """Restore only the matched identity, preserving ignored invalid tails."""
+        for value in draft.options_snapshot:
+            identity = _saved_option_string(value, "option_id")
+            if identity == option_id:
+                return _SavedModelOptionIdentity(
+                    option_id=identity,
+                    target_label=_saved_option_string(value, "target_label"),
+                )
+        return None
 
     @staticmethod
     def _option_for_target(
-        options: list[dict[str, object]],
+        options: Sequence[_SavedModelOptionIdentity],
         target_label: str,
-    ) -> dict[str, object] | None:
+    ) -> _SavedModelOptionIdentity | None:
         return next(
-            (
-                option
-                for option in options
-                if ExternalModelSettingsRepository._option_target_label(option)
-                == target_label
-            ),
+            (option for option in options if option.target_label == target_label),
             None,
         )
 
     @staticmethod
-    def _option_id(option: dict[str, object]) -> str:
-        return ExternalModelSettingsRepository._required_string(option, "option_id")
-
-    @staticmethod
-    def _option_target_label(option: dict[str, object]) -> str:
-        return ExternalModelSettingsRepository._required_string(option, "target_label")
-
-    @staticmethod
-    def _required_string(value: dict[str, object], key: str) -> str:
-        result = value.get(key)
-        if not isinstance(result, str) or not result:
-            raise RuntimeError("External model draft option snapshot is invalid")
-        return result
+    def _saved_option_for_target(
+        values: Sequence[dict[str, object]], target_label: str
+    ) -> _SavedModelOptionIdentity | None:
+        """Restore a selected retained identity without inspecting unrelated fields."""
+        for value in values:
+            target = _saved_option_string(value, "target_label")
+            if target == target_label:
+                return _SavedModelOptionIdentity(
+                    option_id=_saved_option_string(value, "option_id"),
+                    target_label=target,
+                )
+        return None
 
     @staticmethod
     def _require_authorized(

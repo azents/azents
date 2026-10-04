@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from typing import assert_never
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,23 +83,31 @@ async def select_model_operation_candidate(
                 session,
                 identity,
             )
-            if observation.status is ModelCandidateHealthStatus.AVAILABLE:
-                active = mark_current_candidate_active(
-                    current,
-                    reason=ModelOperationCandidateOutcomeReason.SELECTED,
-                    recorded_at=observation.server_time,
-                )
-                return ModelCandidateSelection(
-                    operation=active,
-                    candidate=candidate,
-                    reservation_consumed=False,
-                )
-            if observation.status is ModelCandidateHealthStatus.COOLDOWN:
-                status = ModelOperationCandidateOutcomeStatus.COOLDOWN
-                reason = ModelOperationCandidateOutcomeReason.ACTIVE_COOLDOWN
-            else:
-                status = ModelOperationCandidateOutcomeStatus.PROBE_BUSY
-                reason = ModelOperationCandidateOutcomeReason.BACKGROUND_PROBE_REQUIRED
+            match observation.status:
+                case ModelCandidateHealthStatus.AVAILABLE:
+                    active = mark_current_candidate_active(
+                        current,
+                        reason=ModelOperationCandidateOutcomeReason.SELECTED,
+                        recorded_at=observation.server_time,
+                    )
+                    return ModelCandidateSelection(
+                        operation=active,
+                        candidate=candidate,
+                        reservation_consumed=False,
+                    )
+                case ModelCandidateHealthStatus.COOLDOWN:
+                    status = ModelOperationCandidateOutcomeStatus.COOLDOWN
+                    reason = ModelOperationCandidateOutcomeReason.ACTIVE_COOLDOWN
+                case (
+                    ModelCandidateHealthStatus.RECOVERY_PENDING
+                    | ModelCandidateHealthStatus.CLAIMED
+                ):
+                    status = ModelOperationCandidateOutcomeStatus.PROBE_BUSY
+                    reason = (
+                        ModelOperationCandidateOutcomeReason.BACKGROUND_PROBE_REQUIRED
+                    )
+                case _ as unreachable:
+                    assert_never(unreachable)
             current = mark_current_candidate_skipped_and_advance(
                 current,
                 status=status,
@@ -112,50 +121,55 @@ async def select_model_operation_candidate(
             identity,
             owner_id=current.operation_id,
         )
-        if probe.outcome is ForegroundProbeOutcome.HEALTHY:
-            active = mark_current_candidate_active(
-                current,
-                reason=ModelOperationCandidateOutcomeReason.SELECTED,
-                recorded_at=probe.observation.server_time,
-            )
-            return ModelCandidateSelection(
-                operation=active,
-                candidate=candidate,
-                reservation_consumed=False,
-            )
-        if probe.outcome is ForegroundProbeOutcome.CLAIMED:
-            health = probe.observation.health
-            if (
-                health is None
-                or health.claim_token is None
-                or health.claim_until is None
-            ):
-                raise RuntimeError("Foreground probe claim returned incomplete state")
-            active = mark_current_candidate_active(
-                current,
-                reason=ModelOperationCandidateOutcomeReason.HALF_OPEN_PROBE,
-                recorded_at=probe.observation.server_time,
-            )
-            claim = TransferredModelCandidateClaim(
-                kind=ModelCandidateClaimKind.PROBE,
-                candidate_ordinal=candidate.ordinal,
-                health_generation=health.generation,
-                claim_owner_id=current.operation_id,
-                claim_token=health.claim_token,
-                claim_until=health.claim_until,
-                transferred_at=probe.observation.server_time,
-            )
-            return ModelCandidateSelection(
-                operation=set_transferred_probe_claim(active, claim),
-                candidate=candidate,
-                reservation_consumed=False,
-            )
-        if probe.outcome is ForegroundProbeOutcome.COOLDOWN:
-            status = ModelOperationCandidateOutcomeStatus.COOLDOWN
-            reason = ModelOperationCandidateOutcomeReason.ACTIVE_COOLDOWN
-        else:
-            status = ModelOperationCandidateOutcomeStatus.PROBE_BUSY
-            reason = ModelOperationCandidateOutcomeReason.PROBE_CLAIM_BUSY
+        match probe.outcome:
+            case ForegroundProbeOutcome.HEALTHY:
+                active = mark_current_candidate_active(
+                    current,
+                    reason=ModelOperationCandidateOutcomeReason.SELECTED,
+                    recorded_at=probe.observation.server_time,
+                )
+                return ModelCandidateSelection(
+                    operation=active,
+                    candidate=candidate,
+                    reservation_consumed=False,
+                )
+            case ForegroundProbeOutcome.CLAIMED:
+                health = probe.observation.health
+                if (
+                    health is None
+                    or health.claim_token is None
+                    or health.claim_until is None
+                ):
+                    raise RuntimeError(
+                        "Foreground probe claim returned incomplete state"
+                    )
+                active = mark_current_candidate_active(
+                    current,
+                    reason=ModelOperationCandidateOutcomeReason.HALF_OPEN_PROBE,
+                    recorded_at=probe.observation.server_time,
+                )
+                claim = TransferredModelCandidateClaim(
+                    kind=ModelCandidateClaimKind.PROBE,
+                    candidate_ordinal=candidate.ordinal,
+                    health_generation=health.generation,
+                    claim_owner_id=current.operation_id,
+                    claim_token=health.claim_token,
+                    claim_until=health.claim_until,
+                    transferred_at=probe.observation.server_time,
+                )
+                return ModelCandidateSelection(
+                    operation=set_transferred_probe_claim(active, claim),
+                    candidate=candidate,
+                    reservation_consumed=False,
+                )
+            case ForegroundProbeOutcome.COOLDOWN:
+                status = ModelOperationCandidateOutcomeStatus.COOLDOWN
+                reason = ModelOperationCandidateOutcomeReason.ACTIVE_COOLDOWN
+            case ForegroundProbeOutcome.BUSY:
+                status = ModelOperationCandidateOutcomeStatus.PROBE_BUSY
+                reason = ModelOperationCandidateOutcomeReason.PROBE_CLAIM_BUSY
+            case _ as unreachable:
+                assert_never(unreachable)
         current = mark_current_candidate_skipped_and_advance(
             current,
             status=status,

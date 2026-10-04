@@ -1899,12 +1899,40 @@ class TestEventExecutionRepositories:
         assert stored is not None
         assert stored.model_operation_state == operation_state.model_dump(mode="json")
 
+        active_call = ActiveToolCall(
+            call_id="patch-call",
+            name="read_text",
+            arguments="{}",
+            started_at=datetime.datetime.now(datetime.UTC),
+            owner_generation=1,
+            wire_dialect="json_function",
+        )
+        await repo.update(
+            rdb_session,
+            run.id,
+            AgentRunPatch(
+                terminal_result_message="retained",
+                active_tool_calls=[active_call],
+            ),
+        )
+        unchanged = await repo.update(rdb_session, run.id, AgentRunPatch())
+        assert unchanged.model_operation_state == operation_state
+        assert unchanged.terminal_result_message == "retained"
+        assert unchanged.active_tool_calls == [active_call]
+        assert stored.model_operation_state == operation_state.model_dump(mode="json")
+
         cleared = await repo.update(
             rdb_session,
             run.id,
-            AgentRunPatch(model_operation_state=None),
+            AgentRunPatch(
+                model_operation_state=None,
+                terminal_result_message=None,
+                active_tool_calls=None,
+            ),
         )
         assert cleared.model_operation_state is None
+        assert cleared.terminal_result_message is None
+        assert cleared.active_tool_calls == []
 
         restored = await repo.update(
             rdb_session,

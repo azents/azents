@@ -559,6 +559,8 @@ class TestRootAgentSessionCreationRepository:
 
         service = _service()
         async with AsyncSession(rdb_engine, expire_on_commit=False) as first_session:
+            first_pid = await first_session.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(first_pid, int)
             first = await service.ensure_team_primary(
                 first_session,
                 workspace_id=workspace_id,
@@ -568,10 +570,13 @@ class TestRootAgentSessionCreationRepository:
                 rdb_engine,
                 expire_on_commit=False,
             ) as second_session:
-                second_started = asyncio.Event()
+                second_pid = await second_session.scalar(
+                    sa.text("SELECT pg_backend_pid()")
+                )
+                assert isinstance(second_pid, int)
+                assert first_pid != second_pid
 
                 async def ensure_second_primary() -> RootAgentSessionCreationResult:
-                    second_started.set()
                     return await service.ensure_team_primary(
                         second_session,
                         workspace_id=workspace_id,
@@ -579,15 +584,25 @@ class TestRootAgentSessionCreationRepository:
                     )
 
                 second_task = asyncio.create_task(ensure_second_primary())
-                await asyncio.wait_for(second_started.wait(), timeout=5)
-                with pytest.raises(TimeoutError):
-                    await asyncio.wait_for(
-                        asyncio.shield(second_task),
-                        timeout=0.1,
-                    )
-                await first_session.commit()
-                second = await asyncio.wait_for(second_task, timeout=5)
-                await second_session.commit()
+                try:
+                    async with asyncio.timeout(5):
+                        async with AsyncSession(rdb_engine) as observer:
+                            while True:
+                                blockers = await observer.scalar(
+                                    sa.text("SELECT pg_blocking_pids(:pid)"),
+                                    {"pid": second_pid},
+                                )
+                                if first_pid in blockers:
+                                    break
+                                assert not second_task.done()
+                    assert not second_task.done()
+                    await first_session.commit()
+                    second = await asyncio.wait_for(second_task, timeout=5)
+                    await second_session.commit()
+                finally:
+                    if not second_task.done():
+                        second_task.cancel()
+                    await asyncio.gather(second_task, return_exceptions=True)
 
         assert first.created is True
         assert first.policy_revision == 5
