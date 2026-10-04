@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -209,6 +210,13 @@ def _allocation(status: SessionGitWorktreeStatus) -> SessionGitWorktree:
     )
 
 
+class _WorktreeFixture(NamedTuple):
+    """Worktree service and allocation projection."""
+
+    service: SessionGitWorktreeService
+    allocations: _AllocationProjection
+
+
 def _service(
     *,
     resolver: _ProjectionResolver,
@@ -217,7 +225,7 @@ def _service(
     allocations: list[SessionGitWorktree],
     runner_operations: RuntimeRunnerOperationClient | None = None,
     skill_store: SkillStateStore | None = None,
-) -> tuple[SessionGitWorktreeService, _AllocationProjection]:
+) -> _WorktreeFixture:
     allocation_repository = _AllocationProjection(allocations)
     if runner_operations is None:
         runner_operations = _RunnerProjection()
@@ -259,7 +267,7 @@ def _service(
         runner_operations=runner_operations,
         skill_store=skill_store,
     )
-    return service, allocation_repository
+    return _WorktreeFixture(service, allocation_repository)
 
 
 @pytest.mark.asyncio
