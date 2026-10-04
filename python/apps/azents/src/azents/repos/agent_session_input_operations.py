@@ -227,6 +227,7 @@ class AgentSessionInputOperationsRepository:
             try:
                 write_request_repository = self.chat_write_request_repository
                 async with self.session_manager() as session:
+                    agent = await self.agent_repository.lock_by_id(session, agent_id)
                     agent_session = await self.agent_session_repository.lock_by_id(
                         session, agent_session_id
                     )
@@ -238,7 +239,6 @@ class AgentSessionInputOperationsRepository:
                         return Failure(AgentSessionInputInactiveSession())
                     if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                         return Failure(AgentSessionInputSubagentReadOnly())
-                    agent = await self.agent_repository.lock_by_id(session, agent_id)
                     if (
                         agent is None
                         or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
