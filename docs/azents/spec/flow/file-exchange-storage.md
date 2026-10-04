@@ -85,7 +85,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-10-05
-spec_version: 58
+spec_version: 59
 ---
 
 # File Exchange Storage
@@ -387,6 +387,15 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ### Agent presents sandbox file
 
+Exchange publication recovery uses a completed
+`ExchangeFileOperationRepository.load_publication_for_recovery` operation with
+an independently injected native PostgreSQL read-only scope. The repository
+translates only database failures into `ExchangeFilePublicationRecoveryError`
+after closing that scope. The service retains uploaded objects when a committed
+publication cannot be disproven; absent metadata permits the existing
+compensation path. Unexpected failures and cancellation propagate unchanged.
+The service does not own SQLAlchemy error handling or live membership reads.
+
 `present_file` publishes files from any absolute Runtime path, including `/tmp` and
 paths outside the Agent Workspace, as a public Exchange attachment. Relative paths
 and file-location URIs are rejected before Runtime access. Sources remain subject to
@@ -507,6 +516,10 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-10-05** (spec_version 59) — Recorded completed read-only Exchange
+  publication recovery and its narrow database-error boundary, retaining
+  conservative verified-object compensation behavior.
 
 - **2026-10-05** (spec_version 58) — Separated finalized upload-publication
   observation from upload/Agent mutation locks while preserving exact uploader,

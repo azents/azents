@@ -6,6 +6,7 @@ spec_type: domain
 domain: workspace
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
@@ -153,7 +154,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-10-05
-spec_version: 93
+spec_version: 94
 ---
 
 # Workspace & Membership
@@ -306,6 +307,14 @@ operation finishes. System-administrator assignment still grants no implicit
 Workspace access.
 
 ### Agent Workspace Runtime State
+
+`AgentWorkspaceFileService` receives the completed
+`AgentWorkspaceAccessRepository` as an injected collaborator. The repository
+loads the Agent and exact requester membership in a native PostgreSQL read-only
+scope and returns detached authority after that scope closes. File orchestration
+does not construct access owners from database managers or narrower repositories;
+Runtime operation targets, Runner-reported paths, and file outcomes remain
+independently authoritative.
 
 Agent Workspace API exposes Agent Runtime capability and lifecycle state. Read APIs do not ensure or
 start a Runtime. Server reads PostgreSQL capability, optional logical Runtime, Provider/Runner state,
@@ -1004,6 +1013,8 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-10-05 (spec_version=94)** — Recorded injected completed Agent Workspace
+  access ownership with native read-only Agent and membership inspection.
 - **2026-10-05 (spec_version=93)** — Moved invitation and join-request reads and
   atomic membership mutations into completed repository operations, keeping
   signup-token preparation and email delivery after commit with unchanged

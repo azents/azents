@@ -23,6 +23,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.scheduled_task_control import ScheduledTaskProviderControlResult
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -50,10 +51,7 @@ from azents.services.external_channel.discord_settings_scope import (
     build_discord_settings_custom_id,
     parse_discord_settings_custom_id,
 )
-from azents.services.scheduled_task.control import (
-    ScheduledTaskProviderControlResult,
-    build_scheduled_task_control_locator,
-)
+from azents.services.scheduled_task.control import build_scheduled_task_control_locator
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)

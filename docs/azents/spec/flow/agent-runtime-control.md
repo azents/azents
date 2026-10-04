@@ -71,6 +71,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/chat/workspace.py
+  - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/core/file_transfer.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
@@ -103,7 +104,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-05
-spec_version: 95
+spec_version: 96
 ---
 
 # Agent Runtime Control
@@ -533,6 +534,12 @@ lifecycle presentation composed by `AgentRuntimeService`. Workspace keeps its
 separate Runtime/access union only for file-browser layout and obtains lifecycle
 actions from the same server authority. The public single-summary projection is not
 part of the current API.
+
+Workspace file orchestration injects the completed
+`AgentWorkspaceAccessRepository` for Agent and requester membership authority.
+Its native read-only database scope closes before Runtime lifecycle or Runner
+operations begin. This access boundary does not start a Runtime, invent a
+Workspace path, or change the existing exact operation-target authority.
 
 Runtime Settings and Workspace render one user-impact status plus separate execution
 environment, Runtime connection, and host-control facts. Selected and applied Runtime
@@ -1250,6 +1257,9 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 96) — Recorded completed read-only Workspace
+  access authority before Runtime and Runner orchestration.
 
 - **2026-10-05** (spec_version 95) — Separated Runtime, Runner, binding and worktree
   descriptions from actual mutation fences; retained captured removal/decommission
