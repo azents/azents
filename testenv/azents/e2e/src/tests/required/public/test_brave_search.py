@@ -1,6 +1,8 @@
 """Credential-free Brave Search product-path and image materialization E2E."""
 
 import json
+import time
+from contextlib import ExitStack
 
 import azentsadminclient
 import azentspublicclient
@@ -37,6 +39,7 @@ from azentspublicclient.models.toolkit_config_update_request import (
 from testcontainers.core.container import DockerContainer
 
 from support.exchange_download import download_fixture_exchange_file
+from support.observations import RunMarkerObservation
 from support.utils import (
     model_selection_from_first_candidate,
     single_candidate_model_options,
@@ -98,6 +101,76 @@ def _request_journal(proxy_url: str) -> list[dict[str, object]]:
     response = requests.get(f"{proxy_url}/v1/_image_generation_requests", timeout=10)
     response.raise_for_status()
     return json_object_list_payload(response.json(), label="Brave request journal")
+
+
+def _wait_for_terminal_session(
+    *, server_url: str, token: str, agent_id: str, session_id: str
+) -> None:
+    """Drain an admitted turn using a persisted terminal marker, then idle."""
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        events = _tool_events(server_url=server_url, token=token, session_id=session_id)
+        if any(
+            event.get("kind") == "run_marker"
+            and RunMarkerObservation.model_validate(event.get("payload")).status
+            in {"completed", "failed", "stopped", "interrupted"}
+            for event in events
+        ):
+            _wait_for_idle(
+                server_url=server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            return
+        time.sleep(0.2)
+    raise TimeoutError(f"Brave Session did not reach a terminal run: {session_id}")
+
+
+def _completed_success_sessions(
+    *, server_url: str, token: str, agent_id: str
+) -> dict[str, str]:
+    """Overlap independent searches and drain all created Sessions on every exit."""
+    sessions: dict[str, str] = {}
+    rejected_sessions: set[str] = set()
+
+    def drain(session_id: str) -> None:
+        if session_id not in rejected_sessions:
+            _wait_for_terminal_session(
+                server_url=server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+
+    with ExitStack() as pending:
+        for kind in _KINDS:
+            session_id = _create_profile_session(
+                server_url=server_url, token=token, agent_id=agent_id
+            )
+            sessions[kind] = session_id
+            pending.callback(drain, session_id)
+            try:
+                _submit(
+                    server_url=server_url,
+                    token=token,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    kind=kind,
+                )
+            except requests.HTTPError as error:
+                if error.response is not None and error.response.status_code in {
+                    400,
+                    401,
+                    403,
+                    404,
+                    422,
+                }:
+                    # Validation/auth rejection did not admit a turn. Network
+                    # errors and ambiguous server failures still require drain.
+                    rejected_sessions.add(session_id)
+                raise
+    return sessions
 
 
 def test_brave_five_tools_and_one_call_multi_image_without_runtime(
@@ -328,28 +401,13 @@ def test_brave_five_tools_and_one_call_multi_image_without_runtime(
     assert "private_brave__" not in json.dumps(disabled_search)
 
     image_session_id: str | None = None
-    vision_journal_start: int | None = None
-    for kind in _KINDS:
-        session_id = _create_profile_session(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent.id,
-        )
-        if kind == "images":
-            vision_journal_start = len(_request_journal(openai_proxy_url))
-        _submit(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent.id,
-            session_id=session_id,
-            kind=kind,
-        )
-        _wait_for_idle(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent.id,
-            session_id=session_id,
-        )
+    vision_journal_start = len(_request_journal(openai_proxy_url))
+    sessions = _completed_success_sessions(
+        server_url=azents_public_server_url,
+        token=workspace.token,
+        agent_id=agent.id,
+    )
+    for kind, session_id in sessions.items():
         events = _tool_events(
             server_url=azents_public_server_url,
             token=workspace.token,

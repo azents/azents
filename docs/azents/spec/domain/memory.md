@@ -197,6 +197,9 @@ selected root Session and Agent. These locks exclude authority writers while
 allowing the `KEY SHARE` parent protection used by Session/event FK operations.
 Current User membership is locked separately and the existing enablement,
 root lifecycle, Workspace, and product-scope checks remain unchanged.
+Concurrent consumers that already hold canonical Agent parent `KEY SHARE`
+protection can authorize both the same root and distinct roots sharing that
+Agent without mutually upgrading the parent locks to `FOR UPDATE`.
 
 Saved index entries are type/name/ID sorted. Historical candidates are bounded to
 200 and ranked deterministically. New Sessions rank by source activity,

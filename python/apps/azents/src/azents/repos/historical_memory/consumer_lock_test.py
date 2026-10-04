@@ -11,12 +11,14 @@ import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.enums import AgentSessionProductMode
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory.repository_test import (
     _NOW,
@@ -84,6 +86,69 @@ async def test_snapshot_consumer_coexists_with_agent_parent_key_share(
         assert snapshot is not None
         assert snapshot.session_id == source.session_id
         assert snapshot.agent_id == source.agent_id
+
+
+@asynccontextmanager
+async def _committed_peer(
+    engine: AsyncEngine, source: _SourceFixture
+) -> AsyncIterator[str]:
+    """Own a second root Session sharing the first source's Agent authority."""
+    async with AsyncSession(engine, expire_on_commit=False) as setup:
+        peer = await AgentSessionRepository().create(
+            setup,
+            AgentSessionCreate(
+                workspace_id=source.workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=source.agent_id,
+                title="Concurrent Memory consumer",
+            ),
+        )
+        await setup.commit()
+    try:
+        yield peer.id
+    finally:
+        async with AsyncSession(engine) as cleanup:
+            await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
+                cleanup, root_session_id=peer.id, session_ids=[peer.id]
+            )
+            await cleanup.commit()
+
+
+@pytest.mark.parametrize("distinct_sessions", [False, True])
+async def test_concurrent_snapshot_consumers_keep_parent_fk_locks(
+    rdb_engine: AsyncEngine,
+    rdb_session_manager: SessionManager[AsyncSession],
+    distinct_sessions: bool,
+) -> None:
+    """Two canonical parent-lock holders must not deadlock during Memory access."""
+    repository = HistoricalMemoryRepository(rdb_session_manager)
+    ready = asyncio.Barrier(2)
+    async with _committed_source(rdb_engine) as source:
+        async with _committed_peer(rdb_engine, source) as peer_id:
+
+            async def consume(session_id: str) -> None:
+                async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                    assert await AgentSessionRepository().lock_agent_parent_for_session(
+                        session, session_id
+                    )
+                    await ready.wait()
+                    snapshot = await repository.get_snapshot_consumer_in_session(
+                        session, session_id=session_id
+                    )
+                    assert snapshot is not None
+                    assert snapshot.session_id == session_id
+                    assert snapshot.agent_id == source.agent_id
+                    await session.commit()
+
+            async def run_consumers() -> None:
+                async with asyncio.TaskGroup() as tasks:
+                    tasks.create_task(consume(source.session_id))
+                    tasks.create_task(
+                        consume(peer_id if distinct_sessions else source.session_id)
+                    )
+
+            await asyncio.wait_for(run_consumers(), timeout=5)
 
 
 @pytest.mark.parametrize("entity", ["agent", "session"])
