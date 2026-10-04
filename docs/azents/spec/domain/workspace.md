@@ -50,6 +50,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_project_preset/**
   - python/apps/azents/src/azents/repos/agent_project_default/**
   - python/apps/azents/src/azents/repos/agent_project_catalog/**
+  - python/apps/azents/src/azents/repos/agent_project_catalog/operations.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
@@ -153,7 +154,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-10-05
-spec_version: 93
+spec_version: 94
 ---
 
 # Workspace & Membership
@@ -785,6 +786,21 @@ and catalog entry, refreshes Skill projection, and marks the allocation cleaned 
 source and preserved branch metadata. It never calls branch deletion. Archive skips that cleaned
 allocation, so it cannot later delete the branch preserved by the Agent-facing removal.
 
+### Agent Project Catalog operation boundaries
+
+Agent Project Catalog candidate upserts, entry lists, exact-path status snapshots,
+and status application finish inside repository-owned operations. Independent
+lists and snapshots use PostgreSQL read-only scopes and return detached domain
+entries; candidate batches and status batches retain one atomic write group and
+the exact Agent/path identity. Runtime target resolution, Agent Workspace path
+normalization, and Runner filesystem probes occur outside every open catalog
+transaction, before their resulting status evidence is applied.
+
+Catalog filesystem status is descriptive Agent-scoped evidence and does not
+inherit a Session owner-generation gate. Canonical Session and action ownership
+remain fenced at their actual registry/action mutation boundaries; descriptive
+status refresh does not grant Project registration or action admission authority.
+
 ### Workspace External Channel Multi Apps
 
 Workspace is the Web management authority for Slack and Discord Multi Apps. Owners and Managers can
@@ -1010,6 +1026,10 @@ stateDiagram-v2
   ownership validation, statuses, notification cooldown, and delivery failure
   propagation.
 
+- **2026-10-05 (spec_version=94)** — Completed Agent Project Catalog read-only
+  snapshots and atomic candidate/status operations before service presentation
+  and Runtime probes. Descriptive status refresh uses the adopted operation-scoped
+  authority without extending a Session owner gate to the catalog projection.
 - **2026-10-02 (spec_version=91)** — Moved Workspace administration and HTTP
   membership admission into completed repository operations, retaining atomic
   Workspace/OWNER creation and existing lookup, conflict, and authorization
