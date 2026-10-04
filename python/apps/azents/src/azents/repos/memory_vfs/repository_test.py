@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from psycopg import AsyncCursor
 from pydantic import TypeAdapter
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -35,6 +35,7 @@ from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory_vfs.data import (
     HistoricalMemoryVfsRecord,
@@ -64,13 +65,13 @@ class _AgentFixture(NamedTuple):
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     slug: str,
 ) -> _AgentFixture:
     workspace = RDBWorkspace(name="Memory VFS", handle=f"memory-vfs-{slug}")
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     model_selection = make_test_model_selection_dict()
     agent = RDBAgent(
         workspace_id=workspace.id,
@@ -85,12 +86,12 @@ async def _create_agent(
         lightweight_model_label="lightweight",
         memory_enabled=True,
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(workspace_id=workspace.id, agent_id=agent.id)
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return _AgentFixture(agent=agent, workspace_id=workspace.id)
 
 
@@ -102,7 +103,7 @@ class _SourceFixture(NamedTuple):
 
 
 async def _create_source(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     agent_id: str,
     workspace_id: str,
@@ -131,7 +132,7 @@ async def _create_source(
         ),
     )
     event.id = hashlib.sha256(slug.encode()).hexdigest()[:32]
-    session.add(event)
+    session.write_session.add(event)
     row = RDBHistoricalMemorySource(
         source_session_id=source.id,
         admitted_at=_NOW - datetime.timedelta(hours=2),
@@ -141,13 +142,13 @@ async def _create_source(
     row.prepared_at = _NOW
     row.source_title_snapshot = f"{slug} title"
     row.summary = f"{slug} historical summary"
-    session.add(row)
-    await session.flush()
+    session.write_session.add(row)
+    await session.write_session.flush()
     return _SourceFixture(session_id=source.id, event_id=event.id)
 
 
 async def test_repository_applies_scope_membership_lifecycle_and_enablement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Every query reflects current root scope, lifecycle, and Agent enablement."""
     async with rdb_session_manager() as session:
@@ -156,7 +157,7 @@ async def test_repository_applies_scope_membership_lifecycle_and_enablement(
             session,
             UserCreate(email="memory-vfs@example.test"),
         )
-        session.add(
+        session.write_session.add(
             RDBWorkspaceUser(
                 workspace_id=workspace_id,
                 user_id=user.id,
@@ -180,7 +181,7 @@ async def test_repository_applies_scope_membership_lifecycle_and_enablement(
             mode=AgentSessionProductMode.USER,
             associated_user_id=user.id,
         )
-        session.add_all(
+        session.write_session.add_all(
             [
                 RDBAgentMemory(
                     agent_id=agent.id,
@@ -202,7 +203,7 @@ async def test_repository_applies_scope_membership_lifecycle_and_enablement(
                 ),
             ]
         )
-        await session.commit()
+        await session.write_session.commit()
 
     repository = MemoryVfsRepository(session_manager=rdb_session_manager)
     team = MemoryVfsAuthority(
@@ -283,10 +284,10 @@ async def test_repository_applies_scope_membership_lifecycle_and_enablement(
     }
 
     async with rdb_session_manager() as session:
-        user_source = await session.get(RDBAgentSession, user_session_id)
+        user_source = await session.read_session.get(RDBAgentSession, user_session_id)
         assert user_source is not None
         user_source.status = AgentSessionStatus.ARCHIVED
-        await session.commit()
+        await session.write_session.commit()
     assert (
         await repository.get_source(
             personal,
@@ -298,10 +299,10 @@ async def test_repository_applies_scope_membership_lifecycle_and_enablement(
     )
 
     async with rdb_session_manager() as session:
-        persisted_agent = await session.get(RDBAgent, agent.id)
+        persisted_agent = await session.read_session.get(RDBAgent, agent.id)
         assert persisted_agent is not None
         persisted_agent.memory_enabled = False
-        await session.commit()
+        await session.write_session.commit()
     assert await repository.authorized(personal) is False
     assert (
         await repository.list_saved(
@@ -314,7 +315,7 @@ async def test_repository_applies_scope_membership_lifecycle_and_enablement(
 
 
 async def test_repository_reauthorizes_the_exact_current_root_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Root identity, scope owner, lifecycle, and membership are live fences."""
     async with rdb_session_manager() as session:
@@ -327,7 +328,7 @@ async def test_repository_reauthorizes_the_exact_current_root_session(
             session,
             UserCreate(email="memory-vfs-other@example.test"),
         )
-        session.add_all(
+        session.write_session.add_all(
             [
                 RDBWorkspaceUser(
                     workspace_id=workspace_id,
@@ -363,7 +364,7 @@ async def test_repository_reauthorizes_the_exact_current_root_session(
             session,
             slug="other-root",
         )
-        await session.commit()
+        await session.write_session.commit()
 
     repository = MemoryVfsRepository(session_manager=rdb_session_manager)
     team = MemoryVfsAuthority(
@@ -425,25 +426,25 @@ async def test_repository_reauthorizes_the_exact_current_root_session(
     )
 
     async with rdb_session_manager() as session:
-        root = await session.get(RDBAgentSession, team_session_id)
+        root = await session.read_session.get(RDBAgentSession, team_session_id)
         assert root is not None
         root.status = AgentSessionStatus.ARCHIVED
-        await session.commit()
+        await session.write_session.commit()
     assert await repository.authorized(team) is False
 
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == workspace_id,
                 RDBWorkspaceUser.user_id == user.id,
             )
         )
-        await session.commit()
+        await session.write_session.commit()
     assert await repository.authorized(personal) is False
 
 
 async def test_repository_exact_reads_reject_oversized_text_and_json_rows(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Exact queries never transfer Text or JSON beyond the caller byte bound."""
     async with rdb_session_manager() as session:
@@ -465,14 +466,14 @@ async def test_repository_exact_reads_reject_oversized_text_and_json_rows(
             description="d" * 1_000,
             content="c" * 1_000,
         )
-        session.add(memory)
-        historical = await session.get(
+        session.write_session.add(memory)
+        historical = await session.read_session.get(
             RDBHistoricalMemorySource,
             source_session_id,
         )
         assert historical is not None
         historical.summary = "s" * 1_000
-        source_event = await session.get(RDBEvent, event_id)
+        source_event = await session.read_session.get(RDBEvent, event_id)
         assert source_event is not None
         source_event.payload = _PAYLOAD_ADAPTER.validate_python(
             UserMessagePayload(
@@ -493,8 +494,8 @@ async def test_repository_exact_reads_reject_oversized_text_and_json_rows(
                 ).model_dump(mode="json")
             ),
         )
-        session.add(tool_result)
-        await session.commit()
+        session.write_session.add(tool_result)
+        await session.write_session.commit()
 
     repository = MemoryVfsRepository(session_manager=rdb_session_manager)
     authority = MemoryVfsAuthority(
@@ -545,7 +546,7 @@ async def test_repository_exact_reads_reject_oversized_text_and_json_rows(
 
 
 async def test_event_candidates_use_two_queries_across_multiple_sources(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     rdb_engine: AsyncEngine,
 ) -> None:
     """Candidate and pairing query counts remain constant across source Sessions."""
@@ -579,7 +580,7 @@ async def test_event_candidates_use_two_queries_across_multiple_sources(
             )
             source_ids.append(source_id)
             call_id = f"call-{index}"
-            session.add_all(
+            session.write_session.add_all(
                 [
                     RDBEvent(
                         session_id=source_id,
@@ -609,7 +610,7 @@ async def test_event_candidates_use_two_queries_across_multiple_sources(
                     ),
                 ]
             )
-        await session.commit()
+        await session.write_session.commit()
 
     authority = MemoryVfsAuthority(
         root_session_id=source_ids[0],
@@ -666,7 +667,7 @@ async def test_event_candidates_use_two_queries_across_multiple_sources(
 
 
 async def test_broad_lists_omit_oversized_rows_before_body_transfer(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Broad grep pages retain bounded rows and truncate oversized body rows."""
     async with rdb_session_manager() as session:
@@ -687,10 +688,12 @@ async def test_broad_lists_omit_oversized_rows_before_body_transfer(
             mode=AgentSessionProductMode.TEAM,
             associated_user_id=None,
         )
-        oversized_source = await session.get(RDBAgentSession, oversized_source_id)
+        oversized_source = await session.read_session.get(
+            RDBAgentSession, oversized_source_id
+        )
         assert oversized_source is not None
         oversized_source.title = "t" * 200
-        oversized_historical = await session.get(
+        oversized_historical = await session.read_session.get(
             RDBHistoricalMemorySource,
             oversized_source_id,
         )
@@ -714,8 +717,8 @@ async def test_broad_lists_omit_oversized_rows_before_body_transfer(
             description="d" * 10_000,
             content="c" * 10_000,
         )
-        session.add_all([normal_memory, oversized_memory])
-        await session.commit()
+        session.write_session.add_all([normal_memory, oversized_memory])
+        await session.write_session.commit()
 
     repository = MemoryVfsRepository(session_manager=rdb_session_manager)
     authority = MemoryVfsAuthority(
@@ -765,7 +768,7 @@ async def test_broad_lists_omit_oversized_rows_before_body_transfer(
 
 
 async def test_glob_inventory_projects_only_body_free_uri_columns(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     rdb_engine: AsyncEngine,
 ) -> None:
     """Glob discovers poison-sized bodies without selecting their body columns."""
@@ -779,13 +782,15 @@ async def test_glob_inventory_projects_only_body_free_uri_columns(
             mode=AgentSessionProductMode.TEAM,
             associated_user_id=None,
         )
-        source = await session.get(RDBAgentSession, source_id)
+        source = await session.read_session.get(RDBAgentSession, source_id)
         assert source is not None
         source.title = "t" * 200
-        historical = await session.get(RDBHistoricalMemorySource, source_id)
+        historical = await session.read_session.get(
+            RDBHistoricalMemorySource, source_id
+        )
         assert historical is not None
         historical.summary = "s" * 10_000
-        source_event = await session.get(RDBEvent, event_id)
+        source_event = await session.read_session.get(RDBEvent, event_id)
         assert source_event is not None
         source_event.payload = _PAYLOAD_ADAPTER.validate_python(
             UserMessagePayload(
@@ -802,8 +807,8 @@ async def test_glob_inventory_projects_only_body_free_uri_columns(
             description="d" * 10_000,
             content="c" * 10_000,
         )
-        session.add(memory)
-        await session.commit()
+        session.write_session.add(memory)
+        await session.write_session.commit()
 
     projected_columns: list[tuple[str, ...]] = []
 

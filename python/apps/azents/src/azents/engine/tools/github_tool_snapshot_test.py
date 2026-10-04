@@ -18,6 +18,7 @@ from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import GitHubToolkitConfig, McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionTool
 from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.toolkit_state.engine import McpToolSnapshotStore
 from azents.testing.types import is_object_factory
@@ -98,8 +99,8 @@ class _FakeToolkitStateStore:
 class _FakeSessionContext:
     """Minimal async session context manager."""
 
-    async def __aenter__(self) -> AsyncSession:
-        return AsyncSession()
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(AsyncSession())
 
     async def __aexit__(self, *exc: object) -> None:
         pass
@@ -108,7 +109,7 @@ class _FakeSessionContext:
 class _FakeSessionManager:
     """Minimal async session manager."""
 
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
+    def __call__(self) -> AsyncContextManager[WriteSession]:
         return _FakeSessionContext()
 
 

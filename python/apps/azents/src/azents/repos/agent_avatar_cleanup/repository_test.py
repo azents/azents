@@ -7,11 +7,12 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.services.uploads.schema import (
     StoredImage,
@@ -45,7 +46,7 @@ def _avatar(key: str) -> StoredImage:
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     avatar: StoredImage | None,
 ) -> RDBAgent:
@@ -55,8 +56,8 @@ async def _create_agent(
         name="Avatar cleanup test",
         handle=f"avatar-cleanup-{suffix}",
     )
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace.id,
         name="Avatar cleanup Agent",
@@ -70,13 +71,13 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent
 
 
 async def test_update_avatar_enqueues_each_actual_superseded_snapshot(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Sequential serialized mutations never enqueue the final current avatar."""
     old_avatar = _avatar("public/avatar/agent-1/large/old.webp")
@@ -100,7 +101,7 @@ async def test_update_avatar_enqueues_each_actual_superseded_snapshot(
     assert isinstance(second, Success)
     jobs = list(
         (
-            await rdb_session.scalars(
+            await rdb_session.read_session.scalars(
                 sa.select(RDBAgentAvatarCleanupJob).order_by(
                     RDBAgentAvatarCleanupJob.created_at,
                     RDBAgentAvatarCleanupJob.id,
@@ -113,7 +114,7 @@ async def test_update_avatar_enqueues_each_actual_superseded_snapshot(
         middle_avatar.model_dump(mode="json"),
     ]
     assert all(job.agent_id == agent.id for job in jobs)
-    current = await rdb_session.get(RDBAgent, agent.id)
+    current = await rdb_session.read_session.get(RDBAgent, agent.id)
     assert current is not None
     assert current.avatar == current_avatar.model_dump(mode="json")
 
@@ -128,18 +129,20 @@ async def test_concurrent_avatar_updates_enqueue_each_committed_prior_snapshot(
     intermediate_avatar = _avatar("public/avatar/agent-1/large/intermediate.webp")
     final_avatar = _avatar("public/avatar/agent-1/large/final.webp")
     session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
-    async with session_factory() as setup_session:
+    async with session_factory() as _raw_setup_session:
+        setup_session = ReadWriteSession(_raw_setup_session)
         agent = await _create_agent(setup_session, avatar=original_avatar)
         agent_id = agent.id
         workspace_id = agent.workspace_id
-        await setup_session.commit()
+        await setup_session.write_session.commit()
 
     first_lock_acquired = asyncio.Event()
     allow_first_commit = asyncio.Event()
     second_started = asyncio.Event()
 
     async def replace_with_intermediate() -> object:
-        async with session_factory() as first_session:
+        async with session_factory() as _raw_first_session:
+            first_session = ReadWriteSession(_raw_first_session)
             result = await AgentRepository().update_avatar(
                 first_session,
                 agent_id,
@@ -147,18 +150,19 @@ async def test_concurrent_avatar_updates_enqueue_each_committed_prior_snapshot(
             )
             first_lock_acquired.set()
             await allow_first_commit.wait()
-            await first_session.commit()
+            await first_session.write_session.commit()
             return result
 
     async def replace_with_final() -> object:
-        async with session_factory() as second_session:
+        async with session_factory() as _raw_second_session:
+            second_session = ReadWriteSession(_raw_second_session)
             second_started.set()
             result = await AgentRepository().update_avatar(
                 second_session,
                 agent_id,
                 final_avatar,
             )
-            await second_session.commit()
+            await second_session.write_session.commit()
             return result
 
     first_task = asyncio.create_task(replace_with_intermediate())
@@ -188,11 +192,12 @@ async def test_concurrent_avatar_updates_enqueue_each_committed_prior_snapshot(
 
         assert isinstance(first, Success)
         assert isinstance(second, Success)
-        async with session_factory() as verification_session:
-            current = await verification_session.get(RDBAgent, agent_id)
+        async with session_factory() as _raw_verification_session:
+            verification_session = ReadWriteSession(_raw_verification_session)
+            current = await verification_session.read_session.get(RDBAgent, agent_id)
             jobs = list(
                 (
-                    await verification_session.scalars(
+                    await verification_session.read_session.scalars(
                         sa.select(RDBAgentAvatarCleanupJob)
                         .where(RDBAgentAvatarCleanupJob.agent_id == agent_id)
                         .order_by(
@@ -211,23 +216,24 @@ async def test_concurrent_avatar_updates_enqueue_each_committed_prior_snapshot(
         assert final_avatar.model_dump(mode="json") not in cleanup_avatars
         assert len(cleanup_avatars) == 2
     finally:
-        async with session_factory() as cleanup_session:
-            await cleanup_session.execute(
+        async with session_factory() as _raw_cleanup_session:
+            cleanup_session = ReadWriteSession(_raw_cleanup_session)
+            await cleanup_session.write_session.execute(
                 sa.delete(RDBAgentAvatarCleanupJob).where(
                     RDBAgentAvatarCleanupJob.agent_id == agent_id
                 )
             )
-            await cleanup_session.execute(
+            await cleanup_session.write_session.execute(
                 sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
             )
-            await cleanup_session.execute(
+            await cleanup_session.write_session.execute(
                 sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
             )
-            await cleanup_session.commit()
+            await cleanup_session.write_session.commit()
 
 
 async def test_avatar_cleanup_job_survives_agent_deletion(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Agent deletion clears only the optional diagnostic relationship."""
     old_avatar = _avatar("public/avatar/agent-1/large/old.webp")
@@ -236,16 +242,20 @@ async def test_avatar_cleanup_job_survives_agent_deletion(
     result = await AgentRepository().update_avatar(rdb_session, agent.id, None)
 
     assert isinstance(result, Success)
-    await rdb_session.delete(agent)
-    await rdb_session.flush()
-    jobs = list((await rdb_session.scalars(sa.select(RDBAgentAvatarCleanupJob))).all())
+    await rdb_session.write_session.delete(agent)
+    await rdb_session.write_session.flush()
+    jobs = list(
+        (
+            await rdb_session.read_session.scalars(sa.select(RDBAgentAvatarCleanupJob))
+        ).all()
+    )
     assert len(jobs) == 1
     assert jobs[0].agent_id is None
     assert jobs[0].avatar == old_avatar.model_dump(mode="json")
 
 
 async def test_claim_retry_and_delete_completed_cleanup_job(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Claiming uses tokens and success deletes the cleanup job."""
     now = datetime.datetime.now(datetime.UTC)
@@ -256,8 +266,8 @@ async def test_claim_retry_and_delete_completed_cleanup_job(
         agent_id=None,
     )
     row.next_attempt_at = now
-    rdb_session.add(row)
-    await rdb_session.flush()
+    rdb_session.write_session.add(row)
+    await rdb_session.write_session.flush()
     repository = AgentAvatarCleanupRepository()
 
     first = await repository.claim_due(
@@ -324,11 +334,11 @@ async def test_claim_retry_and_delete_completed_cleanup_job(
         )
         == []
     )
-    assert await rdb_session.get(RDBAgentAvatarCleanupJob, row.id) is None
+    assert await rdb_session.read_session.get(RDBAgentAvatarCleanupJob, row.id) is None
 
 
 async def test_expired_claim_token_cannot_settle_reclaimed_avatar_cleanup_jobs(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A stale token cannot retry or delete jobs reclaimed by the same scheduler."""
     now = datetime.datetime.now(datetime.UTC)
@@ -348,8 +358,8 @@ async def test_expired_claim_token_cannot_settle_reclaimed_avatar_cleanup_jobs(
     )
     retry_row.next_attempt_at = now
     delete_row.next_attempt_at = now
-    rdb_session.add_all([retry_row, delete_row])
-    await rdb_session.flush()
+    rdb_session.write_session.add_all([retry_row, delete_row])
+    await rdb_session.write_session.flush()
     repository = AgentAvatarCleanupRepository()
 
     first = await repository.claim_due(
@@ -399,8 +409,11 @@ async def test_expired_claim_token_cannot_settle_reclaimed_avatar_cleanup_jobs(
         lease_token=second_token,
     )
 
-    retried = await rdb_session.get(RDBAgentAvatarCleanupJob, retry_row.id)
+    retried = await rdb_session.read_session.get(RDBAgentAvatarCleanupJob, retry_row.id)
     assert retried is not None
     assert retried.lease_token is None
     assert retried.next_attempt_at == retry_at
-    assert await rdb_session.get(RDBAgentAvatarCleanupJob, delete_row.id) is None
+    assert (
+        await rdb_session.read_session.get(RDBAgentAvatarCleanupJob, delete_row.id)
+        is None
+    )

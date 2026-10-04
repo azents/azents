@@ -6,7 +6,6 @@ from typing import Annotated
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     apply_to_options,
@@ -27,6 +26,7 @@ from azents.core.model_operation import (
 from azents.engine.run.provider_failure import ModelProviderFailure
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -52,7 +52,7 @@ class SessionTitleRepository:
         ActiveModelCapabilitiesRepository, Depends(ActiveModelCapabilitiesRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def load_generation_snapshot(

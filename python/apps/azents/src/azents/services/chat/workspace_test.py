@@ -18,6 +18,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
     WorkspaceUserRole,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
@@ -69,7 +70,7 @@ _RUNNER_FILE_OPERATION_TIMEOUT = datetime.timedelta(seconds=120)
 class _FakeAgentRepository(AgentRepository):
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> Agent | None:
         del session
@@ -81,7 +82,7 @@ class _FakeAgentRepository(AgentRepository):
 class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -468,11 +469,11 @@ class _FakeRuntimeWorkspaceDownloadService(RuntimeWorkspaceDownloadService):
 
 
 @contextlib.asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield one unused but correctly typed test session."""
     session = AsyncSession()
     try:
-        yield session
+        yield ReadWriteSession(session)
     finally:
         await session.close()
 

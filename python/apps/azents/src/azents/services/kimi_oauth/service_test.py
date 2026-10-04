@@ -18,6 +18,7 @@ from azents.core.kimi_oauth import (
     KimiOAuthSessionStatus,
 )
 from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.kimi_oauth_session.data import KimiOAuthSessionWithSecrets
 from azents.repos.kimi_oauth_session.repository import KimiOAuthSessionRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -40,13 +41,13 @@ _TEST_KEY = Fernet.generate_key().decode()
 class _SessionManager:
     """Expose a single test DB session as a context manager."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self.session = session
 
     def __call__(self) -> "_SessionManager":
         return self
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         return self.session
 
     async def __aexit__(self, *_args: object) -> None:
@@ -106,7 +107,11 @@ async def test_reconnect_replaces_existing_integration_credentials() -> None:
         )
     )
     service = KimiOAuthService(
-        _SessionManager(require_instance(AsyncMock(spec=AsyncSession), AsyncSession)),
+        _SessionManager(
+            ReadWriteSession(
+                require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+            )
+        ),
         require_instance(session_repo, KimiOAuthSessionRepository),
         require_instance(integration_repo, LLMProviderIntegrationRepository),
         require_instance(client, KimiOAuthClient),
@@ -134,7 +139,7 @@ async def test_reconnect_replaces_existing_integration_credentials() -> None:
 
 
 async def test_slow_down_increases_and_returns_poll_interval(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Persist and expose every RFC 8628 slow_down interval increment."""
     suffix = uuid.uuid4().hex[:12]
@@ -209,7 +214,7 @@ async def test_slow_down_increases_and_returns_poll_interval(
 
 
 async def test_reconnect_updates_existing_integration(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Replace encrypted credentials while preserving integration identity and alias."""
     suffix = uuid.uuid4().hex[:12]

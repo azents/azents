@@ -7,7 +7,6 @@ from unittest.mock import Mock, create_autospec
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from types_aiobotocore_ses.client import SESClient
 
 import azents.api.public.auth.v1 as auth_api
@@ -26,6 +25,7 @@ from azents.core.credential_read import CredentialReadFact, CredentialReadKind
 from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.auth_operation import AuthOperationRepository
 from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.repos.credential_read_operations_test import (
@@ -179,7 +179,7 @@ def boundary_fixture(
 
 @pytest.fixture
 async def boundary_reads(
-    rdb_session_manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> CredentialReadFixture:
     return credential_read_fixture(rdb_session_manager, monkeypatch)
 

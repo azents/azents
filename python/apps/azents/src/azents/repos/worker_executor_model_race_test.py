@@ -24,6 +24,7 @@ from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -48,48 +49,49 @@ from azents.repos.worker_executor_model_test import (
 @asynccontextmanager
 async def independent_manager(
     engine: AsyncEngine,
-) -> AsyncIterator[SessionManager[AsyncSession]]:
+) -> AsyncIterator[SessionManager[WriteSession]]:
     """Allocate real independent connections, committing each completed scope."""
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     yield manager
 
 
-async def backend_pid(session: AsyncSession) -> int:
-    pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+async def backend_pid(session: WriteSession) -> int:
+    pid = await session.read_session.scalar(sa.text("SELECT pg_backend_pid()"))
     assert isinstance(pid, int)
     return pid
 
 
 async def wait_blocked(
-    manager: SessionManager[AsyncSession], waiter: int, holder: int
+    manager: SessionManager[WriteSession], waiter: int, holder: int
 ) -> None:
     """Use authoritative PostgreSQL blocking state rather than elapsed sleeps."""
     assert waiter != holder
     async with asyncio.timeout(10):
         async with manager() as observer:
             while True:
-                blockers = await observer.scalar(
+                blockers = await observer.write_session.scalar(
                     sa.text("SELECT pg_blocking_pids(:pid)"), {"pid": waiter}
                 )
                 if isinstance(blockers, list) and holder in blockers:
                     return
 
 
-async def cleanup(manager: SessionManager[AsyncSession], fixture: ModelFixture) -> None:
+async def cleanup(manager: SessionManager[WriteSession], fixture: ModelFixture) -> None:
     """Delete exactly this independently committed subject and its health rows."""
     async with manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBModelCandidateHealth).where(
                 RDBModelCandidateHealth.workspace_id == fixture.workspace_id
             )
@@ -97,40 +99,40 @@ async def cleanup(manager: SessionManager[AsyncSession], fixture: ModelFixture) 
         context_ids = sa.select(RDBSessionAgentContext.id).where(
             RDBSessionAgentContext.agent_id == fixture.agent_id
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSessionAgentContext)
             .where(RDBSessionAgentContext.agent_id == fixture.agent_id)
             .values(root_session_agent_id=None)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgent).where(
                 RDBSessionAgent.context_id.in_(context_ids)
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentSession).where(
                 RDBAgentSession.agent_id == fixture.agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == fixture.agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentRuntime).where(
                 RDBAgentRuntime.agent_id == fixture.agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgent).where(RDBAgent.id == fixture.agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBLLMProviderIntegration).where(
                 RDBLLMProviderIntegration.workspace_id == fixture.workspace_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == fixture.workspace_id)
         )
 
@@ -143,7 +145,7 @@ class _PidAgents(ModelAgents):
         self.pids = pids
         self.entered = entered
 
-    async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
+    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent | None:
         self.pids.append(await backend_pid(session))
         self.entered.set()
         return await super().lock_by_id(session, agent_id)
@@ -155,7 +157,7 @@ class _PidGuard(ModelGuard):
     entered: asyncio.Event
 
     async def assert_owner_generation_in_session(
-        self, session: AsyncSession, *, session_id: str, owner_generation: int
+        self, session: WriteSession, *, session_id: str, owner_generation: int
     ) -> None:
         self.pids.append(await backend_pid(session))
         self.entered.set()
@@ -172,7 +174,7 @@ class _ConflictSessions(ModelSessions):
         self.conflicted = conflicted
 
     async def lock_execution_by_id(
-        self, session: AsyncSession, agent_session_id: str
+        self, session: WriteSession, agent_session_id: str
     ) -> AgentSession | None:
         try:
             return await super().lock_execution_by_id(session, agent_session_id)
@@ -217,7 +219,7 @@ async def test_profile_agent_lock_serializes_configuration_on_distinct_connectio
                     await AgentRepository().lock_by_id(session, fixture.agent_id)
                     is not None
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBAgent)
                     .where(RDBAgent.id == fixture.agent_id)
                     .values(main_model_label="alternate")

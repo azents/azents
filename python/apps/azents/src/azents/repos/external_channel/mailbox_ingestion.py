@@ -9,7 +9,6 @@ from urllib.parse import quote, urlparse, urlunparse
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.config import Config
@@ -82,6 +81,7 @@ from azents.core.root_agent_session_creation import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.conversation_provisioning import (
@@ -173,7 +173,7 @@ class ExternalChannelMailboxIngestionRepository:
     """Accept provider history directly into one canonical mailbox item."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -205,7 +205,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def create_configured_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         resource_id: str,
         route_id: str,
@@ -313,7 +313,7 @@ class ExternalChannelMailboxIngestionRepository:
                 request=request,
             )
             if priority_request is not None:
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelIngestionPreparation(
                     position_id=None,
                     exclusive_start_position=None,
@@ -336,7 +336,7 @@ class ExternalChannelMailboxIngestionRepository:
                 source_resource is not None
                 and source_resource.status is not ExternalChannelResourceStatus.ACTIVE
             ):
-                await session.commit()
+                await session.write_session.commit()
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE,
@@ -345,7 +345,7 @@ class ExternalChannelMailboxIngestionRepository:
                 request=request,
                 resource=source_resource,
             ):
-                await session.commit()
+                await session.write_session.commit()
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
@@ -361,14 +361,14 @@ class ExternalChannelMailboxIngestionRepository:
                 binding=binding,
             )
             if ignored_reason is not None:
-                await session.commit()
+                await session.write_session.commit()
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.IGNORED,
                     ignored_reason,
                 )
             if source_resource is None:
                 if request.replay_boundary is not None:
-                    await session.commit()
+                    await session.write_session.commit()
                     return _immediate(
                         ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                         ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
@@ -382,7 +382,7 @@ class ExternalChannelMailboxIngestionRepository:
                 request=request,
                 resource=source_resource,
             ):
-                await session.commit()
+                await session.write_session.commit()
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
@@ -412,7 +412,7 @@ class ExternalChannelMailboxIngestionRepository:
                     if existing is not None:
                         wake_item_id = existing.id
                         wake_session_id = binding.agent_session_id
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelIngestionPreparation(
                     position_id=None,
                     exclusive_start_position=None,
@@ -435,7 +435,7 @@ class ExternalChannelMailboxIngestionRepository:
                 and start >= boundary.trigger_position
             ):
                 start = boundary.range_start_position
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelIngestionPreparation(
                 position_id=position.id,
                 exclusive_start_position=start,
@@ -480,7 +480,7 @@ class ExternalChannelMailboxIngestionRepository:
                 and position.read_through_position
                 != preparation.exclusive_start_position
             ):
-                await session.rollback()
+                await session.write_session.rollback()
                 return _position_mismatch()
             trigger = history.trigger
             if (
@@ -552,7 +552,7 @@ class ExternalChannelMailboxIngestionRepository:
                     request=request,
                     selector_id=selector.id,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelIngestionAcceptance(
                     status="awaiting_selection",
                     reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
@@ -625,7 +625,7 @@ class ExternalChannelMailboxIngestionRepository:
                     or trigger.provider_user_id,
                     now=now,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelIngestionAcceptance(
                     status="awaiting_access",
                     reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
@@ -672,7 +672,7 @@ class ExternalChannelMailboxIngestionRepository:
                 or target_session.status is not AgentSessionStatus.ACTIVE
                 or target_session.stop_requested_at is not None
             ):
-                await session.commit()
+                await session.write_session.commit()
                 return _rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
@@ -799,7 +799,7 @@ class ExternalChannelMailboxIngestionRepository:
                     read_through_position=history.trigger_position,
                 )
                 if not advanced:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     return _position_mismatch()
             if (
                 conversation.resource.resource_type
@@ -823,11 +823,11 @@ class ExternalChannelMailboxIngestionRepository:
                 binding.agent_session_id,
             )
             if admitted_session is None:
-                await session.rollback()
+                await session.write_session.rollback()
                 return _rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
-            await session.commit()
+            await session.write_session.commit()
             if session_created:
                 logger.info(
                     "Created External Channel AgentSession",
@@ -863,7 +863,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _get_source_resource(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         request: ExternalChannelIngestionRequest,
     ) -> ExternalChannelResource | None:
@@ -877,7 +877,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_source_resource(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         now: datetime.datetime,
@@ -899,7 +899,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _prepare_effective_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -970,7 +970,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _selected_setup_priority_request(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
     ) -> ExternalChannelIngestionRequest | None:
@@ -1041,7 +1041,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _resolve_conversation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -1229,7 +1229,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _accept_setup_required(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -1265,7 +1265,7 @@ class ExternalChannelMailboxIngestionRepository:
             now=now,
         )
         if claim is None:
-            await session.rollback()
+            await session.write_session.rollback()
             return _position_mismatch()
         if route is None:
             selector = await self._ensure_selector(
@@ -1283,7 +1283,7 @@ class ExternalChannelMailboxIngestionRepository:
                 request=request,
                 selector_id=selector.id,
             )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelIngestionAcceptance(
                 status="awaiting_selection",
                 reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
@@ -1338,7 +1338,7 @@ class ExternalChannelMailboxIngestionRepository:
                 ),
                 now=now,
             )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelIngestionAcceptance(
                 status="awaiting_access",
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
@@ -1352,7 +1352,7 @@ class ExternalChannelMailboxIngestionRepository:
             resource=conversation.source_resource,
             claim=claim,
         )
-        await session.commit()
+        await session.write_session.commit()
         return ExternalChannelIngestionAcceptance(
             status="awaiting_selection",
             reason=ExternalChannelIngestionReason.SETUP_REQUIRED,
@@ -1364,7 +1364,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _ensure_setup_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         position: ExternalChannelConversationPosition,
@@ -1477,7 +1477,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _complete_setup_replay(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         conversation: _Conversation,
@@ -1502,7 +1502,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _resolve_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -1528,7 +1528,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _ensure_principal(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
     ) -> str:
@@ -1573,7 +1573,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _ensure_selector(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -1633,7 +1633,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         route: ExternalChannelAgentRoute,
         resource: ExternalChannelResource,
@@ -1678,7 +1678,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _prepare_position(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
     ) -> ExternalChannelConversationPosition | None:
@@ -1734,7 +1734,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _initialize_thread_position(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         resource: ExternalChannelResource,
@@ -1773,7 +1773,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_selector_control_intent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         request: ExternalChannelIngestionRequest,
         selector_id: str,
@@ -1838,7 +1838,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_access_control_intent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request_id: str,
         request: ExternalChannelIngestionRequest,
@@ -1900,7 +1900,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_session_presence_intent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
@@ -1921,7 +1921,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_setup_control_intent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         resource: ExternalChannelResource,
         claim: ExternalChannelSetupClaim,
@@ -1947,7 +1947,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _create_initial_progress_intent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         binding: ExternalChannelBinding,
@@ -1963,7 +1963,7 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _lock_authority(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         now: datetime.datetime,
@@ -2023,10 +2023,10 @@ class ExternalChannelMailboxIngestionRepository:
 
     async def _commit_ignored(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         reason: ExternalChannelIngestionReason,
     ) -> ExternalChannelIngestionAcceptance:
-        await session.commit()
+        await session.write_session.commit()
         return ExternalChannelIngestionAcceptance(
             status="ignored",
             reason=reason,

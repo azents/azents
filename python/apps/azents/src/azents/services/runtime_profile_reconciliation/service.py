@@ -7,11 +7,11 @@ from typing import Annotated
 from azcommon.datetime import tznow
 from fastapi import Depends
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import RuntimeConfigurationReconcileTask
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.services.runtime_profile_resolution.data import (
@@ -42,7 +42,7 @@ class RuntimeProfileReconciliationService:
     """Fan out source changes to exact Agent Runtime desired revisions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     profile_repository: Annotated[
         RuntimeProfileRepository, Depends(RuntimeProfileRepository)

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.file_access import (
     ExternalChannelFileAccessRepository,
 )
@@ -26,11 +27,12 @@ async def test_active_target_read_completes_its_database_transaction() -> None:
         capabilities={"download_files": True},
         resource_labels={"channel_id": "channel-1"},
     )
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         transaction_active = True
         try:
@@ -41,7 +43,7 @@ async def test_active_target_read_completes_its_database_transaction() -> None:
     work_repository = AsyncMock(spec=ExternalChannelWorkRepository)
 
     async def load_target(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         session_id: str,
         agent_id: str,

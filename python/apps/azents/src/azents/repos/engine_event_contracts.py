@@ -3,8 +3,6 @@
 import datetime
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -13,6 +11,7 @@ from azents.engine.events.types import (
     EventPayload,
 )
 from azents.engine.run.failure import FailedRunRetryState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 
 
@@ -21,7 +20,7 @@ class AgentRunCreateRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Fetch run state."""
@@ -29,7 +28,7 @@ class AgentRunCreateRepository(Protocol):
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentRunCreate,
     ) -> AgentRunState:
         """Create Agent run row."""
@@ -37,7 +36,7 @@ class AgentRunCreateRepository(Protocol):
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -51,7 +50,7 @@ class AgentRunCreateRepository(Protocol):
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         retry_state: FailedRunRetryState | None,
     ) -> object:
@@ -64,7 +63,7 @@ class RunStateRepository(Protocol):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Fetch run state with a row lock."""
@@ -72,7 +71,7 @@ class RunStateRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Fetch run state."""
@@ -80,7 +79,7 @@ class RunStateRepository(Protocol):
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -91,7 +90,7 @@ class RunStateRepository(Protocol):
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -105,7 +104,7 @@ class RunStateRepository(Protocol):
 
     async def mark_parent_result_suppressed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         finalized_at: datetime.datetime,
@@ -115,7 +114,7 @@ class RunStateRepository(Protocol):
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         retry_state: FailedRunRetryState | None,
     ) -> object:
@@ -128,7 +127,7 @@ class TranscriptRepository(Protocol):
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None = None,
@@ -138,7 +137,7 @@ class TranscriptRepository(Protocol):
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Append Event."""
@@ -146,7 +145,7 @@ class TranscriptRepository(Protocol):
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
@@ -159,7 +158,7 @@ class EventPayloadRepository(Protocol):
 
     async def update_payload(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         event_id: str,
         payload: EventPayload,
     ) -> Event:
@@ -172,7 +171,7 @@ class SessionHeadMoveRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> "SessionHeadState | None":
         """Fetch current model-input head state."""
@@ -180,7 +179,7 @@ class SessionHeadMoveRepository(Protocol):
 
     async def lock_compaction_plan_if_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         expected_head_event_id: str | None,
@@ -191,7 +190,7 @@ class SessionHeadMoveRepository(Protocol):
 
     async def move_model_input_head(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         event_id: str,
     ) -> object:
@@ -204,7 +203,7 @@ class EventAppendRepository(EventPayloadRepository, Protocol):
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Append Event."""
@@ -222,7 +221,7 @@ class SessionHeadRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> SessionHeadState | None:
         """Fetch session state."""

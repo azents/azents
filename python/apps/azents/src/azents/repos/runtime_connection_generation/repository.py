@@ -1,7 +1,6 @@
 """Durable Runtime Control connection-generation authority repository."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeConnectionAuthorityKind
 from azents.core.runtime_connection_generation import (
@@ -11,6 +10,7 @@ from azents.rdb.models.runtime_connection_generation import (
     RDBRuntimeConnectionGeneration,
     RDBRuntimeConnectionGenerationCutover,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     RuntimeConnectionGeneration,
@@ -28,10 +28,10 @@ class RuntimeConnectionGenerationRepository:
 
     async def get_cutover(
         self,
-        session: AsyncSession,
+        session: ReadSession,
     ) -> RuntimeConnectionGenerationCutover | None:
         """Return the current allocator cutover marker."""
-        rdb = await session.get(
+        rdb = await session.read_session.get(
             RDBRuntimeConnectionGenerationCutover,
             CURRENT_ALLOCATOR_VERSION,
         )
@@ -39,13 +39,13 @@ class RuntimeConnectionGenerationRepository:
 
     async def get_generation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
     ) -> RuntimeConnectionGeneration | None:
         """Return durable generation state for one connection subject."""
-        rdb = await session.get(
+        rdb = await session.read_session.get(
             RDBRuntimeConnectionGeneration,
             (connection_kind, subject_id),
         )
@@ -53,7 +53,7 @@ class RuntimeConnectionGenerationRepository:
 
     async def allocate_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
@@ -80,20 +80,20 @@ class RuntimeConnectionGenerationRepository:
                 "Runtime connection generation authority is exhausted"
             )
         rdb.high_water_generation += 1
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build_generation(rdb)
 
     async def generation_is_current_high_water(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
         generation: int,
     ) -> bool:
         """Return whether a publication candidate remains the latest allocation."""
-        rdb = await session.get(
+        rdb = await session.read_session.get(
             RDBRuntimeConnectionGeneration,
             (connection_kind, subject_id),
         )
@@ -105,14 +105,14 @@ class RuntimeConnectionGenerationRepository:
 
     async def accept_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
         generation: int,
     ) -> RuntimeConnectionGeneration | None:
         """Accept a generation only while it remains the latest allocation."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeConnectionGeneration)
             .where(
                 RDBRuntimeConnectionGeneration.connection_kind == connection_kind,
@@ -126,7 +126,7 @@ class RuntimeConnectionGenerationRepository:
         rdb = result.scalar_one_or_none()
         if rdb is not None:
             return self._build_generation(rdb)
-        existing = await session.get(
+        existing = await session.write_session.get(
             RDBRuntimeConnectionGeneration,
             (connection_kind, subject_id),
         )
@@ -138,12 +138,12 @@ class RuntimeConnectionGenerationRepository:
 
     async def _get_generation_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
     ) -> RDBRuntimeConnectionGeneration | None:
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeConnectionGeneration)
             .where(
                 RDBRuntimeConnectionGeneration.connection_kind == connection_kind,

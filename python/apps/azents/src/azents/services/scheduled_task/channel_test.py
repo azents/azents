@@ -34,6 +34,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderTarget,
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -72,8 +73,8 @@ _RUN_ID = "r" * 32
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    yield ReadWriteSession(require_instance(MagicMock(spec=AsyncSession), AsyncSession))
 
 
 class _TrackedSession(AsyncSession):
@@ -92,14 +93,14 @@ class _TransactionTracker:
     """Create sessions whose transaction lifetime is directly observable."""
 
     def __init__(self) -> None:
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[_TrackedSession] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
         session = _TrackedSession()
         self.sessions.append(session)
         try:
-            yield session
+            yield ReadWriteSession(session)
         finally:
             session.active = False
             await session.close()

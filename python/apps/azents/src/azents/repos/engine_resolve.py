@@ -4,10 +4,10 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.engine_read import (
@@ -39,7 +39,7 @@ class EngineResolveRepositories:
 
 def get_engine_resolve_repositories(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
     integration_repository: Annotated[

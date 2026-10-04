@@ -76,6 +76,7 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
@@ -128,9 +129,9 @@ _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
 
 
 @asynccontextmanager
-async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager_double() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+    yield ReadWriteSession(require_instance(MagicMock(spec=AsyncSession), AsyncSession))
 
 
 class _RuntimeRepositoryDouble(AgentRuntimeRepository):
@@ -141,7 +142,7 @@ class _RuntimeRepositoryDouble(AgentRuntimeRepository):
 
     async def ensure_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         default_runtime_provider_id: str | None = None,
@@ -165,7 +166,7 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> Agent | None:
         """Return a minimal active Agent projection."""
@@ -201,7 +202,7 @@ class _WorkspaceUserRepositoryDouble(WorkspaceUserRepository):
 
     async def lock_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         user_id: str,
@@ -227,7 +228,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession:
         """Lock and fetch session."""
@@ -266,7 +267,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def set_applied_inference_profile(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_target_label: str,
@@ -285,7 +286,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def mark_running_for_input_wakeup(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> None:
         """Record wake transition."""
@@ -294,7 +295,7 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
 
     async def get_working_folder_context_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> SessionWorkingFolderContext:
@@ -322,7 +323,7 @@ class _MailboxAdmissionRepositoryDouble(MailboxAdmissionRepository):
 
     async def enqueue_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         input: MailboxEnqueue,
     ) -> MailboxAdmissionResult:
         """Record MailboxItem creation."""
@@ -358,7 +359,7 @@ class _MailboxServiceDouble(MailboxDatabaseRepository):
 
     async def has_seen_action_type(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         action_type: str,
@@ -376,7 +377,7 @@ class _ExchangeFileService(InputAttachmentClaimRepository):
 
     async def claim_input_attachments(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -393,7 +394,7 @@ class _RejectingExchangeFileService(_ExchangeFileService):
 
     async def claim_input_attachments(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -416,7 +417,7 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationRepository
 
 
 def _mailbox_admission_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> MailboxAdmissionRepository:
     """Create database-only admission for integration tests."""
     return MailboxAdmissionRepository(
@@ -427,14 +428,14 @@ def _mailbox_admission_repository(
 
 
 def _mailbox_item_service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> MailboxRepository:
     """Provide the canonical mailbox primitive for atomic input composition."""
     del rdb_session_manager
     return MailboxRepository()
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -447,7 +448,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     slug: str,
     *,
@@ -463,8 +464,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -499,10 +500,10 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    await session.write_session.flush()
     if runtime_capability is AgentRuntimeCapability.MANAGED:
         runtime_repository = AgentRuntimeRepository()
         runtime = await runtime_repository.ensure_for_agent(session, agent.id)
@@ -519,7 +520,7 @@ async def _create_agent(
 
 
 async def _cleanup_committed_agent_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str | None,
     user_id: str | None,
@@ -527,12 +528,12 @@ async def _cleanup_committed_agent_fixture(
 ) -> None:
     """Remove the committed fixture used by the cross-transaction fence test."""
     if agent_id is not None:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSessionAgentContext)
             .where(RDBSessionAgentContext.agent_id == agent_id)
             .values(root_session_agent_id=None)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgent).where(
                 RDBSessionAgent.agent_session_id.in_(
                     sa.select(RDBAgentSession.id).where(
@@ -541,39 +542,43 @@ async def _cleanup_committed_agent_fixture(
                 )
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentDecommissionJob).where(
                 RDBAgentDecommissionJob.agent_id == agent_id
             )
         )
-        await session.execute(sa.delete(RDBAgent).where(RDBAgent.id == agent_id))
+        await session.write_session.execute(
+            sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
+        )
     if workspace_id is not None:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
         )
     if user_id is not None:
-        await session.execute(sa.delete(RDBUser).where(RDBUser.id == user_id))
+        await session.write_session.execute(
+            sa.delete(RDBUser).where(RDBUser.id == user_id)
+        )
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
 async def _add_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     user_id: str,
@@ -596,7 +601,7 @@ class TestAgentSessionInputService:
 
     async def test_create_buffered_agent_input_delegates_wake_to_mailbox_service(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Delegate the durable REST input wake transition to MailboxService."""
         calls: list[str] = []
@@ -662,7 +667,7 @@ class TestAgentSessionInputService:
 
     async def test_invalid_profile_rejects_before_mailbox_and_applied_state(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Invalid Human profile admission leaves Session and mailbox unchanged."""
         async with rdb_session_manager() as session:
@@ -696,7 +701,7 @@ class TestAgentSessionInputService:
                 agent_session.id,
             )
             initial_runtime_ids = list(
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBAgentRuntime.id).where(
                         RDBAgentRuntime.agent_id == agent_id
                     )
@@ -773,7 +778,7 @@ class TestAgentSessionInputService:
                 agent_session.id,
             )
             runtime_ids = list(
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBAgentRuntime.id).where(
                         RDBAgentRuntime.agent_id == agent_id
                     )
@@ -804,8 +809,8 @@ class TestAgentSessionInputService:
         db_session = AsyncMock(spec=AsyncSession)
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield db_session
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(db_session)
 
         mailbox_item_service = _MailboxServiceDouble(calls)
         mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
@@ -910,7 +915,7 @@ class TestAgentSessionInputService:
 
     async def test_create_team_session_with_buffered_input_bootstraps_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """First draft input creates a session with explicit Projects."""
         async with rdb_session_manager() as session:
@@ -1031,7 +1036,7 @@ class TestAgentSessionInputService:
 
     async def test_create_two_user_sessions_with_buffered_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Owner can admit multiple User Sessions on one Agent."""
         async with rdb_session_manager() as session:
@@ -1138,7 +1143,7 @@ class TestAgentSessionInputService:
 
     async def test_runtime_free_session_queues_only_user_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runtime-free Session creation omits Runtime working-folder actions."""
         async with rdb_session_manager() as session:
@@ -1214,7 +1219,7 @@ class TestAgentSessionInputService:
 
     async def test_new_session_retry_reuses_admitted_session_and_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """One Agent-scoped client request creates exactly one Session and input."""
         async with rdb_session_manager() as session:
@@ -1335,15 +1340,16 @@ class TestAgentSessionInputService:
         del latest_db_schema
 
         @asynccontextmanager
-        async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
-            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async def independent_session_manager() -> AsyncGenerator[WriteSession]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+                session = ReadWriteSession(raw_session)
                 try:
                     yield session
                 except Exception:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     raise
                 else:
-                    await session.commit()
+                    await session.write_session.commit()
 
         agent_id: str | None = None
         user_id: str | None = None
@@ -1459,7 +1465,7 @@ class TestAgentSessionInputService:
         finally:
             async with independent_session_manager() as session:
                 if agent_id is not None:
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.text(
                             "DELETE FROM chat_write_requests "
                             "WHERE creation_agent_id = :agent_id "
@@ -1468,7 +1474,7 @@ class TestAgentSessionInputService:
                         ),
                         {"agent_id": agent_id},
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.text(
                             "DELETE FROM mailbox_items WHERE session_id IN "
                             "(SELECT id FROM agent_sessions WHERE agent_id = :agent_id)"
@@ -1484,7 +1490,7 @@ class TestAgentSessionInputService:
 
     async def test_new_session_retry_rejects_changed_payload(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """An Agent-scoped client key cannot create a second changed Session."""
         async with rdb_session_manager() as session:
@@ -1574,7 +1580,7 @@ class TestAgentSessionInputService:
 
     async def test_new_session_attachment_conflict_rolls_back_session_and_input(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """First-message claim failure removes the new Session and MailboxItem."""
         async with rdb_session_manager() as session:
@@ -1665,7 +1671,7 @@ class TestAgentSessionInputService:
 
     async def test_buffered_agent_input_rejects_archived_session_after_rollover(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """User input with stale session id is rejected instead of redirected."""
         async with rdb_session_manager() as session:
@@ -1744,7 +1750,7 @@ class TestAgentSessionInputService:
 
     async def test_buffered_agent_input_rejects_subagent_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Direct human input cannot be enqueued into a child subagent session."""
         async with rdb_session_manager() as session:
@@ -1826,7 +1832,7 @@ class TestAgentSessionInputService:
 
     async def test_create_buffered_agent_input_marks_session_running(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """REST input storage marks Session running to cover broker loss."""
         async with rdb_session_manager() as session:
@@ -1905,7 +1911,7 @@ class TestAgentSessionInputService:
 
     async def test_existing_session_input_adopts_working_folder_setup_once(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Legacy-style active Session input queues one setup action before wake."""
         async with rdb_session_manager() as session:
@@ -2023,21 +2029,23 @@ class TestAgentSessionInputService:
         agent_id: str | None = None
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_session:
+                session = ReadWriteSession(raw_session)
                 try:
                     yield session
                 except Exception:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     raise
                 else:
-                    await session.commit()
+                    await session.write_session.commit()
 
         try:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as setup_session:
+            ) as raw_setup_session:
+                setup_session = ReadWriteSession(raw_setup_session)
                 workspace_id = await _create_workspace(
                     setup_session,
                     f"input-agent-fence-{suffix}",
@@ -2063,7 +2071,7 @@ class TestAgentSessionInputService:
                         agent_id=agent_id,
                     )
                 ).session
-                await setup_session.commit()
+                await setup_session.write_session.commit()
 
             service = AgentSessionInputService(
                 operations=AgentSessionInputOperationsRepository(
@@ -2097,7 +2105,8 @@ class TestAgentSessionInputService:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as decommission_session:
+            ) as raw_decommission_session:
+                decommission_session = ReadWriteSession(raw_decommission_session)
                 decommissioned = await AgentRepository().mark_decommissioning(
                     decommission_session,
                     agent_id,
@@ -2130,7 +2139,7 @@ class TestAgentSessionInputService:
                             asyncio.shield(admission_task),
                             timeout=0.1,
                         )
-                    await decommission_session.commit()
+                    await decommission_session.write_session.commit()
                     result = await asyncio.wait_for(admission_task, timeout=5)
                 finally:
                     if not admission_task.done():
@@ -2150,18 +2159,19 @@ class TestAgentSessionInputService:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as session:
+            ) as raw_session:
+                session = ReadWriteSession(raw_session)
                 await _cleanup_committed_agent_fixture(
                     session,
                     workspace_id=workspace_id,
                     user_id=user_id,
                     agent_id=agent_id,
                 )
-                await session.commit()
+                await session.write_session.commit()
 
     async def test_create_buffered_agent_input_dedupes_client_request_id(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Same client_request_id returns same MailboxItem."""
         async with rdb_session_manager() as session:
@@ -2235,7 +2245,7 @@ class TestAgentSessionInputService:
         async with rdb_session_manager() as session:
             historical_profile = _TEST_INFERENCE_PROFILE.model_dump(mode="json")
             historical_profile.pop("enabled_execution_options")
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBChatWriteRequest)
                 .where(
                     RDBChatWriteRequest.client_request_id == "client-request-1",
@@ -2296,7 +2306,7 @@ class TestAgentSessionInputService:
 
     async def test_buffered_input_idempotency_is_scoped_to_requester(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Different requesters sharing a client key retain independent inputs."""
         async with rdb_session_manager() as session:
@@ -2485,14 +2495,14 @@ class TestAgentSessionInputService:
 
 
 def _active_profile_repository(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ActiveProfileAdmissionRepository:
     """Keep these lifecycle-only fixtures scoped to their declared option contract."""
     del manager
     repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
 
     async def validate(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         profile: RequestedInferenceProfile,

@@ -5,7 +5,6 @@ from decimal import Decimal
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
 from azents.core.model_catalog_identity import CatalogIdentityError
@@ -21,6 +20,7 @@ from azents.core.model_metadata_collection_data import (
 )
 from azents.core.model_pricing import normalize_model_pricing
 from azents.rdb.models.model_metadata_source import RDBModelMetadataSourceModel
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import (
     ContextModelRequest,
@@ -62,7 +62,7 @@ def _fetched(
 
 
 async def _publish(
-    session: AsyncSession,
+    session: WriteSession,
     repository: ModelMetadataSourceRepository,
     fetched: FetchedModelMetadataSource,
 ) -> None:
@@ -82,7 +82,7 @@ async def _publish(
 
 
 async def test_overwrite_retains_only_current_keys_and_updates_price(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     first = _fetched(
@@ -115,7 +115,7 @@ async def test_overwrite_retains_only_current_keys_and_updates_price(
     assert current is not None
     assert current.models == second.models
     assert current.payload == second.payload
-    count = await rdb_session.scalar(
+    count = await rdb_session.read_session.scalar(
         sa.select(sa.func.count()).select_from(RDBModelMetadataSourceModel)
     )
     assert count == 1
@@ -128,7 +128,7 @@ async def test_overwrite_retains_only_current_keys_and_updates_price(
 
 
 async def test_lossless_decimal_survives_jsonb_and_current_restore(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     payload = decode_catalog_source(
@@ -145,7 +145,7 @@ async def test_lossless_decimal_survives_jsonb_and_current_restore(
 
 
 async def test_late_failure_cannot_replace_newer_work_status(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     first = await repository.begin_sync(
@@ -176,7 +176,7 @@ async def test_late_failure_cannot_replace_newer_work_status(
 
 
 async def test_failure_preserves_last_success_and_current_models(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     fetched = _fetched(
@@ -205,7 +205,7 @@ async def test_failure_preserves_last_success_and_current_models(
 
 
 async def test_context_query_is_exact_scoped_and_requested_only(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     fetched = _fetched(
@@ -243,7 +243,7 @@ async def test_context_query_is_exact_scoped_and_requested_only(
 
 
 async def test_ambiguous_exact_vertex_namespaces_do_not_choose_one(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     fetched = _fetched(
@@ -280,7 +280,7 @@ async def test_ambiguous_exact_vertex_namespaces_do_not_choose_one(
 
 
 async def test_value_and_absence_checks_do_not_use_work_token(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = ModelMetadataSourceRepository()
     fetched = _fetched(

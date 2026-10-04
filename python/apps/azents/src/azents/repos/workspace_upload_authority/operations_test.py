@@ -9,6 +9,7 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -31,8 +32,8 @@ class _SessionManager:
     """Provide one session-shaped value for repository doubles."""
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
-        yield AsyncSession()
+    async def __call__(self) -> AsyncGenerator[WriteSession]:
+        yield ReadWriteSession(AsyncSession())
 
 
 class _AgentRepository(AgentRepository):
@@ -43,7 +44,7 @@ class _AgentRepository(AgentRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> Agent | None:
         """Return the configured Agent for its exact ID."""
@@ -61,7 +62,7 @@ class _WorkspaceUserRepository(WorkspaceUserRepository):
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -86,7 +87,7 @@ class _AgentAdminRepository(AgentAdminRepository):
 
     async def is_admin(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         workspace_user_id: str,
     ) -> bool:

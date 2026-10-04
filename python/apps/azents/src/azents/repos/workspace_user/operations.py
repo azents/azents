@@ -5,11 +5,11 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -72,7 +72,7 @@ class WorkspaceUserOperationRepository:
         OwnerLifecycleRepository, Depends(OwnerLifecycleRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def create_by_handle(
@@ -270,7 +270,7 @@ class WorkspaceUserOperationRepository:
 
     async def _transfer_ownership(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         new_owner_workspace_user_id: str,
@@ -320,7 +320,7 @@ class WorkspaceUserOperationRepository:
                 case Success():
                     pass
                 case Failure(error):
-                    await session.rollback()
+                    await session.write_session.rollback()
                     return Failure(error)
                 case _:
                     assert_never(demotion_result)
@@ -340,7 +340,7 @@ class WorkspaceUserOperationRepository:
                     )
                 )
             case Failure(error):
-                await session.rollback()
+                await session.write_session.rollback()
                 return Failure(error)
             case _:
                 assert_never(promotion_result)

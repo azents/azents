@@ -29,6 +29,7 @@ from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.workspace import WorkspaceRepository
 
@@ -48,7 +49,7 @@ def _make_repo() -> LLMProviderIntegrationRepository:
 
 
 async def _create_workspace(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str = "llm-integ-test-ws",
 ) -> str:
@@ -67,7 +68,7 @@ async def _create_workspace(
 class TestLLMProviderIntegrationRepository:
     """LLMProviderIntegrationRepository tests."""
 
-    async def test_create(self, rdb_session: AsyncSession) -> None:
+    async def test_create(self, rdb_session: WriteSession) -> None:
         """Create LLM Provider Integration (API key provider)."""
         # Given: Workspace + prepare create data
         ws_id = await _create_workspace(rdb_session)
@@ -92,7 +93,7 @@ class TestLLMProviderIntegrationRepository:
         assert integration.updated_at
 
     async def test_create_xai_api_key_encrypts_and_redacts_secrets(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Encrypt xAI API keys at rest and omit them from normal reads."""
         ws_id = await _create_workspace(rdb_session)
@@ -109,7 +110,9 @@ class TestLLMProviderIntegrationRepository:
             ),
         )
 
-        stored = await rdb_session.get(RDBLLMProviderIntegration, created.id)
+        stored = await rdb_session.read_session.get(
+            RDBLLMProviderIntegration, created.id
+        )
         redacted = await repo.get_by_id(rdb_session, created.id)
         with_secrets = await repo.get_by_id_with_secrets(rdb_session, created.id)
 
@@ -121,7 +124,7 @@ class TestLLMProviderIntegrationRepository:
         assert with_secrets.secrets == ApiKeySecrets(api_key=api_key)
         assert with_secrets.config is None
 
-    async def test_create_with_config(self, rdb_session: AsyncSession) -> None:
+    async def test_create_with_config(self, rdb_session: WriteSession) -> None:
         """Create LLM Provider Integration (provider with config)."""
         # Given: Workspace + prepare AWS Bedrock create data
         ws_id = await _create_workspace(rdb_session)
@@ -146,7 +149,7 @@ class TestLLMProviderIntegrationRepository:
             access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
         )
 
-    async def test_get_by_id(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_id(self, rdb_session: WriteSession) -> None:
         """Fetch LLM Provider Integration by ID, excluding secrets."""
         # Given: create Integration
         ws_id = await _create_workspace(rdb_session)
@@ -170,13 +173,13 @@ class TestLLMProviderIntegrationRepository:
         assert integration.provider == LLMProvider.ANTHROPIC
         assert integration.name == "Anthropic Key"
 
-    async def test_get_by_id_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_id_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent ID."""
         repo = _make_repo()
         integration = await repo.get_by_id(rdb_session, "nonexistent-id")
         assert integration is None
 
-    async def test_get_by_id_with_secrets(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_id_with_secrets(self, rdb_session: WriteSession) -> None:
         """Fetch LLM Provider Integration by ID, including secrets."""
         # Given: create Integration
         ws_id = await _create_workspace(rdb_session)
@@ -205,7 +208,7 @@ class TestLLMProviderIntegrationRepository:
             access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID", region="us-east-1"
         )
 
-    async def test_get_by_id_with_secrets_gcp(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_id_with_secrets_gcp(self, rdb_session: WriteSession) -> None:
         """Fetch GCP provider including secrets."""
         # Given: create GCP Integration
         ws_id = await _create_workspace(rdb_session)
@@ -234,7 +237,7 @@ class TestLLMProviderIntegrationRepository:
         )
 
     async def test_get_by_id_with_secrets_chatgpt_oauth(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Fetch ChatGPT OAuth secrets and config decrypted."""
         ws_id = await _create_workspace(rdb_session)
@@ -282,7 +285,7 @@ class TestLLMProviderIntegrationRepository:
         )
 
     async def test_get_by_id_with_secrets_xai_oauth(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Fetch xAI OAuth secrets and config decrypted."""
         ws_id = await _create_workspace(rdb_session)
@@ -327,7 +330,7 @@ class TestLLMProviderIntegrationRepository:
             connected_at=connected_at,
         )
 
-    async def test_list_by_workspace(self, rdb_session: AsyncSession) -> None:
+    async def test_list_by_workspace(self, rdb_session: WriteSession) -> None:
         """Fetch integrations by workspace."""
         # Given: create multiple integrations in one workspace
         ws_id = await _create_workspace(rdb_session)
@@ -357,7 +360,7 @@ class TestLLMProviderIntegrationRepository:
         # Then: return two items
         assert len(integration_list.items) == 2
 
-    async def test_update_by_id(self, rdb_session: AsyncSession) -> None:
+    async def test_update_by_id(self, rdb_session: WriteSession) -> None:
         """Update LLM Provider Integration."""
         # Given: create Integration
         ws_id = await _create_workspace(rdb_session)
@@ -387,7 +390,7 @@ class TestLLMProviderIntegrationRepository:
 
     async def test_name_only_update_preserves_catalog_configuration_version(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Display-name changes do not invalidate credential-visible catalogs."""
         ws_id = await _create_workspace(rdb_session)
@@ -411,7 +414,7 @@ class TestLLMProviderIntegrationRepository:
         assert isinstance(result, Success)
         assert result.value.catalog_configuration_version == 1
 
-    async def test_update_secrets(self, rdb_session: AsyncSession) -> None:
+    async def test_update_secrets(self, rdb_session: WriteSession) -> None:
         """Check decryption after secrets update."""
         # Given: create Integration
         ws_id = await _create_workspace(rdb_session)
@@ -438,7 +441,7 @@ class TestLLMProviderIntegrationRepository:
         assert integration is not None
         assert integration.secrets == ApiKeySecrets(api_key="new-key")
 
-    async def test_update_config(self, rdb_session: AsyncSession) -> None:
+    async def test_update_config(self, rdb_session: WriteSession) -> None:
         """Check config update."""
         # Given: create AWS Integration
         ws_id = await _create_workspace(rdb_session)
@@ -474,7 +477,7 @@ class TestLLMProviderIntegrationRepository:
             access_key_id="EXAMPLE_AWS_ACCESS_KEY_ID_NEW", region="ap-northeast-2"
         )
 
-    async def test_update_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_update_not_found(self, rdb_session: WriteSession) -> None:
         """Return NotFound when updating nonexistent ID."""
         repo = _make_repo()
         result = await repo.update_by_id(
@@ -485,7 +488,7 @@ class TestLLMProviderIntegrationRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, NotFound)
 
-    async def test_delete_by_id(self, rdb_session: AsyncSession) -> None:
+    async def test_delete_by_id(self, rdb_session: WriteSession) -> None:
         """Delete LLM Provider Integration."""
         # Given: create Integration
         ws_id = await _create_workspace(rdb_session)
@@ -525,7 +528,8 @@ class TestLLMProviderIntegrationRepository:
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as setup_session:
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 handle=f"llm-integration-delete-lock-order-{suffix}",
@@ -545,14 +549,15 @@ class TestLLMProviderIntegrationRepository:
                 provider=integration.provider,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async def delete_integration() -> None:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as delete_session:
-                await delete_session.execute(
+            ) as _raw_delete_session:
+                delete_session = ReadWriteSession(_raw_delete_session)
+                await delete_session.write_session.execute(
                     sa.text("SELECT set_config('application_name', :name, true)"),
                     {"name": application_name},
                 )
@@ -561,13 +566,14 @@ class TestLLMProviderIntegrationRepository:
                     integration.id,
                     workspace_id=workspace_id,
                 )
-                await delete_session.commit()
+                await delete_session.write_session.commit()
 
         async def wait_for_workspace_lock() -> None:
             deadline = asyncio.get_running_loop().time() + 5
             while asyncio.get_running_loop().time() < deadline:
-                async with AsyncSession(rdb_engine) as observer:
-                    waiting = await observer.scalar(
+                async with AsyncSession(rdb_engine) as _raw_observer:
+                    observer = ReadWriteSession(_raw_observer)
+                    waiting = await observer.write_session.scalar(
                         sa.text(
                             """
                             SELECT EXISTS (
@@ -590,14 +596,15 @@ class TestLLMProviderIntegrationRepository:
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as sync_session:
-            locked_workspace_id = await sync_session.scalar(
+        ) as _raw_sync_session:
+            sync_session = ReadWriteSession(_raw_sync_session)
+            locked_workspace_id = await sync_session.write_session.scalar(
                 sa.select(RDBWorkspace.id)
                 .where(RDBWorkspace.id == workspace_id)
                 .with_for_update()
             )
             assert locked_workspace_id == workspace_id
-            locked_catalog_id = await sync_session.scalar(
+            locked_catalog_id = await sync_session.write_session.scalar(
                 sa.select(RDBLLMCatalog.id)
                 .where(RDBLLMCatalog.id == catalog.id)
                 .with_for_update()
@@ -607,7 +614,7 @@ class TestLLMProviderIntegrationRepository:
             deletion_task = asyncio.create_task(delete_integration())
             await wait_for_workspace_lock()
             locked_integration_id = await asyncio.wait_for(
-                sync_session.scalar(
+                sync_session.write_session.scalar(
                     sa.select(RDBLLMProviderIntegration.id)
                     .where(RDBLLMProviderIntegration.id == integration.id)
                     .with_for_update()
@@ -615,20 +622,21 @@ class TestLLMProviderIntegrationRepository:
                 timeout=5,
             )
             assert locked_integration_id == integration.id
-            await sync_session.commit()
+            await sync_session.write_session.commit()
 
         await asyncio.wait_for(deletion_task, timeout=5)
 
-        async with AsyncSession(rdb_engine) as verification_session:
+        async with AsyncSession(rdb_engine) as _raw_verification_session:
+            verification_session = ReadWriteSession(_raw_verification_session)
             assert (
-                await verification_session.get(
+                await verification_session.read_session.get(
                     RDBLLMProviderIntegration,
                     integration.id,
                 )
                 is None
             )
             assert (
-                await verification_session.get(
+                await verification_session.read_session.get(
                     RDBLLMCatalog,
                     catalog.id,
                 )

@@ -9,7 +9,6 @@ from typing import Annotated, assert_never
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.password import (
     WeakPasswordError,
@@ -20,6 +19,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.password_reset_token import PasswordResetTokenRepository
@@ -81,7 +81,7 @@ class PasswordResetTokenService:
     password_login_repo: Annotated[PasswordLoginRepository, Depends()]
     session_repo: Annotated[SessionRepository, Depends()]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
     config: Annotated[Config, Depends(get_config)]

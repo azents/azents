@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import pytest
 import sqlalchemy as sa
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from uuid6 import uuid7
 
 from azents.rdb.models.agent import RDBAgent
@@ -28,6 +28,7 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityBusyError,
     ConsolidationAuthorityError,
@@ -53,7 +54,7 @@ from azents.testing.consolidation import (
 @pytest.mark.parametrize("source_count", [1, 64])
 async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
     rdb_engine: AsyncEngine,
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     source_count: int,
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
@@ -64,7 +65,7 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
     drafts = ConsolidationDraftRepository(rdb_session_manager)
     await drafts.observe(claim.principal, path="summary.md")
     async with rdb_session_manager() as session:
-        draft = await session.scalar(sa.select(RDBConsolidationDraft))
+        draft = await session.read_session.scalar(sa.select(RDBConsolidationDraft))
         assert draft is not None
         ids = [corpus.team_source]
         for index in range(source_count - 1):
@@ -77,14 +78,14 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
                     title=f"Source {index}",
                 )
             )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBHistoricalMemorySource)
             .where(RDBHistoricalMemorySource.source_session_id.in_(ids))
             .values(summary_generation=17)
         )
         for source_id in ids:
             for generation in range(1, 17):
-                session.add(
+                session.write_session.add(
                     RDBConsolidationEvidence(
                         id=uuid7().hex,
                         attempt_id=claim.principal.attempt_id,
@@ -96,7 +97,7 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
                     )
                 )
                 if generation <= 8:
-                    session.add(
+                    session.write_session.add(
                         RDBConsolidationDraftDependency(
                             id=uuid7().hex,
                             draft_id=draft.id,
@@ -107,7 +108,7 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
                             membership_grant_id=None,
                         )
                     )
-        await session.commit()
+        await session.write_session.commit()
     statements: list[str] = []
 
     def capture(*args: object) -> None:
@@ -150,16 +151,16 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
     ]
     assert len(copies) == 1
     async with rdb_session_manager() as session:
-        count = await session.scalar(
+        count = await session.read_session.scalar(
             sa.select(sa.func.count()).select_from(RDBConsolidationDraftDependency)
         )
         assert count == source_count * 16
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBHistoricalMemorySource)
             .where(RDBHistoricalMemorySource.source_session_id == ids[-1])
             .values(availability_generation=2)
         )
-        await session.commit()
+        await session.write_session.commit()
     with pytest.raises(ConsolidationAuthorityError):
         await drafts.replay_receipt(
             claim.principal,
@@ -175,9 +176,9 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
     @asynccontextmanager
-    async def manager() -> AsyncGenerator[AsyncSession, None]:
+    async def manager() -> AsyncGenerator[WriteSession, None]:
         async with factory.begin() as session:
-            yield session
+            yield ReadWriteSession(session)
 
     corpus = await seed_consolidation_corpus(manager)
     try:
@@ -202,7 +203,7 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
             ],
         )
         async with manager() as holder:
-            await holder.scalar(
+            await holder.write_session.scalar(
                 sa.select(RDBHistoricalMemorySource)
                 .where(
                     RDBHistoricalMemorySource.source_session_id == corpus.team_source
@@ -214,7 +215,7 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
         # Rejected nonwaiting manifest checks release the owner fence for renewal.
         assert await ConsolidationOwnershipRepository(manager).renew(claim.principal)
         async with manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBConsolidationAttempt)
                 .where(RDBConsolidationAttempt.id == claim.principal.attempt_id)
                 .values(
@@ -224,7 +225,7 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
             )
         with pytest.raises(ConsolidationDeadlineError, match="deadline"):
             async with consolidation_job_session(manager, claim.principal) as job:
-                file = await job.session.scalar(
+                file = await job.session.write_session.scalar(
                     sa.select(RDBConsolidationDraftFile).where(
                         RDBConsolidationDraftFile.draft_id.in_(
                             sa.select(RDBConsolidationDraft.id).where(
@@ -235,7 +236,7 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                 )
                 assert file is not None
                 file.content = "must roll back"
-                job.session.add(
+                job.session.write_session.add(
                     RDBConsolidationMutationReceipt(
                         attempt_id=claim.principal.attempt_id,
                         tool_call_id="timed-out",
@@ -243,11 +244,11 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                         result_json=created.model_dump(mode="json"),
                     )
                 )
-                await job.session.flush()
+                await job.session.write_session.flush()
                 # Exercise server cancellation before the operation timer, then
                 # the operation timer with server cancellation disabled. Elapsed
                 # time is the contract here, not a test-ordering mechanism.
-                await job.session.execute(
+                await job.session.write_session.execute(
                     sa.select(
                         sa.func.set_config(
                             "statement_timeout",
@@ -256,9 +257,9 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                         )
                     )
                 )
-                await job.session.execute(sa.select(sa.func.pg_sleep(2)))
+                await job.session.write_session.execute(sa.select(sa.func.pg_sleep(2)))
         async with manager() as session:
-            file = await session.scalar(
+            file = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraftFile).where(
                     RDBConsolidationDraftFile.draft_id.in_(
                         sa.select(RDBConsolidationDraft.id).where(
@@ -274,7 +275,7 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
             )
             assert file is not None and file.content == "preserved"
             assert (
-                await session.get(
+                await session.write_session.get(
                     RDBConsolidationMutationReceipt,
                     (claim.principal.attempt_id, "timed-out"),
                 )
@@ -282,7 +283,7 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
             )
             # An independent transaction immediately reacquires the released fence.
             assert (
-                await session.scalar(
+                await session.write_session.scalar(
                     sa.select(RDBConsolidationUnit)
                     .where(RDBConsolidationUnit.agent_id == corpus.team.agent_id)
                     .with_for_update(nowait=True)
@@ -291,12 +292,12 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
             )
     finally:
         async with manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSessionAgentContext)
                 .where(RDBSessionAgentContext.agent_id == corpus.team.agent_id)
                 .values(root_session_agent_id=None)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSessionAgent).where(
                     RDBSessionAgent.agent_session_id.in_(
                         sa.select(RDBAgentSession.id).where(
@@ -305,30 +306,30 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                     )
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSessionAgentContext).where(
                     RDBSessionAgentContext.agent_id == corpus.team.agent_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgentSession).where(
                     RDBAgentSession.agent_id == corpus.team.agent_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgentRuntime).where(
                     RDBAgentRuntime.agent_id == corpus.team.agent_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgent).where(RDBAgent.id == corpus.team.agent_id)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBWorkspace).where(
                     RDBWorkspace.id == corpus.team.workspace_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBUser).where(
                     RDBUser.id == corpus.personal.associated_user_id
                 )

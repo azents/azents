@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionStatus
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -22,12 +23,13 @@ from azents.repos.subagent_tool_operations import SubagentToolOperationRepositor
 
 async def test_subagent_tool_operations_close_before_returning_effect_targets() -> None:
     """Subagent reads and queueing return detached results after commit."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
     transaction_count = 0
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active, transaction_count
         assert not transaction_active
         transaction_active = True

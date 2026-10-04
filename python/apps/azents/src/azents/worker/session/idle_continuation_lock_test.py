@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import (
     _create_agent,
@@ -32,7 +33,7 @@ class _ObservedSessionRepository(AgentSessionRepository):
 
     async def lock_execution_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Record the database's nonblocking tree-admission rejection."""
@@ -51,9 +52,10 @@ async def _wait_for_database_blocker(
     blocker_pid: int,
 ) -> None:
     """Observe an actual lock dependency instead of guessing scheduler timing."""
-    async with AsyncSession(engine) as observer:
+    async with AsyncSession(engine) as raw_observer:
+        observer = ReadWriteSession(raw_observer)
         while True:
-            blocked = await observer.scalar(
+            blocked = await observer.read_session.scalar(
                 sa.text("SELECT :blocker_pid = ANY(pg_blocking_pids(:blocked_pid))"),
                 {"blocker_pid": blocker_pid, "blocked_pid": blocked_pid},
             )
@@ -70,7 +72,8 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
     del latest_db_schema
     repository = _ObservedSessionRepository()
     suffix = uuid4().hex[:8]
-    async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+    async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_setup:
+        setup = ReadWriteSession(raw_setup)
         workspace_id = await _create_workspace(setup, f"idle-lock-order-{suffix}")
         agent_id = await _create_agent(
             setup,
@@ -97,7 +100,7 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
             title=None,
             last_task_message=None,
         )
-        await setup.commit()
+        await setup.write_session.commit()
 
     service = _service(
         continuation_recorder=_ContinuationRecorder(),
@@ -108,8 +111,11 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
     idle_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
     async def evaluate_idle() -> bool:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as idle_session:
-            backend_pid = await idle_session.scalar(sa.text("SELECT pg_backend_pid()"))
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_idle_session:
+            idle_session = ReadWriteSession(raw_idle_session)
+            backend_pid = await idle_session.read_session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
             assert isinstance(backend_pid, int)
             idle_pid.set_result(backend_pid)
             eligibility = await service.repository._eligibility(
@@ -118,18 +124,21 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
                 "0" * 32,
                 owner_generation=root.owner_generation,
             )
-            await idle_session.commit()
+            await idle_session.write_session.commit()
             return eligibility.eligible
 
     tasks: list[asyncio.Task[object]] = []
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as terminal_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as raw_terminal_session:
+            terminal_session = ReadWriteSession(raw_terminal_session)
             locked_child = await repository.wait_for_execution_lock_by_id(
                 terminal_session,
                 child.agent_session_id,
             )
             assert locked_child is not None
-            terminal_pid = await terminal_session.scalar(
+            terminal_pid = await terminal_session.read_session.scalar(
                 sa.text("SELECT pg_backend_pid()")
             )
             assert isinstance(terminal_pid, int)
@@ -162,7 +171,7 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
                 timeout=5,
             )
             assert locked_parent is not None
-            await terminal_session.commit()
+            await terminal_session.write_session.commit()
 
             assert await asyncio.wait_for(idle_task, timeout=5) is False
             assert repository.tree_admission_deferred.is_set()

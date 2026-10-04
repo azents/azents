@@ -10,7 +10,6 @@ from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -32,6 +31,7 @@ from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContr
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
@@ -109,7 +109,7 @@ class RuntimeProfileWorkspaceService:
     """Manage complete Runtime choices owned by one Workspace."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     profile_repository: Annotated[
         RuntimeProfileRepository, Depends(RuntimeProfileRepository)
@@ -197,7 +197,7 @@ class RuntimeProfileWorkspaceService:
 
     async def resolve_agent_create_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         explicit_profile_id: str | None,
@@ -235,7 +235,7 @@ class RuntimeProfileWorkspaceService:
 
     async def require_available_agent_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         profile_id: str,
@@ -584,7 +584,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _project(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         profile: WorkspaceRuntimeProfile,
     ) -> WorkspaceRuntimeProfileProjection:
@@ -684,7 +684,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _require_infrastructure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         profile_id: str,
     ) -> RuntimeInfrastructureProfile:
         profile = await self.profile_repository.get_infrastructure_profile(
@@ -701,7 +701,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _project_default(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         workspace: Workspace,
     ) -> WorkspaceRuntimeProfileDefaultProjection:
@@ -728,7 +728,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _require_selectable_infrastructure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         infrastructure: RuntimeInfrastructureProfile,
@@ -764,7 +764,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _require_selectable_workspace_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         infrastructure: RuntimeInfrastructureProfile,
@@ -816,7 +816,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _provider_ready_for_workspace(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         workspace_id: str,
@@ -846,7 +846,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _infrastructure_compatibility(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         infrastructure: RuntimeInfrastructureProfile,
@@ -876,7 +876,7 @@ class RuntimeProfileWorkspaceService:
 
     async def _workspace_profile_compatibility(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         infrastructure: RuntimeInfrastructureProfile,

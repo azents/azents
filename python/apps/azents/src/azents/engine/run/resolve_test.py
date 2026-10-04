@@ -69,6 +69,7 @@ from azents.engine.tools.runtime_web import RuntimeWebToolkit, RuntimeWebToolkit
 from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -161,15 +162,22 @@ def test_attachment_preview_does_not_advertise_withheld_resource_tools() -> None
 
 
 def _session_manager_for(
-    session: AsyncSession,
-) -> SessionManager[AsyncSession]:
+    session: WriteSession,
+) -> SessionManager[WriteSession]:
     """Return a session manager yielding one test session."""
 
     @asynccontextmanager
-    async def manager() -> AsyncGenerator[AsyncSession, None]:
+    async def manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     return manager
+
+
+def _resolution_session() -> WriteSession:
+    """Create a wrapped mock session with a controllable ORM lookup."""
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.get = AsyncMock(return_value=None)
+    return ReadWriteSession(raw_session)
 
 
 def _make_scheduled_provider() -> ScheduledToolkitProvider:
@@ -527,8 +535,8 @@ def _make_turn_context() -> TurnContext:
 
 def _make_builtin_provider() -> BuiltinToolkitProvider:
     """Create BuiltinToolkitProvider for resolve_agent_tools tests."""
-    session = AsyncMock(spec=AsyncSession)
-    session.get = AsyncMock(return_value=None)
+    session = ReadWriteSession(AsyncMock(spec=AsyncSession))
+    session.read_session.get = AsyncMock(return_value=None)
     memory = AsyncMock(spec=MemoryRepository)
     memory.list_summaries.return_value = []
     runtimes = AsyncMock(spec=AgentRuntimeRepository)
@@ -805,8 +813,8 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input(
             InvokeInput(
@@ -1260,13 +1268,13 @@ class TestResolveInvokeInput:
         agent_repository = AsyncMock()
         integration_repository = AsyncMock()
 
-        async def get_agent(session: AsyncSession, agent_id: str) -> Agent:
+        async def get_agent(session: WriteSession, agent_id: str) -> Agent:
             del session, agent_id
             assert active_sessions == 1
             return _make_agent()
 
         async def get_integration(
-            session: AsyncSession, integration_id: str
+            session: WriteSession, integration_id: str
         ) -> LLMProviderIntegrationWithSecrets:
             del session, integration_id
             assert active_sessions == 1
@@ -1276,11 +1284,11 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.side_effect = get_integration
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
             nonlocal active_sessions
             active_sessions += 1
             try:
-                yield AsyncMock(spec=AsyncSession)
+                yield ReadWriteSession(AsyncMock(spec=AsyncSession))
             finally:
                 active_sessions -= 1
 
@@ -1330,8 +1338,8 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1446,8 +1454,8 @@ class TestResolveInvokeInput:
         agent_repository.get_by_id.return_value = _make_agent()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1488,8 +1496,8 @@ class TestResolveInvokeInput:
         integration_repository.get_by_id_with_secrets.return_value = _make_integration()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1531,8 +1539,8 @@ class TestResolveInvokeInput:
         agent_repository.get_by_id.return_value = _make_agent()
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1575,8 +1583,8 @@ class TestResolveInvokeInput:
         )
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         result = await resolve_invoke_input_with_profile(
             InvokeInput(
@@ -1623,8 +1631,7 @@ class TestResolveAgentTools:
         execution_mode: ToolkitExecutionMode,
     ) -> None:
         """Runtime Web authority tools remain available before Runtime startup."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
         provider = RuntimeWebToolkitProvider(
             service=AsyncMock(spec=RuntimeWebService),
         )
@@ -1665,8 +1672,7 @@ class TestResolveAgentTools:
         execution_mode: ToolkitExecutionMode,
     ) -> None:
         """Root and subagent Runs resolve the shared-context worktree Toolkit."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
@@ -1725,8 +1731,7 @@ class TestResolveAgentTools:
 
     async def test_auto_binds_claude_rules_when_runtime_capability_allows(self) -> None:
         """Claude rules Toolkit is auto-bound after Runtime capability admission."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
@@ -1776,8 +1781,7 @@ class TestResolveAgentTools:
         self,
     ) -> None:
         """Claude rules Toolkit is not auto-bound without Runtime capability."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
@@ -1814,8 +1818,7 @@ class TestResolveAgentTools:
 
     async def test_auto_binds_subagent_toolkit_in_root_mode(self) -> None:
         """Root sessions receive the coherent subagent collaboration bundle."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         bindings = await resolve_agent_tools(
             "agent-1",
@@ -1853,12 +1856,11 @@ class TestResolveAgentTools:
 
     async def test_subagent_mode_filters_root_only_auto_bound_toolkits(self) -> None:
         """Subagent mode keeps read/runtime capabilities and excludes root-only ones."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
 
         @asynccontextmanager
-        async def goal_session_manager() -> AsyncGenerator[AsyncSession, None]:
-            yield AsyncMock(spec=AsyncSession)
+        async def goal_session_manager() -> AsyncGenerator[WriteSession, None]:
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
         bindings = await resolve_agent_tools(
             "agent-1",
@@ -1900,8 +1902,7 @@ class TestResolveAgentTools:
 
     async def test_scheduled_toolkit_is_unprefixed_and_root_only(self) -> None:
         """Scheduled auto-binding needs no attachment, config, or credentials."""
-        session = AsyncMock(spec=AsyncSession)
-        session.get.return_value = None
+        session = _resolution_session()
         provider = _make_scheduled_provider()
 
         root = await resolve_agent_tools(

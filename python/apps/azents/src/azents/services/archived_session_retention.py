@@ -5,10 +5,10 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionRetentionApplication,
@@ -74,7 +74,7 @@ class ArchivedSessionRetentionService:
         Depends(ArchivedSessionRetentionRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def get_settings(self) -> SystemFileLifecycleSettings:

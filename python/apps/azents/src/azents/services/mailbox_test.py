@@ -92,6 +92,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -200,7 +201,7 @@ def test_fold_turn_eligibility(
     assert eligible is expected
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -213,7 +214,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -223,8 +224,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -258,13 +259,13 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
 async def _create_fixture(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     slug: str,
 ) -> _MailboxFixture:
     """Create fixture satisfying MailboxItem FK."""
@@ -312,7 +313,7 @@ class _ScheduledAdmissionFixture:
 
 
 async def _create_scheduled_admission_fixture(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     slug: str,
 ) -> _ScheduledAdmissionFixture:
@@ -359,7 +360,7 @@ async def _create_scheduled_admission_fixture(
                 scheduled_for=scheduled_for,
             ),
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBScheduledTask)
             .where(RDBScheduledTask.id == task.id)
             .values(
@@ -411,7 +412,7 @@ async def _create_scheduled_admission_fixture(
 
 
 async def _create_active_run(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     session_id: str,
 ) -> AgentRunState:
@@ -426,7 +427,7 @@ async def _create_active_run(
 
 
 async def _create_buffer(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     session_id: str,
     user_id: str,
@@ -462,7 +463,7 @@ async def _create_buffer(
 
 
 async def _create_action_buffer(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     session_id: str,
     user_id: str,
@@ -495,7 +496,7 @@ async def _create_action_buffer(
 
 
 async def _create_agent_message_buffer(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     session_id: str,
     content: str,
@@ -534,7 +535,7 @@ async def _create_agent_message_buffer(
 
 
 async def _create_agent_result_buffer(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     session_id: str,
     content: str,
@@ -601,7 +602,7 @@ def _skill_item() -> SkillProjectionItem:
 
 
 async def _create_child_session_agent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     parent_session_id: str,
     name: str = "reviewer",
@@ -629,7 +630,7 @@ async def _create_child_session_agent(
 
 
 async def _create_terminal_child_run(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     child_session_agent_id: str,
     terminal_result_event_id: str,
@@ -666,7 +667,7 @@ async def _create_terminal_child_run(
 class _VfsService:
     """VFS resolver test double for managed Skill action promotion."""
 
-    def __init__(self, tracked_sessions: list[AsyncSession] | None = None) -> None:
+    def __init__(self, tracked_sessions: list[WriteSession] | None = None) -> None:
         revision = make_vfs_source_revision(
             source_id="release:azents",
             source_kind="global_release",
@@ -689,7 +690,8 @@ class _VfsService:
         if self.tracked_sessions is not None:
             assert self.tracked_sessions
             assert all(
-                not session.in_transaction() for session in self.tracked_sessions
+                not session.write_session.in_transaction()
+                for session in self.tracked_sessions
             )
             self.observed_no_active_transaction = True
         self.run_ids.append(str(kwargs["run_id"]))
@@ -717,7 +719,7 @@ class _VfsService:
 
 
 async def _agent_id_for_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     session_id: str,
 ) -> str:
     """Return agent ID for a test session."""
@@ -911,7 +913,7 @@ class _DeletingExchangeFileService(_ExchangeFileService):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         session_id: str,
         buffer_id: str,
         metadata_result: Result[
@@ -1023,7 +1025,7 @@ class _CancellingSecondAttachmentExchangeFileService(_ExchangeFileService):
 
 
 def _mailbox_item_service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     exchange_file_service: ExchangeFileService | None = None,
     model_file_service: ModelFileService | None = None,
@@ -1071,7 +1073,7 @@ def _mailbox_item_service(
 
 
 def _turn_action_capabilities(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     agent_session_repository: AgentSessionRepository,
     *,
     vfs_projection_service: TurnActionVfsProjectionService | None = None,
@@ -1096,7 +1098,7 @@ def _scheduled_task_service() -> ScheduledTaskService:
 
 
 @asynccontextmanager
-async def _unit_session_manager() -> AsyncIterator[AsyncSession]:
+async def _unit_session_manager() -> AsyncIterator[WriteSession]:
     """Yield a DB-session placeholder for preparation-only unit tests."""
     yield AsyncMock(spec=AsyncSession)
 
@@ -1105,11 +1107,11 @@ async def _unit_session_manager() -> AsyncIterator[AsyncSession]:
 class _TrackingSessionManager:
     """Record sessions so external fakes can inspect transaction state."""
 
-    delegate: SessionManager[AsyncSession]
-    sessions: list[AsyncSession]
+    delegate: SessionManager[WriteSession]
+    sessions: list[WriteSession]
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         async with self.delegate() as session:
             self.sessions.append(session)
             yield session
@@ -1423,7 +1425,7 @@ async def test_cancelled_attachment_preparation_discards_partial_model_files() -
 
 @pytest.mark.asyncio
 async def test_admit_scheduled_trigger_starts_cycle_and_binds_run(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Trigger admission atomically starts its cycle and creates one bound Run."""
     fixture = await _create_scheduled_admission_fixture(
@@ -1473,7 +1475,7 @@ async def test_admit_scheduled_trigger_starts_cycle_and_binds_run(
 
 @pytest.mark.asyncio
 async def test_generic_flush_preserves_scheduled_trigger_head(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Generic model-input flush leaves Scheduled Task work to its admission path."""
     fixture = await _create_scheduled_admission_fixture(
@@ -1504,7 +1506,7 @@ async def test_generic_flush_preserves_scheduled_trigger_head(
 
 @pytest.mark.asyncio
 async def test_delete_scheduled_task_removes_admitted_trigger_and_cycle(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Task deletion before admission removes all start authority and creates no Run."""
     fixture = await _create_scheduled_admission_fixture(
@@ -1554,7 +1556,7 @@ async def test_delete_scheduled_task_removes_admitted_trigger_and_cycle(
 
 @pytest.mark.asyncio
 async def test_admit_scheduled_trigger_consumes_deleted_task_without_run(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Deletion before trigger admission removes the stale envelope and cycle."""
     fixture = await _create_scheduled_admission_fixture(
@@ -1605,7 +1607,7 @@ async def test_admit_scheduled_trigger_consumes_deleted_task_without_run(
 
 @pytest.mark.asyncio
 async def test_delete_scheduled_task_preserves_started_cycle_and_run(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Task deletion after admission preserves independent started work."""
     fixture = await _create_scheduled_admission_fixture(
@@ -1655,7 +1657,7 @@ async def test_delete_scheduled_task_preserves_started_cycle_and_run(
 
 @pytest.mark.asyncio
 async def test_admit_scheduled_continuation_rebinds_started_cycle(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A continuation creates a new bound Run without restarting the cycle."""
     fixture = await _create_scheduled_admission_fixture(
@@ -1932,7 +1934,7 @@ class TestMailboxService:
 
     async def test_flush_admits_agent_remove_as_operation_action(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Removal stays outside model input and enters durable operation execution."""
         session_id, user_id = await _create_fixture(
@@ -1980,7 +1982,7 @@ class TestMailboxService:
 
     async def test_enqueue_wake_session_marks_session_running(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Wake-producing admission persists the matching Session transition."""
         session_id, user_id = await _create_fixture(
@@ -2035,7 +2037,7 @@ class TestMailboxService:
 
     async def test_enqueue_queue_only_keeps_session_idle(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Queue-only mailbox admission preserves the idle Session state."""
         session_id, user_id = await _create_fixture(
@@ -2081,7 +2083,7 @@ class TestMailboxService:
 
     async def test_idempotent_wake_reapplies_running_transition(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A replay repairs an idle Session while preserving one mailbox row."""
         session_id, user_id = await _create_fixture(
@@ -2129,7 +2131,7 @@ class TestMailboxService:
 
     async def test_pending_queries_separate_mailbox_from_wake_intent(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Queue-only mailbox input is pending without requesting a wake."""
         session_id, user_id = await _create_fixture(
@@ -2159,7 +2161,7 @@ class TestMailboxService:
 
     async def test_enqueue_deduplicates_only_the_same_inference_profile(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """An idempotency key cannot silently reuse another requested profile."""
         session_id, user_id = await _create_fixture(
@@ -2236,7 +2238,7 @@ class TestMailboxService:
 
     async def test_enqueue_rejects_profile_mismatch_from_idempotency_race(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """The atomic create result is checked even when the pre-read misses."""
         repository = AsyncMock(spec=MailboxRepository)
@@ -2293,7 +2295,7 @@ class TestMailboxService:
 
     async def test_flush_promotes_buffer_and_deletes_row(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """On flush success, event creation and buffer deletion share result."""
         session_id, user_id = await _create_fixture(
@@ -2364,12 +2366,12 @@ class TestMailboxService:
             enabled_execution_options=[],
         )
         async with rdb_session_manager() as session:
-            remaining = await session.scalar(
+            remaining = await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBMailboxItem)
                 .where(RDBMailboxItem.id == buffer_id)
             )
-            stored_event = await session.get(RDBEvent, result.events[0].id)
+            stored_event = await session.read_session.get(RDBEvent, result.events[0].id)
         assert remaining == 0
         assert stored_event is not None
         assert stored_event.payload["requested_inference_profile"] == {
@@ -2380,7 +2382,7 @@ class TestMailboxService:
 
     async def test_flush_promotes_external_channel_continuation_event(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Channel continuation promotes through the public mailbox flush path."""
         session_id, _user_id = await _create_fixture(
@@ -2443,7 +2445,7 @@ class TestMailboxService:
 
     async def test_turn_action_continuation_waits_for_terminal_predecessor(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A continuation remains pending until its predecessor Run is terminal."""
         session_id, _user_id = await _create_fixture(
@@ -2561,7 +2563,7 @@ class TestMailboxService:
 
     async def test_flush_rejects_stale_preparation_snapshot(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A changed FIFO head is not consumed with another input's preparation."""
         session_id, user_id = await _create_fixture(
@@ -2596,7 +2598,7 @@ class TestMailboxService:
 
     async def test_flush_rejects_superseded_owner_generation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A stale Worker cannot promote the current owner's FIFO head."""
         session_id, user_id = await _create_fixture(
@@ -2632,7 +2634,7 @@ class TestMailboxService:
 
     async def test_flush_resolves_attachments_before_locking_fifo_head(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Attachment resolution cannot self-deadlock on the claimed buffer."""
         session_id, user_id = await _create_fixture(
@@ -2709,7 +2711,7 @@ class TestMailboxService:
 
     async def test_flush_rolls_back_inference_state_and_buffer_on_event_failure(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Session inference update, event append, and buffer deletion are atomic."""
@@ -2786,7 +2788,7 @@ class TestMailboxService:
 
     async def test_profile_failure_does_not_create_goal(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A failed Goal action reports the failure without mutating Goal state."""
         session_id, user_id = await _create_fixture(
@@ -2830,7 +2832,7 @@ class TestMailboxService:
 
     async def test_flush_associates_events_with_run_before_buffer_delete(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Promotion, run association, and buffer deletion share one transaction."""
         session_id, user_id = await _create_fixture(
@@ -2876,13 +2878,13 @@ class TestMailboxService:
                 session,
                 run_id=run.id,
             )
-            remaining = await session.get(RDBMailboxItem, buffer_id)
+            remaining = await session.read_session.get(RDBMailboxItem, buffer_id)
         assert associated_event_ids == result.promoted_event_ids
         assert remaining is None
 
     async def test_flush_processes_only_oldest_buffer(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Each preparation transaction consumes exactly one FIFO head."""
         session_id, user_id = await _create_fixture(
@@ -2937,7 +2939,7 @@ class TestMailboxService:
         async with rdb_session_manager() as session:
             remaining_ids = list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(RDBMailboxItem.id).where(
                             RDBMailboxItem.session_id == session_id
                         )
@@ -2948,7 +2950,7 @@ class TestMailboxService:
 
     async def test_processor_does_not_apply_run_profile_filtering(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """FIFO preparation is independent from the previous turn profile."""
         session_id, user_id = await _create_fixture(
@@ -2989,12 +2991,12 @@ class TestMailboxService:
         )
         assert len(result.promoted_event_ids) == 1
         async with rdb_session_manager() as session:
-            remaining = await session.get(RDBMailboxItem, buffer_id)
+            remaining = await session.read_session.get(RDBMailboxItem, buffer_id)
         assert remaining is None
 
     async def test_flush_promotes_agent_message_payload(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Agent mailbox input is persisted as an agent_message event."""
         session_id, _user_id = await _create_fixture(
@@ -3041,7 +3043,7 @@ class TestMailboxService:
 
     async def test_flush_promotes_and_acknowledges_agent_result(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Promotion persists metadata and advances the direct child cursor."""
         session_id, _user_id = await _create_fixture(
@@ -3103,7 +3105,7 @@ class TestMailboxService:
 
     async def test_agent_result_acknowledgment_is_monotonic(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Older terminal results cannot regress a consumed child cursor."""
         session_id, _user_id = await _create_fixture(
@@ -3164,7 +3166,7 @@ class TestMailboxService:
 
     async def test_agent_result_acknowledgment_requires_direct_parent(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A payload cannot acknowledge a child outside its direct parent."""
         session_id, _user_id = await _create_fixture(
@@ -3217,7 +3219,7 @@ class TestMailboxService:
 
     async def test_agent_result_acknowledgment_requires_matching_terminal_run(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Tampered terminal metadata cannot advance the child cursor."""
         session_id, _user_id = await _create_fixture(
@@ -3270,7 +3272,7 @@ class TestMailboxService:
 
     async def test_agent_result_acknowledgment_rolls_back_with_promotion(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A failed promotion cannot commit its child observation cursor."""
@@ -3330,7 +3332,7 @@ class TestMailboxService:
 
     async def test_flush_skill_action_loads_skill_before_user_message(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Skill action promotes skill_loaded then the request as user_message."""
         session_id, user_id = await _create_fixture(
@@ -3394,7 +3396,7 @@ class TestMailboxService:
 
     async def test_flush_managed_skill_action_uses_active_run_vfs(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Managed Skill action snapshots the exact current run VFS body."""
         session_id, user_id = await _create_fixture(
@@ -3457,7 +3459,7 @@ class TestMailboxService:
 
     async def test_flush_preserves_exchange_attachment_payload(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Attachment promotion also creates rich model input FilePart."""
         session_id, user_id = await _create_fixture(
@@ -3560,7 +3562,7 @@ class TestMailboxService:
 
     async def test_attachment_preparation_failure_preserves_buffer_for_retry(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A transient admitted download failure leaves the FIFO input durable."""
         session_id, user_id = await _create_fixture(
@@ -3654,7 +3656,7 @@ class TestMailboxService:
 
     async def test_flush_reuses_buffer_file_parts_without_rematerializing(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """FilePart fixed at creation boundary is not recreated on flush."""
         session_id, user_id = await _create_fixture(
@@ -3716,7 +3718,7 @@ class TestMailboxService:
 
     async def test_deleted_buffer_is_not_promoted(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Buffer deleted before flush is not promoted to event."""
         session_id, user_id = await _create_fixture(

@@ -14,6 +14,7 @@ from azents.core.runtime_profile import (
     RuntimeReconcileSourceKind,
     RuntimeReconcileTaskStatus,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import RuntimeConfigurationReconcileTask
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.services.runtime_profile_resolution.service import (
@@ -30,7 +31,7 @@ class _SessionManager:
         self.session = AsyncMock(spec=AsyncSession)
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         yield self.session
 
 

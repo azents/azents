@@ -5,7 +5,6 @@ from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -20,6 +19,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_file_pin import RDBModelFilePin
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -43,13 +43,13 @@ class _ModelFileFixture(NamedTuple):
 
 
 async def _noop_terminal_finalization(
-    _session: AsyncSession,
+    _session: WriteSession,
     _run_ids: list[str],
 ) -> None:
     """Satisfy the atomic replacement finalization boundary in fixture tests."""
 
 
-async def _create_agent_session(session: AsyncSession) -> _ModelFileFixture:
+async def _create_agent_session(session: WriteSession) -> _ModelFileFixture:
     """Create AgentSession for tests."""
     await WorkspaceRepository().create(
         session,
@@ -68,8 +68,8 @@ async def _create_agent_session(session: AsyncSession) -> _ModelFileFixture:
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -103,16 +103,16 @@ async def _create_agent_session(session: AsyncSession) -> _ModelFileFixture:
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
 
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
 
     agent_session = await AgentSessionRepository().create(
         session,
@@ -141,7 +141,7 @@ async def _create_agent_session(session: AsyncSession) -> _ModelFileFixture:
     )
 
 
-async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
+async def test_create_model_file_metadata(rdb_session: WriteSession) -> None:
     """Create ModelFile metadata row and storage key."""
     workspace_id, agent_id, session_id, run_id = await _create_agent_session(
         rdb_session
@@ -182,7 +182,7 @@ async def test_create_model_file_metadata(rdb_session: AsyncSession) -> None:
 
 
 async def test_mark_deleted_if_unpinned_updates_available_rows(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """ModelFile cleanup marks available unpinned rows as deleted."""
     workspace_id, agent_id, session_id, run_id = await _create_agent_session(
@@ -223,7 +223,7 @@ async def test_mark_deleted_if_unpinned_updates_available_rows(
 
 
 async def test_list_statuses_for_session_returns_known_model_files(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """ModelFile status lookup returns only IDs belonging to current session."""
     workspace_id, agent_id, session_id, run_id = await _create_agent_session(
@@ -285,7 +285,7 @@ async def test_list_statuses_for_session_returns_known_model_files(
 
 
 async def test_release_terminal_run_pins_preserves_pending(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Release terminal pins without treating pending runs as terminal."""
     workspace_id, agent_id, session_id, run_id = await _create_agent_session(
@@ -348,7 +348,7 @@ async def test_release_terminal_run_pins_preserves_pending(
     released = await pin_repo.release_terminal_run_pins(rdb_session, limit=10)
     remaining_run_ids = list(
         (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(RDBModelFilePin.run_id).where(
                     RDBModelFilePin.model_file_id == model_file.id
                 )

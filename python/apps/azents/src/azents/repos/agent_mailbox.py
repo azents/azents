@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import SessionAgent
 from azents.core.enums import (
@@ -16,6 +15,7 @@ from azents.core.enums import (
 )
 from azents.core.mailbox_data import MailboxItem
 from azents.engine.events.types import AgentRunState
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
@@ -36,7 +36,7 @@ class AgentMailboxRepository:
 
     async def enqueue_spawn_assignment(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,
@@ -54,7 +54,7 @@ class AgentMailboxRepository:
 
     async def enqueue_message(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,
@@ -72,7 +72,7 @@ class AgentMailboxRepository:
 
     async def enqueue_followup_task(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,
@@ -90,7 +90,7 @@ class AgentMailboxRepository:
 
     async def enqueue_terminal_result(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,
@@ -139,7 +139,7 @@ class AgentMailboxRepository:
 
     async def _enqueue_instruction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,
@@ -164,7 +164,7 @@ class AgentMailboxRepository:
 
     async def _enqueue(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,

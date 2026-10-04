@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
@@ -34,6 +33,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     consolidation_job_session,
@@ -88,7 +88,7 @@ def decode_coverage(content: str | None) -> ConsolidationCoverage:
 
 
 async def copy_published_dependencies(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     revision_id: str,
     draft_id: str,
@@ -110,7 +110,7 @@ async def copy_published_dependencies(
         RDBConsolidationEvidence.membership_grant_id,
     ).where(RDBConsolidationEvidence.attempt_id == attempt_id)
     influence = inherited.union(exposed).subquery()
-    await session.execute(
+    await session.write_session.execute(
         insert(RDBConsolidationRevisionDependency).from_select(
             [
                 "id",
@@ -138,14 +138,14 @@ async def copy_published_dependencies(
 class ConsolidationPublicationRepository:
     """The sole publication authority; no model tool submits a publication payload."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def freeze(
         self, principal: ConsolidationJobPrincipal
     ) -> FrozenConsolidationDraft:
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
-            draft = await session.scalar(
+            draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(
                     RDBConsolidationDraft.unit_id == owner.unit.id
                 )
@@ -159,7 +159,7 @@ class ConsolidationPublicationRepository:
             )
             files = {
                 file.path: file.content
-                for file in await session.scalars(
+                for file in await session.write_session.scalars(
                     sa.select(RDBConsolidationDraftFile).where(
                         RDBConsolidationDraftFile.draft_id == draft.id
                     )
@@ -184,10 +184,12 @@ class ConsolidationPublicationRepository:
         """Resolve an uncertain result from durable completion, without republishing."""
         async with consolidation_session(self.session_manager) as session:
             grant = await lock_unit_authority(session, principal.unit)
-            unit = await session.scalar(
+            unit = await session.write_session.scalar(
                 sa.select(RDBConsolidationUnit).where(unit_predicate(principal.unit))
             )
-            attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+            attempt = await session.write_session.get(
+                RDBConsolidationAttempt, principal.attempt_id
+            )
             if (
                 unit is None
                 or attempt is None
@@ -205,7 +207,7 @@ class ConsolidationPublicationRepository:
                 raise ConsolidationAuthorityError(
                     "Consolidation completion is unavailable."
                 )
-            revision = await session.get(
+            revision = await session.write_session.get(
                 RDBConsolidationRevision, attempt.completed_revision_id
             )
             if (
@@ -233,7 +235,7 @@ class ConsolidationPublicationRepository:
                 raise ConsolidationBudgetExceeded(
                     "Consolidation hard budget cannot produce publication."
                 )
-            draft = await session.scalar(
+            draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(
                     RDBConsolidationDraft.unit_id == owner.unit.id
                 )
@@ -251,7 +253,7 @@ class ConsolidationPublicationRepository:
             )
             files = {
                 file.path: file.content
-                for file in await session.scalars(
+                for file in await session.write_session.scalars(
                     sa.select(RDBConsolidationDraftFile).where(
                         RDBConsolidationDraftFile.draft_id == draft.id
                     )
@@ -271,7 +273,7 @@ class ConsolidationPublicationRepository:
             coverage = decode_coverage(files.get("coverage.json"))
             rows = {
                 row.id: row
-                for row in await session.scalars(
+                for row in await session.write_session.scalars(
                     sa.select(RDBConsolidationWork)
                     .where(
                         work_predicate(principal.unit),
@@ -307,7 +309,7 @@ class ConsolidationPublicationRepository:
             )
             route_influence = inherited_ids.union(exposed_ids).subquery()
             available_route_ids = set(
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(route_influence.c.source_session_id).where(
                         route_influence.c.source_session_id.in_(route_ids)
                     )
@@ -325,8 +327,8 @@ class ConsolidationPublicationRepository:
                 markdown=actual.markdown,
                 rendered_block=actual.rendered_block,
             )
-            session.add(revision)
-            await session.flush()
+            session.write_session.add(revision)
+            await session.write_session.flush()
             await copy_published_dependencies(
                 session,
                 revision_id=revision_id,
@@ -336,8 +338,8 @@ class ConsolidationPublicationRepository:
             for row in rows.values():
                 row.state = ConsolidationWorkState.PUBLISHED
                 row.published_revision_id = revision_id
-            await session.flush()
-            remaining = await session.scalar(
+            await session.write_session.flush()
+            remaining = await session.write_session.scalar(
                 sa.select(
                     pending_work_query(
                         principal.unit, owner.attempt.membership_grant_id
@@ -374,7 +376,7 @@ class ConsolidationPublicationRepository:
             if owner.unit.no_progress_count >= 3:
                 delay = min(60 * 2 ** min(owner.unit.no_progress_count - 3, 9), 21600)
                 owner.unit.retry_at = now + datetime.timedelta(seconds=delay)
-            await session.flush()
+            await session.write_session.flush()
             outcome = ConsolidationPublicationOutcome(revision_id)
             no_progress_count = owner.unit.no_progress_count
             unit_id = owner.unit.id

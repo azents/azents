@@ -6,12 +6,12 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
 from azents.core.kimi_oauth import KimiOAuthConnectionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.kimi_oauth_runtime_data import (
     KimiOAuthRefreshTokens,
     KimiRuntimeIntegrationMissing,
@@ -30,7 +30,7 @@ class KimiOAuthRuntimeRepository:
     """Retain the original row lock and secrets-only refresh identity fence."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,

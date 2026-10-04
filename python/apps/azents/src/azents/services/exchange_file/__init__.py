@@ -29,7 +29,6 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
@@ -50,6 +49,7 @@ from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
 from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import (
@@ -1908,7 +1908,7 @@ class ExchangeFileService:
 
     async def _has_workspace_access(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         user_id: str,

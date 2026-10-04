@@ -4,13 +4,13 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -39,7 +39,7 @@ from azents.repos.toolkit_state.engine import (
 
 
 def _owner_manager(
-    manager: SessionManager[AsyncSession], owner: SessionExecutionOwner
+    manager: SessionManager[WriteSession], owner: SessionExecutionOwner
 ) -> OwnerBoundSessionManager:
     return OwnerBoundSessionManager(
         session_manager=manager,
@@ -52,7 +52,7 @@ def _owner_manager(
 class EngineMcpSnapshotFactory:
     """Create completed snapshot operations for explicit nullable identities."""
 
-    session_manager: SessionManager[AsyncSession] | None
+    session_manager: SessionManager[WriteSession] | None
 
     def with_owner(self, owner: SessionExecutionOwner) -> "EngineMcpSnapshotFactory":
         manager = self.session_manager
@@ -129,7 +129,7 @@ class EngineToolRepositories:
 
 def get_engine_tool_repositories(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
     memory_repository: Annotated[MemoryRepository, Depends(MemoryRepository)],
@@ -170,7 +170,7 @@ def get_engine_tool_repositories(
 
 def get_engine_todo_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> TodoStateStore:
     """Compose a completed Todo store inside the repository layer."""
@@ -179,7 +179,7 @@ def get_engine_todo_store(
 
 def get_engine_scheduled_tool_operations(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     task_repository: Annotated[
         ScheduledTaskRepository, Depends(ScheduledTaskRepository)

@@ -5,7 +5,6 @@ import logging
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import ConsolidationWorkState
 from azents.rdb.models.agent import RDBAgent
@@ -15,6 +14,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 )
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory_consolidation.discovery import (
     ConsolidationDiscoveryRepository,
@@ -32,7 +32,7 @@ from azents.testing.consolidation import seed_consolidation_corpus
 
 
 async def test_three_failed_attempts_warn_and_back_off_without_acknowledging_work(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
@@ -45,7 +45,7 @@ async def test_three_failed_attempts_warn_and_back_off_without_acknowledging_wor
             claim.principal, failure_code="synthetic_failure", cancelled=False
         )
         async with rdb_session_manager() as session:
-            unit = await session.get(RDBConsolidationUnit, claim.unit_id)
+            unit = await session.read_session.get(RDBConsolidationUnit, claim.unit_id)
             assert unit is not None and unit.retry_at is not None
             assert unit.no_progress_count == index + 1
             assert unit.retry_at > datetime.datetime.now(datetime.UTC)
@@ -58,7 +58,7 @@ async def test_three_failed_attempts_warn_and_back_off_without_acknowledging_wor
     )
     async with rdb_session_manager() as session:
         states = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBConsolidationWork.state).where(
                     RDBConsolidationWork.agent_id == corpus.team.agent_id
                 )
@@ -70,7 +70,7 @@ async def test_three_failed_attempts_warn_and_back_off_without_acknowledging_wor
 
 
 async def test_discovery_coalesces_exact_units_and_honors_owner_retry_and_eligibility(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     repository = ConsolidationDiscoveryRepository(rdb_session_manager)
@@ -91,7 +91,7 @@ async def test_discovery_coalesces_exact_units_and_honors_owner_retry_and_eligib
         corpus.personal,
     )
     async with rdb_session_manager() as session:
-        unit = await session.get(RDBConsolidationUnit, claim.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, claim.unit_id)
         assert unit is not None
         unit.retry_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             seconds=1
@@ -101,18 +101,18 @@ async def test_discovery_coalesces_exact_units_and_honors_owner_retry_and_eligib
         corpus.personal,
     }
     async with rdb_session_manager() as session:
-        agent = await session.get(RDBAgent, corpus.team.agent_id)
+        agent = await session.read_session.get(RDBAgent, corpus.team.agent_id)
         assert agent is not None
         agent.memory_enabled = False
     assert await repository.list_due(agent_id=None, limit=25) == ()
 
 
 async def test_personal_membership_loss_waits_without_peer_unit_or_model_admission(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == corpus.personal.workspace_id,
                 RDBWorkspaceUser.user_id == corpus.personal.associated_user_id,
@@ -124,7 +124,7 @@ async def test_personal_membership_loss_waits_without_peer_unit_or_model_admissi
 
 
 async def test_denied_source_metadata_retires_without_model_coverage_acknowledgement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     async with rdb_session_manager() as session:
@@ -143,7 +143,7 @@ async def test_denied_source_metadata_retires_without_model_coverage_acknowledge
     ).entries == ()
     async with rdb_session_manager() as session:
         rows = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBConsolidationWork).where(
                     RDBConsolidationWork.source_session_id == corpus.team_source
                 )

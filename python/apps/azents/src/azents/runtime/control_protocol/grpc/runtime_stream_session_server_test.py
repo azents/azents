@@ -33,9 +33,9 @@ from azents_runtime_control.system_metrics import (
     RunnerSystemMetricsScope,
 )
 from redis.exceptions import ConnectionError as RedisConnectionError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
 from azents.repos.runtime_stream_route_test import (
@@ -1983,7 +1983,7 @@ async def test_control_drain_marks_owner_and_resets_long_lived_stream() -> None:
 
 @pytest.mark.parametrize("outcome", ["route", "missing", "error", "cancel"])
 async def test_data_plane_route_snapshot_closes_pg_before_local_projection(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     outcome: str,
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, f"data-route-{outcome}")
@@ -1999,7 +1999,7 @@ async def test_data_plane_route_snapshot_closes_pg_before_local_projection(
     class ReadFailure(RuntimeWebSessionRouteRepository):
         async def resolve(
             self,
-            session: AsyncSession,
+            session: WriteSession,
             *,
             runtime_id: str,
             desired_generation: int,
@@ -2059,7 +2059,7 @@ async def test_data_plane_route_snapshot_closes_pg_before_local_projection(
 @pytest.mark.parametrize("cancel", [False, True])
 @pytest.mark.parametrize("replacement", [False, True])
 async def test_join_registration_failure_closes_pg_and_releases_only_original_epoch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
     replacement: bool,
 ) -> None:

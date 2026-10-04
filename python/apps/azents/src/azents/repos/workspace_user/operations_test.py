@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -72,13 +73,13 @@ def _repository(
     *,
     user_repository: AsyncMock | None = None,
     workspace_repository: AsyncMock | None = None,
-    session: AsyncMock | None = None,
+    session: WriteSession | None = None,
 ) -> WorkspaceUserOperationRepository:
     """Build an operation repository with one deterministic transaction."""
-    test_session = session or AsyncMock(spec=AsyncSession)
+    test_session = session or ReadWriteSession(AsyncMock(spec=AsyncSession))
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield test_session
 
     return WorkspaceUserOperationRepository(
@@ -229,7 +230,8 @@ async def test_transfer_ownership_rolls_back_when_promotion_fails() -> None:
         user_id="user-new-owner",
         role=WorkspaceUserRole.MANAGER,
     )
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
     workspace_repository.get_by_id_for_update.return_value = _workspace()
@@ -258,7 +260,7 @@ async def test_transfer_ownership_rolls_back_when_promotion_fails() -> None:
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, NotFound)
-    session.rollback.assert_awaited_once()
+    _raw_session.rollback.assert_awaited_once()
 
 
 @pytest.mark.parametrize("attempt", range(3))
@@ -275,18 +277,22 @@ async def test_concurrent_owner_creation_keeps_single_owner(
     user_ids: list[str] = []
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_result = await WorkspaceRepository().create(
                 setup_session,
                 WorkspaceCreate(name="Owner race", handle=workspace_handle),
@@ -302,7 +308,7 @@ async def test_concurrent_owner_creation_keeps_single_owner(
                     UserCreate(email=f"owner-race-{suffix}-{index}@example.com"),
                 )
                 user_ids.append(user.id)
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         repository = WorkspaceUserOperationRepository(
             user_repository=WorkspaceUserRepository(),
@@ -328,11 +334,14 @@ async def test_concurrent_owner_creation_keeps_single_owner(
         assert len(failures) == 1
         assert isinstance(failures[0].error, WorkspaceUserOwnerAlreadyExists)
     finally:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as cleanup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_cleanup_session:
+            cleanup_session = ReadWriteSession(_raw_cleanup_session)
             if workspace_id is not None:
-                await cleanup_session.execute(
+                await cleanup_session.write_session.execute(
                     sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
                 )
             for user_id in user_ids:
                 await UserRepository().delete(cleanup_session, user_id)
-            await cleanup_session.commit()
+            await cleanup_session.write_session.commit()

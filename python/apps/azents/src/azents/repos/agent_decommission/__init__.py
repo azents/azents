@@ -5,10 +5,10 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentDecommissionStatus
 from azents.rdb.models.agent_decommission import RDBAgentDecommissionJob
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import AgentDecommissionJob
 
@@ -18,14 +18,14 @@ class AgentDecommissionRepository:
 
     async def create_or_get(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         workspace_id: str,
         requested_by_workspace_user_id: str,
     ) -> AgentDecommissionJob:
         """Create one decommission job or return its durable existing job."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBAgentDecommissionJob)
             .values(
                 id=uuid7().hex,
@@ -38,23 +38,23 @@ class AgentDecommissionRepository:
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            rdb = await session.scalar(
+            rdb = await session.write_session.scalar(
                 sa.select(RDBAgentDecommissionJob).where(
                     RDBAgentDecommissionJob.agent_id == agent_id
                 )
             )
         if rdb is None:
             raise RuntimeError("Agent decommission job creation failed")
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentDecommissionJob | None:
         """Fetch one durable decommission job by Agent ID."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBAgentDecommissionJob).where(
                 RDBAgentDecommissionJob.agent_id == agent_id
             )
@@ -65,7 +65,7 @@ class AgentDecommissionRepository:
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -111,7 +111,7 @@ class AgentDecommissionRepository:
             .limit(1)
             .scalar_subquery()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentDecommissionJob)
             .where(RDBAgentDecommissionJob.id == candidate)
             .values(
@@ -146,7 +146,7 @@ class AgentDecommissionRepository:
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -154,7 +154,7 @@ class AgentDecommissionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Advance an owned job to its current coordinator phase."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentDecommissionJob)
             .where(
                 RDBAgentDecommissionJob.id == job_id,
@@ -170,7 +170,7 @@ class AgentDecommissionRepository:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -180,7 +180,7 @@ class AgentDecommissionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Release an owned job into bounded retry wait."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBAgentDecommissionJob)
             .where(
                 RDBAgentDecommissionJob.id == job_id,

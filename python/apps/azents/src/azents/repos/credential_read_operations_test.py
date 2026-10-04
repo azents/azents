@@ -22,6 +22,7 @@ from azents.rdb.models.password_login import RDBPasswordLogin
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.user_email import RDBUserEmail
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
@@ -39,31 +40,40 @@ class CredentialQueryCall:
     stage: str
     occurrence: int
     argument: str
-    session: AsyncSession
+    session: ReadSession
 
 
 class CredentialReadScope:
     """Observe actual infrastructure close/commit/rollback, not a fake SQL scope."""
 
     def __init__(
-        self, manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+        self, manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self.manager = manager
-        self.sessions: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
-        self.closed_sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
+        self.active: list[WriteSession] = []
+        self.closed_sessions: list[WriteSession] = []
         self.commits = 0
         self.failures = 0
         original_close = AsyncSession.close
 
         async def close(session: AsyncSession) -> None:
             await original_close(session)
-            self.closed_sessions.append(session)
+            wrapper = next(
+                (
+                    candidate
+                    for candidate in self.sessions
+                    if candidate.write_session is session
+                ),
+                None,
+            )
+            if wrapper is not None:
+                self.closed_sessions.append(wrapper)
 
         monkeypatch.setattr(AsyncSession, "close", close)
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "Read groups must not nest completed operations"
         try:
             async with self.manager() as session:
@@ -84,7 +94,9 @@ class CredentialReadScope:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
         assert all(session in self.closed_sessions for session in self.sessions)
 
 
@@ -101,9 +113,9 @@ class CredentialReadFault:
         self.reached = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def point(self, stage: str, argument: str, session: AsyncSession) -> None:
+    async def point(self, stage: str, argument: str, session: ReadSession) -> None:
         assert self.scope.active == [session]
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         occurrence = sum(call.stage == stage for call in self.trace) + 1
         self.trace.append(CredentialQueryCall(stage, occurrence, argument, session))
         if stage == self.stage and occurrence == self.occurrence:
@@ -121,12 +133,12 @@ class CredentialUsers(UserRepository):
     def __init__(self, fault: CredentialReadFault) -> None:
         self.fault = fault
 
-    async def get(self, session: AsyncSession, user_id: str) -> User | None:
+    async def get(self, session: ReadSession, user_id: str) -> User | None:
         result = await super().get(session, user_id)
         await self.fault.point("user_get", user_id, session)
         return result
 
-    async def get_by_email(self, session: AsyncSession, email: str) -> User | None:
+    async def get_by_email(self, session: ReadSession, email: str) -> User | None:
         result = await super().get_by_email(session, email)
         await self.fault.point("user_by_email", email, session)
         return result
@@ -136,14 +148,12 @@ class CredentialEmails(UserEmailRepository):
     def __init__(self, fault: CredentialReadFault) -> None:
         self.fault = fault
 
-    async def list_by_user(
-        self, session: AsyncSession, user_id: str
-    ) -> list[UserEmail]:
+    async def list_by_user(self, session: ReadSession, user_id: str) -> list[UserEmail]:
         result = await super().list_by_user(session, user_id)
         await self.fault.point("email_list", user_id, session)
         return result
 
-    async def get_by_email(self, session: AsyncSession, email: str) -> UserEmail | None:
+    async def get_by_email(self, session: ReadSession, email: str) -> UserEmail | None:
         result = await super().get_by_email(session, email)
         await self.fault.point("email_by_email", email, session)
         return result
@@ -153,7 +163,7 @@ class CredentialPasswords(PasswordLoginRepository):
     def __init__(self, fault: CredentialReadFault) -> None:
         self.fault = fault
 
-    async def exists_for_user(self, session: AsyncSession, user_id: str) -> bool:
+    async def exists_for_user(self, session: ReadSession, user_id: str) -> bool:
         result = await super().exists_for_user(session, user_id)
         await self.fault.point("password_exists", user_id, session)
         return result
@@ -164,11 +174,11 @@ class CredentialReadFixture:
     repository: CredentialReadOperationRepository
     scope: CredentialReadScope
     fault: CredentialReadFault
-    manager: SessionManager[AsyncSession]
+    manager: SessionManager[WriteSession]
 
 
 def credential_read_fixture(
-    manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> CredentialReadFixture:
     scope = CredentialReadScope(manager, monkeypatch)
     fault = CredentialReadFault(scope)
@@ -193,7 +203,7 @@ class CredentialReadSubject:
 
 
 async def seed_credential_subject(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     password: bool,
     primary_verified: bool,
@@ -210,13 +220,13 @@ async def seed_credential_subject(
         )
         assert isinstance(created, Success)
         if primary_verified:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBUserEmail)
                 .where(RDBUserEmail.email == email)
                 .values(verified_at=datetime.now(UTC))
             )
         if secondary_verified:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBUserEmail)
                 .where(RDBUserEmail.email == secondary)
                 .values(verified_at=datetime.now(UTC))
@@ -241,15 +251,15 @@ async def credential_rows(
 ) -> dict[str, list[dict[str, object]]]:
     """Compare complete persisted rows without exposing a live ORM result."""
     async with fixture.manager() as session:
-        users = await session.execute(
+        users = await session.write_session.execute(
             sa.select(*RDBUser.__table__.columns).where(RDBUser.id == user_id)
         )
-        emails = await session.execute(
+        emails = await session.write_session.execute(
             sa.select(*RDBUserEmail.__table__.columns)
             .where(RDBUserEmail.user_id == user_id)
             .order_by(RDBUserEmail.email)
         )
-        passwords = await session.execute(
+        passwords = await session.write_session.execute(
             sa.select(*RDBPasswordLogin.__table__.columns).where(
                 RDBPasswordLogin.user_id == user_id
             )
@@ -263,7 +273,7 @@ async def credential_rows(
 
 @pytest.fixture
 async def credential_reads(
-    rdb_session_manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> CredentialReadFixture:
     return credential_read_fixture(rdb_session_manager, monkeypatch)
 
@@ -440,7 +450,7 @@ async def test_real_zero_linked_email_list_keeps_unconfigured_email_fact(
         )
         # Defensive FK-valid fixture: User.get still joins its primary row by ID,
         # while that email row no longer belongs to this User's linked-email list.
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBUserEmail)
             .where(RDBUserEmail.user_id == subject.user_id)
             .values(user_id=other.id)
@@ -485,7 +495,7 @@ async def test_required_frozen_detached_facts_hold_no_hash_or_orm_after_scope(
     assert sa.inspect(snapshot, raiseerr=False) is None
     fixture.scope.assert_closed()
     async with fixture.manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBUserEmail)
             .where(RDBUserEmail.user_id == subject.user_id)
             .values(verified_at=None)
@@ -582,21 +592,26 @@ class StandaloneCredentialManager:
         self.pids: list[int] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(self.connection, expire_on_commit=False) as session:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        async with AsyncSession(
+            self.connection, expire_on_commit=False
+        ) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
-                pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+                pid = await session.read_session.scalar(
+                    sa.text("SELECT pg_backend_pid()")
+                )
                 assert isinstance(pid, int)
                 self.pids.append(pid)
                 yield session
             except asyncio.CancelledError:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
 
 @pytest.mark.parametrize("change", ["delete", "disable"])
@@ -635,7 +650,7 @@ async def test_late_user_change_preserves_plain_read_rules(
                     writer_pid = writer.pids[-1]
                     assert reader_pid != writer_pid
                     if change == "delete":
-                        await session.execute(
+                        await session.write_session.execute(
                             sa.delete(RDBUser).where(RDBUser.id == subject.user_id)
                         )
                     else:
@@ -643,7 +658,7 @@ async def test_late_user_change_preserves_plain_read_rules(
                             session, subject.user_id, disabled_at=datetime.now(UTC)
                         )
                 async with writer() as session:
-                    current = await session.get(RDBUser, subject.user_id)
+                    current = await session.write_session.get(RDBUser, subject.user_id)
                     if change == "delete":
                         assert current is None
                     else:
@@ -690,10 +705,10 @@ async def test_late_user_change_preserves_plain_read_rules(
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             async with manager() as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBUser).where(RDBUser.id == subject.user_id)
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBUserEmail).where(
                         RDBUserEmail.user_id == subject.user_id
                     )

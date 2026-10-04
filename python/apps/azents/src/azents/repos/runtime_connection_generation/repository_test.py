@@ -13,6 +13,7 @@ from azents.rdb.models.runtime_connection_generation import (
     RDBRuntimeConnectionGeneration,
     RDBRuntimeConnectionGenerationCutover,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 
 from .data import (
     RuntimeConnectionGenerationExhausted,
@@ -26,18 +27,18 @@ from .repository import (
 
 async def _post_cutover_time(
     repository: RuntimeConnectionGenerationRepository,
-    session: AsyncSession,
+    session: WriteSession,
 ) -> datetime.datetime:
     cutover = await repository.get_cutover(session)
     if cutover is None:
         cutover_at = datetime.datetime.now(UTC)
-        session.add(
+        session.write_session.add(
             RDBRuntimeConnectionGenerationCutover(
                 allocator_version=1,
                 cutover_at=cutover_at,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
     else:
         cutover_at = cutover.cutover_at
     return cutover_at + datetime.timedelta(microseconds=1)
@@ -45,7 +46,7 @@ async def _post_cutover_time(
 
 async def _activate_subject(
     repository: RuntimeConnectionGenerationRepository,
-    session: AsyncSession,
+    session: WriteSession,
     *,
     connection_kind: RuntimeConnectionAuthorityKind,
     subject_id: str,
@@ -54,7 +55,7 @@ async def _activate_subject(
 ) -> None:
     """Create the Phase 2 activation state required by repository primitives."""
     await _post_cutover_time(repository, session)
-    session.add(
+    session.write_session.add(
         RDBRuntimeConnectionGeneration(
             connection_kind=connection_kind,
             subject_id=subject_id,
@@ -62,7 +63,7 @@ async def _activate_subject(
             accepted_generation=accepted_generation,
         )
     )
-    await session.flush()
+    await session.write_session.flush()
 
 
 class TestRuntimeConnectionGenerationRepository:
@@ -70,7 +71,7 @@ class TestRuntimeConnectionGenerationRepository:
 
     async def test_allocate_and_accept_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         await _activate_subject(
@@ -128,7 +129,7 @@ class TestRuntimeConnectionGenerationRepository:
 
     async def test_missing_subject_fails_closed(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         await _post_cutover_time(repository, rdb_session)
@@ -145,7 +146,7 @@ class TestRuntimeConnectionGenerationRepository:
 
     async def test_missing_subject_preflight_fails_closed(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         await _post_cutover_time(repository, rdb_session)
@@ -163,7 +164,7 @@ class TestRuntimeConnectionGenerationRepository:
 
     async def test_missing_subject_acceptance_fails_closed(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         await _post_cutover_time(repository, rdb_session)
@@ -181,7 +182,7 @@ class TestRuntimeConnectionGenerationRepository:
 
     async def test_exhausted_generation_never_wraps(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         await _activate_subject(
@@ -209,8 +210,9 @@ class TestRuntimeConnectionGenerationRepository:
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
         subject_id = "concurrent-generation-runtime"
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            async with session.begin():
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
+            async with session.write_session.begin():
                 await _activate_subject(
                     repository,
                     session,
@@ -219,8 +221,9 @@ class TestRuntimeConnectionGenerationRepository:
                 )
 
         async def allocate() -> int:
-            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-                async with session.begin():
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+                session = ReadWriteSession(_raw_session)
+                async with session.write_session.begin():
                     state = await repository.allocate_generation(
                         session,
                         connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
@@ -232,16 +235,17 @@ class TestRuntimeConnectionGenerationRepository:
             generations = await asyncio.gather(allocate(), allocate())
             assert sorted(generations) == [1, 2]
         finally:
-            async with AsyncSession(rdb_engine) as session:
-                async with session.begin():
-                    await session.execute(
+            async with AsyncSession(rdb_engine) as _raw_session:
+                session = ReadWriteSession(_raw_session)
+                async with session.write_session.begin():
+                    await session.write_session.execute(
                         sa.delete(RDBRuntimeConnectionGeneration).where(
                             RDBRuntimeConnectionGeneration.connection_kind
                             == RuntimeConnectionAuthorityKind.RUNNER,
                             RDBRuntimeConnectionGeneration.subject_id == subject_id,
                         )
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.delete(RDBRuntimeConnectionGenerationCutover).where(
                             RDBRuntimeConnectionGenerationCutover.allocator_version == 1
                         )

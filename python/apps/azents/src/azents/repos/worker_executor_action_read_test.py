@@ -1,13 +1,12 @@
 """Ordered PostgreSQL action projection regression for completed Worker reads."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.action_execution_data import (
     ActionExecutionCreate,
     ActionExecutionEventCreate,
 )
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.live_projection_authority_test import _create_session
@@ -15,7 +14,7 @@ from azents.repos.worker_executor_read_test import _Boundary, _reads
 
 
 async def test_action_projections_keep_pending_running_and_progress_order(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     session_id = await _create_session(
         rdb_session_manager, handle="executor-read-actions"

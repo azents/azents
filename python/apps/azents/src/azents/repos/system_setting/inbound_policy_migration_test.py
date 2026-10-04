@@ -10,7 +10,6 @@ from alembic.operations import Operations
 from alembic.script import ScriptDirectory
 from azcommon.uuid import uuid7
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.consts import PROJECT_ROOT
 from azents.core.system_setting import (
@@ -18,12 +17,13 @@ from azents.core.system_setting import (
     SystemSettingValidationStatus,
 )
 from azents.rdb.models.system_setting import RDBSystemSetting, RDBSystemSettingCandidate
+from azents.rdb.session_capabilities import WriteSession
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("old_inbound_bytes", [10 * 1024 * 1024, 500 * 1024 * 1024])
 async def test_retirement_preserves_outbound_and_invalidates_stale_version(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
     old_inbound_bytes: int,
 ) -> None:
     """Both customized and historical defaults lose inbound authority only."""
@@ -34,7 +34,7 @@ async def test_retirement_preserves_outbound_and_invalidates_stale_version(
         "outbound_max_action_bytes": 60 * 1024 * 1024,
     }
     legacy_config = {"inbound_max_file_bytes": old_inbound_bytes, **outbound}
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBSystemSetting(
             section=section,
             schema_version=1,
@@ -46,7 +46,7 @@ async def test_retirement_preserves_outbound_and_invalidates_stale_version(
             validated_at=now,
         )
     )
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBSystemSettingCandidate(
             id=uuid7().hex,
             section=section,
@@ -59,7 +59,7 @@ async def test_retirement_preserves_outbound_and_invalidates_stale_version(
             expires_at=now + datetime.timedelta(days=1),
         )
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     config = AlembicConfig(PROJECT_ROOT / "db-schemas" / "rdb" / "alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     revision = scripts.get_revision("43a0fbdc96fe")
@@ -69,12 +69,14 @@ async def test_retirement_preserves_outbound_and_invalidates_stale_version(
         with Operations.context(MigrationContext.configure(connection)):
             revision.module.upgrade()
 
-    connection = await rdb_session.connection()
+    connection = await rdb_session.write_session.connection()
     await connection.run_sync(upgrade)
-    rdb_session.expire_all()
-    current = (await rdb_session.execute(sa.select(RDBSystemSetting))).scalar_one()
+    rdb_session.write_session.expire_all()
+    current = (
+        await rdb_session.write_session.execute(sa.select(RDBSystemSetting))
+    ).scalar_one()
     candidate = (
-        await rdb_session.execute(sa.select(RDBSystemSettingCandidate))
+        await rdb_session.write_session.execute(sa.select(RDBSystemSettingCandidate))
     ).scalar_one()
     assert current.config == outbound
     assert current.schema_version == 2
@@ -92,7 +94,9 @@ async def test_retirement_preserves_outbound_and_invalidates_stale_version(
             revision.module.downgrade()
 
     await connection.run_sync(downgrade)
-    rdb_session.expire_all()
-    restored = (await rdb_session.execute(sa.select(RDBSystemSetting))).scalar_one()
+    rdb_session.write_session.expire_all()
+    restored = (
+        await rdb_session.write_session.execute(sa.select(RDBSystemSetting))
+    ).scalar_one()
     assert restored.schema_version == 1
     assert restored.config == {**outbound, "inbound_max_file_bytes": 134_217_728}

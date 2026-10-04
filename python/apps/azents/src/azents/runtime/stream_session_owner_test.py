@@ -13,10 +13,10 @@ from azents_runtime_control.runtime_stream_session import (
     APPROVED_SESSION_PROFILE,
     MANDATORY_DATA_FRAME_BYTES,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
 from azents.repos.runtime_stream_route_test import (
@@ -49,18 +49,18 @@ class _OwnedSession(NamedTuple):
 
 
 async def _owned(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     clock: Callable[[], datetime.datetime] = _now,
 ) -> _OwnedSession:
     async with session_manager() as session:
         workspace_id, agent_id, _ = await _authority_fixture(session)
         runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime.desired_generation = 3
         runtime.runner_generation = 4
-        await session.flush()
+        await session.write_session.flush()
         runtime_id = runtime.id
     manager = RuntimeStreamSessionOwnerManager(
         repository=RuntimeStreamRouteOperationRepository(
@@ -141,7 +141,7 @@ def _evidence(
 
 
 async def test_owner_registry_binds_authenticated_runner_boot(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     _, owned = await _owned(rdb_session_manager)
     registry = RuntimeStreamOwnerSessionRegistry(
@@ -168,7 +168,7 @@ async def test_owner_registry_binds_authenticated_runner_boot(
     ),
 )
 async def test_owner_registry_rejects_invalid_profile(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     maximum_data_frame_bytes: int,
     request_stream_window_bytes: int | None,
 ) -> None:
@@ -194,7 +194,7 @@ async def test_owner_registry_rejects_invalid_profile(
 
 
 async def test_owner_registry_rejects_extended_offer_deadline(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     _, owned = await _owned(rdb_session_manager)
     registry = RuntimeStreamOwnerSessionRegistry(
@@ -217,7 +217,7 @@ async def test_owner_registry_rejects_extended_offer_deadline(
 
 
 async def test_owner_registry_rejects_stale_snapshot_after_drain(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager, draining_owned = await _owned(rdb_session_manager)
     registry = RuntimeStreamOwnerSessionRegistry(
@@ -237,7 +237,7 @@ async def test_owner_registry_rejects_stale_snapshot_after_drain(
 
 
 async def test_owner_registry_rejects_stale_snapshot_after_release(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager, released_owned = await _owned(rdb_session_manager)
     registry = RuntimeStreamOwnerSessionRegistry(
@@ -257,11 +257,13 @@ async def test_owner_registry_rejects_stale_snapshot_after_release(
 
 
 async def test_owner_registry_rejects_generation_replacement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     _, owned = await _owned(rdb_session_manager)
     async with rdb_session_manager() as session:
-        runtime = await session.get(RDBAgentRuntime, owned.offer.owner.runtime_id)
+        runtime = await session.read_session.get(
+            RDBAgentRuntime, owned.offer.owner.runtime_id
+        )
         assert runtime is not None
         runtime.runner_generation = 5
     registry = RuntimeStreamOwnerSessionRegistry(
@@ -277,7 +279,7 @@ async def test_owner_registry_rejects_generation_replacement(
 
 
 async def test_owner_registry_consumes_join_once_under_concurrency(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Completed-operation synchronization tests local acceptance, not PG locking."""
     _, owned = await _owned(rdb_session_manager)
@@ -327,7 +329,7 @@ async def test_owner_registry_consumes_join_once_under_concurrency(
 
 
 async def test_owner_registry_rechecks_deadline_after_nonce_consumption(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Local expiry follows real committed nonce consumption, never rollback."""
     _, owned = await _owned(rdb_session_manager)
@@ -378,7 +380,7 @@ async def test_owner_registry_rechecks_deadline_after_nonce_consumption(
 
 
 async def test_owner_offer_deadline_never_exceeds_durable_lease(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     def future_clock() -> datetime.datetime:
         return _now() + datetime.timedelta(hours=1)
@@ -390,7 +392,7 @@ async def test_owner_offer_deadline_never_exceeds_durable_lease(
 
 @pytest.mark.parametrize("different_route_snapshot", [False, True])
 async def test_owner_clock_and_local_acceptance_follow_completed_route_operations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     different_route_snapshot: bool,
 ) -> None:
     """The offer's original epoch, not a route snapshot, authorizes the join."""
@@ -438,7 +440,7 @@ async def test_owner_clock_and_local_acceptance_follow_completed_route_operation
 
 @pytest.mark.parametrize("clock_failure", ["expired", "naive", "error", "cancel"])
 async def test_postcommit_clock_failure_preserves_consumed_nonce_and_empty_registry(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     clock_failure: str,
 ) -> None:
     fixture = await route_fixture(
@@ -494,7 +496,7 @@ async def test_postcommit_clock_failure_preserves_consumed_nonce_and_empty_regis
 
 
 async def test_acquire_clock_error_preserves_already_committed_owner_lease(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, "owner-acquire-clock-error")
 
@@ -520,7 +522,7 @@ async def test_acquire_clock_error_preserves_already_committed_owner_lease(
 
 
 async def test_duplicate_local_join_fails_after_committed_nonce_consumption(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, "owner-duplicate-join")
     manager = RuntimeStreamSessionOwnerManager(

@@ -1,10 +1,10 @@
 """Agent Project default repository."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentProjectDefaultItemType
 from azents.rdb.models.agent_project_default import RDBAgentProjectDefault
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import AgentProjectDefault, AgentProjectDefaultCreate
 
@@ -14,7 +14,7 @@ class AgentProjectDefaultRepository:
 
     async def replace_defaults(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         paths: list[str],
@@ -34,13 +34,13 @@ class AgentProjectDefaultRepository:
 
     async def replace_default_items(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         items: list[AgentProjectDefaultCreate],
     ) -> list[AgentProjectDefault]:
         """Replace Agent default workspace items with the provided ordered list."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentProjectDefault).where(
                 RDBAgentProjectDefault.agent_id == agent_id,
             )
@@ -53,19 +53,19 @@ class AgentProjectDefaultRepository:
                 item_type=item.item_type,
                 position=position,
             )
-            session.add(rdb)
-            await session.flush()
+            session.write_session.add(rdb)
+            await session.write_session.flush()
             defaults.append(self._build(rdb))
         return defaults
 
     async def list_defaults(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[AgentProjectDefault]:
         """Fetch Agent default workspace items in creation selection order."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentProjectDefault)
             .where(RDBAgentProjectDefault.agent_id == agent_id)
             .order_by(

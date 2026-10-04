@@ -11,6 +11,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_profile import RuntimeProfileLifecycle
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.runtime_profile.availability import (
     RuntimeProfileAvailabilityRepository,
 )
@@ -26,7 +27,8 @@ from azents.repos.runtime_provider_policy.repository import (
 
 async def test_provider_unavailable_profile_returns_existing_reason_code() -> None:
     """Agent selection preserves the Workspace projection rejection order."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
     provider_repository = AsyncMock(spec=RuntimeProviderRepository)
     control_repository = AsyncMock(spec=RuntimeProviderControlRepository)

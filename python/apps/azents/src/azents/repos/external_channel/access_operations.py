@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -37,6 +36,7 @@ from azents.core.root_agent_session_creation import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.conversation_provisioning import (
@@ -80,7 +80,7 @@ class ExternalChannelAccessOperations:
     """Own each complete database-only access decision transaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -212,7 +212,7 @@ class ExternalChannelAccessOperations:
                     session,
                     access_request_id=request.id,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return AccessAllowCommit(
                     result=ExternalChannelAllowedAccess(
                         request=request,
@@ -336,7 +336,7 @@ class ExternalChannelAccessOperations:
                 session,
                 access_request_id=request.id,
             )
-            await session.commit()
+            await session.write_session.commit()
             return AccessAllowCommit(
                 result=ExternalChannelAllowedAccess(
                     request=decided,
@@ -460,7 +460,7 @@ class ExternalChannelAccessOperations:
 
     async def _allow_setup_request(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request_snapshot: ExternalChannelAccessRequest,
         scope: ExternalChannelAccessGrantScope,
@@ -556,7 +556,7 @@ class ExternalChannelAccessOperations:
                 session,
                 access_request_id=request.id,
             )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelAllowedAccess(
                 request=request,
                 binding=None,
@@ -593,7 +593,7 @@ class ExternalChannelAccessOperations:
             session,
             access_request_id=request.id,
         )
-        await session.commit()
+        await session.write_session.commit()
         return ExternalChannelAllowedAccess(
             request=decided,
             binding=None,
@@ -651,7 +651,7 @@ class ExternalChannelAccessOperations:
                 raise ExternalChannelAccessDecisionError(
                     "The access grant does not exist."
                 )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelRevokedAccess(grant=grant)
 
     async def remove_block(
@@ -673,7 +673,7 @@ class ExternalChannelAccessOperations:
                 raise ExternalChannelAccessDecisionError(
                     "The access block does not exist."
                 )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelRemovedBlock(block=block)
 
     async def _resolve(
@@ -720,7 +720,7 @@ class ExternalChannelAccessOperations:
                     session,
                     access_request_id=request.id,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelResolvedAccess(
                     request=request,
                     control_delete_plan=delete_plan,
@@ -774,7 +774,7 @@ class ExternalChannelAccessOperations:
                     session,
                     access_request_id=request.id,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelResolvedAccess(
                     request=request,
                     control_delete_plan=delete_plan,
@@ -808,7 +808,7 @@ class ExternalChannelAccessOperations:
                 session,
                 access_request_id=request.id,
             )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelResolvedAccess(
                 request=decided,
                 control_delete_plan=delete_plan,
@@ -816,7 +816,7 @@ class ExternalChannelAccessOperations:
 
     async def _resolve_setup_request(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request_snapshot: ExternalChannelAccessRequest,
         action: Literal["deny", "block"],
@@ -877,7 +877,7 @@ class ExternalChannelAccessOperations:
                 session,
                 access_request_id=request.id,
             )
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelResolvedAccess(
                 request=request,
                 control_delete_plan=delete_plan,
@@ -929,7 +929,7 @@ class ExternalChannelAccessOperations:
             session,
             access_request_id=request.id,
         )
-        await session.commit()
+        await session.write_session.commit()
         return ExternalChannelResolvedAccess(
             request=decided,
             control_delete_plan=delete_plan,
@@ -937,7 +937,7 @@ class ExternalChannelAccessOperations:
 
     async def _locked_request(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         access_request_id: str,
     ) -> ExternalChannelAccessRequest:

@@ -34,6 +34,7 @@ from azents.core.external_channel_provider_effect import (
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import (
     _create_agent,
@@ -61,6 +62,22 @@ from azents.services.external_channel.slack_events import SlackControlMessageRes
 from azents.testing.types import require_instance
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
+
+
+def _session() -> WriteSession:
+    """Create a wrapped mock write session."""
+    raw_session = MagicMock(spec=AsyncSession)
+    raw_session.commit = AsyncMock()
+    return ReadWriteSession(raw_session)
+
+
+def _commit_mock(session: WriteSession) -> AsyncMock:
+    """Return the mocked commit callable from a test capability wrapper."""
+    raw_session = session.write_session
+    assert isinstance(raw_session, MagicMock)
+    commit = raw_session.commit
+    assert isinstance(commit, AsyncMock)
+    return commit
 
 
 @dataclass
@@ -342,7 +359,7 @@ async def test_execute_serializes_actions_for_the_same_binding() -> None:
 @pytest.mark.asyncio
 async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     """Ignore does not apply finish's final-reply gate to Tracker cleanup."""
-    session = SimpleNamespace(commit=AsyncMock())
+    session = _session()
     effect = _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE)
     repository = SimpleNamespace(
         commit_direct_action=AsyncMock(
@@ -399,7 +416,7 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     assert result.work_status is ExternalChannelWorkStatus.FINISHED
     assert result.outcomes == (delivered,)
     repository.commit_direct_action.assert_awaited_once()
-    session.commit.assert_awaited_once()
+    _commit_mock(session).assert_awaited_once()
     execute_direct_effect.assert_awaited_once_with(
         effect,
         file_storage=None,
@@ -414,7 +431,7 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
 @pytest.mark.asyncio
 async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     """Finish retains the Tracker cleanup gate when its required reply fails."""
-    session = SimpleNamespace(commit=AsyncMock())
+    session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     delete = _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE)
     repository = SimpleNamespace(
@@ -478,7 +495,7 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
 @pytest.mark.asyncio
 async def test_request_input_settles_only_after_confirmed_reply_delivery() -> None:
     """A delivered question establishes awaiting state through a second CAS."""
-    session = SimpleNamespace(commit=AsyncMock())
+    session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     repository = SimpleNamespace(
         commit_direct_action=AsyncMock(
@@ -548,13 +565,13 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
         work_cycle_id="work-1",
         expected_state_revision=5,
     )
-    assert session.commit.await_count == 2
+    assert _commit_mock(session).await_count == 2
 
 
 @pytest.mark.asyncio
 async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     """A failed question reply leaves Work ready for normal continuation."""
-    session = SimpleNamespace(commit=AsyncMock())
+    session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     repository = SimpleNamespace(
         commit_direct_action=AsyncMock(
@@ -611,13 +628,13 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     assert result.awaiting_input is False
     assert result.state_revision == 5
     repository.settle_awaiting_input.assert_not_awaited()
-    session.commit.assert_awaited_once()
+    _commit_mock(session).assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_tracker_recreation_needs_only_cleanup() -> None:
     """Standalone recreation depends only on confirmed old-host cleanup."""
-    session = SimpleNamespace(commit=AsyncMock())
+    session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     remove = replace(
         _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE),
@@ -703,7 +720,7 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
 @pytest.mark.asyncio
 async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
     """Failed old-host cleanup prevents standalone replacement creation."""
-    session = SimpleNamespace(commit=AsyncMock())
+    session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     remove = replace(
         _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE),
@@ -1660,7 +1677,7 @@ async def test_discord_thread_session_open_failure_is_an_unknown_outcome() -> No
 
 
 async def _create_execution_authority(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     slug: str,
 ) -> SessionResourceAuthority:
@@ -1708,7 +1725,7 @@ def _owned_effect(
 
 
 def _owned_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     repository: object,
 ) -> ExternalChannelActionService:
     """Create one concrete service with mocked non-database collaborators."""
@@ -1724,7 +1741,7 @@ def _owned_service(
 
 
 async def test_stale_execution_cannot_commit_direct_channel_work(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Takeover before direct Work admission rejects the old transaction."""
     authority = await _create_execution_authority(
@@ -1762,7 +1779,7 @@ async def test_stale_execution_cannot_commit_direct_channel_work(
 
 
 async def test_stale_execution_cannot_start_direct_provider_effect(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Takeover before provider admission prevents external delivery."""
     authority = await _create_execution_authority(
@@ -1797,7 +1814,7 @@ async def test_stale_execution_cannot_start_direct_provider_effect(
 
 
 async def test_takeover_after_provider_effect_rejects_old_settlement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An admitted provider effect cannot settle after its owner is replaced."""
     authority = await _create_execution_authority(

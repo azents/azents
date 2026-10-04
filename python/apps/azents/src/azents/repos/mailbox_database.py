@@ -4,9 +4,9 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MailboxItemKind
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.mailbox import MailboxRepository
@@ -25,7 +25,7 @@ class MailboxDatabaseRepository:
     ]
 
     async def has_seen_action_type(
-        self, session: AsyncSession, *, session_id: str, action_type: str
+        self, session: ReadSession, *, session_id: str, action_type: str
     ) -> bool:
         pending = await self.mailbox_item_repository.list_by_session_id(
             session, session_id

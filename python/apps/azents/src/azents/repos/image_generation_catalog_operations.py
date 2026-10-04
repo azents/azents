@@ -5,13 +5,13 @@ import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMCatalogAttemptStatus, LLMCatalogPurpose, LLMProvider
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import (
     ImageGenerationCatalogEntryWithCatalog,
     LLMCatalogRepository,
@@ -65,7 +65,7 @@ class ImageGenerationCatalogOperationsRepository:
     """Finish every transaction before service/provider I/O."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     integration_repository: Annotated[
@@ -256,7 +256,7 @@ class ImageGenerationCatalogOperationsRepository:
 
     async def fail_sync(self, failure: CatalogSyncFailure) -> None:
         async with self.session_manager() as session:
-            initial = await session.get(RDBLLMCatalog, failure.catalog_id)
+            initial = await session.write_session.get(RDBLLMCatalog, failure.catalog_id)
             if initial is None:
                 return
             if initial.provider_integration_id is not None:

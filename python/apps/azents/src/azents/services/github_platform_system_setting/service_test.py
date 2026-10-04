@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.system_setting import (
@@ -24,6 +23,7 @@ from azents.core.system_setting_data import (
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.github_platform_system_setting.binding import (
     PlatformGitHubAppBindingRepository,
 )
@@ -55,7 +55,7 @@ def _private_key() -> str:
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     validation_client: PlatformGitHubAppValidationClient,
 ) -> PlatformGitHubAppSystemSettingService:
     key = Fernet.generate_key().decode()
@@ -106,7 +106,7 @@ def _mutation(private_key: str) -> SystemSettingMutation:
 
 
 async def test_valid_candidate_without_impact_auto_activates(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A first valid App with no existing bindings activates immediately."""
     client = MagicMock(spec=PlatformGitHubAppValidationClient)
@@ -134,7 +134,7 @@ async def test_valid_candidate_without_impact_auto_activates(
 
 
 async def test_invalid_private_key_never_calls_github(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Local validation persists a sanitized invalid candidate without egress."""
     client = MagicMock(spec=PlatformGitHubAppValidationClient)

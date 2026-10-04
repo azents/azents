@@ -2,7 +2,6 @@
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory_budget import (
@@ -15,6 +14,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationModelDispatch,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
     ConsolidationBudgetRepository,
 )
@@ -29,7 +29,7 @@ from azents.testing.consolidation import seed_consolidation_corpus
 
 
 async def _principal(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ConsolidationJobPrincipal:
     corpus = await seed_consolidation_corpus(manager)
     claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
@@ -58,7 +58,7 @@ def _usage(prompt: int, completion: int) -> ConsolidationUsage:
 
 
 async def test_physical_reservations_and_usage_replay_are_fenced_and_idempotent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     budgets = ConsolidationBudgetRepository(rdb_session_manager)
@@ -89,7 +89,7 @@ async def test_physical_reservations_and_usage_replay_are_fenced_and_idempotent(
     assert remaining.model_requests == 31 and remaining.output_tokens == 15975
     assert remaining.input_tokens == 249880
     async with rdb_session_manager() as session:
-        row = await session.get(
+        row = await session.read_session.get(
             RDBConsolidationModelDispatch, (principal.attempt_id, nonce)
         )
         assert row is not None and row.usage_recorded and row.usage_json is not None
@@ -98,7 +98,7 @@ async def test_physical_reservations_and_usage_replay_are_fenced_and_idempotent(
 
 
 async def test_missing_usage_is_unknown_and_does_not_release_a_fabricated_zero(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     budgets = ConsolidationBudgetRepository(rdb_session_manager)
@@ -113,14 +113,14 @@ async def test_missing_usage_is_unknown_and_does_not_release_a_fabricated_zero(
             principal, dispatch_id=uuid7().hex, input_tokens=1, output_tokens=1
         )
     async with rdb_session_manager() as session:
-        row = await session.get(
+        row = await session.read_session.get(
             RDBConsolidationModelDispatch, (principal.attempt_id, nonce)
         )
         assert row is not None and row.usage_recorded and row.usage_json is None
 
 
 async def test_actual_over_budget_is_committed_and_blocks_later_admission(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     budgets = ConsolidationBudgetRepository(rdb_session_manager)
@@ -132,7 +132,9 @@ async def test_actual_over_budget_is_committed_and_blocks_later_admission(
         principal, dispatch_id=nonce, usage=_usage(250001, 16001)
     )
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert attempt is not None
         assert attempt.input_tokens == 250001 and attempt.output_tokens == 16001
         assert attempt.failure_code == "token_budget_exceeded"
@@ -147,7 +149,7 @@ async def test_actual_over_budget_is_committed_and_blocks_later_admission(
 
 
 async def test_each_transport_attempt_counts_and_tool_batch_cannot_cross_cap(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     budgets = ConsolidationBudgetRepository(rdb_session_manager)
@@ -170,13 +172,15 @@ async def test_each_transport_attempt_counts_and_tool_batch_cannot_cross_cap(
     assert (await budgets.remaining(principal)).tool_calls == 1
     await budgets.reserve_tools(principal, count=1)
     async with rdb_session_manager() as session:
-        count = await session.scalar(
+        count = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBConsolidationModelDispatch)
             .where(RDBConsolidationModelDispatch.attempt_id == principal.attempt_id)
         )
         assert count == 32
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert (
             attempt is not None
             and attempt.model_requests == 32

@@ -6,7 +6,6 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionStopSignal
 from azents.core.enums import (
@@ -43,6 +42,7 @@ from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
@@ -83,14 +83,14 @@ class _Broker:
 
 
 async def _seed_managed_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
 ) -> _ManagedAgentFixture:
     """Create one managed-unconfigured Agent."""
     workspace = RDBWorkspace(name="Runtime removal", handle=handle)
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict()
     agent = RDBAgent(
         workspace_id=workspace.id,
@@ -105,10 +105,10 @@ async def _seed_managed_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    await session.write_session.flush()
     return _ManagedAgentFixture(
         workspace_id=workspace.id,
         agent_id=agent.id,
@@ -116,7 +116,7 @@ async def _seed_managed_agent(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     removal_repository: AgentRuntimeRemovalRepository | None = None,
 ) -> AgentRuntimeRemovalService:
@@ -157,7 +157,7 @@ def _request(
 
 
 async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Confirmation stores only content-free Agent-wide impact counts."""
     async with rdb_session_manager() as session:
@@ -167,7 +167,7 @@ async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
         )
         root_id = uuid4().hex
         subagent_id = uuid4().hex
-        await session.execute(
+        await session.write_session.execute(
             sa.insert(RDBAgentSession),
             [
                 {
@@ -194,7 +194,7 @@ async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
                 },
             ],
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.insert(RDBAgentRun).values(
                 id=uuid4().hex,
                 session_id=subagent_id,
@@ -204,7 +204,7 @@ async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
                 status=AgentRunStatus.RUNNING,
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.insert(RDBActionExecution).values(
                 id=uuid4().hex,
                 session_id=root_id,
@@ -246,7 +246,7 @@ async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
 
 
 async def test_confirmation_rejects_stale_and_competing_requests(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Version fences and one active operation serialize confirmation."""
     async with rdb_session_manager() as session:
@@ -279,7 +279,7 @@ async def test_confirmation_rejects_stale_and_competing_requests(
 
 
 async def test_confirmation_rolls_back_agent_fence_when_operation_creation_fails(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Agent capability and operation creation share one transaction."""
@@ -314,7 +314,7 @@ async def test_confirmation_rolls_back_agent_fence_when_operation_creation_fails
 
 
 async def test_completed_idempotency_key_cannot_fence_readded_agent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A historical removal key cannot replay after a later Runtime add."""
     async with rdb_session_manager() as session:
@@ -332,7 +332,7 @@ async def test_completed_idempotency_key_cannot_fence_readded_agent(
     assert summary.completed_count == 1
 
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == agent_id)
             .values(
@@ -368,7 +368,7 @@ async def test_completed_idempotency_key_cannot_fence_readded_agent(
 
 
 async def test_coordinator_completes_no_runtime_removal_and_preserves_agent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A managed-unconfigured Agent becomes Runtime-free without deletion."""
     async with rdb_session_manager() as session:
@@ -394,7 +394,7 @@ async def test_coordinator_completes_no_runtime_removal_and_preserves_agent(
             session,
             confirmed.operation.id,
         )
-        workspace = await session.get(RDBWorkspace, workspace_id)
+        workspace = await session.read_session.get(RDBWorkspace, workspace_id)
     assert agent is not None
     assert workspace is not None
     assert agent.runtime_capability is AgentRuntimeCapability.NONE
@@ -407,7 +407,7 @@ async def test_coordinator_completes_no_runtime_removal_and_preserves_agent(
 
 
 async def test_coordinator_records_locked_no_physical_binding_authority(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An empty logical Runtime is terminalized by repository-owned proof."""
     async with rdb_session_manager() as session:
@@ -423,8 +423,8 @@ async def test_coordinator_records_locked_no_physical_binding_authority(
             provider_binding_origin=None,
             provider_binding_evidence=None,
         )
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime_id = runtime.id
     service = _service(rdb_session_manager)
     confirmed = await service.confirm(
@@ -484,7 +484,7 @@ async def test_coordinator_records_locked_no_physical_binding_authority(
 
 
 async def test_coordinator_waits_for_exact_provider_acknowledgement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Provider disconnection alone never completes physical deletion."""
     async with rdb_session_manager() as session:
@@ -505,8 +505,8 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
             metadata_=None,
             workspace_id=None,
         )
-        session.add(provider)
-        await session.flush()
+        session.write_session.add(provider)
+        await session.write_session.flush()
         runtime = RDBAgentRuntime(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -515,12 +515,12 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
             provider_binding_origin=RuntimeProviderBindingOrigin.PLATFORM_DEFAULT,
             provider_binding_evidence={"source": "test"},
         )
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime.configuration_sequence = 1
         document = {"schema_version": 1, "resolved_configuration": {"cpu": 1}}
         now = datetime.datetime.now(datetime.UTC)
-        session.add(
+        session.write_session.add(
             RDBRuntimeConfigurationState(
                 runtime_id=runtime.id,
                 desired_sequence=1,
@@ -540,7 +540,7 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
                 applied_at=now,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         runtime_id = runtime.id
     service = _service(rdb_session_manager)
     confirmed = await service.confirm(
@@ -577,7 +577,7 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
             )
         )
         assert acknowledged is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntimeRemovalOperation)
             .where(RDBAgentRuntimeRemovalOperation.id == confirmed.operation.id)
             .values(
@@ -599,7 +599,7 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
         )
         agent = await AgentRepository().get_by_id(session, agent_id)
         runtime = await AgentRuntimeRepository().get_by_id(session, runtime_id)
-        configuration_state = await session.get(
+        configuration_state = await session.read_session.get(
             RDBRuntimeConfigurationState,
             runtime_id,
         )

@@ -8,7 +8,6 @@ from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeProviderKind
 from azents.core.runtime_profile import (
@@ -26,6 +25,7 @@ from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContr
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileCreate,
@@ -105,7 +105,7 @@ class RuntimeProfileAdminService:
     """Manage typed infrastructure Profiles within one Provider boundary."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     profile_repository: Annotated[
         RuntimeProfileRepository, Depends(RuntimeProfileRepository)
@@ -548,7 +548,7 @@ class RuntimeProfileAdminService:
 
     async def _require_provider(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         provider_logical_id: str,
     ) -> RuntimeProvider:
         provider = await self.provider_repository.get_by_provider_id(
@@ -565,7 +565,7 @@ class RuntimeProfileAdminService:
 
     async def _current_contract(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         provider: RuntimeProvider,
     ) -> _CurrentContract:
         revision_id = provider.current_contract_revision_id

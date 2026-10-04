@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated, assert_never
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.agent_session_data import AgentSessionCreate
@@ -16,6 +15,7 @@ from azents.core.root_agent_session_creation import (
     RootWorkspaceIntent,
 )
 from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -50,7 +50,7 @@ class RootAgentSessionCreationRepository:
 
     async def create_root_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: AgentSessionCreate,
         workspace_intent: RootWorkspaceIntent,
@@ -88,7 +88,7 @@ class RootAgentSessionCreationRepository:
 
     async def ensure_team_primary(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -155,7 +155,7 @@ class RootAgentSessionCreationRepository:
 
     async def _resolve_workspace_intent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         capability: AgentRuntimeCapability,
@@ -200,7 +200,7 @@ class RootAgentSessionCreationRepository:
 
     async def _require_automatic_project_policy(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> AgentAutomaticProjectPolicy:
@@ -229,7 +229,7 @@ class RootAgentSessionCreationRepository:
 
     async def _create_projects(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         project_paths: tuple[str, ...],

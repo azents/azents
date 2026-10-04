@@ -7,7 +7,6 @@ from typing import Annotated
 import sqlalchemy as sa
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionProductMode, EventKind
 from azents.core.historical_memory_consolidation import ConsolidationScope
@@ -26,6 +25,7 @@ from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import CompactionSummaryPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.authority import consolidation_session
 from azents.repos.historical_memory_consolidation.foreground import (
@@ -54,7 +54,7 @@ class MemoryContextSnapshotRepository:
         ToolkitStateRepository, Depends(ToolkitStateRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     def with_owner(
@@ -72,7 +72,7 @@ class MemoryContextSnapshotRepository:
 
     async def prompt_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
         async with consolidation_session(self.session_manager) as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
             consumer = (
@@ -135,7 +135,7 @@ class MemoryContextSnapshotRepository:
         after_compaction: bool,
     ) -> bool:
         async with consolidation_session(self.session_manager) as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
             consumer = (
@@ -170,7 +170,7 @@ class MemoryContextSnapshotRepository:
 
     async def _select_snapshot(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         consumer: MemorySnapshotConsumer,
         record: ToolkitStateRecord | None,
@@ -245,7 +245,7 @@ class MemoryContextSnapshotRepository:
         return True
 
     async def _valid_boundary(
-        self, session: AsyncSession, consumer: MemorySnapshotConsumer
+        self, session: ReadSession, consumer: MemorySnapshotConsumer
     ) -> bool:
         if consumer.model_input_head_event_id is None:
             return True

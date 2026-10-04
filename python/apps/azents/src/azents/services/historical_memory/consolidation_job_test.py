@@ -7,7 +7,6 @@ from collections.abc import Awaitable, Callable
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import ConsolidationDisposition
 from azents.core.historical_memory_publication import (
@@ -18,6 +17,7 @@ from azents.core.historical_memory_publication import (
 from azents.job_runtime.types import JobExecutionContext, JobRequest
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationUnit
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
 )
@@ -91,7 +91,7 @@ class _PausedHost:
         self.closed = True
 
 
-async def _host(manager: SessionManager[AsyncSession]) -> _PausedHost:
+async def _host(manager: SessionManager[WriteSession]) -> _PausedHost:
     corpus = await seed_consolidation_corpus(manager)
     ownership = ConsolidationOwnershipRepository(manager)
     claim = await ownership.claim(corpus.team)
@@ -100,7 +100,7 @@ async def _host(manager: SessionManager[AsyncSession]) -> _PausedHost:
 
 
 async def test_heartbeat_renews_while_model_is_blocked_without_foreground_lock(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(rdb_session_manager)
     clock = _Clock()
@@ -109,13 +109,13 @@ async def test_heartbeat_renews_while_model_is_blocked_without_foreground_lock(
     assert await clock.requests.get() == 30
     before = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=60)
     async with rdb_session_manager() as session:
-        unit = await session.get(RDBConsolidationUnit, host.claim.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, host.claim.unit_id)
         assert unit is not None
         unit.lease_until = before
     await clock.ticks.put(None)
     assert await clock.requests.get() == 30
     async with rdb_session_manager() as session:
-        unit = await session.get(RDBConsolidationUnit, host.claim.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, host.claim.unit_id)
         assert (
             unit is not None
             and unit.lease_until is not None
@@ -128,7 +128,7 @@ async def test_heartbeat_renews_while_model_is_blocked_without_foreground_lock(
 
 
 async def test_unconfirmed_ownership_cancels_and_quiesces_the_blocked_host(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(rdb_session_manager)
     clock = _Clock()
@@ -136,7 +136,7 @@ async def test_unconfirmed_ownership_cancels_and_quiesces_the_blocked_host(
     await host.started.wait()
     assert await clock.requests.get() == 30
     async with rdb_session_manager() as session:
-        unit = await session.get(RDBConsolidationUnit, host.claim.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, host.claim.unit_id)
         assert unit is not None
         unit.owner_token = "b" * 32
     await clock.ticks.put(None)
@@ -149,7 +149,7 @@ async def test_unconfirmed_ownership_cancels_and_quiesces_the_blocked_host(
 
 
 async def test_shutdown_preserves_cancellation_and_drops_host_lifecycle(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(rdb_session_manager)
     clock = _Clock()
@@ -163,7 +163,7 @@ async def test_shutdown_preserves_cancellation_and_drops_host_lifecycle(
 
 
 async def test_already_elapsed_attempt_closes_even_a_never_started_host(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(rdb_session_manager)
     host.claim = dataclasses.replace(
@@ -193,7 +193,7 @@ class _CloseDeniedPause(_PausedHost):
 
 
 async def test_late_cleanup_error_does_not_replace_original_shutdown_cancellation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     base = await _host(rdb_session_manager)
     attempt = _CloseDeniedPause(
@@ -227,7 +227,7 @@ class _CommittedPause(_PausedHost):
 
 
 async def test_publication_commit_wins_heartbeat_loss_during_final_quiescence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     base = await _host(rdb_session_manager)
     principal = base.claim.principal
@@ -289,7 +289,7 @@ async def test_publication_commit_wins_heartbeat_loss_during_final_quiescence(
 
 
 async def test_handler_requests_productive_pending_continuation_after_publication(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     service = Mock()

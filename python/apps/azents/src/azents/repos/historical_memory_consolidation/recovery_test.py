@@ -4,7 +4,6 @@ import datetime
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import (
     ConsolidationDisposition,
@@ -21,6 +20,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
@@ -40,7 +40,7 @@ from azents.testing.consolidation import seed_consolidation_corpus
 
 @pytest.mark.parametrize("deny_restore", [False, True])
 async def test_recovery_retains_authorized_draft_or_discards_entire_denied_work(
-    rdb_session_manager: SessionManager[AsyncSession], deny_restore: bool
+    rdb_session_manager: SessionManager[WriteSession], deny_restore: bool
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
@@ -104,7 +104,9 @@ async def test_recovery_retains_authorized_draft_or_discards_entire_denied_work(
         assert actual.content == "retained partial prose"
         assert actual.draft_revision_id == result.draft_revision_id
     async with rdb_session_manager() as session:
-        row = await session.get(RDBConsolidationWork, page.entries[0].work_id)
+        row = await session.read_session.get(
+            RDBConsolidationWork, page.entries[0].work_id
+        )
         assert row is not None
         assert row.state is (
             ConsolidationWorkState.PENDING
@@ -119,7 +121,7 @@ async def test_recovery_retains_authorized_draft_or_discards_entire_denied_work(
                 is None
             )
             assert (
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(sa.func.count()).select_from(
                         RDBConsolidationDraftDependency
                     )
@@ -127,7 +129,7 @@ async def test_recovery_retains_authorized_draft_or_discards_entire_denied_work(
                 == 0
             )
             assert (
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(sa.func.count())
                     .select_from(RDBConsolidationEvidence)
                     .where(
@@ -140,7 +142,7 @@ async def test_recovery_retains_authorized_draft_or_discards_entire_denied_work(
 
 
 async def test_new_owner_recovers_only_draft_dependencies_not_prior_unused_exposures(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
@@ -171,7 +173,7 @@ async def test_new_owner_recovers_only_draft_dependencies_not_prior_unused_expos
         first.principal, failure_code="synthetic_interruption", cancelled=False
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBConsolidationUnit)
             .where(RDBConsolidationUnit.agent_id == corpus.team.agent_id)
             .values(retry_at=sa.func.clock_timestamp() - datetime.timedelta(seconds=1))

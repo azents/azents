@@ -3,10 +3,10 @@
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_project_preset import AgentProjectPreset
 from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 class AgentProjectPresetRepository:
@@ -14,13 +14,13 @@ class AgentProjectPresetRepository:
 
     async def upsert_preset(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         path: str,
     ) -> AgentProjectPreset:
         """Create or refresh an Agent Project preset row."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             pg_insert(RDBAgentProjectPreset)
             .values(
                 id=uuid7().hex,
@@ -34,17 +34,17 @@ class AgentProjectPresetRepository:
             .returning(RDBAgentProjectPreset)
         )
         rdb = result.scalar_one()
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def list_presets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[AgentProjectPreset]:
         """Fetch Agent Project presets ordered by recent use."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentProjectPreset)
             .where(RDBAgentProjectPreset.agent_id == agent_id)
             .order_by(

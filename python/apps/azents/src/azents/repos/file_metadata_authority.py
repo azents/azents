@@ -2,9 +2,8 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunStatus, AgentSessionStatus
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 
@@ -31,7 +30,7 @@ class FileMetadataAuthorityRepository:
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         authority: FileResourceAuthority,
         *,
         lock: bool,

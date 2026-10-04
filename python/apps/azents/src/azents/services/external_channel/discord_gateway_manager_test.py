@@ -28,6 +28,7 @@ from azents.core.external_channel_ingestion import (
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.discord_connection_operations import (
     DiscordConnectionOperationRepository,
 )
@@ -70,11 +71,13 @@ class _SessionManager:
     """Yield one mock session without database I/O."""
 
     def __init__(self) -> None:
-        self.session = MagicMock()
-        self.session.commit = AsyncMock()
+        raw_session = MagicMock()
+        raw_session.commit = AsyncMock()
+        self.raw_session = raw_session
+        self.session = ReadWriteSession(raw_session)
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[MagicMock]:
+    async def __call__(self) -> AsyncIterator[ReadWriteSession]:
         yield self.session
 
 
@@ -616,7 +619,7 @@ async def test_admits_typed_event_under_current_lease() -> None:
     assert isinstance(create, ExternalChannelTrigger)
     assert create.connection_id == "connection-1"
     assert create.provider_event_id == "discord:discord_message_create:300:200:100"
-    sessions.session.commit.assert_not_awaited()
+    sessions.raw_session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio

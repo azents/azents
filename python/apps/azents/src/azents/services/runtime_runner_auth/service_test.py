@@ -14,6 +14,7 @@ from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredentialInvalid,
     RuntimeRunnerCredentialVerifier,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.services.runtime_runner_auth.service import (
@@ -28,7 +29,7 @@ class _FakeRuntimeRepository(AgentRuntimeRepository):
 
     async def get_by_id_for_update(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         del session
@@ -52,8 +53,10 @@ def _runtime(*, desired_generation: int) -> AgentRuntime:
 
 def _service(runtime: AgentRuntime | None) -> RuntimeRunnerAuthenticationService:
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(
+            require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+        )
 
     return RuntimeRunnerAuthenticationService(
         session_manager=session_manager,

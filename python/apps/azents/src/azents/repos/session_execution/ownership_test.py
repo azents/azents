@@ -16,6 +16,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
@@ -25,7 +26,7 @@ from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 
 
 async def test_owner_bound_transaction_rejects_superseded_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A new durable claim revokes both old writes and external admission checks."""
     sessions = AgentSessionRepository()
@@ -71,7 +72,7 @@ async def test_owner_bound_transaction_rejects_superseded_generation(
 
 
 async def test_owner_bound_transaction_rejects_missing_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Missing durable authority must never become an unfenced execution scope."""
     owner = OwnerBoundSessionManager(
@@ -93,10 +94,11 @@ async def test_execution_lock_contention_releases_tree_gate_before_retry(
     del latest_db_schema
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             yield session
-            await session.commit()
+            await session.write_session.commit()
 
     suffix = uuid4().hex[:8]
     sessions = AgentSessionRepository()
@@ -133,11 +135,11 @@ async def test_execution_lock_contention_releases_tree_gate_before_retry(
 
     async with session_manager() as holder:
         if contended_row == "agent":
-            await holder.scalar(
+            await holder.write_session.scalar(
                 sa.select(RDBAgent.id).where(RDBAgent.id == agent_id).with_for_update()
             )
         else:
-            await holder.scalar(
+            await holder.write_session.scalar(
                 sa.select(RDBAgentSession.id)
                 .where(
                     RDBAgentSession.id
@@ -156,7 +158,7 @@ async def test_execution_lock_contention_releases_tree_gate_before_retry(
             # The competing writer can enter the tree lifecycle immediately:
             # the failed execution attempt retained neither gate nor Session.
             assert (
-                await holder.scalar(
+                await holder.write_session.scalar(
                     sa.select(RDBSessionAgent.id)
                     .where(RDBSessionAgent.id == root.id)
                     .with_for_update(nowait=True)
@@ -164,14 +166,14 @@ async def test_execution_lock_contention_releases_tree_gate_before_retry(
                 == root.id
             )
             assert (
-                await holder.scalar(
+                await holder.write_session.scalar(
                     sa.select(RDBAgentSession.id)
                     .where(RDBAgentSession.id == child.agent_session_id)
                     .with_for_update(nowait=True)
                 )
                 == child.agent_session_id
             )
-        await holder.commit()
+        await holder.write_session.commit()
 
     await OwnerBoundSessionManager(
         session_manager=session_manager,

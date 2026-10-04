@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -13,6 +12,7 @@ from azents.core.enums import (
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 
 
@@ -21,7 +21,7 @@ class RuntimeProviderPublicService:
     """List eligible Providers without exposing mutable binding state."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
 

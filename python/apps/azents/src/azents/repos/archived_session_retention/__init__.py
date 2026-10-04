@@ -5,7 +5,6 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionKind,
@@ -21,6 +20,7 @@ from azents.rdb.models.archived_session_retention import (
     RDBArchivedSessionRetentionApplication,
     RDBSystemFileLifecycleSetting,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     ArchivedSessionPurgeJob,
@@ -51,16 +51,16 @@ class ArchivedSessionPurgeParticipantSnapshotInvalid(RuntimeError):
 class ArchivedSessionRetentionRepository:
     """Persistence operations for archive retention settings and work."""
 
-    async def get_settings(self, session: AsyncSession) -> SystemFileLifecycleSettings:
+    async def get_settings(self, session: ReadSession) -> SystemFileLifecycleSettings:
         """Fetch the singleton settings row."""
-        row = await session.get(RDBSystemFileLifecycleSetting, 1)
+        row = await session.read_session.get(RDBSystemFileLifecycleSetting, 1)
         if row is None:
             raise RuntimeError("System file lifecycle settings are not initialized")
         return self._build_settings(row)
 
-    async def lock_settings(self, session: AsyncSession) -> SystemFileLifecycleSettings:
+    async def lock_settings(self, session: WriteSession) -> SystemFileLifecycleSettings:
         """Lock and fetch the singleton settings row."""
-        row = await session.scalar(
+        row = await session.write_session.scalar(
             sa.select(RDBSystemFileLifecycleSetting)
             .where(RDBSystemFileLifecycleSetting.id == 1)
             .with_for_update()
@@ -71,14 +71,14 @@ class ArchivedSessionRetentionRepository:
 
     async def update_settings(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         expected_revision: int,
         retention_days: int | None,
         updated_by_user_id: str,
     ) -> SystemFileLifecycleSettings | None:
         """Update settings when the optimistic revision matches."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSystemFileLifecycleSetting)
             .where(
                 RDBSystemFileLifecycleSetting.id == 1,
@@ -97,7 +97,7 @@ class ArchivedSessionRetentionRepository:
 
     async def schedule_purge_job(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         eligible_at: datetime.datetime,
@@ -124,7 +124,7 @@ class ArchivedSessionRetentionRepository:
             "completed_at": None,
             "updated_at": now,
         }
-        await session.execute(
+        await session.write_session.execute(
             insert(RDBArchivedSessionPurgeJob)
             .values(
                 id=uuid7().hex,
@@ -140,13 +140,13 @@ class ArchivedSessionRetentionRepository:
 
     async def cancel_unstarted_purge_job(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         now: datetime.datetime,
     ) -> bool:
         """Cancel purge work only before its irreversible fence."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.root_session_id == root_session_id,
@@ -166,7 +166,7 @@ class ArchivedSessionRetentionRepository:
 
     async def cancel_invalid_unstarted_purge_jobs(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -198,7 +198,7 @@ class ArchivedSessionRetentionRepository:
             .order_by(RDBArchivedSessionPurgeJob.updated_at)
             .limit(limit)
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.id.in_(candidates),
@@ -228,12 +228,12 @@ class ArchivedSessionRetentionRepository:
 
     async def purge_fencing_started(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
     ) -> bool:
         """Return whether irreversible purge fencing has started."""
-        started = await session.scalar(
+        started = await session.write_session.scalar(
             sa.select(RDBArchivedSessionPurgeJob.fencing_started_at)
             .where(RDBArchivedSessionPurgeJob.root_session_id == root_session_id)
             .with_for_update()
@@ -242,7 +242,7 @@ class ArchivedSessionRetentionRepository:
 
     async def preview(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         retention_days: int | None,
         now: datetime.datetime,
@@ -261,13 +261,13 @@ class ArchivedSessionRetentionRepository:
         )
         candidate = sa.and_(base, ~started_job)
         affected = (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBAgentSession).where(candidate)
             )
             or 0
         )
         excluded = (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBAgentSession)
                 .where(base, started_job)
@@ -279,7 +279,7 @@ class ArchivedSessionRetentionRepository:
         cancelled = 0
         if retention_days is None:
             cancelled = (
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(sa.func.count())
                     .select_from(RDBAgentSession)
                     .where(candidate, RDBAgentSession.purge_after.is_not(None))
@@ -293,7 +293,7 @@ class ArchivedSessionRetentionRepository:
             )
             cutoff = now - datetime.timedelta(days=retention_days)
             immediately = (
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(sa.func.count())
                     .select_from(RDBAgentSession)
                     .where(candidate, archived_at <= cutoff)
@@ -310,10 +310,10 @@ class ArchivedSessionRetentionRepository:
         )
 
     async def get_active_application(
-        self, session: AsyncSession
+        self, session: ReadSession
     ) -> ArchivedSessionRetentionApplication | None:
         """Fetch the oldest unfinished recalculation application."""
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBArchivedSessionRetentionApplication)
             .where(
                 RDBArchivedSessionRetentionApplication.status.in_(
@@ -327,12 +327,12 @@ class ArchivedSessionRetentionRepository:
 
     async def get_application(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         application_id: str,
     ) -> ArchivedSessionRetentionApplication | None:
         """Fetch one durable retention application by ID."""
-        row = await session.get(
+        row = await session.read_session.get(
             RDBArchivedSessionRetentionApplication,
             application_id,
         )
@@ -340,7 +340,7 @@ class ArchivedSessionRetentionRepository:
 
     async def create_application(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         target_revision: int,
         target_retention_days: int | None,
@@ -352,14 +352,14 @@ class ArchivedSessionRetentionRepository:
             target_retention_days=target_retention_days,
             requested_by_user_id=requested_by_user_id,
         )
-        session.add(row)
-        await session.flush()
-        await session.refresh(row)
+        session.write_session.add(row)
+        await session.write_session.flush()
+        await session.write_session.refresh(row)
         return self._build_application(row)
 
     async def claim_application(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -397,7 +397,7 @@ class ArchivedSessionRetentionRepository:
             .limit(1)
             .scalar_subquery()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionRetentionApplication)
             .where(RDBArchivedSessionRetentionApplication.id == candidate)
             .values(
@@ -422,7 +422,7 @@ class ArchivedSessionRetentionRepository:
 
     async def apply_next_batch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         application: ArchivedSessionRetentionApplication,
         now: datetime.datetime,
@@ -442,7 +442,7 @@ class ArchivedSessionRetentionRepository:
             query = query.where(RDBAgentSession.id > application.cursor_session_id)
         rows = list(
             (
-                await session.execute(
+                await session.write_session.execute(
                     query.order_by(RDBAgentSession.id).with_for_update().limit(limit)
                 )
             ).scalars()
@@ -455,7 +455,7 @@ class ArchivedSessionRetentionRepository:
         cursor = None
         for row in rows:
             cursor = row.id
-            job = await session.scalar(
+            job = await session.write_session.scalar(
                 sa.select(RDBArchivedSessionPurgeJob)
                 .where(RDBArchivedSessionPurgeJob.root_session_id == row.id)
                 .with_for_update()
@@ -516,7 +516,7 @@ class ArchivedSessionRetentionRepository:
                 for key, value in insert_values.items()
                 if key not in {"id", "root_session_id"}
             }
-            await session.execute(
+            await session.write_session.execute(
                 insert(RDBArchivedSessionPurgeJob)
                 .values(**insert_values)
                 .on_conflict_do_update(
@@ -537,7 +537,7 @@ class ArchivedSessionRetentionRepository:
 
     async def advance_application(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         application_id: str,
         lease_owner: str,
@@ -582,7 +582,7 @@ class ArchivedSessionRetentionRepository:
             )
         else:
             values.update(status=ArchivedSessionRetentionApplicationStatus.PENDING)
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionRetentionApplication)
             .where(
                 RDBArchivedSessionRetentionApplication.id == application_id,
@@ -597,7 +597,7 @@ class ArchivedSessionRetentionRepository:
 
     async def mark_application_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         application_id: str,
         next_attempt_at: datetime.datetime,
@@ -606,7 +606,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
     ) -> None:
         """Release a failed application lease into bounded retry wait."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBArchivedSessionRetentionApplication)
             .where(
                 RDBArchivedSessionRetentionApplication.id == application_id,
@@ -626,7 +626,7 @@ class ArchivedSessionRetentionRepository:
 
     async def claim_due_purge_job(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -685,7 +685,7 @@ class ArchivedSessionRetentionRepository:
             .limit(1)
             .scalar_subquery()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(RDBArchivedSessionPurgeJob.id == candidate)
             .values(
@@ -716,7 +716,7 @@ class ArchivedSessionRetentionRepository:
 
     async def mark_purge_cleaning(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -727,7 +727,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Persist cleanup scope and enter the cleaning phase."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.id == job_id,
@@ -747,7 +747,7 @@ class ArchivedSessionRetentionRepository:
 
     async def mark_purge_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -759,7 +759,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
     ) -> None:
         """Release a purge lease into bounded retry wait."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.id == job_id,
@@ -780,14 +780,14 @@ class ArchivedSessionRetentionRepository:
 
     async def complete_purge_job(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
         now: datetime.datetime,
     ) -> bool:
         """Complete a content-free purge tombstone and release its lease."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.id == job_id,
@@ -811,7 +811,7 @@ class ArchivedSessionRetentionRepository:
 
     async def materialize_purge_participant_executions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -838,7 +838,7 @@ class ArchivedSessionRetentionRepository:
                 message="Purge participant snapshot contains duplicate keys.",
             )
 
-        job = await session.scalar(
+        job = await session.write_session.scalar(
             sa.select(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.id == job_id,
@@ -852,7 +852,7 @@ class ArchivedSessionRetentionRepository:
 
         rows = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBArchivedSessionPurgeParticipantExecution)
                     .where(
                         RDBArchivedSessionPurgeParticipantExecution.purge_job_id
@@ -879,7 +879,7 @@ class ArchivedSessionRetentionRepository:
                 )
             return [self._build_participant_execution(row) for row in rows]
 
-        session.add_all(
+        session.write_session.add_all(
             [
                 RDBArchivedSessionPurgeParticipantExecution(
                     purge_job_id=job_id,
@@ -892,7 +892,7 @@ class ArchivedSessionRetentionRepository:
                 )
             ]
         )
-        await session.flush()
+        await session.write_session.flush()
         return await self.list_purge_participant_executions(
             session,
             job_id=job_id,
@@ -900,14 +900,14 @@ class ArchivedSessionRetentionRepository:
 
     async def list_purge_participant_executions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
     ) -> list[ArchivedSessionPurgeParticipantExecution]:
         """List participant checkpoints in stable key order."""
         rows = list(
             (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBArchivedSessionPurgeParticipantExecution)
                     .where(
                         RDBArchivedSessionPurgeParticipantExecution.purge_job_id
@@ -923,7 +923,7 @@ class ArchivedSessionRetentionRepository:
 
     async def start_purge_participant_attempt(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -931,7 +931,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Record an actual owned participant attempt and clear stale block state."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeParticipantExecution)
             .where(
                 RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
@@ -960,7 +960,7 @@ class ArchivedSessionRetentionRepository:
 
     async def mark_purge_participant_blocked(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -969,7 +969,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Record an unmet dependency without incrementing the attempt count."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeParticipantExecution)
             .where(
                 RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
@@ -992,7 +992,7 @@ class ArchivedSessionRetentionRepository:
 
     async def checkpoint_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -1010,7 +1010,7 @@ class ArchivedSessionRetentionRepository:
         elif phase is ArchivedSessionPurgeParticipantPhase.VERIFIED:
             timestamp_values["verified_at"] = now
 
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeParticipantExecution)
             .where(
                 RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
@@ -1038,7 +1038,7 @@ class ArchivedSessionRetentionRepository:
 
     async def record_purge_participant_failure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -1049,7 +1049,7 @@ class ArchivedSessionRetentionRepository:
         now: datetime.datetime,
     ) -> bool:
         """Persist participant failure details and job-level attribution together."""
-        participant_result = await session.execute(
+        participant_result = await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeParticipantExecution)
             .where(
                 RDBArchivedSessionPurgeParticipantExecution.purge_job_id == job_id,
@@ -1071,7 +1071,7 @@ class ArchivedSessionRetentionRepository:
         )
         if participant_result.scalar_one_or_none() is None:
             return False
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBArchivedSessionPurgeJob)
             .where(
                 RDBArchivedSessionPurgeJob.id == job_id,

@@ -4,8 +4,6 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import ExchangeFileStatus, ModelFileStatus
 from azents.engine.events.input_projection import (
     exchange_attachment_object_keys,
@@ -14,6 +12,7 @@ from azents.engine.events.input_projection import (
     replace_unavailable_file_parts,
 )
 from azents.engine.events.types import Event
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.engine_event_contracts import EventPayloadRepository
 
 
@@ -22,7 +21,7 @@ class ModelFileStatusRepository(Protocol):
 
     async def list_statuses_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_file_ids: Sequence[str],
@@ -36,7 +35,7 @@ class ExchangeFileStatusRepository(Protocol):
 
     async def list_statuses_by_object_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_keys: Sequence[str],
     ) -> dict[str, ExchangeFileStatus]:
@@ -54,7 +53,7 @@ class EngineInputProjectionRepository:
 
     async def apply_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         transcript: Sequence[Event],

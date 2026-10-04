@@ -5,7 +5,6 @@ from typing import Literal
 
 import httpx2
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
@@ -23,6 +22,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationModelDispatch,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
     ConsolidationBudgetRepository,
 )
@@ -40,7 +40,7 @@ from azents.testing.consolidation import seed_consolidation_corpus
 
 
 async def _principal(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ConsolidationJobPrincipal:
     corpus = await seed_consolidation_corpus(manager)
     claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
@@ -99,7 +99,7 @@ def _unexpected_mapper(
 
 
 async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     repository = ConsolidationBudgetRepository(rdb_session_manager)
@@ -108,7 +108,9 @@ async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
 
     async def proxy(request: httpx2.Request) -> httpx2.Response:
         async with rdb_session_manager() as session:
-            attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+            attempt = await session.read_session.get(
+                RDBConsolidationAttempt, principal.attempt_id
+            )
             assert attempt is not None
             journal.append(attempt.model_requests)
         return httpx2.Response(200, content=b"{}")
@@ -137,7 +139,7 @@ async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
     assert (await repository.remaining(principal)).input_tokens == 250000 - 100 - 20
     for index, reservation in enumerate(admission.reservations):
         async with rdb_session_manager() as session:
-            row = await session.get(
+            row = await session.read_session.get(
                 RDBConsolidationModelDispatch,
                 (principal.attempt_id, reservation.dispatch_id),
             )
@@ -150,7 +152,7 @@ async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
 
 
 async def test_physical_budget_refusal_blocks_the_proxy_and_remains_nonprovider(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     repository = ConsolidationBudgetRepository(rdb_session_manager)
@@ -186,7 +188,7 @@ async def test_physical_budget_refusal_blocks_the_proxy_and_remains_nonprovider(
 
 
 async def test_actual_usage_excess_is_durable_and_cannot_become_normal_completion(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     repository = ConsolidationBudgetRepository(rdb_session_manager)

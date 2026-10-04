@@ -12,7 +12,6 @@ import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.repos.worker_executor_model as model_module
 from azents.core.active_model_capabilities import (
@@ -66,6 +65,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -114,7 +114,7 @@ class ModelActiveCapabilities(ActiveModelCapabilitiesRepository):
 
     async def capture_exact_choices_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: Sequence[ConfiguredModelIdentity],
@@ -162,7 +162,7 @@ class ModelActiveCapabilities(ActiveModelCapabilitiesRepository):
         )
 
     async def inputs_match_in_session(
-        self, session: AsyncSession, *, captured: CapturedActiveChoiceInputs
+        self, session: WriteSession, *, captured: CapturedActiveChoiceInputs
     ) -> bool:
         del session, captured
         self.revalidations += 1
@@ -172,15 +172,15 @@ class ModelActiveCapabilities(ActiveModelCapabilitiesRepository):
 class ModelManager:
     """Observe genuine factory completion; narrower compositions share one Session."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.sessions: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
+        self.active: list[WriteSession] = []
         self.commits = 0
         self.failures = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "Nested completed operation inside a model transaction"
         try:
             async with self.manager() as session:
@@ -198,7 +198,9 @@ class ModelManager:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 class ModelFault:
@@ -220,9 +222,9 @@ class ModelFault:
         self.release = asyncio.Event()
         self.renewal: CandidateHealthRenewal | None = None
 
-    async def point(self, stage: str, session: AsyncSession) -> None:
+    async def point(self, stage: str, session: ReadSession) -> None:
         assert self.manager.active == [session]
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         self.trace.append(stage)
         if self.stage == stage:
             self.reached.set()
@@ -236,7 +238,7 @@ class ModelAgents(AgentRepository):
     def __init__(self, fault: ModelFault) -> None:
         self.fault = fault
 
-    async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
+    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent | None:
         result = await super().lock_by_id(session, agent_id)
         await self.fault.point("agent_lock", session)
         return result
@@ -247,7 +249,7 @@ class ModelSessions(AgentSessionRepository):
         self.fault = fault
 
     async def lock_by_id(
-        self, session: AsyncSession, agent_session_id: str
+        self, session: WriteSession, agent_session_id: str
     ) -> AgentSession | None:
         result = await super().lock_by_id(session, agent_session_id)
         await self.fault.point("session_lock", session)
@@ -255,7 +257,7 @@ class ModelSessions(AgentSessionRepository):
 
     async def set_applied_inference_profile(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         model_target_label: str,
@@ -274,7 +276,7 @@ class ModelSessions(AgentSessionRepository):
 
     async def set_primary_model_reservation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         reservation: PrimaryModelReservation | None,
@@ -291,7 +293,7 @@ class ModelSessions(AgentSessionRepository):
 
     async def set_inference_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         inference_state: SessionInferenceState,
@@ -308,14 +310,14 @@ class ModelRuns(AgentRunRepository):
         self.fault = fault
 
     async def lock_by_id(
-        self, session: AsyncSession, run_id: str
+        self, session: WriteSession, run_id: str
     ) -> AgentRunState | None:
         result = await super().lock_by_id(session, run_id)
         await self.fault.point("run_lock", session)
         return result
 
     async def update(
-        self, session: AsyncSession, run_id: str, patch: AgentRunPatch
+        self, session: WriteSession, run_id: str, patch: AgentRunPatch
     ) -> AgentRunState:
         result = await super().update(session, run_id, patch)
         if "model_operation_state" in patch:
@@ -328,7 +330,7 @@ class ModelHealth(ModelCandidateHealthRepository):
     fault: ModelFault
 
     async def renew_quota_in_session(
-        self, session: AsyncSession, identity: ModelCandidateIdentity
+        self, session: ReadSession, identity: ModelCandidateIdentity
     ) -> ModelCandidateHealthObservation:
         result = await super().renew_quota_in_session(session, identity)
         await self.fault.point("renew", session)
@@ -336,7 +338,7 @@ class ModelHealth(ModelCandidateHealthRepository):
 
     async def renew_claimed_quota_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -357,7 +359,7 @@ class ModelHealth(ModelCandidateHealthRepository):
         return result
 
     async def claim_foreground_probe_in_session(
-        self, session: AsyncSession, identity: ModelCandidateIdentity, *, owner_id: str
+        self, session: WriteSession, identity: ModelCandidateIdentity, *, owner_id: str
     ) -> ForegroundProbeResult:
         result = await super().claim_foreground_probe_in_session(
             session, identity, owner_id=owner_id
@@ -368,7 +370,7 @@ class ModelHealth(ModelCandidateHealthRepository):
 
     async def transfer_reservation_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         identity: ModelCandidateIdentity,
         *,
         expected_generation: int,
@@ -394,7 +396,7 @@ class ModelGuard(WorkerSessionOperationRepository):
     fault: ModelFault
 
     async def assert_owner_generation_in_session(
-        self, session: AsyncSession, *, session_id: str, owner_generation: int
+        self, session: WriteSession, *, session_id: str, owner_generation: int
     ) -> None:
         # The marker precedes the actual shared guard, before any model mutation.
         assert self.fault.manager.active == [session]
@@ -437,7 +439,7 @@ class ModelFixture:
 
 
 async def model_fixture(
-    manager: SessionManager[AsyncSession], name: str
+    manager: SessionManager[WriteSession], name: str
 ) -> ModelFixture:
     observed = ModelManager(manager)
     fault = ModelFault(observed, None, None, False)
@@ -446,7 +448,7 @@ async def model_fixture(
     agents = ModelAgents(fault)
     async with manager() as session:
         root, agent_id = await _create_execution_subject(session, handle=name)
-        agent = await session.get(RDBAgent, agent_id)
+        agent = await session.write_session.get(RDBAgent, agent_id)
         assert agent is not None and agent.model_selection is not None
         original = AgentModelSelection.model_validate(agent.model_selection)
         selections = [
@@ -483,7 +485,7 @@ async def model_fixture(
         ]
         agent.main_model_label = "default"
         agent.lightweight_model_label = "lightweight"
-        await session.flush()
+        await session.write_session.flush()
         generation = await AgentSessionRepository().claim_owner_generation(
             session, root.id
         )
@@ -557,7 +559,7 @@ async def expire_health(
     fixture: ModelFixture, identity: ModelCandidateIdentity
 ) -> None:
     async with fixture.manager.manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBModelCandidateHealth)
             .where(
                 RDBModelCandidateHealth.workspace_id == identity.workspace_id,
@@ -721,7 +723,7 @@ class ExternalWitness:
     ],
 )
 async def test_requested_profile_precedence_lock_order_and_no_new_owner_fence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     explicit: bool,
     label: str,
     source: InferenceProfileSource,
@@ -760,7 +762,7 @@ async def test_requested_profile_precedence_lock_order_and_no_new_owner_fence(
 
 
 async def test_requested_stale_label_normalizes_and_empty_options_keeps_value_error(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-profile-stale")
     stale = RequestedInferenceProfile(
@@ -781,7 +783,7 @@ async def test_requested_stale_label_normalizes_and_empty_options_keeps_value_er
         IntegrityError, match="ck_agents_selectable_model_options_shape"
     ):
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgent)
                 .where(RDBAgent.id == fixture.agent_id)
                 .values(selectable_model_options=[])
@@ -798,7 +800,7 @@ async def test_requested_stale_label_normalizes_and_empty_options_keeps_value_er
 
 @pytest.mark.parametrize("missing", ["agent", "session", "mapping"])
 async def test_requested_profile_keeps_missing_and_agent_session_mapping_errors(
-    rdb_session_manager: SessionManager[AsyncSession], missing: str
+    rdb_session_manager: SessionManager[WriteSession], missing: str
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-profile-invalid")
     agent_id, session_id = fixture.agent_id, fixture.session_id
@@ -817,7 +819,7 @@ async def test_requested_profile_keeps_missing_and_agent_session_mapping_errors(
 
 
 async def test_fresh_unlocked_snapshot_and_three_distinct_scopes_before_external(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-fresh-three-phases")
     snapshot = await fixture.repository.load_fresh_profile_snapshot(
@@ -874,7 +876,7 @@ async def test_fresh_unlocked_snapshot_and_three_distinct_scopes_before_external
 
 
 async def test_fresh_prewrite_profile_mismatch_has_no_mutations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-prewrite-drift")
     before = await model_rows(fixture)
@@ -903,7 +905,7 @@ async def test_fresh_prewrite_profile_mismatch_has_no_mutations(
 
 @pytest.mark.parametrize("failure", ["foreground", "missing-lightweight", "compaction"])
 async def test_normal_fresh_failures_commit_exact_reached_profile_claim_and_slots(
-    rdb_session_manager: SessionManager[AsyncSession], failure: str
+    rdb_session_manager: SessionManager[WriteSession], failure: str
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, f"model-fresh-failure-{failure}")
     await stale_profile(fixture)
@@ -914,7 +916,7 @@ async def test_normal_fresh_failures_commit_exact_reached_profile_claim_and_slot
         await health_repo.renew_quota(fixture.fallback)
     elif failure == "missing-lightweight":
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgent)
                 .where(RDBAgent.id == fixture.agent_id)
                 .values(lightweight_model_label="removed-lightweight")
@@ -982,7 +984,7 @@ async def test_normal_fresh_failures_commit_exact_reached_profile_claim_and_slot
 )
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_fresh_exception_after_real_write_rolls_back_entire_prepare_group(
-    rdb_session_manager: SessionManager[AsyncSession], stage: str, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], stage: str, cancel: bool
 ) -> None:
     fixture = await model_fixture(
         rdb_session_manager, f"model-fresh-rollback-{stage}-{cancel}"
@@ -1015,7 +1017,7 @@ async def test_fresh_exception_after_real_write_rolls_back_entire_prepare_group(
 
 
 async def test_successful_reservation_transfer_clear_and_background_no_claim(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-transfer-success")
     reservation = await reserve_primary(fixture)
@@ -1043,7 +1045,7 @@ async def test_successful_reservation_transfer_clear_and_background_no_claim(
 @pytest.mark.parametrize("kind", ["sampling", "compaction"])
 @pytest.mark.parametrize("exhausted", [False, True])
 async def test_quota_commits_health_slot_retry_and_start_clears_atomically(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     kind: Literal["sampling", "compaction"],
     exhausted: bool,
 ) -> None:
@@ -1095,7 +1097,7 @@ async def test_quota_commits_health_slot_retry_and_start_clears_atomically(
 @pytest.mark.parametrize("stage", ["renew", "probe", "slot"])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_quota_failure_after_real_sql_rolls_back_health_claim_slot_and_clears(
-    rdb_session_manager: SessionManager[AsyncSession], stage: str, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], stage: str, cancel: bool
 ) -> None:
     fixture = await model_fixture(
         rdb_session_manager, f"model-quota-fault-{stage}-{cancel}"
@@ -1125,7 +1127,7 @@ async def test_quota_failure_after_real_sql_rolls_back_health_claim_slot_and_cle
 
 
 async def test_quota_uses_stale_claimed_renewal_observation_without_new_rejection(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-quota-stale-claim")
     await seed_probe(fixture, fixture.primary)
@@ -1154,7 +1156,7 @@ async def test_quota_uses_stale_claimed_renewal_observation_without_new_rejectio
     "invalid", ["missing", "stale", "run", "state", "slot", "route"]
 )
 async def test_quota_guard_and_exact_prewrite_errors_preserve_rows(
-    rdb_session_manager: SessionManager[AsyncSession], invalid: str
+    rdb_session_manager: SessionManager[WriteSession], invalid: str
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, f"model-quota-invalid-{invalid}")
     prepared = await prepare(fixture)
@@ -1209,13 +1211,13 @@ async def test_quota_guard_and_exact_prewrite_errors_preserve_rows(
 
 
 async def test_quota_does_not_add_run_session_identity_check(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-quota-source")
     other = await model_fixture(rdb_session_manager, "model-quota-other-session")
     prepared = await prepare(fixture)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRun)
             .where(RDBAgentRun.id == fixture.run_id)
             .values(session_id=other.session_id, run_index=2)
@@ -1233,7 +1235,7 @@ async def test_quota_does_not_add_run_session_identity_check(
 
 @pytest.mark.parametrize("drift", ["id", "cursor", "missing"])
 async def test_final_inference_operation_fence_retains_prior_preparation_commit(
-    rdb_session_manager: SessionManager[AsyncSession], drift: str
+    rdb_session_manager: SessionManager[WriteSession], drift: str
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, f"model-final-drift-{drift}")
     prepared = await prepare(fixture)
@@ -1272,7 +1274,7 @@ async def test_final_inference_operation_fence_retains_prior_preparation_commit(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_final_inference_write_rollback_preserves_previous_claim_and_slot(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-final-rollback")
     await reserve_primary(fixture)
@@ -1298,12 +1300,12 @@ async def test_final_inference_write_rollback_preserves_previous_claim_and_slot(
 
 @pytest.mark.parametrize("mode", ["success", "missing", "exhausted"])
 async def test_compaction_background_commits_success_but_inside_error_rolls_back_slot(
-    rdb_session_manager: SessionManager[AsyncSession], mode: str
+    rdb_session_manager: SessionManager[WriteSession], mode: str
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, f"model-compaction-{mode}")
     if mode == "missing":
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgent)
                 .where(RDBAgent.id == fixture.agent_id)
                 .values(lightweight_model_label="removed")
@@ -1358,7 +1360,7 @@ async def test_compaction_background_commits_success_but_inside_error_rolls_back
 
 
 async def test_task_cancel_after_profile_write_resolves_prepare_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-task-cancel")
     await stale_profile(fixture)
@@ -1388,13 +1390,13 @@ async def test_task_cancel_after_profile_write_resolves_prepare_transaction(
 
 
 async def test_missing_lightweight_commits_actual_half_open_probe_without_slot(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-light-missing-probe")
     await stale_profile(fixture)
     await seed_probe(fixture, fixture.primary)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == fixture.agent_id)
             .values(lightweight_model_label="missing-light")
@@ -1434,7 +1436,7 @@ async def test_missing_lightweight_commits_actual_half_open_probe_without_slot(
     ],
 )
 async def test_stale_override_source_and_replacement_policy_remain_unchanged(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     source: InferenceProfileSource,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-stale-override")
@@ -1477,7 +1479,7 @@ async def test_stale_override_source_and_replacement_policy_remain_unchanged(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_fresh_prepared_commit_survives_external_resolution_failure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-external-failure")
@@ -1498,7 +1500,7 @@ async def test_fresh_prepared_commit_survives_external_resolution_failure(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_compaction_fault_after_actual_slot_write_rolls_back(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-compaction-slot-fault")
@@ -1521,7 +1523,7 @@ async def test_compaction_fault_after_actual_slot_write_rolls_back(
 
 
 class _BrokenRead(ModelAgents):
-    async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
+    async def get_by_id(self, session: ReadSession, agent_id: str) -> Agent | None:
         result = await super().get_by_id(session, agent_id)
         await self.fault.point("read", session)
         return result
@@ -1529,7 +1531,7 @@ class _BrokenRead(ModelAgents):
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_actual_snapshot_read_error_or_cancel_closes_before_external_work(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-read-fault")
@@ -1553,7 +1555,7 @@ async def test_actual_snapshot_read_error_or_cancel_closes_before_external_work(
 @pytest.mark.parametrize("operation", ["fresh", "final", "compaction"])
 @pytest.mark.parametrize("invalid", ["stale", "missing-run"])
 async def test_model_existing_generation_and_missing_run_errors_are_prewrite(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: Literal["fresh", "final", "compaction"],
     invalid: str,
 ) -> None:
@@ -1604,12 +1606,12 @@ async def test_model_existing_generation_and_missing_run_errors_are_prewrite(
 
 
 async def test_final_inference_does_not_add_agent_configuration_fence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-final-agent-change")
     prepared = await prepare(fixture)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == fixture.agent_id)
             .values(main_model_label="alternate")
@@ -1629,7 +1631,7 @@ async def test_final_inference_does_not_add_agent_configuration_fence(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_claimed_quota_renewal_actual_write_rolls_back_with_previous_authority(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-claimed-quota-rollback")
@@ -1659,7 +1661,7 @@ async def test_claimed_quota_renewal_actual_write_rolls_back_with_previous_autho
 
 @pytest.mark.parametrize("invalid", ["workspace", "agent", "run-session"])
 async def test_compaction_preserves_existing_workspace_and_mapping_guards(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     invalid: str,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-compaction-guard")
@@ -1672,7 +1674,7 @@ async def test_compaction_preserves_existing_workspace_and_mapping_guards(
             agent_id = other.agent_id
         else:
             async with rdb_session_manager() as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBAgentRun)
                     .where(RDBAgentRun.id == fixture.run_id)
                     .values(session_id=other.session_id, run_index=2)
@@ -1693,7 +1695,7 @@ async def test_compaction_preserves_existing_workspace_and_mapping_guards(
 
 @pytest.mark.parametrize("missing", ["agent", "session"])
 async def test_profile_snapshot_missing_value_error_follows_scope_completion(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     missing: str,
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-snapshot-missing")
@@ -1707,7 +1709,7 @@ async def test_profile_snapshot_missing_value_error_follows_scope_completion(
 
 
 async def test_new_foreground_and_compaction_compile_before_both_normalizations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stale saved capabilities never enter new profile normalization."""
@@ -1801,7 +1803,7 @@ async def test_new_foreground_and_compaction_compile_before_both_normalizations(
 
 
 async def test_frozen_reuse_and_quota_advance_do_not_relookup_active_metadata(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "active-frozen-quota")
     first = await prepare(fixture)
@@ -1855,7 +1857,7 @@ async def test_frozen_reuse_and_quota_advance_do_not_relookup_active_metadata(
 
 
 async def test_source_input_change_is_prewrite_drift_not_mixed_operation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "active-input-drift")
     frame = await fixture.repository.load_fresh_profile_snapshot(
@@ -1887,7 +1889,7 @@ async def test_source_input_change_is_prewrite_drift_not_mixed_operation(
 
 
 async def test_standalone_compaction_captures_only_new_lightweight_then_freezes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "active-compaction-only")
     active = fixture.repository.active_capabilities_repository
@@ -1925,7 +1927,7 @@ async def test_standalone_compaction_captures_only_new_lightweight_then_freezes(
 
 
 async def test_unavailable_selected_metadata_fails_without_model_substitution(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "active-unavailable")
     active = fixture.repository.active_capabilities_repository
@@ -1943,7 +1945,7 @@ async def test_unavailable_selected_metadata_fails_without_model_substitution(
 
 @pytest.mark.parametrize("change", ["metadata", "settings", "order", "identity"])
 async def test_locked_prepare_fences_user_configuration_not_metadata(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     change: str,
 ) -> None:
@@ -1955,7 +1957,7 @@ async def test_locked_prepare_fences_user_configuration_not_metadata(
     )
     original_lock = fixture.repository.agent_repository.lock_by_id
 
-    async def changed_lock(session: AsyncSession, agent_id: str) -> Agent | None:
+    async def changed_lock(session: WriteSession, agent_id: str) -> Agent | None:
         agent = await original_lock(session, agent_id)
         assert agent is not None
         options = list(agent.selectable_model_options)
@@ -2035,7 +2037,7 @@ async def test_locked_prepare_fences_user_configuration_not_metadata(
 
 
 async def test_compaction_input_drift_is_bounded_before_any_slot_write(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "active-compaction-drift")
     active = fixture.repository.active_capabilities_repository
@@ -2056,7 +2058,7 @@ async def test_compaction_input_drift_is_bounded_before_any_slot_write(
 
 
 async def test_same_candidate_retry_keeps_capture_new_operation_adopts_change(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "active-retry-capture")
     active = fixture.repository.active_capabilities_repository

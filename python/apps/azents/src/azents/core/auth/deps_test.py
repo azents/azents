@@ -7,7 +7,6 @@ import pytest
 from azcommon.result import Success
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.account_access import ActiveAccountSubjectStatus
 from azents.core.auth.deps import (
@@ -29,6 +28,7 @@ from azents.core.config import (
 )
 from azents.core.enums import SystemUserRole, WorkspaceUserRole
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.account_access_test import (
     SubjectIdentity,
     access_fixture,
@@ -46,7 +46,7 @@ from azents.services.system_user_role.service import SystemUserRoleService
 
 
 def _make_role_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> SystemUserRoleService:
     """Create a system role service for dependency tests."""
     return SystemUserRoleService(
@@ -63,7 +63,7 @@ class TestGetSystemAdmin:
 
     async def test_rejects_missing_user(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject an authenticated subject that no longer has a User row."""
         service = _make_role_service(rdb_session_manager)
@@ -78,7 +78,7 @@ class TestGetSystemAdmin:
 
     async def test_rejects_user_without_system_admin_role(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject an authenticated ordinary User."""
         service = _make_role_service(rdb_session_manager)
@@ -99,7 +99,7 @@ class TestGetSystemAdmin:
 
     async def test_returns_system_admin_context(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Return the authenticated context when the role exists."""
         service = _make_role_service(rdb_session_manager)
@@ -131,7 +131,7 @@ class TestGetSystemAdmin:
 
     async def test_revocation_invalidates_existing_user_context(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Re-check the database role for an already-authenticated User context."""
         service = _make_role_service(rdb_session_manager)
@@ -172,7 +172,7 @@ class TestRequireActiveUserSession:
 
     async def test_rejects_access_disabled_user(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject JWT subjects whose account is marked access-disabled."""
         user_repo = UserRepository()
@@ -207,7 +207,7 @@ class TestRequireActiveUserSession:
 
     async def test_rejects_revoked_auth_session(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject JWT subjects whose auth session was revoked."""
         user_repo = UserRepository()
@@ -264,7 +264,7 @@ def _credentials(
 @pytest.mark.parametrize("optional", [False, True])
 @pytest.mark.parametrize("kind", ["missing", "malformed", "expired", "wrong_signature"])
 async def test_token_rejection_does_not_open_an_admission_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     optional: bool,
     kind: Literal["missing", "malformed", "expired", "wrong_signature"],
 ) -> None:
@@ -323,7 +323,7 @@ async def test_token_rejection_does_not_open_an_admission_read(
     ],
 )
 async def test_valid_jwt_subject_rejection_preserves_required_and_optional_behavior(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     optional: bool,
     status: ActiveAccountSubjectStatus,
 ) -> None:
@@ -353,7 +353,7 @@ async def test_valid_jwt_subject_rejection_preserves_required_and_optional_behav
 @pytest.mark.parametrize("optional", [False, True])
 @pytest.mark.parametrize("elevated", [False, True])
 async def test_active_subject_preserves_exact_ids_and_elevation_after_closed_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     optional: bool,
     elevated: bool,
 ) -> None:
@@ -392,7 +392,7 @@ async def test_elevation_guard_remains_core_http_policy(elevated: bool) -> None:
 
 @pytest.mark.parametrize("workspace_exists", [False, True])
 async def test_workspace_missing_and_nonmember_have_unchanged_http_errors(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     workspace_exists: bool,
 ) -> None:
     """Map detached missing Workspace/member outcomes only in core auth."""
@@ -424,7 +424,7 @@ async def test_workspace_missing_and_nonmember_have_unchanged_http_errors(
 
 @pytest.mark.parametrize("role", list(WorkspaceUserRole))
 async def test_workspace_context_and_permissions_use_current_persisted_membership(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     role: WorkspaceUserRole,
 ) -> None:
     """Preserve membership IDs, role permission projection and Session identity."""
@@ -451,7 +451,7 @@ async def test_workspace_context_and_permissions_use_current_persisted_membershi
 
 
 async def test_workspace_role_change_and_removal_are_authoritative_on_next_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A retained User context neither freezes role nor bypasses revoked membership."""
     subject = await seed_subject(rdb_session_manager, ActiveAccountSubjectStatus.ACTIVE)
@@ -486,7 +486,7 @@ async def test_workspace_role_change_and_removal_are_authoritative_on_next_read(
 
 
 async def test_system_admin_and_elevated_subject_get_no_implicit_workspace_membership(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Keep instance-wide administration separate from Workspace membership."""
     subject = await seed_subject(rdb_session_manager, ActiveAccountSubjectStatus.ACTIVE)
@@ -517,7 +517,7 @@ async def test_system_admin_and_elevated_subject_get_no_implicit_workspace_membe
 
 @pytest.mark.parametrize("optional", [False, True])
 async def test_authentication_database_failures_remain_transparent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     optional: bool,
 ) -> None:
     """Optional auth must not disguise a DB failure as an unauthenticated subject."""

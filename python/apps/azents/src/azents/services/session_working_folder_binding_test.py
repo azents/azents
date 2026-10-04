@@ -15,6 +15,7 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.runtime_capabilities import RuntimeCapabilitySnapshot
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import LockedSessionWorkingFolderBinding
 from azents.repos.session_working_folder_binding import (
@@ -80,7 +81,7 @@ def _service() -> SessionWorkingFolderBindingService:
     agent_session_repository = AsyncMock()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession]:
+    async def session_manager() -> AsyncGenerator[WriteSession]:
         yield AsyncMock(spec=AsyncSession)
 
     return SessionWorkingFolderBindingService(

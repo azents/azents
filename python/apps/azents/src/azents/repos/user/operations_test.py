@@ -17,6 +17,7 @@ from azents.core.enums import SystemUserRole
 from azents.core.system_user_role import LastSystemAdmin, SystemUserNotFound
 from azents.core.user import NotFound, UserDeletionStatus
 from azents.rdb.models.owner_lifecycle import RDBOwnerLifecycleJob
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
 from azents.repos.session import SessionRepository
@@ -46,17 +47,18 @@ class _Sessions:
     active: int
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(self.engine, expire_on_commit=False) as session:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        async with AsyncSession(self.engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             self.active += 1
             try:
                 yield session
-                await session.commit()
+                await session.write_session.commit()
             except asyncio.CancelledError:
                 # AsyncSession exit rolls back cancellation, as in production.
                 raise
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             finally:
                 self.active -= 1
@@ -113,7 +115,7 @@ class _Accounts:
             administrator = await SystemUserRoleRepository().has_role(
                 session, account.user_id, SystemUserRole.SYSTEM_ADMIN
             )
-            jobs = await session.scalar(
+            jobs = await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBOwnerLifecycleJob)
                 .where(RDBOwnerLifecycleJob.user_id == account.user_id)
@@ -178,7 +180,7 @@ class _Publisher(NoopRuntimeTerminalInvalidationPublisher):
 class _FailingRevocation(SessionRepository):
     async def revoke_all_by_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         user_id: str,
         *,
         except_session_id: str | None = None,
@@ -191,7 +193,7 @@ class _FailingRevocation(SessionRepository):
 
 class _FailingPurge(OwnerLifecycleRepository):
     async def create_or_get_account_purge(
-        self, session: AsyncSession, *, user_id: str
+        self, session: WriteSession, *, user_id: str
     ) -> OwnerLifecycleJob:
         await super().create_or_get_account_purge(session, user_id=user_id)
         raise _PersistenceFailure("Injected failure after purge-job insertion")
@@ -203,7 +205,7 @@ class _BlockedPurge(OwnerLifecycleRepository):
     release: asyncio.Event
 
     async def create_or_get_account_purge(
-        self, session: AsyncSession, *, user_id: str
+        self, session: WriteSession, *, user_id: str
     ) -> OwnerLifecycleJob:
         job = await super().create_or_get_account_purge(session, user_id=user_id)
         self.entered.set()
@@ -387,7 +389,7 @@ async def test_grant_rechecks_disabled_user_after_email_lookup(
 
 class _FailingRoleCreate(SystemUserRoleRepository):
     async def create(
-        self, session: AsyncSession, create: SystemUserRoleAssignmentCreate
+        self, session: WriteSession, create: SystemUserRoleAssignmentCreate
     ) -> SystemUserRoleAssignment:
         await super().create(session, create)
         raise _PersistenceFailure("Injected failure after assignment creation")
@@ -395,7 +397,7 @@ class _FailingRoleCreate(SystemUserRoleRepository):
 
 class _FailingRoleDelete(SystemUserRoleRepository):
     async def delete(
-        self, session: AsyncSession, user_id: str, role: SystemUserRole
+        self, session: WriteSession, user_id: str, role: SystemUserRole
     ) -> bool:
         await super().delete(session, user_id, role)
         raise _PersistenceFailure("Injected failure after assignment removal")

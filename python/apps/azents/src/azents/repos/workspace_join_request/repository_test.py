@@ -1,10 +1,10 @@
 """WorkspaceJoinRequest repository tests."""
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import JoinRequestStatus
 from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -13,7 +13,7 @@ from . import WorkspaceJoinRequestRepository
 from .data import NotFound, WorkspaceJoinRequestCreate, WorkspaceJoinRequestUpdate
 
 
-async def _create_workspace(session: AsyncSession, handle: str = "jr-test-ws") -> str:
+async def _create_workspace(session: WriteSession, handle: str = "jr-test-ws") -> str:
     """Create Workspace for tests and return internal ID."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -26,7 +26,7 @@ async def _create_workspace(session: AsyncSession, handle: str = "jr-test-ws") -
 
 
 async def _create_user(
-    session: AsyncSession, email: str = "jr-test@example.com"
+    session: WriteSession, email: str = "jr-test@example.com"
 ) -> str:
     """Create User for tests and return user_id."""
     repo = UserRepository()
@@ -37,7 +37,7 @@ async def _create_user(
 class TestWorkspaceJoinRequestRepository:
     """WorkspaceJoinRequestRepository tests."""
 
-    async def test_create_or_rerequest_new(self, rdb_session: AsyncSession) -> None:
+    async def test_create_or_rerequest_new(self, rdb_session: WriteSession) -> None:
         """Create new join request."""
         # Given
         workspace_id = await _create_workspace(rdb_session, "jr-create-ws")
@@ -63,7 +63,7 @@ class TestWorkspaceJoinRequestRepository:
         assert jr.updated_at
 
     async def test_create_or_rerequest_upsert_muted(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Update existing muted request to pending."""
         # Given: create join request then mute
@@ -96,7 +96,7 @@ class TestWorkspaceJoinRequestRepository:
         assert updated.status == JoinRequestStatus.PENDING
         assert updated.message == "Request again"
 
-    async def test_get(self, rdb_session: AsyncSession) -> None:
+    async def test_get(self, rdb_session: WriteSession) -> None:
         """Fetch join request by ID."""
         # Given
         workspace_id = await _create_workspace(rdb_session, "jr-get-ws")
@@ -114,12 +114,12 @@ class TestWorkspaceJoinRequestRepository:
         assert found is not None
         assert found.id == jr.id
 
-    async def test_get_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent ID."""
         repo = WorkspaceJoinRequestRepository()
         assert await repo.get(rdb_session, "nonexistent") is None
 
-    async def test_get_by_workspace_and_user(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_workspace_and_user(self, rdb_session: WriteSession) -> None:
         """workspace + user fetch."""
         # Given
         workspace_id = await _create_workspace(rdb_session, "jr-byws-ws")
@@ -138,7 +138,7 @@ class TestWorkspaceJoinRequestRepository:
         assert found.workspace_id == workspace_id
         assert found.user_id == user_id
 
-    async def test_list_by_workspace(self, rdb_session: AsyncSession) -> None:
+    async def test_list_by_workspace(self, rdb_session: WriteSession) -> None:
         """Fetch workspace join request list."""
         # Given
         workspace_id = await _create_workspace(rdb_session, "jr-list-ws")
@@ -162,7 +162,7 @@ class TestWorkspaceJoinRequestRepository:
         assert len(result.items) == 2
 
     async def test_list_by_workspace_with_status_filter(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Fetch list filtered by status."""
         # Given
@@ -190,7 +190,7 @@ class TestWorkspaceJoinRequestRepository:
         assert result.total == 1
         assert result.items[0].status == JoinRequestStatus.PENDING
 
-    async def test_update(self, rdb_session: AsyncSession) -> None:
+    async def test_update(self, rdb_session: WriteSession) -> None:
         """join request Update."""
         # Given
         workspace_id = await _create_workspace(rdb_session, "jr-update-ws")
@@ -212,7 +212,7 @@ class TestWorkspaceJoinRequestRepository:
         assert isinstance(result, Success)
         assert result.value.status == JoinRequestStatus.MUTED
 
-    async def test_update_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_update_not_found(self, rdb_session: WriteSession) -> None:
         """nonexistent join request when updating return NotFound."""
         repo = WorkspaceJoinRequestRepository()
         result = await repo.update(
@@ -223,7 +223,7 @@ class TestWorkspaceJoinRequestRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, NotFound)
 
-    async def test_delete(self, rdb_session: AsyncSession) -> None:
+    async def test_delete(self, rdb_session: WriteSession) -> None:
         """join request Delete."""
         # Given
         workspace_id = await _create_workspace(rdb_session, "jr-delete-ws")

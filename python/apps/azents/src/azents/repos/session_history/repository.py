@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONPATH
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionKind,
@@ -16,6 +15,7 @@ from azents.core.enums import (
 from azents.core.json_value import JSONValue
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
+from azents.rdb.session_capabilities import ReadSession
 
 SEARCHABLE_KINDS = frozenset(
     {
@@ -119,7 +119,7 @@ class SessionHistoryRepository:
 
     async def search_roots(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         scope: SessionHistoryScope,
         query: str,
@@ -184,7 +184,7 @@ class SessionHistoryRepository:
         statement = statement.order_by(
             RDBAgentSession.updated_at.desc(), RDBAgentSession.id.desc()
         ).limit(limit + 1)
-        rows = list((await session.execute(statement)).all())
+        rows = list((await session.read_session.execute(statement)).all())
         hits = [
             SessionSearchHit(
                 session_id=row.id,
@@ -200,7 +200,7 @@ class SessionHistoryRepository:
 
     async def search_events(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         query: str,
@@ -217,7 +217,7 @@ class SessionHistoryRepository:
             statement = statement.where(RDBEvent.id < before)
         rows = list(
             (
-                await session.execute(
+                await session.read_session.execute(
                     statement.order_by(RDBEvent.id.desc()).limit(limit + 1)
                 )
             ).scalars()

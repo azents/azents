@@ -2,12 +2,11 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
 )
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.subagent_coordination.repository import (
     SubagentCoordinationRepository,
 )
@@ -40,7 +39,7 @@ class SubagentCoordinationService:
 
     async def list_agents(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_id: str,
         configured_capacity: int,

@@ -45,7 +45,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from azents.core.config import PostgreSQLConfig
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
@@ -56,6 +56,10 @@ from azents.core.runtime_transfer_coordinator_credential import (
     RuntimeTransferCoordinatorCredentialVerifier,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_connection_generation.repository import (
@@ -2202,19 +2206,8 @@ def _create_engine(settings: RuntimeControlSettings) -> AsyncEngine:
     )
 
 
-def _session_manager(engine: AsyncEngine) -> SessionManager[AsyncSession]:
-    @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
-            else:
-                await session.commit()
-
-    return session_manager
+def _session_manager(engine: AsyncEngine) -> SessionManager[WriteSession]:
+    return create_read_write_session_manager(engine)
 
 
 async def run_runtime_control_server() -> None:

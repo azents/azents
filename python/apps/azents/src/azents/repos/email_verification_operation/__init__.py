@@ -6,10 +6,10 @@ from typing import Annotated, assert_never
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification.data import (
     AlreadyVerified,
@@ -31,7 +31,7 @@ class EmailVerificationOperationRepository:
         EmailVerificationRepository, Depends(EmailVerificationRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def create_delivery_record(

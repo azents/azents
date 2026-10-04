@@ -4,11 +4,11 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.xai_oauth import XaiOAuthSessionStatus
 from azents.rdb.models.xai_oauth_session import RDBXaiOAuthSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     NotFound,
@@ -29,7 +29,7 @@ class XaiOAuthSessionRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: XaiOAuthSessionCreate,
     ) -> XaiOAuthSession:
         """Create xAI OAuth session.
@@ -49,13 +49,13 @@ class XaiOAuthSessionRepository:
             interval_seconds=create.interval_seconds,
             expires_at=create.expires_at,
         )
-        session.add(rdb_session)
-        await session.flush()
+        session.write_session.add(rdb_session)
+        await session.write_session.flush()
         return self._build(rdb_session)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> XaiOAuthSession | None:
         """Fetch xAI OAuth session by ID.
@@ -64,14 +64,14 @@ class XaiOAuthSessionRepository:
         :param session_id: Session ID
         :return: Session or None
         """
-        rdb = await session.get(RDBXaiOAuthSession, session_id)
+        rdb = await session.read_session.get(RDBXaiOAuthSession, session_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_id_with_secrets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> XaiOAuthSessionWithSecrets | None:
         """Fetch xAI OAuth session by ID including secrets.
@@ -80,20 +80,20 @@ class XaiOAuthSessionRepository:
         :param session_id: Session ID
         :return: Session including secrets or None
         """
-        rdb = await session.get(RDBXaiOAuthSession, session_id)
+        rdb = await session.read_session.get(RDBXaiOAuthSession, session_id)
         if rdb is None:
             return None
         return self._build_with_secrets(rdb)
 
     async def increase_poll_interval(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         *,
         seconds: int,
     ) -> Result[XaiOAuthSession, NotFound]:
         """Increase the polling interval of an unexpired pending session."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBXaiOAuthSession)
             .where(
                 RDBXaiOAuthSession.id == session_id,
@@ -112,7 +112,7 @@ class XaiOAuthSessionRepository:
 
     async def consume(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> Result[XaiOAuthSession, NotFound]:
         """Transition pending session to connected status.
@@ -129,7 +129,7 @@ class XaiOAuthSessionRepository:
 
     async def cancel(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> Result[XaiOAuthSession, NotFound]:
         """Transition pending session to cancelled status.
@@ -146,12 +146,12 @@ class XaiOAuthSessionRepository:
 
     async def _transition_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         status: XaiOAuthSessionStatus,
     ) -> Result[XaiOAuthSession, NotFound]:
         """Transition status of unexpired pending session."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBXaiOAuthSession)
             .where(
                 RDBXaiOAuthSession.id == session_id,

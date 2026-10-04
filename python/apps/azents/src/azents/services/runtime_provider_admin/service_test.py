@@ -11,7 +11,6 @@ from azents_runtime_control.provider import (
     RuntimeProviderOperationalWarning,
     RuntimeProviderOperationalWarningSeverity,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -22,6 +21,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -37,7 +37,7 @@ from .service import (
 
 
 async def test_provider_policy_and_workspace_availability_enqueue_versions(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Every Provider policy mutation advances and reconciles Admin version."""
     provider_repository = RuntimeProviderRepository()
@@ -115,7 +115,7 @@ async def test_provider_policy_and_workspace_availability_enqueue_versions(
 
 
 async def test_provider_operational_diagnostics_returns_only_current_projection(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Admin diagnostics expose no connection credential or binding authority."""
     provider_repository = Mock(spec=RuntimeProviderRepository)

@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind
 from azents.engine.events.types import (
@@ -17,6 +16,7 @@ from azents.engine.events.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -35,7 +35,7 @@ from azents.repos.worker_session import WorkerSessionOperationRepository
 
 def get_user_stop_tool_result_repository(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
     transcript_repository: Annotated[
@@ -55,7 +55,7 @@ class UserStopOperationRepository:
     """Own each original Stop commit separately under the shared Worker guard."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     worker_session_repository: Annotated[
         WorkerSessionOperationRepository, Depends(WorkerSessionOperationRepository)

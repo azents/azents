@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.external_channel_conversation_preparation import (
     ExternalChannelConversationPreparation,
@@ -12,6 +11,7 @@ from azents.core.external_channel_conversation_preparation import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelConnectionConfiguration,
@@ -35,7 +35,7 @@ class ExternalChannelConversationProvisioningRepository:
     """Own short persistence scopes around provider conversation preparation."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     repository: Annotated[
         ExternalChannelRepository, Depends(ExternalChannelRepository.create)
@@ -63,7 +63,7 @@ class ExternalChannelConversationProvisioningRepository:
 
     async def apply_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         target_resource_id: str,
         preparation: ExternalChannelConversationPreparation,

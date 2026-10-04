@@ -3,7 +3,6 @@
 import dataclasses
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
@@ -14,6 +13,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.mailbox_item import RDBMailboxItem
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 _MAX_BATCH_SIZE = 500
 
@@ -113,13 +113,13 @@ class SessionCutoverReplayRepository:
 
     async def fence_owner_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         expected_owner_generation: int,
     ) -> int:
         """Invalidate the exact preflight owner generation before broker replay."""
-        generation = await session.scalar(
+        generation = await session.write_session.scalar(
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
@@ -131,18 +131,18 @@ class SessionCutoverReplayRepository:
         )
         if generation is None:
             raise ValueError("Session owner generation changed before replay")
-        await session.flush()
+        await session.write_session.flush()
         return generation
 
     async def read_candidate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> CutoverReplayCandidate | None:
         """Read the current exact durable work identity for one Session."""
         row = (
-            await session.execute(
+            await session.read_session.execute(
                 self._candidate_statement().where(RDBAgentSession.id == session_id)
             )
         ).one_or_none()
@@ -150,7 +150,7 @@ class SessionCutoverReplayRepository:
 
     async def read_candidate_batch(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         batch_size: int,
         after_session_id: str | None,
@@ -163,7 +163,7 @@ class SessionCutoverReplayRepository:
         if after_session_id is not None:
             statement = statement.where(RDBAgentSession.id > after_session_id)
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 statement.order_by(RDBAgentSession.id).limit(batch_size + 1)
             )
         ).all()

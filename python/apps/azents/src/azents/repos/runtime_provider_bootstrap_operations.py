@@ -7,7 +7,6 @@ from typing import Annotated
 
 from azcommon.datetime import tznow
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuditEventType,
@@ -41,6 +40,7 @@ from azents.core.system_setting_data import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import (
     RuntimeProviderAuditEventCreate,
     RuntimeProviderBootstrapDeclaration,
@@ -111,7 +111,7 @@ class RuntimeProviderBootstrapOperations:
     """Reconcile successful authoritative bootstrap source snapshots."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
     system_setting_repository: Annotated[
@@ -241,7 +241,7 @@ class RuntimeProviderBootstrapOperations:
     async def _reconcile_declaration(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         source: RuntimeProviderBootstrapSource,
         snapshot: RuntimeProviderBootstrapSnapshot,
         declaration: RuntimeProviderBootstrapDeclarationInput,
@@ -489,7 +489,7 @@ class RuntimeProviderBootstrapOperations:
     async def _reconcile_authentication_binding(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         declaration: RuntimeProviderBootstrapDeclarationInput,
         declaration_id: str,
         provider_id: str,
@@ -587,7 +587,7 @@ class RuntimeProviderBootstrapOperations:
     async def _append_binding_audit_event(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         binding_id: str,
         event_type: RuntimeProviderBindingAuditEventType,
         metadata: dict[str, object],
@@ -612,7 +612,7 @@ class RuntimeProviderBootstrapOperations:
     async def _revoke_withdrawn_binding(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         declaration: RuntimeProviderBootstrapDeclaration,
         revoked_at: datetime.datetime,
     ) -> None:
@@ -666,7 +666,7 @@ class RuntimeProviderBootstrapOperations:
     async def _seed_platform_default_when_unset(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         source: RuntimeProviderBootstrapSource,
         declaration: RuntimeProviderBootstrapDeclarationInput,
         creation_seed: PlatformDefaultCreationSeed,
@@ -746,7 +746,7 @@ class RuntimeProviderBootstrapOperations:
     async def _reconcile_linked_declaration(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         source: RuntimeProviderBootstrapSource,
         snapshot: RuntimeProviderBootstrapSnapshot,
         declaration: RuntimeProviderBootstrapDeclarationInput,
@@ -845,7 +845,7 @@ class RuntimeProviderBootstrapOperations:
     async def _record_conflict(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         source: RuntimeProviderBootstrapSource,
         snapshot: RuntimeProviderBootstrapSnapshot,
         declaration: RuntimeProviderBootstrapDeclarationInput,
@@ -930,7 +930,7 @@ class RuntimeProviderBootstrapOperations:
     async def _append_reconciled_audit_event(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         provider_id: str,
         source: RuntimeProviderBootstrapSource,
         declaration_key: str,

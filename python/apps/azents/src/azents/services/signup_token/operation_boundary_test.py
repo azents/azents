@@ -11,7 +11,7 @@ import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
 from types_aiobotocore_ses.client import SESClient
 
@@ -44,6 +44,7 @@ from azents.core.signup_token_operations import (
 )
 from azents.rdb.models.signup_token import RDBSignupToken
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.signup_token.data import (
     SignupToken,
     SignupTokenCreate,
@@ -444,7 +445,7 @@ def redeem_input(state: SignupBoundary, plaintext: str) -> RedeemSignupTokenInpu
 
 @pytest.fixture
 async def signup_boundary_pg(
-    rdb_session_manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> SignupFixture:
     return signup_fixture(rdb_session_manager, monkeypatch)
 
@@ -539,13 +540,13 @@ async def test_actual_preview_clock_hash_mask_after_closed_read_and_no_consumpti
     )
     async with fixture.manager() as session:
         if status == "revoked":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.email == fixture.email)
                 .values(revoked_at=NOW)
             )
         elif status in {"expiry_equal", "expiry_past"}:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.email == fixture.email)
                 .values(
@@ -555,7 +556,7 @@ async def test_actual_preview_clock_hash_mask_after_closed_read_and_no_consumpti
                 )
             )
         elif status == "exhausted":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.email == fixture.email)
                 .values(used_count=1)

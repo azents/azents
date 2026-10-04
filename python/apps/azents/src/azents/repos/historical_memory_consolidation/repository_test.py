@@ -9,7 +9,7 @@ from typing import TypedDict
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from uuid6 import uuid7
 
 from azents.core.enums import WorkspaceUserRole
@@ -30,6 +30,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory_consolidation.authority import (
@@ -78,7 +79,7 @@ def _change(
 
 
 async def test_exact_scope_reads_and_duplicate_claim(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
@@ -107,21 +108,21 @@ async def test_exact_scope_reads_and_duplicate_claim(
 
 
 async def test_expiry_takeover_fences_old_owner(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
     first = await owners.claim(corpus.team)
     assert first is not None
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBConsolidationUnit)
             .where(RDBConsolidationUnit.agent_id == corpus.team.agent_id)
             .values(
                 lease_until=sa.func.clock_timestamp() - datetime.timedelta(seconds=1)
             )
         )
-        await session.commit()
+        await session.write_session.commit()
     second = await owners.claim(corpus.team)
     assert second is not None
     assert second.principal.owner_generation == first.principal.owner_generation + 1
@@ -131,7 +132,7 @@ async def test_expiry_takeover_fences_old_owner(
 
 
 async def test_receipt_replay_conflict_and_stale_draft(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
@@ -164,7 +165,7 @@ async def test_receipt_replay_conflict_and_stale_draft(
 
 
 async def test_source_exposure_fences_previously_admitted_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
@@ -197,14 +198,16 @@ async def test_source_exposure_fences_previously_admitted_mutation(
     assert result.file_count == 1
     async with rdb_session_manager() as session:
         dependencies = list(
-            await session.scalars(sa.select(RDBConsolidationDraftDependency))
+            await session.read_session.scalars(
+                sa.select(RDBConsolidationDraftDependency)
+            )
         )
         assert any(row.source_session_id == corpus.team_source for row in dependencies)
 
 
 @pytest.mark.parametrize("tree", [True, False])
 async def test_archive_restore_never_revives_draft_dependency(
-    rdb_session_manager: SessionManager[AsyncSession], tree: bool
+    rdb_session_manager: SessionManager[WriteSession], tree: bool
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
@@ -243,9 +246,11 @@ async def test_archive_restore_never_revives_draft_dependency(
             root_session_id=corpus.team_source,
             session_ids=[corpus.team_source],
         )
-        source = await session.get(RDBHistoricalMemorySource, corpus.team_source)
+        source = await session.read_session.get(
+            RDBHistoricalMemorySource, corpus.team_source
+        )
         assert source is not None and source.availability_generation == 2
-        await session.commit()
+        await session.write_session.commit()
     with pytest.raises(ConsolidationAuthorityError):
         await drafts.observe(claim.principal, path="summary.md")
     with pytest.raises(ConsolidationAuthorityError):
@@ -253,22 +258,22 @@ async def test_archive_restore_never_revives_draft_dependency(
 
 
 async def test_membership_recreated_with_same_row_id_cannot_revive_attempt(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
     claim = await owners.claim(corpus.personal)
     assert claim is not None
     async with rdb_session_manager() as session:
-        member = await session.scalar(
+        member = await session.read_session.scalar(
             sa.select(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == corpus.personal.workspace_id
             )
         )
         assert member is not None
         old_identity, row_id = member.memory_grant_identity, member.id
-        await session.delete(member)
-        await session.flush()
+        await session.write_session.delete(member)
+        await session.write_session.flush()
         replacement = RDBWorkspaceUser(
             workspace_id=corpus.personal.workspace_id,
             user_id=corpus.personal.associated_user_id or "invalid",
@@ -276,16 +281,16 @@ async def test_membership_recreated_with_same_row_id_cannot_revive_attempt(
             role=WorkspaceUserRole.MEMBER,
         )
         replacement.id = row_id
-        session.add(replacement)
-        await session.flush()
+        session.write_session.add(replacement)
+        await session.write_session.flush()
         assert replacement.memory_grant_identity != old_identity
-        await session.commit()
+        await session.write_session.commit()
     with pytest.raises(ConsolidationAuthorityError):
         await owners.renew(claim.principal)
 
 
 async def test_oversized_batch_rolls_back_every_file_and_receipt(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
@@ -307,13 +312,15 @@ async def test_oversized_batch_rolls_back_every_file_and_receipt(
             ],
         )
     async with rdb_session_manager() as session:
-        assert not list(await session.scalars(sa.select(RDBConsolidationDraftFile)))
+        assert not list(
+            await session.read_session.scalars(sa.select(RDBConsolidationDraftFile))
+        )
     current = await drafts.observe(claim.principal, path="summary.md")
     assert current.draft_revision_id == observed.draft_revision_id
 
 
 async def test_source_purge_retains_independent_influence_and_denies_use(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
@@ -334,21 +341,21 @@ async def test_source_purge_retains_independent_influence_and_denies_use(
         changes=[_change("summary.md", observed, "depends on purged source")],
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBHistoricalMemorySource).where(
                 RDBHistoricalMemorySource.source_session_id == corpus.team_source
             )
         )
-        await session.commit()
+        await session.write_session.commit()
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBConsolidationDraftDependency)
             )
             == 1
         )
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBConsolidationWork)
             )
             == 2
@@ -358,7 +365,7 @@ async def test_source_purge_retains_independent_influence_and_denies_use(
 
 
 async def test_multifile_commit_and_delete_recreate_never_reuses_identity(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
@@ -406,12 +413,12 @@ async def test_multifile_commit_and_delete_recreate_never_reuses_identity(
 
 
 async def test_membership_repository_restores_fresh_enrollment(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     assert corpus.personal.associated_user_id is not None
     async with rdb_session_manager() as session:
-        member = await session.scalar(
+        member = await session.read_session.scalar(
             sa.select(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == corpus.personal.workspace_id
             )
@@ -429,9 +436,9 @@ async def test_membership_repository_restores_fresh_enrollment(
                 role=WorkspaceUserRole.MEMBER,
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         work = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBConsolidationWork)
                 .where(RDBConsolidationWork.source_session_id == corpus.personal_source)
                 .order_by(RDBConsolidationWork.sequence)
@@ -450,15 +457,15 @@ async def test_two_real_transactions_admit_exactly_one_owner(
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
     @asynccontextmanager
-    async def manager() -> AsyncGenerator[AsyncSession, None]:
+    async def manager() -> AsyncGenerator[WriteSession, None]:
         async with factory.begin() as session:
-            yield session
+            yield ReadWriteSession(session)
 
     slug = uuid7().hex
     async with manager() as session:
         workspace = RDBWorkspace(name=slug, handle=slug)
-        session.add(workspace)
-        await session.flush()
+        session.write_session.add(workspace)
+        await session.write_session.flush()
         selection = make_test_model_selection_dict()
         agent = RDBAgent(
             workspace_id=workspace.id,
@@ -472,8 +479,8 @@ async def test_two_real_transactions_admit_exactly_one_owner(
             lightweight_model_label="lightweight",
             memory_enabled=True,
         )
-        session.add(agent)
-        await session.flush()
+        session.write_session.add(agent)
+        await session.write_session.flush()
         key = ConsolidationUnitKey(
             agent_id=agent.id,
             workspace_id=workspace.id,
@@ -493,7 +500,7 @@ async def test_two_real_transactions_admit_exactly_one_owner(
         gate.set()
         assert sorted(await asyncio.gather(left, right)) == [False, True]
         async with manager() as session:
-            unit = await session.scalar(
+            unit = await session.write_session.scalar(
                 sa.select(RDBConsolidationUnit).where(
                     RDBConsolidationUnit.agent_id == key.agent_id
                 )
@@ -507,7 +514,7 @@ async def test_two_real_transactions_admit_exactly_one_owner(
                 owner_token=unit.owner_token,
             )
             assert (
-                await session.scalar(
+                await session.write_session.scalar(
                     sa.select(sa.func.count())
                     .select_from(RDBConsolidationAttempt)
                     .where(RDBConsolidationAttempt.unit_id == unit.id)
@@ -515,7 +522,7 @@ async def test_two_real_transactions_admit_exactly_one_owner(
                 == 1
             )
         async with manager() as holder:
-            await holder.scalar(
+            await holder.write_session.scalar(
                 sa.select(RDBAgent).where(RDBAgent.id == key.agent_id).with_for_update()
             )
             with pytest.raises(ConsolidationAuthorityBusyError, match="temporarily"):
@@ -523,17 +530,17 @@ async def test_two_real_transactions_admit_exactly_one_owner(
         assert await repository.renew(principal) is not None
     finally:
         async with manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgent).where(RDBAgent.id == key.agent_id)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBWorkspace).where(RDBWorkspace.id == key.workspace_id)
             )
 
 
 @pytest.mark.parametrize("personal", [False, True])
 async def test_memory_disable_restore_retains_denial_continuity(
-    rdb_session_manager: SessionManager[AsyncSession], personal: bool
+    rdb_session_manager: SessionManager[WriteSession], personal: bool
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     key = corpus.personal if personal else corpus.team
@@ -557,8 +564,8 @@ async def test_memory_disable_restore_retains_denial_continuity(
         agents = AgentRepository()
         await agents.update_by_id(session, key.agent_id, {"memory_enabled": False})
         await agents.update_by_id(session, key.agent_id, {"memory_enabled": True})
-        source = await session.get(RDBHistoricalMemorySource, source_id)
+        source = await session.read_session.get(RDBHistoricalMemorySource, source_id)
         assert source is not None and source.availability_generation == 2
-        await session.commit()
+        await session.write_session.commit()
     with pytest.raises(ConsolidationAuthorityError):
         await drafts.observe(claim.principal, path="summary.md")

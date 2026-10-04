@@ -6,7 +6,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.exchange_file_errors import (
     ExchangeFileInputClaimError,
@@ -17,6 +16,7 @@ from azents.core.exchange_file_errors import (
     FileUnavailable,
     exchange_object_key_from_uri,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import (
@@ -45,7 +45,7 @@ class InputAttachmentClaimRepository:
 
     async def claim_input_attachments(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,

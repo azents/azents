@@ -154,6 +154,7 @@ from azents.engine.tools.run_tool_to_file import (
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
@@ -237,9 +238,9 @@ class _SessionContext:
         """Store fake session."""
         self.session = session or _Session()
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         """Return fake session."""
-        return self.session
+        return ReadWriteSession(self.session)
 
     async def __aexit__(self, *exc: object) -> None:
         """No-op exit."""
@@ -251,15 +252,16 @@ def _fake_execution_owner_lock(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def lock_owner(
         self: AgentSessionRepository,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> AgentSession | None:
         del self, session_id
-        assert isinstance(session, _Session)
-        if session.owner_generation is None:
+        raw_session = session.write_session
+        assert isinstance(raw_session, _Session)
+        if raw_session.owner_generation is None:
             return None
         return _agent_session().model_copy(
-            update={"owner_generation": session.owner_generation}
+            update={"owner_generation": raw_session.owner_generation}
         )
 
     monkeypatch.setattr(
@@ -288,7 +290,7 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
         self.states: dict[tuple[str, str], ToolWorkingSetState] = {}
 
     def with_session_manager(
-        self, session_manager: SessionManager[AsyncSession]
+        self, session_manager: SessionManager[WriteSession]
     ) -> ToolWorkingSetStore:
         """Keep in-memory state while assembling an owner-bound execution."""
         del session_manager
@@ -327,7 +329,7 @@ class _ToolWorkingSetStore(ToolWorkingSetStore):
 
     async def clear_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
@@ -397,7 +399,7 @@ class _RunRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         """Return existing run state when retry reuses a run id."""
@@ -405,14 +407,14 @@ class _RunRepo:
         return self._state
 
     async def lock_by_id(
-        self, session: AsyncSession, run_id: str
+        self, session: ReadSession, run_id: str
     ) -> AgentRunState | None:
         """Return the current Run for repository composition wiring."""
         return await self.get_by_id(session, run_id)
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -435,7 +437,7 @@ class _RunRepo:
         return self._state
 
     async def mark_parent_result_suppressed(
-        self, session: AsyncSession, *, run_id: str, finalized_at: datetime.datetime
+        self, session: ReadSession, *, run_id: str, finalized_at: datetime.datetime
     ) -> AgentRunState:
         """Keep the detached Run contract for completed repository wiring."""
         del finalized_at
@@ -446,7 +448,7 @@ class _RunRepo:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: AgentRunCreate,
     ) -> AgentRunState:
         """Record create call."""
@@ -476,7 +478,7 @@ class _RunRepo:
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -499,7 +501,7 @@ class _RunRepo:
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         retry_state: object | None,
     ) -> object:
@@ -514,7 +516,7 @@ class _AgentSessionRepo(AgentSessionRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Handle session lookup call."""
@@ -523,7 +525,7 @@ class _AgentSessionRepo(AgentSessionRepository):
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Return root SessionAgent without using an unbound test DB session."""
@@ -546,7 +548,7 @@ class _EventSessionHeadRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> _EventSessionHeadState:
         """Return head state."""
@@ -563,7 +565,7 @@ class _TranscriptRepo:
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None = None,
@@ -575,7 +577,7 @@ class _TranscriptRepo:
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
@@ -592,7 +594,7 @@ class _TranscriptRepo:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: EventCreate,
     ) -> Event:
         """Convert Event append call to test event."""

@@ -15,6 +15,7 @@ from azents.core.user_email import DuplicateEmail, UserEmailCreate
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.user_email import RDBUserEmail
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import User, UserCreate
 from azents.repos.user_email import UserEmailRepository
@@ -28,30 +29,31 @@ class CommittedOperationManager:
         self.engine = engine
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Include commit-time deferred constraint failures in rollback."""
-        async with AsyncSession(self.engine, expire_on_commit=False) as session:
+        async with AsyncSession(self.engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
-                await session.commit()
+                await session.write_session.commit()
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
 
 
 class ObservedEmailManager:
     """Observe actual transaction resolution before operation results return."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
         self.resolved: list[bool] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Finish the underlying real lifetime on success or rollback."""
         self.active = True
-        current: AsyncSession | None = None
+        current: WriteSession | None = None
         try:
             async with self.manager() as session:
                 current = session
@@ -59,10 +61,10 @@ class ObservedEmailManager:
         finally:
             self.active = False
             if current is not None:
-                self.resolved.append(not current.in_transaction())
+                self.resolved.append(not current.write_session.in_transaction())
 
 
-async def _user(manager: SessionManager[AsyncSession], name: str) -> User:
+async def _user(manager: SessionManager[WriteSession], name: str) -> User:
     """Create a User with its real primary email and deferred reference."""
     async with manager() as session:
         return await UserRepository().create(
@@ -71,7 +73,7 @@ async def _user(manager: SessionManager[AsyncSession], name: str) -> User:
 
 
 async def test_create_conflict_and_missing_delete_finish_with_unchanged_results(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Duplicate email rollback leaves one row and no lingering failed session."""
     user = await _user(rdb_session_manager, "email-operation-create")
@@ -95,7 +97,7 @@ async def test_create_conflict_and_missing_delete_finish_with_unchanged_results(
 
 
 async def test_user_order_and_global_page_count_are_preserved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """User ascending order and global descending pagination retain exact totals."""
     user = await _user(rdb_session_manager, "email-operation-order")
@@ -112,7 +114,7 @@ async def test_user_order_and_global_page_count_are_preserved(
         ids.append(result.value.id)
     async with rdb_session_manager() as session:
         for index, id in enumerate(ids):
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBUserEmail)
                 .where(RDBUserEmail.id == id)
                 .values(
@@ -158,13 +160,14 @@ async def test_primary_email_delete_retains_real_commit_time_foreign_key_failure
     del latest_db_schema
 
     @asynccontextmanager
-    async def committed_manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def committed_manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
-                await session.commit()
+                await session.write_session.commit()
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
 
     manager = ObservedEmailManager(committed_manager)
@@ -184,4 +187,6 @@ async def test_primary_email_delete_retains_real_commit_time_foreign_key_failure
             )
     finally:
         async with committed_manager() as session:
-            await session.execute(sa.delete(RDBUser).where(RDBUser.id == user.id))
+            await session.write_session.execute(
+                sa.delete(RDBUser).where(RDBUser.id == user.id)
+            )

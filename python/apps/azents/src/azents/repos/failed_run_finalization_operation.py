@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, EventKind
 from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPayload
@@ -16,6 +15,7 @@ from azents.engine.run.failure import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -49,7 +49,7 @@ class FailedRunFinalizationOperationRepository:
     """Own failure admission, Events, Run transition and parent delivery atomically."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
@@ -87,7 +87,7 @@ class FailedRunFinalizationOperationRepository:
 
     async def append_terminal_failed_run_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         input: FailedRunFinalization,
     ) -> FailedRunFinalizationEvents:
         """Compose failed Events and delivery inside an owned repository scope."""

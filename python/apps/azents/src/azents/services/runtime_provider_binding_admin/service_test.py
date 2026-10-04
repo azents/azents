@@ -7,7 +7,6 @@ from typing import Any
 import pytest
 from azcommon.datetime import tznow
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -23,6 +22,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
@@ -50,7 +50,7 @@ from .service import (
 
 
 def _enrollment_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> RuntimeProviderEnrollmentService:
     """Build the issued-token enrollment service used by Admin rotation."""
     return RuntimeProviderEnrollmentService(
@@ -65,7 +65,7 @@ def _enrollment_service(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     enrollment_service: RuntimeProviderEnrollmentService,
 ) -> RuntimeProviderBindingAdminService:
     """Build the binding Admin service with production repositories."""
@@ -79,7 +79,7 @@ def _service(
 
 
 async def _create_admin_and_provider(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     provider_logical_id: str,
     lifecycle_state: RuntimeProviderLifecycleState = (
@@ -117,7 +117,7 @@ class TestRuntimeProviderBindingAdminService:
 
     async def test_create_rotate_revoke_and_audit_lifecycle(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Admin lifecycle is atomic, optimistic, and secret-safe."""
         actor_user_id, _ = await _create_admin_and_provider(
@@ -258,7 +258,7 @@ class TestRuntimeProviderBindingAdminService:
 
     async def test_bootstrap_binding_is_read_only_and_config_is_redacted(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Admin reads only safe workload metadata and cannot mutate ownership."""
         actor_user_id, provider_id = await _create_admin_and_provider(
@@ -317,7 +317,7 @@ class TestRuntimeProviderBindingAdminService:
 
     async def test_create_rejects_invalid_or_conflicting_binding(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Creation rejects unsafe method/config, terminal Providers, and duplicates."""
         actor_user_id, _ = await _create_admin_and_provider(

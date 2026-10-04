@@ -7,7 +7,6 @@ from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
 from azents.core.agent_session_data import AgentSession
@@ -23,6 +22,7 @@ from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -38,14 +38,14 @@ from azents.worker.live.event_projector import LiveEventProjector
 class _Boundary:
     """Record SQL scopes and require detached completion at every effect."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.sessions: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
+        self.active: list[WriteSession] = []
         self.effects: list[str] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
         async with self.manager() as session:
             self.sessions.append(session)
             self.active.append(session)
@@ -56,7 +56,9 @@ class _Boundary:
 
     def check(self, effect: str) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
         self.effects.append(effect)
 
 
@@ -150,7 +152,7 @@ class _Fixture(NamedTuple):
 
 
 def _fixture(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     sessions: AgentSessionRepository,
     runs: AgentRunRepository,
@@ -192,7 +194,7 @@ def _live_run(run_id: str) -> ChatLiveRunState:
 
 
 async def test_completed_owner_and_terminal_reads_precede_all_volatile_effects(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Actual DB reads finish before reset, partial/store mutation and publication."""
@@ -257,7 +259,7 @@ async def test_completed_owner_and_terminal_reads_precede_all_volatile_effects(
 
 
 async def test_durable_takeover_rejects_old_effects_and_resets_new_owner_after_closure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """New durable authority retains the reset-removal-update order outside SQL."""
@@ -276,7 +278,7 @@ async def test_durable_takeover_rejects_old_effects_and_resets_new_owner_after_c
     await projector.flush_session(session_id, owner_generation=0)
     before = list(broadcast.events)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(owner_generation=1)
@@ -301,7 +303,7 @@ async def test_durable_takeover_rejects_old_effects_and_resets_new_owner_after_c
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 @pytest.mark.parametrize("stage", ["store", "broadcast"])
 async def test_eligible_terminal_external_failure_still_evicts_local_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: str,
     stage: str,
     caplog: pytest.LogCaptureFixture,
@@ -345,7 +347,7 @@ async def test_eligible_terminal_external_failure_still_evicts_local_generation(
 
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 async def test_owner_read_failure_closes_sql_without_external_effects(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -356,7 +358,7 @@ async def test_owner_read_failure_closes_sql_without_external_effects(
 
     class FailingSessions(AgentSessionRepository):
         async def get_by_id(
-            self, session: AsyncSession, agent_session_id: str
+            self, session: ReadSession, agent_session_id: str
         ) -> AgentSession | None:
             await super().get_by_id(session, agent_session_id)
             if failure == "cancel":
@@ -383,7 +385,7 @@ async def test_owner_read_failure_closes_sql_without_external_effects(
 
 
 async def test_restart_and_local_run_mismatch_preserve_current_durable_projection(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Keep local mismatch short-circuit and durable current-Run-ID rules."""
     session_id = await _create_session(rdb_session_manager, handle="projection-runs")
@@ -415,12 +417,12 @@ async def test_restart_and_local_run_mismatch_preserve_current_durable_projectio
     assert fixture.projector._active_run_ids[key] == "local-newer"
     fixture.projector._active_run_ids[key] = current.id
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRun)
             .where(RDBAgentRun.id == current.id)
             .values(status=AgentRunStatus.COMPLETED)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(owner_generation=1)
@@ -436,7 +438,7 @@ async def test_restart_and_local_run_mismatch_preserve_current_durable_projectio
 
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 async def test_failed_terminal_read_does_not_evict_ineligible_local_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: str,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -449,7 +451,7 @@ async def test_failed_terminal_read_does_not_evict_ineligible_local_state(
     class FailingRuns(AgentRunRepository):
         async def get_running_by_session_id(
             self,
-            session: AsyncSession,
+            session: ReadSession,
             *,
             session_id: str,
         ) -> AgentRunState | None:

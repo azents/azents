@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -15,6 +14,7 @@ from azents.core.enums import (
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -56,7 +56,7 @@ class AgentRuntimeTransitionService:
     """Own explicit `none` to `managed` Runtime transitions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     runtime_repository: Annotated[
@@ -213,7 +213,7 @@ class AgentRuntimeTransitionService:
 
     async def _prepare_runtime(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         prepared: PreparedRuntimeProfileSelection,
@@ -276,7 +276,7 @@ class AgentRuntimeTransitionService:
 
     async def _replay(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: AgentRuntimeAdditionRequest,
         agent: Agent,

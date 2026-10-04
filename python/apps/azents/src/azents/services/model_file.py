@@ -14,7 +14,6 @@ from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
@@ -23,6 +22,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.file_metadata_authority import FileResourceAuthority
 from azents.repos.model_file import ModelFileRepository, model_file_storage_key
@@ -141,7 +141,7 @@ class ModelFileService:
     model_file_repository: Annotated[ModelFileRepository, Depends(ModelFileRepository)]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
@@ -294,7 +294,7 @@ class ModelFileService:
 
     async def validate_resource_authority_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         authority: SessionResourceAuthority,
         *,
         lock: bool,

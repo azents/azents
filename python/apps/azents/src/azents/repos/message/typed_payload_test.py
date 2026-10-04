@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.repos.message as message_module
 from azents.core.enums import EventKind
-from azents.core.json_value import JSONValue
 from azents.engine.events.historical_memory_projection import (
     HistoricalMemoryEvidence,
     HistoricalMemoryEvidenceTier,
@@ -19,7 +18,8 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
 )
-from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession
 from azents.repos.message import MessageRepository, _HistoricalMemoryScanBudget
 from azents.repos.message.repository_test import _native_artifact
 
@@ -51,7 +51,7 @@ class _LinkedResultsRepository(MessageRepository):
 
     async def _historical_memory_tool_results(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         tail_event_id: str,
@@ -110,10 +110,11 @@ async def test_registered_tool_linkage_uses_validated_payload_fields(
         )
 
     monkeypatch.setattr(message_module, "project_historical_memory_event", project)
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     page = Mock()
     page.scalars.return_value = [call]
-    session.execute.return_value = page
+    _raw_session.execute.return_value = page
     repository = _LinkedResultsRepository([result])
     rows = await repository._list_historical_memory_registered_tools(
         session,
@@ -125,7 +126,7 @@ async def test_registered_tool_linkage_uses_validated_payload_fields(
     assert rows == [call, result]
     assert repository.requested_call_ids == [("call-1",)]
     assert len(projected_events) == 1
-    session.execute.assert_awaited_once()
+    _raw_session.execute.assert_awaited_once()
 
 
 async def test_invalid_call_payload_fails_before_result_linkage() -> None:
@@ -142,10 +143,11 @@ async def test_invalid_call_payload_fails_before_result_linkage() -> None:
         "1" * 32,
     )
     del call.payload["call_id"]
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     page = Mock()
     page.scalars.return_value = [call]
-    session.execute.return_value = page
+    _raw_session.execute.return_value = page
     repository = _LinkedResultsRepository([])
     with pytest.raises(ValidationError):
         await repository._list_historical_memory_registered_tools(

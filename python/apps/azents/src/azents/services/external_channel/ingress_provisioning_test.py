@@ -19,6 +19,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningRepository,
 )
@@ -55,10 +56,10 @@ from azents.services.external_channel.ingress_provisioning import (
 from azents.testing.external_channel import make_provider_effect_plan
 
 
-def _session_manager() -> SessionManager[AsyncSession]:
+def _session_manager() -> SessionManager[WriteSession]:
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        session: AsyncSession = MagicMock(spec=AsyncSession)
+    async def manager() -> AsyncIterator[WriteSession]:
+        session: WriteSession = MagicMock(spec=AsyncSession)
         yield session
 
     return manager
@@ -261,7 +262,7 @@ async def test_complete_uses_caller_transaction(
     tracker_visibility: str,
 ) -> None:
     """The ready transition uses one caller-owned transaction for every DB effect."""
-    transaction: AsyncSession = MagicMock(spec=AsyncSession)
+    transaction: WriteSession = MagicMock(spec=AsyncSession)
     repository = MagicMock(spec=ExternalChannelRepository)
     repository.lock_connection_for_routing = AsyncMock(
         return_value=SimpleNamespace(id="connection-1")
@@ -340,7 +341,7 @@ async def test_complete_uses_caller_transaction(
 
 async def test_complete_rejects_changed_participation_generation() -> None:
     """A stale configured target terminalizes before Binding or Session creation."""
-    transaction: AsyncSession = MagicMock(spec=AsyncSession)
+    transaction: WriteSession = MagicMock(spec=AsyncSession)
     repository = MagicMock(spec=ExternalChannelRepository)
     repository.lock_connection_for_routing = AsyncMock(
         return_value=SimpleNamespace(id="connection-1")

@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.external_channel_impact import ExternalChannelMultiRouteImpact
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
@@ -15,6 +14,7 @@ from azents.core.session_lifecycle import (
     SessionLifecyclePurgeContext,
     SessionLifecycleTransitionContext,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
@@ -49,7 +49,7 @@ class ExternalChannelLifecycleService:
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ExternalChannelArchiveTermination | None:
@@ -64,7 +64,7 @@ class ExternalChannelLifecycleService:
 
     async def restore_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ExternalChannelRestoreValidation | None:
@@ -78,7 +78,7 @@ class ExternalChannelLifecycleService:
 
     async def prepare_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> None:
@@ -90,7 +90,7 @@ class ExternalChannelLifecycleService:
 
     async def cleanup_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ExternalChannelPurgeCleanup | None:
@@ -104,7 +104,7 @@ class ExternalChannelLifecycleService:
 
     async def verify_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ExternalChannelPurgeVerification | None:
@@ -118,7 +118,7 @@ class ExternalChannelLifecycleService:
 
     async def finalize_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ExternalChannelPurgeVerification | None:
@@ -127,7 +127,7 @@ class ExternalChannelLifecycleService:
 
     async def cleanup_decommissioned_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         now: datetime.datetime,
@@ -141,7 +141,7 @@ class ExternalChannelLifecycleService:
 
     async def project_multi_route_impact(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -155,7 +155,7 @@ class ExternalChannelLifecycleService:
 
     async def remove_multi_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -173,7 +173,7 @@ class ExternalChannelLifecycleService:
 
     async def reenable_multi_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -187,7 +187,7 @@ class ExternalChannelLifecycleService:
 
     async def disconnect_multi_connection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         now: datetime.datetime,
@@ -214,7 +214,7 @@ class ExternalChannelLifecycleService:
 
     async def purge_decommissioned_provider_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         connection_ids: Sequence[str],
     ) -> int:
         """Purge deferred Single-App credentials after target capture."""

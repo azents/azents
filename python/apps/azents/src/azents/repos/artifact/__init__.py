@@ -4,10 +4,10 @@ import datetime
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ArtifactStatus
 from azents.rdb.models.artifact import RDBArtifact
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import Artifact, ArtifactCreate
 
@@ -28,7 +28,7 @@ class ArtifactRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ArtifactCreate,
     ) -> Artifact:
         """Create Artifact metadata."""
@@ -57,28 +57,28 @@ class ArtifactRepository:
             created_run_index=create.created_run_index,
             artifact_id=create.id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         artifact_id: str,
     ) -> Artifact | None:
         """Fetch Artifact by ID."""
-        rdb = await session.get(RDBArtifact, artifact_id)
+        rdb = await session.read_session.get(RDBArtifact, artifact_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_storage_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         storage_key: str,
     ) -> Artifact | None:
         """Fetch Artifact by storage key."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBArtifact).where(RDBArtifact.storage_key == storage_key)
         )
         if rdb is None:
@@ -87,7 +87,7 @@ class ArtifactRepository:
 
     async def list_for_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> list[Artifact]:
@@ -95,7 +95,7 @@ class ArtifactRepository:
         if not session_ids:
             return []
         rows = (
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBArtifact)
                 .where(RDBArtifact.session_id.in_(session_ids))
                 .order_by(RDBArtifact.id)
@@ -105,7 +105,7 @@ class ArtifactRepository:
 
     async def expire_for_session_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         expired_at: datetime.datetime,
@@ -114,7 +114,7 @@ class ArtifactRepository:
         if not session_ids:
             return []
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBArtifact)
                 .where(
                     RDBArtifact.session_id.in_(session_ids),
@@ -126,12 +126,12 @@ class ArtifactRepository:
         for row in rows:
             row.status = ArtifactStatus.EXPIRED
             row.expired_at = expired_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def delete_purged_for_session_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> int:
@@ -139,7 +139,7 @@ class ArtifactRepository:
         if not session_ids:
             return 0
         deleted_ids = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.delete(RDBArtifact)
                 .where(
                     RDBArtifact.session_id.in_(session_ids),
@@ -153,14 +153,14 @@ class ArtifactRepository:
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         limit: int,
     ) -> list[Artifact]:
         """Mark Artifacts past expiration time as expired."""
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBArtifact)
                 .where(
                     RDBArtifact.status == ArtifactStatus.AVAILABLE,
@@ -173,18 +173,18 @@ class ArtifactRepository:
         for row in rows:
             row.status = ArtifactStatus.EXPIRED
             row.expired_at = now
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def list_expired_pending_blob_deletion(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[Artifact]:
         """List expired Artifacts whose blob deletion has not been recorded."""
         rows = (
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBArtifact)
                 .where(
                     RDBArtifact.status == ArtifactStatus.EXPIRED,
@@ -198,18 +198,18 @@ class ArtifactRepository:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         artifact_id: str,
         blob_deleted_at: datetime.datetime,
     ) -> None:
         """Record Artifact blob deletion success."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBArtifact)
             .where(RDBArtifact.id == artifact_id)
             .values(blob_deleted_at=blob_deleted_at)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     def _build(self, rdb: RDBArtifact) -> Artifact:
         """Convert RDB model to domain model."""

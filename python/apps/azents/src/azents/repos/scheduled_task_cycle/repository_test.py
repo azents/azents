@@ -14,6 +14,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
@@ -62,7 +63,7 @@ class _ToolkitStateRepository(ToolkitStateRepository):
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -85,7 +86,7 @@ class _ToolkitStateRepository(ToolkitStateRepository):
 
     async def save(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         state: ToolkitStateUpsert,
     ) -> ToolkitStateRecord:
         """Record one create-or-CAS save and return its next version."""
@@ -225,9 +226,9 @@ class _QuerySession(AsyncSession):
         return self.result
 
 
-def _session() -> AsyncSession:
+def _session() -> WriteSession:
     """Return an unbound async session for collaborators that ignore it."""
-    return AsyncSession()
+    return ReadWriteSession(AsyncSession())
 
 
 def _sql(statement: sa.ClauseElement) -> str:
@@ -608,7 +609,7 @@ async def test_list_started_filters_and_orders_current_cycle_rows() -> None:
     )
 
     records = await repository.list_started(
-        session,
+        ReadWriteSession(session),
         agent_id="a" * 32,
         session_id="s" * 32,
     )
@@ -641,7 +642,7 @@ async def test_delete_started_uses_exact_row_version_fence() -> None:
     )
 
     assert await repository.delete_started(
-        session,
+        ReadWriteSession(session),
         record=record,
     )
 

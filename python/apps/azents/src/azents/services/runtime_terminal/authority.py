@@ -3,8 +3,6 @@
 import dataclasses
 from datetime import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -18,6 +16,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -83,7 +82,7 @@ class DatabaseRuntimeTerminalAuthorityResolver:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         user_repository: UserRepository,
         authentication_session_repository: SessionRepository,
         workspace_repository: WorkspaceRepository,
@@ -403,7 +402,7 @@ class DatabaseRuntimeTerminalAuthorityResolver:
 
     async def _session_access_allowed(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_session: AgentSession,
         user_id: str,

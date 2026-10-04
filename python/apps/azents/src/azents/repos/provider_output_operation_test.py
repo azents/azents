@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -26,7 +27,7 @@ class _AuthorityRepository:
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: FileResourceAuthority,
         *,
         lock: bool,
@@ -51,12 +52,13 @@ class _OperationRepository(ProviderOutputOperationRepository):
 
 async def test_provider_output_reads_close_transactions_before_returning() -> None:
     """Scope, retry, and cleanup reads return only after transaction closure."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     active = [False]
     transaction_count = 0
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_count
         assert not active[0]
         active[0] = True

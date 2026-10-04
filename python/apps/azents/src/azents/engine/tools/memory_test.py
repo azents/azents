@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.memory_scope import MemoryScope
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.memory import make_delete_memory_tool, make_save_memory_tool
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import Memory, MemoryCreate
@@ -19,8 +20,9 @@ from azents.repos.memory.operations import MemoryOperationRepository
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    async with AsyncSession() as session:
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    async with AsyncSession() as raw_session:
+        session = ReadWriteSession(raw_session)
         yield session
 
 
@@ -46,7 +48,7 @@ class _MemoryRepository(MemoryRepository):
 
     async def upsert(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,
@@ -70,7 +72,7 @@ class _MemoryRepository(MemoryRepository):
 
     async def delete_by_name(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         user_id: str | None,

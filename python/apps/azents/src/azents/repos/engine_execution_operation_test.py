@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import ActiveToolCall
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.engine_execution_operation import (
     EngineExecutionOperationRepository,
 )
@@ -22,13 +23,13 @@ class _SessionManager:
         self.transaction_count = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Yield one synthetic active transaction."""
         assert not self.active
         self.active = True
         self.transaction_count += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             self.active = False
 
@@ -57,7 +58,7 @@ class _RunRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> _RunState:
         """Return configured current status inside the transaction."""
@@ -67,7 +68,7 @@ class _RunRepository:
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -92,7 +93,7 @@ class _ModelFilePinRepository:
 
     async def pin_many(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         run_id: str,

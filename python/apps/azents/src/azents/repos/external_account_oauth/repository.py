@@ -6,7 +6,6 @@ from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
@@ -30,6 +29,7 @@ from azents.rdb.models.external_account_oauth import RDBExternalAccountOAuthAtte
 from azents.rdb.models.session import RDBSession
 from azents.rdb.models.user import RDBUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.system_setting.repository import SystemSettingRepository
 
 from .data import (
@@ -45,7 +45,7 @@ class ExternalAccountOAuthAttemptRepository:
     def __init__(
         self,
         session_manager: Annotated[
-            SessionManager[AsyncSession],
+            SessionManager[WriteSession],
             Depends(get_session_manager),
         ],
         system_setting_repository: Annotated[
@@ -96,8 +96,8 @@ class ExternalAccountOAuthAttemptRepository:
                 failure_code=None,
             )
             row.id = create.id
-            session.add(row)
-            await session.flush()
+            session.write_session.add(row)
+            await session.write_session.flush()
             return _build(row)
 
     async def claim_open(
@@ -122,12 +122,12 @@ class ExternalAccountOAuthAttemptRepository:
                 session,
                 section=section,
             )
-            user = await session.scalar(
+            user = await session.write_session.scalar(
                 sa.select(RDBUser)
                 .where(RDBUser.id == user_id)
                 .with_for_update(nowait=True)
             )
-            auth_session = await session.scalar(
+            auth_session = await session.write_session.scalar(
                 sa.select(RDBSession)
                 .where(
                     RDBSession.id == auth_session_id,
@@ -144,7 +144,7 @@ class ExternalAccountOAuthAttemptRepository:
                 or current_generation != setting_generation
             ):
                 return None
-            row = await session.scalar(
+            row = await session.write_session.scalar(
                 sa.select(RDBExternalAccountOAuthAttempt)
                 .where(
                     RDBExternalAccountOAuthAttempt.state_hash == state_hash,
@@ -164,7 +164,7 @@ class ExternalAccountOAuthAttemptRepository:
                 return None
             row.status = ExternalAccountOAuthAttemptStatus.CLAIMED
             row.claimed_at = now
-            await session.flush()
+            await session.write_session.flush()
             return _build(row)
 
     async def complete(
@@ -175,7 +175,7 @@ class ExternalAccountOAuthAttemptRepository:
     ) -> bool:
         """Mark one claimed attempt complete."""
         async with self.session_manager() as session:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.update(RDBExternalAccountOAuthAttempt)
                 .where(
                     RDBExternalAccountOAuthAttempt.id == attempt_id,
@@ -199,7 +199,7 @@ class ExternalAccountOAuthAttemptRepository:
     ) -> bool:
         """Mark one claimed attempt failed with a sanitized code."""
         async with self.session_manager() as session:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.update(RDBExternalAccountOAuthAttempt)
                 .where(
                     RDBExternalAccountOAuthAttempt.id == attempt_id,
@@ -228,7 +228,7 @@ class ExternalAccountOAuthAttemptRepository:
     ) -> str:
         """Classify a rejected callback without disclosing durable attempt data."""
         async with self.session_manager() as session:
-            row = await session.scalar(
+            row = await session.write_session.scalar(
                 sa.select(RDBExternalAccountOAuthAttempt).where(
                     RDBExternalAccountOAuthAttempt.state_hash == state_hash,
                 )
@@ -243,8 +243,10 @@ class ExternalAccountOAuthAttemptRepository:
                 return "invalid_callback"
             if row.setting_generation != setting_generation:
                 return "configuration_changed"
-            user = await session.scalar(sa.select(RDBUser).where(RDBUser.id == user_id))
-            auth_session = await session.scalar(
+            user = await session.write_session.scalar(
+                sa.select(RDBUser).where(RDBUser.id == user_id)
+            )
+            auth_session = await session.write_session.scalar(
                 sa.select(RDBSession).where(
                     RDBSession.id == auth_session_id,
                     RDBSession.user_id == user_id,
@@ -275,7 +277,7 @@ class ExternalAccountOAuthAttemptRepository:
             return ExternalAccountOAuthAttemptCleanupSummary(deleted_count=0)
         async with self.session_manager() as session:
             rows = (
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBExternalAccountOAuthAttempt.id)
                     .where(
                         sa.or_(
@@ -293,7 +295,7 @@ class ExternalAccountOAuthAttemptRepository:
             ).all()
             if not rows:
                 return ExternalAccountOAuthAttemptCleanupSummary(deleted_count=0)
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.delete(RDBExternalAccountOAuthAttempt)
                 .where(RDBExternalAccountOAuthAttempt.id.in_(rows))
                 .returning(RDBExternalAccountOAuthAttempt.id)
@@ -304,7 +306,7 @@ class ExternalAccountOAuthAttemptRepository:
 
     async def _current_setting_generation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         section: SystemSettingSection,
     ) -> str:

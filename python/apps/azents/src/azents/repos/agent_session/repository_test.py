@@ -62,6 +62,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_lifecycle_finalizer import (
@@ -80,7 +81,7 @@ from azents.testing.model_selection import (
 from . import AgentSessionRepository
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -92,14 +93,14 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     slug: str,
     *,
@@ -116,8 +117,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -152,8 +153,8 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     if runtime_capability is AgentRuntimeCapability.MANAGED and create_runtime:
         runtime_repository = AgentRuntimeRepository()
         runtime = await runtime_repository.ensure_for_agent(session, agent.id)
@@ -171,7 +172,7 @@ async def _create_agent(
 
 
 async def _bind_root_working_folder(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     repository: AgentSessionRepository,
     agent_id: str,
@@ -204,7 +205,7 @@ class TestAgentSessionRepository:
 
     async def test_applied_profile_generation_increments_for_equal_replacements(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Every accepted common setter call advances the ABA fence once."""
         workspace_id = await _create_workspace(
@@ -248,7 +249,7 @@ class TestAgentSessionRepository:
 
     async def test_replaces_stale_active_profiles_with_the_agent_default(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Only active Sessions with removed labels use the new default profile."""
         workspace_id = await _create_workspace(
@@ -324,7 +325,7 @@ class TestAgentSessionRepository:
 
     async def test_root_context_without_runtime_uses_none_binding(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Runtime-free Agents create a context without Runtime ownership."""
         workspace_id = await _create_workspace(rdb_session, "root-context-none")
@@ -345,7 +346,7 @@ class TestAgentSessionRepository:
                 title=None,
             ),
         )
-        context = await rdb_session.scalar(
+        context = await rdb_session.read_session.scalar(
             sa.select(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == agent_id,
                 RDBSessionAgentContext.workspace_id == workspace_id,
@@ -363,7 +364,7 @@ class TestAgentSessionRepository:
 
     async def test_root_context_managed_without_workspace_path_is_pending(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Managed Agents await Runner workspace evidence before binding."""
         workspace_id = await _create_workspace(rdb_session, "root-context-pending")
@@ -384,7 +385,7 @@ class TestAgentSessionRepository:
                 title=None,
             ),
         )
-        context = await rdb_session.scalar(
+        context = await rdb_session.read_session.scalar(
             sa.select(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == agent_id,
                 RDBSessionAgentContext.workspace_id == workspace_id,
@@ -401,7 +402,7 @@ class TestAgentSessionRepository:
 
     async def test_root_context_managed_without_runtime_row_is_pending(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Managed unconfigured Agents may create pending root contexts."""
         workspace_id = await _create_workspace(
@@ -425,7 +426,7 @@ class TestAgentSessionRepository:
                 title=None,
             ),
         )
-        context = await rdb_session.scalar(
+        context = await rdb_session.read_session.scalar(
             sa.select(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == agent_id,
                 RDBSessionAgentContext.workspace_id == workspace_id,
@@ -450,7 +451,10 @@ class TestAgentSessionRepository:
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
         application_name = f"root-creation-cas-{suffix}"
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"root-context-runtime-cas-{suffix}",
@@ -466,14 +470,15 @@ class TestAgentSessionRepository:
                 agent_id,
             )
             assert runtime is not None
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async def create_root_context() -> str:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as create_session:
-                await create_session.execute(
+            ) as _raw_create_session:
+                create_session = ReadWriteSession(_raw_create_session)
+                await create_session.write_session.execute(
                     sa.text("SELECT set_config('application_name', :name, true)"),
                     {"name": application_name},
                 )
@@ -489,16 +494,17 @@ class TestAgentSessionRepository:
                         ),
                     )
                 except Exception:
-                    await create_session.rollback()
+                    await create_session.write_session.rollback()
                     raise
-                await create_session.commit()
+                await create_session.write_session.commit()
                 return created.id
 
         async def wait_for_runtime_key_share() -> None:
             deadline = asyncio.get_running_loop().time() + 5
             while asyncio.get_running_loop().time() < deadline:
-                async with AsyncSession(rdb_engine) as observer:
-                    waiting = await observer.scalar(
+                async with AsyncSession(rdb_engine) as _raw_observer:
+                    observer = ReadWriteSession(_raw_observer)
+                    waiting = await observer.read_session.scalar(
                         sa.text(
                             """
                             SELECT EXISTS (
@@ -521,8 +527,9 @@ class TestAgentSessionRepository:
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as runtime_session:
-            locked_runtime_id = await runtime_session.scalar(
+        ) as _raw_runtime_session:
+            runtime_session = ReadWriteSession(_raw_runtime_session)
+            locked_runtime_id = await runtime_session.write_session.scalar(
                 sa.select(RDBAgentRuntime.id)
                 .where(RDBAgentRuntime.agent_id == agent_id)
                 .with_for_update()
@@ -530,7 +537,7 @@ class TestAgentSessionRepository:
             assert locked_runtime_id == runtime.id
             creation_task = asyncio.create_task(create_root_context())
             await wait_for_runtime_key_share()
-            updated_agent_id = await runtime_session.scalar(
+            updated_agent_id = await runtime_session.read_session.scalar(
                 sa.update(RDBAgent)
                 .where(
                     RDBAgent.id == agent_id,
@@ -545,7 +552,7 @@ class TestAgentSessionRepository:
                 .returning(RDBAgent.id)
             )
             assert updated_agent_id == agent_id
-            await runtime_session.commit()
+            await runtime_session.write_session.commit()
 
         with pytest.raises(
             RuntimeError,
@@ -553,18 +560,19 @@ class TestAgentSessionRepository:
         ):
             await asyncio.wait_for(creation_task, timeout=5)
 
-        async with AsyncSession(rdb_engine) as verification_session:
-            created_count = await verification_session.scalar(
+        async with AsyncSession(rdb_engine) as _raw_verification_session:
+            verification_session = ReadWriteSession(_raw_verification_session)
+            created_count = await verification_session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBAgentSession)
                 .where(RDBAgentSession.agent_id == agent_id)
             )
-            context_count = await verification_session.scalar(
+            context_count = await verification_session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBSessionAgentContext)
                 .where(RDBSessionAgentContext.agent_id == agent_id)
             )
-            session_agent_count = await verification_session.scalar(
+            session_agent_count = await verification_session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBSessionAgent)
                 .join(
@@ -586,7 +594,10 @@ class TestAgentSessionRepository:
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"session-parent-lock-order-{suffix}",
@@ -606,7 +617,7 @@ class TestAgentSessionRepository:
                     title=None,
                 ),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         competing_started = asyncio.Event()
 
@@ -614,18 +625,20 @@ class TestAgentSessionRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as competing_session:
+            ) as _raw_competing_session:
+                competing_session = ReadWriteSession(_raw_competing_session)
                 competing_started.set()
                 locked = await repository.lock_by_id(competing_session, created.id)
                 assert locked is not None
-                await competing_session.commit()
+                await competing_session.write_session.commit()
                 return locked.id
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as agent_holder:
-            locked_agent_id = await agent_holder.scalar(
+        ) as _raw_agent_holder:
+            agent_holder = ReadWriteSession(_raw_agent_holder)
+            locked_agent_id = await agent_holder.write_session.scalar(
                 sa.select(RDBAgent.id).where(RDBAgent.id == agent_id).with_for_update()
             )
             assert locked_agent_id == agent_id
@@ -642,7 +655,7 @@ class TestAgentSessionRepository:
                 timeout=5,
             )
             assert locked is not None
-            await agent_holder.commit()
+            await agent_holder.write_session.commit()
 
         assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
 
@@ -655,7 +668,10 @@ class TestAgentSessionRepository:
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"session-strong-parent-lock-{suffix}",
@@ -675,7 +691,7 @@ class TestAgentSessionRepository:
                     title=None,
                 ),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         competing_started = asyncio.Event()
 
@@ -683,7 +699,8 @@ class TestAgentSessionRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as competing_session:
+            ) as _raw_competing_session:
+                competing_session = ReadWriteSession(_raw_competing_session)
                 locked_agent = await AgentRepository().lock_by_id(
                     competing_session,
                     agent_id,
@@ -692,14 +709,15 @@ class TestAgentSessionRepository:
                 competing_started.set()
                 locked = await repository.lock_by_id(competing_session, created.id)
                 assert locked is not None
-                await competing_session.commit()
+                await competing_session.write_session.commit()
                 return locked.id
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as agent_holder:
-            locked_agent_id = await agent_holder.scalar(
+        ) as _raw_agent_holder:
+            agent_holder = ReadWriteSession(_raw_agent_holder)
+            locked_agent_id = await agent_holder.write_session.scalar(
                 sa.select(RDBAgent.id)
                 .where(RDBAgent.id == agent_id)
                 .with_for_update(read=True, key_share=True)
@@ -708,11 +726,11 @@ class TestAgentSessionRepository:
             competing_lock = asyncio.create_task(lock_session())
             await asyncio.wait_for(competing_started.wait(), timeout=5)
             assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
-            await agent_holder.commit()
+            await agent_holder.write_session.commit()
 
     async def test_root_context_rejects_runtime_removing(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Runtime removal fences root context admission."""
         workspace_id = await _create_workspace(rdb_session, "root-context-removing")
@@ -724,7 +742,7 @@ class TestAgentSessionRepository:
         )
 
         with pytest.raises(RuntimeError, match="Runtime is being removed"):
-            async with rdb_session.begin_nested():
+            async with rdb_session.write_session.begin_nested():
                 await AgentSessionRepository().create(
                     rdb_session,
                     AgentSessionCreate(
@@ -738,7 +756,7 @@ class TestAgentSessionRepository:
 
     async def test_pending_context_binds_once_with_root_session_handle(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Pending binding CAS stores one exact root-owned Session folder."""
         workspace_id = await _create_workspace(rdb_session, "pending-bind")
@@ -802,7 +820,7 @@ class TestAgentSessionRepository:
 
     async def test_pending_context_binding_checks_runtime_identity(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A stale logical Runtime cannot bind a pending root context."""
         workspace_id = await _create_workspace(rdb_session, "pending-bind-runtime")
@@ -850,7 +868,7 @@ class TestAgentSessionRepository:
 
     async def test_claim_owner_generation_is_monotonic(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Increment the durable ownership evidence once per claim."""
         workspace_id = await _create_workspace(rdb_session, "owner-generation-ws")
@@ -876,7 +894,7 @@ class TestAgentSessionRepository:
 
     async def test_primary_reservation_generation_survives_cleared_payload(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A stale cancellation cannot match a later reservation lifetime."""
         workspace_id = await _create_workspace(
@@ -888,7 +906,7 @@ class TestAgentSessionRepository:
             workspace_id,
             "primary-reservation-generation",
         )
-        integration_id = await rdb_session.scalar(
+        integration_id = await rdb_session.read_session.scalar(
             sa.select(RDBLLMProviderIntegration.id).where(
                 RDBLLMProviderIntegration.workspace_id == workspace_id
             )
@@ -969,7 +987,7 @@ class TestAgentSessionRepository:
 
     async def test_archive_tree_releases_primary_reservation_health_claim(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Archiving releases the exact Session-owned recovery claim."""
         workspace_id = await _create_workspace(
@@ -981,7 +999,7 @@ class TestAgentSessionRepository:
             workspace_id,
             "archive-primary-reservation",
         )
-        integration_id = await rdb_session.scalar(
+        integration_id = await rdb_session.read_session.scalar(
             sa.select(RDBLLMProviderIntegration.id).where(
                 RDBLLMProviderIntegration.workspace_id == workspace_id
             )
@@ -1011,7 +1029,7 @@ class TestAgentSessionRepository:
             created_at=now,
             expires_at=now + datetime.timedelta(minutes=5),
         )
-        rdb_session.add(
+        rdb_session.write_session.add(
             RDBModelCandidateHealth(
                 workspace_id=workspace_id,
                 llm_provider_integration_id=integration_id,
@@ -1044,7 +1062,7 @@ class TestAgentSessionRepository:
             retention_days=None,
         )
 
-        health = await rdb_session.get(
+        health = await rdb_session.read_session.get(
             RDBModelCandidateHealth,
             (
                 workspace_id,
@@ -1060,7 +1078,7 @@ class TestAgentSessionRepository:
 
     async def test_claim_owner_generation_rejects_active_child_of_archived_root(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A stale child wake-up cannot reacquire ownership after purge fencing."""
         workspace_id = await _create_workspace(rdb_session, "owner-root-fence-ws")
@@ -1132,7 +1150,10 @@ class TestAgentSessionRepository:
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repo = AgentSessionRepository()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"owner-claim-lock-cycle-{suffix}",
@@ -1165,7 +1186,7 @@ class TestAgentSessionRepository:
                 title=None,
                 last_task_message=None,
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         claim_started = asyncio.Event()
 
@@ -1173,19 +1194,21 @@ class TestAgentSessionRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as claim_session:
+            ) as _raw_claim_session:
+                claim_session = ReadWriteSession(_raw_claim_session)
                 claim_started.set()
                 generation = await repo.claim_owner_generation(
                     claim_session,
                     child.agent_session_id,
                 )
-                await claim_session.commit()
+                await claim_session.write_session.commit()
                 return generation
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as session_holder:
+        ) as _raw_session_holder:
+            session_holder = ReadWriteSession(_raw_session_holder)
             locked_session_id = (
                 root_session.id
                 if locked_session_kind == "root"
@@ -1212,13 +1235,13 @@ class TestAgentSessionRepository:
                 timeout=5,
             )
             assert locked_root_agent is not None
-            await session_holder.commit()
+            await session_holder.write_session.commit()
 
             assert await asyncio.wait_for(claim_task, timeout=5) == 1
 
     async def test_fence_purge_owner_generations_covers_entire_root_tree(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Root-authoritative purge fences children with stale active status."""
         workspace_id = await _create_workspace(rdb_session, "purge-fence-ws")
@@ -1275,7 +1298,7 @@ class TestAgentSessionRepository:
 
     async def test_last_inference_profile_round_trip(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Persist explicit Default and explicit effort session profiles."""
         workspace_id = await _create_workspace(rdb_session, "session-profile-ws")
@@ -1323,7 +1346,7 @@ class TestAgentSessionRepository:
         assert explicit_profile.inference_state == explicit_state
 
     async def test_ensure_active_creates_one_active_session(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Ensure only one active AgentSession per AgentRuntime."""
         workspace_id = await _create_workspace(rdb_session, "agent-session-ws")
@@ -1352,7 +1375,7 @@ class TestAgentSessionRepository:
         assert first.handle.count("-") == 2
 
     async def test_create_retries_duplicate_session_handle(
-        self, rdb_session: AsyncSession, monkeypatch: MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: MonkeyPatch
     ) -> None:
         """AgentSession handle generation retries unique constraint conflicts."""
         workspace_id = await _create_workspace(rdb_session, "agent-session-handle-ws")
@@ -1403,7 +1426,7 @@ class TestAgentSessionRepository:
 
     async def test_create_assigns_pending_root_context_working_folder(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
         monkeypatch: MonkeyPatch,
     ) -> None:
         """Managed root creation records Runtime ownership without path authority."""
@@ -1438,7 +1461,7 @@ class TestAgentSessionRepository:
             created.id,
         )
         assert root_agent is not None
-        context = await rdb_session.get(
+        context = await rdb_session.read_session.get(
             RDBSessionAgentContext,
             root_agent.context_id,
         )
@@ -1458,7 +1481,7 @@ class TestAgentSessionRepository:
 
     async def test_working_folder_cleanup_transitions_from_pending_to_terminal(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """The root context records one bounded archive cleanup attempt."""
         workspace_id = await _create_workspace(
@@ -1519,7 +1542,9 @@ class TestAgentSessionRepository:
             created.id,
         )
         assert root_agent is not None
-        context = await rdb_session.get(RDBSessionAgentContext, root_agent.context_id)
+        context = await rdb_session.read_session.get(
+            RDBSessionAgentContext, root_agent.context_id
+        )
         assert context is not None
         assert (
             context.working_folder_cleanup_status
@@ -1532,7 +1557,7 @@ class TestAgentSessionRepository:
 
     async def test_working_folder_cleanup_rejects_nonterminal_status(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Terminalization refuses a nonterminal cleanup status."""
         workspace_id = await _create_workspace(
@@ -1579,7 +1604,7 @@ class TestAgentSessionRepository:
 
     async def test_restore_tree_resets_working_folder_cleanup_for_rearchive(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Restore clears prior cleanup observations before a new archive attempt."""
         workspace_id = await _create_workspace(
@@ -1643,7 +1668,9 @@ class TestAgentSessionRepository:
             created.id,
         )
         assert root_agent is not None
-        context = await rdb_session.get(RDBSessionAgentContext, root_agent.context_id)
+        context = await rdb_session.read_session.get(
+            RDBSessionAgentContext, root_agent.context_id
+        )
         assert context is not None
         assert (
             context.working_folder_cleanup_status
@@ -1660,7 +1687,7 @@ class TestAgentSessionRepository:
         )
 
     async def test_update_title_round_trips_custom_title(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """AgentSession title can be updated and cleared."""
         workspace_id = await _create_workspace(rdb_session, "agent-session-title-ws")
@@ -1691,7 +1718,7 @@ class TestAgentSessionRepository:
         assert cleared.title is None
 
     async def test_ensure_active_recreates_after_archive(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Create new active session when active session is archived."""
         workspace_id = await _create_workspace(rdb_session, "agent-session-archive-ws")
@@ -1725,7 +1752,10 @@ class TestAgentSessionRepository:
         """Concurrent ensure_active reuses existing active row."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session, f"agent-session-race-{suffix}"
             )
@@ -1734,10 +1764,13 @@ class TestAgentSessionRepository:
                 workspace_id,
                 f"agent-session-race-model-{suffix}",
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         repo = AgentSessionRepository()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as first_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_first_session:
+            first_session = ReadWriteSession(_raw_first_session)
             first_result = await repo.ensure_team_primary_for_agent(
                 first_session,
                 workspace_id=workspace_id,
@@ -1747,7 +1780,8 @@ class TestAgentSessionRepository:
 
             async with AsyncSession(
                 rdb_engine, expire_on_commit=False
-            ) as second_session:
+            ) as _raw_second_session:
+                second_session = ReadWriteSession(_raw_second_session)
                 second_started = asyncio.Event()
 
                 async def ensure_second_primary() -> (
@@ -1765,10 +1799,10 @@ class TestAgentSessionRepository:
                         asyncio.shield(second_task),
                         timeout=0.1,
                     )
-                await first_session.commit()
+                await first_session.write_session.commit()
                 second_result = await asyncio.wait_for(second_task, timeout=5)
                 second = second_result.session
-                await second_session.commit()
+                await second_session.write_session.commit()
 
         assert first_result.created is True
         assert second_result.created is False
@@ -1776,7 +1810,7 @@ class TestAgentSessionRepository:
         assert second.status == AgentSessionStatus.ACTIVE
 
     async def test_claim_lifecycle_start_sets_marker_once(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """lifecycle start marker is set only on initial claim."""
         workspace_id = await _create_workspace(
@@ -1816,7 +1850,7 @@ class TestAgentSessionRepository:
         assert refreshed.lifecycle_started_at == first_claimed_at
 
     async def test_session_agent_child_tree_creation_and_lookup(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Child and nested SessionAgents share one root tree context."""
         workspace_id = await _create_workspace(rdb_session, "session-agent-tree-ws")
@@ -1920,7 +1954,7 @@ class TestAgentSessionRepository:
         assert observed.parent_observed_event_id == "0123456789abcdef0123456789abcdef"
 
     async def test_session_agent_child_names_are_strict(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Child SessionAgent names are strict canonical path segments."""
         workspace_id = await _create_workspace(rdb_session, "session-agent-name-ws")
@@ -1956,7 +1990,7 @@ class TestAgentSessionRepository:
                 )
 
     async def test_session_agent_duplicate_sibling_is_rejected(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Sibling SessionAgents cannot reuse a parent-local name."""
         workspace_id = await _create_workspace(rdb_session, "session-agent-dupe-ws")
@@ -2000,7 +2034,7 @@ class TestAgentSessionRepository:
 
     async def test_session_agent_child_creation_rejects_archived_root(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Child creation cannot make an archived root tree inconsistent."""
         workspace_id = await _create_workspace(
@@ -2051,7 +2085,7 @@ class TestAgentSessionRepository:
 
     async def test_session_agent_child_creation_rejects_archived_parent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Nested child creation requires an active direct parent Session."""
         workspace_id = await _create_workspace(
@@ -2105,7 +2139,7 @@ class TestAgentSessionRepository:
 
     async def test_session_agent_child_creation_rejects_stopping_parent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A stop fence prevents later child work from escaping the subtree stop."""
         workspace_id = await _create_workspace(
@@ -2154,7 +2188,7 @@ class TestAgentSessionRepository:
 
     async def test_admit_input_wakeup_rejects_a_stop_request_atomically(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Wake admission returns the Session only while input remains eligible."""
         workspace_id = await _create_workspace(
@@ -2196,7 +2230,7 @@ class TestAgentSessionRepository:
 
     async def test_mark_running_for_input_wakeup_rejects_archived_session(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A wake transition fails instead of silently accepting stale authority."""
         workspace_id = await _create_workspace(
@@ -2233,7 +2267,7 @@ class TestAgentSessionRepository:
 
     async def test_mark_running_for_input_wakeup_does_not_rewrite_running_session(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An already-running Session avoids heartbeat and row-version churn."""
         workspace_id = await _create_workspace(
@@ -2261,7 +2295,7 @@ class TestAgentSessionRepository:
             agent_session.id,
         )
         before = (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(
                     RDBAgentSession.run_heartbeat_at,
                     RDBAgentSession.updated_at,
@@ -2274,7 +2308,7 @@ class TestAgentSessionRepository:
             agent_session.id,
         )
         after = (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(
                     RDBAgentSession.run_heartbeat_at,
                     RDBAgentSession.updated_at,
@@ -2293,7 +2327,10 @@ class TestAgentSessionRepository:
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repo = AgentSessionRepository()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"session-agent-stop-race-{suffix}",
@@ -2318,12 +2355,13 @@ class TestAgentSessionRepository:
                 root_session.id,
             )
             assert root_agent is not None
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as stop_session:
+        ) as _raw_stop_session:
+            stop_session = ReadWriteSession(_raw_stop_session)
             stopped_session_ids = await repo.list_session_agent_subtree_session_ids(
                 stop_session,
                 agent_session_id=root_session.id,
@@ -2341,7 +2379,8 @@ class TestAgentSessionRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as spawn_session:
+            ) as _raw_spawn_session:
+                spawn_session = ReadWriteSession(_raw_spawn_session)
                 spawn_started = asyncio.Event()
 
                 async def spawn_child() -> object:
@@ -2362,13 +2401,13 @@ class TestAgentSessionRepository:
                         asyncio.shield(spawn_task),
                         timeout=0.1,
                     )
-                await stop_session.commit()
+                await stop_session.write_session.commit()
                 with pytest.raises(
                     ValueError,
                     match="Root AgentSession is stopping",
                 ):
                     await asyncio.wait_for(spawn_task, timeout=5)
-                await spawn_session.rollback()
+                await spawn_session.write_session.rollback()
 
     async def test_parent_stop_lock_serializes_concurrent_nested_child_creation(
         self,
@@ -2379,7 +2418,10 @@ class TestAgentSessionRepository:
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repo = AgentSessionRepository()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"session-agent-child-stop-race-{suffix}",
@@ -2413,12 +2455,13 @@ class TestAgentSessionRepository:
                 last_task_message=None,
             )
             await repo.mark_running(setup_session, parent.agent_session_id)
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as stop_session:
+        ) as _raw_stop_session:
+            stop_session = ReadWriteSession(_raw_stop_session)
             stopped = await repo.request_stop(
                 stop_session,
                 session_id=parent.agent_session_id,
@@ -2430,7 +2473,8 @@ class TestAgentSessionRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as spawn_session:
+            ) as _raw_spawn_session:
+                spawn_session = ReadWriteSession(_raw_spawn_session)
                 spawn_started = asyncio.Event()
 
                 async def spawn_nested_child() -> object:
@@ -2451,16 +2495,16 @@ class TestAgentSessionRepository:
                         asyncio.shield(spawn_task),
                         timeout=0.1,
                     )
-                await stop_session.commit()
+                await stop_session.write_session.commit()
                 with pytest.raises(
                     ValueError,
                     match="Parent AgentSession is stopping",
                 ):
                     await asyncio.wait_for(spawn_task, timeout=5)
-                await spawn_session.rollback()
+                await spawn_session.write_session.rollback()
 
     async def test_session_agent_path_lookup_is_root_tree_scoped(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Path lookup does not cross root SessionAgent trees."""
         workspace_id = await _create_workspace(rdb_session, "session-agent-scope-ws")
@@ -2518,7 +2562,7 @@ class TestAgentSessionRepository:
         assert resolved_from_second_tree is None
 
     async def test_child_agent_sessions_are_hidden_from_ordinary_lists(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Child AgentSessions are hidden by session_kind from ordinary lists."""
         workspace_id = await _create_workspace(rdb_session, "session-agent-hidden-ws")
@@ -2562,7 +2606,7 @@ class TestAgentSessionRepository:
         assert child_session.session_kind == AgentSessionKind.SUBAGENT
 
     async def test_delete_session_agent_subtree_deletes_child_sessions(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Deleting a linked AgentSession deletes the SessionAgent subtree sessions."""
         workspace_id = await _create_workspace(rdb_session, "session-agent-delete-ws")
@@ -2623,7 +2667,7 @@ class TestAgentSessionRepository:
 
     async def test_finalizer_requires_external_channel_roots_to_be_absent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Finalization never relies on FK cascades for external lifecycle roots."""
         workspace_id = await _create_workspace(
@@ -2653,8 +2697,8 @@ class TestAgentSessionRepository:
             status=ExternalChannelConnectionStatus.ACTIVE,
             app_mode=ExternalChannelAppMode.SINGLE,
         )
-        rdb_session.add(connection)
-        await rdb_session.flush()
+        rdb_session.write_session.add(connection)
+        await rdb_session.write_session.flush()
         route = RDBExternalChannelAgentRoute(
             connection_id=connection.id,
             agent_id=agent_id,
@@ -2669,16 +2713,16 @@ class TestAgentSessionRepository:
             provider_resource_key="thread-1",
             status=ExternalChannelResourceStatus.ACTIVE,
         )
-        rdb_session.add_all((route, resource))
-        await rdb_session.flush()
+        rdb_session.write_session.add_all((route, resource))
+        await rdb_session.write_session.flush()
         binding = RDBExternalChannelBinding(
             resource_id=resource.id,
             route_id=route.id,
             agent_session_id=agent_session.id,
             response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         )
-        rdb_session.add(binding)
-        await rdb_session.flush()
+        rdb_session.write_session.add(binding)
+        await rdb_session.write_session.flush()
 
         with pytest.raises(
             RuntimeError,
@@ -2695,7 +2739,7 @@ class TestAgentSessionRepository:
 
     async def test_create_team_root_sets_product_mode(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Team roots persist explicit product mode without an associated user."""
         workspace_id = await _create_workspace(rdb_session, "product-mode-team-ws")
@@ -2716,7 +2760,7 @@ class TestAgentSessionRepository:
 
     async def test_create_user_root_and_list_predicates(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """User roots are excluded from Team lists and visible in owner lists."""
         workspace_id = await _create_workspace(rdb_session, "product-mode-user-ws")
@@ -2761,7 +2805,7 @@ class TestAgentSessionRepository:
 
     async def test_active_team_lists_order_primary_then_pinned_then_recency(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Active Team directory pages retain pinned-first deterministic ordering."""
         workspace_id = await _create_workspace(rdb_session, "pinned-order-ws")
@@ -2822,7 +2866,7 @@ class TestAgentSessionRepository:
         ]
         for session, pinned, day in ordered_updates:
             changed_at = datetime.datetime(2026, 1, day, tzinfo=datetime.UTC)
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.update(RDBAgentSession)
                 .where(RDBAgentSession.id == session.id)
                 .values(
@@ -2831,7 +2875,7 @@ class TestAgentSessionRepository:
                     updated_at=changed_at,
                 )
             )
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         expected_ids = [
             primary.id,
@@ -2874,7 +2918,7 @@ class TestAgentSessionRepository:
 
     async def test_create_rejects_invalid_product_mode_combinations(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Invalid root/subagent ownership combinations fail closed."""
         workspace_id = await _create_workspace(rdb_session, "product-mode-invalid-ws")

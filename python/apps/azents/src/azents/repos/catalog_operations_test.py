@@ -18,6 +18,7 @@ from azents.core.model_metadata_collection_data import FetchedModelMetadataSourc
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_metadata_source import RDBModelMetadataSource
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import (
     ActiveReadScope,
@@ -57,11 +58,12 @@ class _Transactions:
     """Explicit transaction outcomes; no sleeping or external I/O."""
 
     def __init__(self) -> None:
-        self.session = AsyncMock(spec=AsyncSession)
+        self.raw_session = AsyncMock(spec=AsyncSession)
+        self.session = ReadWriteSession(self.raw_session)
         self.events: list[str] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         self.events.append("begin")
         try:
             yield self.session
@@ -93,7 +95,7 @@ async def test_picker_bundles_local_capture_before_finishing_the_same_transactio
     )
 
     async def prepare(
-        session: AsyncSession, *, workspace_id: str, integration_ids: tuple[str, ...]
+        session: WriteSession, *, workspace_id: str, integration_ids: tuple[str, ...]
     ) -> ActiveReadScope:
         assert session is transactions.session
         assert workspace_id == "workspace"
@@ -103,7 +105,7 @@ async def test_picker_bundles_local_capture_before_finishing_the_same_transactio
         return scope
 
     async def read(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         integration_id: str,
         workspace_id: str,
@@ -118,7 +120,7 @@ async def test_picker_bundles_local_capture_before_finishing_the_same_transactio
         return page
 
     async def capture(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         scope: ActiveReadScope,
         integration_id: str,
@@ -399,7 +401,7 @@ async def test_atomic_system_lease_check_does_not_reclaim_unexpired_work() -> No
             LLMProvider.GOOGLE_GEMINI,
         )
     ]
-    transactions.session.execute.return_value = records
+    transactions.raw_session.execute.return_value = records
     operations = ModelMetadataSourceOperations(
         session_manager=transactions, repository=sources, catalog_repository=catalogs
     )
@@ -484,10 +486,10 @@ async def test_only_expired_system_lease_is_reclaimed_by_combined_work() -> None
         owner.provider_integration_id = None
         owners[owner.id] = owner
     records = [Mock(id=owner.id, provider=owner.provider) for owner in owners.values()]
-    transactions.session.execute.return_value = records
+    transactions.raw_session.execute.return_value = records
 
     async def lock_owner(
-        session: AsyncSession, *, catalog_id: str, shared: bool = False
+        session: WriteSession, *, catalog_id: str, shared: bool = False
     ) -> RDBLLMCatalog:
         return owners[catalog_id]
 

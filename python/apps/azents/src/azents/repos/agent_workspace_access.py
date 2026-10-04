@@ -3,9 +3,9 @@
 import dataclasses
 
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -25,7 +25,7 @@ class AgentWorkspaceMembershipNotFound:
 class AgentWorkspaceAccessRepository:
     """Own the completed Agent and Workspace membership snapshot read."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     agent_repository: AgentRepository
     workspace_user_repository: WorkspaceUserRepository
 

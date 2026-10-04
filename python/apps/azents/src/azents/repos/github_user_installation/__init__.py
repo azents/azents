@@ -6,10 +6,10 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
+from azents.rdb.session_capabilities import ReadSession
 
 
 class GithubUserInstallationRepository:
@@ -17,7 +17,7 @@ class GithubUserInstallationRepository:
 
     async def sync(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         platform_app_id: str,
         installations: Sequence[GitHubInstallationSnapshot],
@@ -59,10 +59,10 @@ class GithubUserInstallationRepository:
                     "updated_at": sa.func.now(),
                 },
             )
-            await session.execute(stmt)
+            await session.read_session.execute(stmt)
 
         if api_installation_ids:
-            await session.execute(
+            await session.read_session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,
                     RDBGithubUserInstallation.platform_app_id == platform_app_id,
@@ -72,7 +72,7 @@ class GithubUserInstallationRepository:
                 )
             )
         else:
-            await session.execute(
+            await session.read_session.execute(
                 delete(RDBGithubUserInstallation).where(
                     RDBGithubUserInstallation.user_id == user_id,
                     RDBGithubUserInstallation.platform_app_id == platform_app_id,
@@ -81,13 +81,13 @@ class GithubUserInstallationRepository:
 
     async def has_access(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         platform_app_id: str,
         installation_id: int,
     ) -> bool:
         """Check App-scoped installation ownership."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             select(RDBGithubUserInstallation.id).where(
                 RDBGithubUserInstallation.user_id == user_id,
                 RDBGithubUserInstallation.platform_app_id == platform_app_id,
@@ -98,7 +98,7 @@ class GithubUserInstallationRepository:
 
     async def list_accessible_installation_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         user_id: str,
         platform_app_id: str,
@@ -107,7 +107,7 @@ class GithubUserInstallationRepository:
         """Return selected App-scoped installation authority rows."""
         if not installation_ids:
             return frozenset()
-        result = await session.execute(
+        result = await session.read_session.execute(
             select(RDBGithubUserInstallation.installation_id).where(
                 RDBGithubUserInstallation.user_id == user_id,
                 RDBGithubUserInstallation.platform_app_id == platform_app_id,

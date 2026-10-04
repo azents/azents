@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind
 from azents.core.goal import (
@@ -17,6 +16,7 @@ from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
@@ -66,7 +66,7 @@ class GoalStateStore:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> None:
         """Create Goal state store."""
         self.session_manager = session_manager
@@ -91,7 +91,7 @@ class GoalStateStore:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> GoalState:
@@ -121,7 +121,7 @@ class GoalStateStore:
 
     async def create_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -266,7 +266,7 @@ class GoalStateStore:
 
     async def set_status_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -321,11 +321,11 @@ class GoalStateStore:
             )
 
     @staticmethod
-    def _make_handle(
-        session: AsyncSession,
+    def _make_handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[GoalState] | None:
+    ) -> ToolkitStateHandle[GoalState, S] | None:
         """Create the Goal Toolkit State handle for one Session identity."""
         if not agent_id or not session_id:
             return None
@@ -345,7 +345,7 @@ def _unfinished(state: GoalState) -> bool:
 
 def get_goal_state_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> GoalStateStore:
     """Create the repository-owned Goal state store dependency."""

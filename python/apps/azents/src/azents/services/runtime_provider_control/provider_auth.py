@@ -15,7 +15,6 @@ from kubernetes_asyncio.client.models.v1_token_review import V1TokenReview
 from kubernetes_asyncio.client.models.v1_token_review_spec import V1TokenReviewSpec
 from kubernetes_asyncio.client.rest import ApiException
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -25,6 +24,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
@@ -164,7 +164,7 @@ class ProviderAuthVerifier(Protocol):
 class IssuedTokenProviderAuthVerifier:
     """Verify Azents-issued Provider credentials against binding state."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     repository: RuntimeProviderControlRepository
     provider_repository: RuntimeProviderRepository
     binding_repository: RuntimeProviderAuthBindingRepository
@@ -239,7 +239,7 @@ class IssuedTokenProviderAuthVerifier:
 class KubernetesServiceAccountProviderAuthVerifier:
     """Verify Kubernetes workload evidence against a bootstrap-owned binding."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     provider_repository: RuntimeProviderRepository
     binding_repository: RuntimeProviderAuthBindingRepository
     token_reviewer: KubernetesServiceAccountTokenReviewer

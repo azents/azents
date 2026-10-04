@@ -5,11 +5,11 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelConnectionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
@@ -28,7 +28,7 @@ class ExternalChannelConnectionRepository:
         Depends(ExternalChannelRepository.create),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
 

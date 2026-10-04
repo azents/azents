@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
@@ -20,6 +19,7 @@ from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
@@ -38,7 +38,7 @@ class WorkerSessionOperationRepository:
     """Own Worker database lifetimes and the existing tree-ordered generation guard."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
@@ -51,7 +51,7 @@ class WorkerSessionOperationRepository:
 
     async def _lock_owned_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         owner_generation: int,
@@ -71,7 +71,7 @@ class WorkerSessionOperationRepository:
 
     async def assert_owner_generation_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         owner_generation: int,
@@ -103,7 +103,7 @@ class WorkerSessionOperationRepository:
             generation = await self.agent_session_repository.claim_owner_generation(
                 session, session_id
             )
-            await session.commit()
+            await session.write_session.commit()
             return generation
 
     async def parent_result_activity_session_id(self, run_id: str) -> str | None:
@@ -331,7 +331,7 @@ class WorkerSessionOperationRepository:
             pending = await self.agent_run_repository.claim_pending_by_session_id(
                 session, session_id=session_id
             )
-            await session.commit()
+            await session.write_session.commit()
             return pending
 
     async def create_pending_agent_run(
@@ -365,7 +365,7 @@ class WorkerSessionOperationRepository:
             await self.agent_run_repository.associate_input_events(
                 session, run_id=pending.id, event_ids=input_event_ids
             )
-            await session.commit()
+            await session.write_session.commit()
             return pending
 
     async def claim_lifecycle_start(
@@ -412,7 +412,7 @@ class WorkerSessionOperationRepository:
             await self.terminal_finalization_repository.finalize_run_in_session(
                 session, run_id=run_id
             )
-            await session.commit()
+            await session.write_session.commit()
             return cancelled
 
     async def complete_bridge_predecessor_run(
@@ -444,7 +444,7 @@ class WorkerSessionOperationRepository:
             await self.agent_run_repository.mark_parent_result_suppressed(
                 session, run_id=run_id, finalized_at=terminal_at
             )
-            await session.commit()
+            await session.write_session.commit()
             return terminal_status
 
     async def activate_pending_agent_run(
@@ -474,7 +474,7 @@ class WorkerSessionOperationRepository:
             run = await self.agent_run_repository.update_phase(
                 session, run_id, initial_phase
             )
-            await session.commit()
+            await session.write_session.commit()
             return run
 
     async def mark_session_agent_runs_terminal(

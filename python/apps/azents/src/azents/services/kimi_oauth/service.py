@@ -8,7 +8,6 @@ from typing import Annotated, assert_never
 import httpx
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
 from azents.core.crypto import CredentialCipher
@@ -21,6 +20,7 @@ from azents.core.kimi_oauth import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.kimi_oauth_session.data import (
     KimiOAuthSessionCreate,
     KimiOAuthSessionWithSecrets,
@@ -82,7 +82,7 @@ class KimiOAuthService:
     def __init__(
         self,
         session_manager: Annotated[
-            SessionManager[AsyncSession], Depends(get_session_manager)
+            SessionManager[WriteSession], Depends(get_session_manager)
         ],
         session_repo: Annotated[KimiOAuthSessionRepository, Depends(_get_session_repo)],
         integration_repo: Annotated[

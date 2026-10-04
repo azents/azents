@@ -18,7 +18,6 @@ from openai.types.responses.response_usage import (
     InputTokensDetails,
     OutputTokensDetails,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, LLMProvider
 from azents.core.openai_client_config import OpenAIResponsesClientConfig
@@ -32,6 +31,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationModelDispatch,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
     ConsolidationBudgetRepository,
 )
@@ -120,7 +120,7 @@ class _Stream:
 
 
 class _JournalClient:
-    def __init__(self, manager: SessionManager[AsyncSession], attempt_id: str) -> None:
+    def __init__(self, manager: SessionManager[WriteSession], attempt_id: str) -> None:
         self.manager = manager
         self.attempt_id = attempt_id
         self.requests: list[dict[str, object]] = []
@@ -133,7 +133,9 @@ class _JournalClient:
         self, kwargs: dict[str, object], *, socket_cache: bool
     ) -> ResponseStreamEvent:
         async with self.manager() as session:
-            attempt = await session.get(RDBConsolidationAttempt, self.attempt_id)
+            attempt = await session.read_session.get(
+                RDBConsolidationAttempt, self.attempt_id
+            )
             assert attempt is not None
             self.admitted_numbers.append(attempt.model_requests)
         self.requests.append(kwargs)
@@ -185,7 +187,7 @@ def _unused_provider(
 
 @pytest.mark.parametrize("websocket", [False, True])
 async def test_http_retry_and_websocket_sends_are_independently_reserved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     websocket: bool,
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
@@ -274,11 +276,11 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
     assert len(second.reservations) == 2
     assert not isinstance(client.requests[2]["previous_response_id"], str)
     async with rdb_session_manager() as session:
-        failed = await session.get(
+        failed = await session.read_session.get(
             RDBConsolidationModelDispatch,
             (claim.principal.attempt_id, second.reservations[0].dispatch_id),
         )
-        succeeded = await session.get(
+        succeeded = await session.read_session.get(
             RDBConsolidationModelDispatch,
             (claim.principal.attempt_id, second.reservations[1].dispatch_id),
         )

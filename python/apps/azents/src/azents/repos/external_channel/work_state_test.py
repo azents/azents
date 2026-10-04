@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import ExternalChannelWorkStatus
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.external_channel.work_state import (
     ChannelWorkState,
     ChannelWorkStateMutation,
@@ -342,7 +343,8 @@ async def test_work_state_rejects_non_owner_identity(
     seeded = await _seed_binding(rdb_engine, suffix="ownership")
     store = ExternalChannelWorkStateStore()
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             for agent_id, session_id in (
                 (seeded.other_agent_id, seeded.other_session_id),
                 (seeded.owner_agent_id, seeded.other_session_id),
@@ -359,7 +361,7 @@ async def test_work_state_rejects_non_owner_identity(
                             result=None,
                         ),
                     )
-            await session.rollback()
+            await session.write_session.rollback()
 
         async with rdb_engine.connect() as connection:
             state_count = await connection.scalar(
@@ -386,7 +388,8 @@ async def test_update_persists_absent_default_without_rewriting_existing_noop(
     seeded = await _seed_binding(rdb_engine, suffix="default-noop")
     store = ExternalChannelWorkStateStore()
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             created = await store.update(
                 session,
                 agent_id=seeded.owner_agent_id,
@@ -399,7 +402,7 @@ async def test_update_persists_absent_default_without_rewriting_existing_noop(
                     changed=False,
                 ),
             )
-            await session.commit()
+            await session.write_session.commit()
 
         assert created.result.work_cycle_id == f"cycle-{seeded.binding_id}"
         async with rdb_engine.connect() as connection:
@@ -415,7 +418,8 @@ async def test_update_persists_absent_default_without_rewriting_existing_noop(
             )
         assert initial_version == 1
 
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             repeated = await store.update(
                 session,
                 agent_id=seeded.owner_agent_id,
@@ -428,7 +432,7 @@ async def test_update_persists_absent_default_without_rewriting_existing_noop(
                     changed=False,
                 ),
             )
-            await session.commit()
+            await session.write_session.commit()
 
         assert repeated.result.work_cycle_id == f"cycle-{seeded.binding_id}"
         async with rdb_engine.connect() as connection:
@@ -455,7 +459,10 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
     del latest_db_schema
     seeded = await _seed_binding(rdb_engine, suffix="concurrency")
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             await ExternalChannelWorkStateStore().update(
                 setup_session,
                 agent_id=seeded.owner_agent_id,
@@ -467,12 +474,14 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
                     result=None,
                 ),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async with (
-            AsyncSession(rdb_engine, expire_on_commit=False) as first_session,
-            AsyncSession(rdb_engine, expire_on_commit=False) as second_session,
+            AsyncSession(rdb_engine, expire_on_commit=False) as _raw_first_session,
+            AsyncSession(rdb_engine, expire_on_commit=False) as _raw_second_session,
         ):
+            first_session = ReadWriteSession(_raw_first_session)
+            second_session = ReadWriteSession(_raw_second_session)
             first_store = ExternalChannelWorkStateStore()
             second_store = ExternalChannelWorkStateStore()
             assert (
@@ -500,7 +509,7 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
                 binding_id=seeded.binding_id,
                 mutator=second_writer,
             )
-            await second_session.commit()
+            await second_session.write_session.commit()
 
             def first_writer(
                 current: ChannelWorkState,
@@ -517,9 +526,12 @@ async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
                 binding_id=seeded.binding_id,
                 mutator=first_writer,
             )
-            await first_session.commit()
+            await first_session.write_session.commit()
 
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as verify_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_verify_session:
+            verify_session = ReadWriteSession(_raw_verify_session)
             final = await ExternalChannelWorkStateStore().load(
                 verify_session,
                 agent_id=seeded.owner_agent_id,

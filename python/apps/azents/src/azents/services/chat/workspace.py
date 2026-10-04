@@ -13,7 +13,6 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     GrpcRuntimeTransferCoordinatorClient,
 )
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chat_data import (
     AgentNotFound,
@@ -30,6 +29,7 @@ from azents.core.enums import (
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
@@ -643,7 +643,7 @@ class AgentWorkspaceFileService:
         runtime_target_resolver: RuntimeOperationTargetResolver = (
             _RUNTIME_TARGET_RESOLVER_DEP
         ),
-        session_manager: SessionManager[AsyncSession] = _SESSION_MANAGER_DEP,
+        session_manager: SessionManager[WriteSession] = _SESSION_MANAGER_DEP,
         runner_file_operation_timeout: timedelta = (_RUNNER_FILE_OPERATION_TIMEOUT_DEP),
         runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
             _RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP

@@ -9,7 +9,6 @@ from typing import Literal
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
 from azents.core.agent_session_data import AgentSession
@@ -21,6 +20,7 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -40,17 +40,17 @@ from azents.worker.session.recovery import StuckSessionRecovery
 class ObservedReadManager:
     """Track genuine Session scopes and transaction resolution on every exit."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.resolved: list[bool] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "A completed operation retained or nested its Session"
         self.active = True
-        current: AsyncSession | None = None
+        current: WriteSession | None = None
         try:
             async with self.manager() as session:
                 current = session
@@ -59,12 +59,14 @@ class ObservedReadManager:
         finally:
             self.active = False
             if current is not None:
-                self.resolved.append(not current.in_transaction())
+                self.resolved.append(not current.write_session.in_transaction())
 
     def assert_closed(self) -> None:
         assert not self.active
         assert all(self.resolved)
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 class _ScanningSessions(AgentSessionRepository):
@@ -75,17 +77,17 @@ class _ScanningSessions(AgentSessionRepository):
     ) -> None:
         self.observed = observed
         self.error = error
-        self.calls: list[tuple[AsyncSession, datetime.timedelta, int]] = []
+        self.calls: list[tuple[WriteSession, datetime.timedelta, int]] = []
 
     async def find_stuck_running(
-        self, session: AsyncSession, *, stale_threshold: datetime.timedelta, limit: int
+        self, session: ReadSession, *, stale_threshold: datetime.timedelta, limit: int
     ) -> list[AgentSession]:
         assert self.observed.active and session is self.observed.sessions[-1]
         self.calls.append((session, stale_threshold, limit))
         records = await super().find_stuck_running(
             session, stale_threshold=stale_threshold, limit=limit
         )
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         if self.error is not None:
             raise self.error
         return records
@@ -100,7 +102,7 @@ class _RecoverySubject:
 
 
 async def _subject(
-    manager: SessionManager[AsyncSession], handle: str
+    manager: SessionManager[WriteSession], handle: str
 ) -> _RecoverySubject:
     sessions = AgentSessionRepository()
     async with manager() as session:
@@ -116,14 +118,14 @@ async def _subject(
             last_task_message=None,
         )
         await sessions.mark_running(session, child.agent_session_id)
-        heartbeat = await session.scalar(sa.select(sa.func.now()))
+        heartbeat = await session.write_session.scalar(sa.select(sa.func.now()))
         assert isinstance(heartbeat, datetime.datetime)
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == root.id)
             .values(run_heartbeat_at=heartbeat - datetime.timedelta(minutes=10))
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == child.agent_session_id)
             .values(run_heartbeat_at=heartbeat - datetime.timedelta(minutes=9))
@@ -132,7 +134,7 @@ async def _subject(
 
 
 async def test_recovery_scan_preserves_strict_threshold_limit_order_and_routing(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The database transaction clock gives deterministic exact cutoff boundaries."""
     subject = await _subject(rdb_session_manager, "recovery-threshold-order")
@@ -182,10 +184,10 @@ async def test_recovery_scan_preserves_strict_threshold_limit_order_and_routing(
             row.status = status
             row.run_heartbeat_at = subject.heartbeat - offset
             if not active_agent:
-                agent = await session.get(RDBAgent, agent_id)
+                agent = await session.read_session.get(RDBAgent, agent_id)
                 assert agent is not None
                 agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
-        await session.flush()
+        await session.write_session.flush()
     observed = ObservedReadManager(rdb_session_manager)
     sessions = _ScanningSessions(observed, None)
     repository = WorkerSessionRecoveryOperationRepository(observed, sessions)
@@ -234,7 +236,7 @@ class _RecoveryBroker(SessionBroker):
         assert len(self.scan.sessions) == 1
         assert self.trace[-1] == f"mark:{message.session_id}"
         async with self.marks.manager() as session:
-            row = await session.get(RDBAgentSession, message.session_id)
+            row = await session.write_session.get(RDBAgentSession, message.session_id)
             assert row is not None
             assert row.run_state is AgentSessionRunState.RUNNING
             assert row.run_heartbeat_at is not None
@@ -283,7 +285,7 @@ class _RecoveryFixture:
 
 
 async def _recovery_fixture(
-    manager: SessionManager[AsyncSession], *, failure: FailureStage, cancel: bool
+    manager: SessionManager[WriteSession], *, failure: FailureStage, cancel: bool
 ) -> _RecoveryFixture:
     subject = await _subject(manager, f"recovery-effects-{failure}-{cancel}")
     scan = ObservedReadManager(manager)
@@ -332,7 +334,7 @@ async def _recovery_fixture(
 
 @pytest.mark.parametrize("failure", ["none", "mark", "send"])
 async def test_recovery_closes_scan_before_root_child_effects_and_record_failures(
-    rdb_session_manager: SessionManager[AsyncSession], failure: FailureStage
+    rdb_session_manager: SessionManager[WriteSession], failure: FailureStage
 ) -> None:
     fixture = await _recovery_fixture(
         rdb_session_manager, failure=failure, cancel=False
@@ -368,7 +370,7 @@ async def test_recovery_closes_scan_before_root_child_effects_and_record_failure
 
 @pytest.mark.parametrize("failure", ["mark", "send"])
 async def test_recovery_cancellation_stops_before_next_record_and_retains_closed_scopes(
-    rdb_session_manager: SessionManager[AsyncSession], failure: FailureStage
+    rdb_session_manager: SessionManager[WriteSession], failure: FailureStage
 ) -> None:
     fixture = await _recovery_fixture(rdb_session_manager, failure=failure, cancel=True)
     with pytest.raises(asyncio.CancelledError):
@@ -381,7 +383,7 @@ async def test_recovery_cancellation_stops_before_next_record_and_retains_closed
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_recovery_scan_read_error_or_cancellation_closes_real_transaction(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     await _subject(rdb_session_manager, "recovery-scan-failure")
     observed = ObservedReadManager(rdb_session_manager)
@@ -404,7 +406,7 @@ class _PausedScan(_ScanningSessions):
         self.release = asyncio.Event()
 
     async def find_stuck_running(
-        self, session: AsyncSession, *, stale_threshold: datetime.timedelta, limit: int
+        self, session: ReadSession, *, stale_threshold: datetime.timedelta, limit: int
     ) -> list[AgentSession]:
         result = await super().find_stuck_running(
             session, stale_threshold=stale_threshold, limit=limit
@@ -415,7 +417,7 @@ class _PausedScan(_ScanningSessions):
 
 
 async def test_actual_task_cancellation_after_recovery_scan_resolves_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     await _subject(rdb_session_manager, "recovery-scan-task-cancel")
     observed = ObservedReadManager(rdb_session_manager)

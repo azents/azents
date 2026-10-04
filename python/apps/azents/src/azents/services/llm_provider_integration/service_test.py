@@ -4,7 +4,6 @@ import datetime
 
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -15,6 +14,7 @@ from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -86,7 +86,7 @@ def test_validate_provider_update_rejects_generic_secrets_for_kimi() -> None:
 
 
 async def test_create_chatgpt_oauth_creates_integration_catalog(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Create the account-scoped catalog in the integration transaction."""
     async with rdb_session_manager() as session:

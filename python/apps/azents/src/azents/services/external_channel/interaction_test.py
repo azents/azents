@@ -9,7 +9,6 @@ from typing import Literal
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -35,6 +34,7 @@ from azents.core.external_channel_selector_state import (
     projection_with_selector_state,
 )
 from azents.core.external_model_settings import ExternalModelActorContext
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -159,7 +159,7 @@ class _Repository:
 
     async def lock_interaction(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         interaction_id: str,
     ) -> ExternalChannelInteraction | None:
@@ -168,7 +168,7 @@ class _Repository:
 
     async def get_connection_configuration(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
     ) -> ExternalChannelConnectionConfiguration | None:
@@ -177,7 +177,7 @@ class _Repository:
 
     async def get_resource_by_provider_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
         resource_type: ExternalChannelResourceType,
@@ -196,7 +196,7 @@ class _Repository:
 
     async def get_resource(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         resource_id: str,
     ) -> ExternalChannelResource | None:
@@ -313,7 +313,7 @@ def _processor(
     participation: object | None = None,
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield _Session()  # ty: ignore[invalid-yield] # Focused session double implements only execute().
 
     async def decorate(

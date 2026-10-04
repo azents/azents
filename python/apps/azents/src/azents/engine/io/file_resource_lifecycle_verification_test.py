@@ -46,6 +46,7 @@ from azents.engine.tools.import_file import (
     make_import_file_tool,
 )
 from azents.engine.tools.testing import FakeSharedStorage
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
@@ -65,7 +66,7 @@ class _FakeArtifactRepository(ArtifactRepository):
     def __init__(self) -> None:
         self.artifacts: dict[str, Artifact] = {}
 
-    async def create(self, session: AsyncSession, create: ArtifactCreate) -> Artifact:
+    async def create(self, session: ReadSession, create: ArtifactCreate) -> Artifact:
         """Store Artifact create input."""
         del session
         artifact_id = create.id
@@ -100,7 +101,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         artifact_id: str,
     ) -> Artifact | None:
         """Fetch Artifact by ID."""
@@ -109,7 +110,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def get_by_storage_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         storage_key: str,
     ) -> Artifact | None:
         """Fetch Artifact by storage key."""
@@ -121,7 +122,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -143,7 +144,7 @@ class _FakeArtifactRepository(ArtifactRepository):
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         artifact_id: str,
         blob_deleted_at: datetime.datetime,
@@ -160,7 +161,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch AgentSession."""
@@ -196,7 +197,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch and lock the deterministic fixture Session."""
@@ -204,7 +205,7 @@ class _FakeAgentSessionRepository(AgentSessionRepository):
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         """Return the deterministic root Session identity."""
@@ -219,7 +220,7 @@ class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -293,7 +294,7 @@ class _AuthorityArtifactService(ArtifactService):
 
     async def _has_valid_resource_authority(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: SessionResourceAuthority,
         *,
         lock: bool = False,
@@ -304,7 +305,7 @@ class _AuthorityArtifactService(ArtifactService):
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Session manager for tests."""
     yield AsyncMock(spec=AsyncSession)
 

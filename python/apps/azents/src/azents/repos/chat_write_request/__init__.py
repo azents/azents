@@ -6,9 +6,9 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.chat_write_request import RDBChatWriteRequest
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import ChatWriteRequest, ChatWriteRequestCreate
 
@@ -18,7 +18,7 @@ class ChatWriteRequestRepository:
 
     async def create_idempotent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ChatWriteRequestCreate,
     ) -> tuple[ChatWriteRequest, bool]:
         """Atomically create ChatWriteRequest or fetch existing row.
@@ -51,7 +51,7 @@ class ChatWriteRequestRepository:
                 index_where=RDBChatWriteRequest.creation_agent_id.is_not(None),
             )
         stmt = insert.returning(RDBChatWriteRequest)
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         rdb = result.scalar_one_or_none()
         if rdb is not None:
             return self._build(rdb), True
@@ -75,14 +75,14 @@ class ChatWriteRequestRepository:
 
     async def get_by_session_creation_client_request_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         requester_user_id: str,
         client_request_id: str,
     ) -> ChatWriteRequest | None:
         """Fetch an Agent-scoped Session creation request."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBChatWriteRequest).where(
                 RDBChatWriteRequest.creation_agent_id == agent_id,
                 RDBChatWriteRequest.requester_user_id == requester_user_id,
@@ -96,14 +96,14 @@ class ChatWriteRequestRepository:
 
     async def get_by_client_request_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         requester_user_id: str,
         client_request_id: str,
     ) -> ChatWriteRequest | None:
         """Fetch REST write record by client request ID."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBChatWriteRequest).where(
                 RDBChatWriteRequest.session_id == session_id,
                 RDBChatWriteRequest.requester_user_id == requester_user_id,
@@ -117,20 +117,20 @@ class ChatWriteRequestRepository:
 
     async def delete_by_requester_user_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         requester_user_id: str,
     ) -> int:
         """Delete retained idempotency records owned by one User."""
         result = cast(
             CursorResult[Any],
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBChatWriteRequest).where(
                     RDBChatWriteRequest.requester_user_id == requester_user_id
                 )
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         return result.rowcount or 0
 
     def _build(self, rdb: RDBChatWriteRequest) -> ChatWriteRequest:

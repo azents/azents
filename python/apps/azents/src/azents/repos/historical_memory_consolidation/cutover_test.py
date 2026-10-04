@@ -4,7 +4,6 @@ import datetime
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
@@ -27,6 +26,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.authority import (
@@ -57,7 +57,7 @@ from azents.testing.consolidated_context import publish_context_overview
 from azents.testing.consolidation import seed_consolidation_corpus
 
 
-def _service(manager: SessionManager[AsyncSession]) -> MemoryContextSnapshotService:
+def _service(manager: SessionManager[WriteSession]) -> MemoryContextSnapshotService:
     return MemoryContextSnapshotService(
         MemoryContextSnapshotRepository(
             HistoricalMemoryRepository(manager),
@@ -70,20 +70,20 @@ def _service(manager: SessionManager[AsyncSession]) -> MemoryContextSnapshotServ
 
 
 async def test_forward_backfills_prepared_sources_without_stage1_wait_or_body_changes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
     async with manager() as session:
-        await session.execute(sa.delete(RDBConsolidationWork))
-        await session.execute(
+        await session.write_session.execute(sa.delete(RDBConsolidationWork))
+        await session.write_session.execute(
             sa.update(RDBHistoricalMemorySource).values(
                 summary_generation=0, evidence_hash=None
             )
         )
         sources_before = list(
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(
                         RDBHistoricalMemorySource.source_session_id,
                         RDBHistoricalMemorySource.summary,
@@ -92,7 +92,7 @@ async def test_forward_backfills_prepared_sources_without_stage1_wait_or_body_ch
                 )
             ).all()
         )
-        session.add(
+        session.write_session.add(
             RDBToolkitState(
                 agent_id=corpus.team.agent_id,
                 session_id=corpus.team_source,
@@ -114,7 +114,7 @@ async def test_forward_backfills_prepared_sources_without_stage1_wait_or_body_ch
         assert (
             list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(
                             RDBHistoricalMemorySource.source_session_id,
                             RDBHistoricalMemorySource.summary,
@@ -126,12 +126,12 @@ async def test_forward_backfills_prepared_sources_without_stage1_wait_or_body_ch
             == sources_before
         )
         assert (
-            await session.scalar(
+            await session.write_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBToolkitState)
             )
             == 0
         )
-        count = await session.scalar(
+        count = await session.write_session.scalar(
             sa.select(sa.func.count()).select_from(RDBConsolidationWork)
         )
     again = await MemoryHandoverService(manager).handover(
@@ -140,19 +140,21 @@ async def test_forward_backfills_prepared_sources_without_stage1_wait_or_body_ch
     assert again.snapshots_reset == 0
     async with manager() as session:
         assert (
-            await session.scalar(
+            await session.write_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBConsolidationWork)
             )
             == count
         )
         assert all(
             source.summary_generation == 1
-            for source in await session.scalars(sa.select(RDBHistoricalMemorySource))
+            for source in await session.write_session.scalars(
+                sa.select(RDBHistoricalMemorySource)
+            )
         )
 
 
 async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_saved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -212,18 +214,18 @@ async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_s
                 phase=AgentRunPhase.WAITING_FOR_MODEL,
                 status=AgentRunStatus.INTERRUPTED,
             )
-            session.add(run)
+            session.write_session.add(run)
             event = RDBEvent(
                 session_id=source,
                 kind=EventKind.COMPACTION_SUMMARY,
                 payload={"compaction_id": uuid7().hex, "content": "Retained history"},
             )
-            session.add(event)
-            await session.flush()
+            session.write_session.add(event)
+            await session.write_session.flush()
             run_ids.append(run.id)
         events_before = list(
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(
                         RDBEvent.id, RDBEvent.session_id, RDBEvent.payload
                     ).order_by(RDBEvent.id)
@@ -262,16 +264,23 @@ async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_s
         )
     async with manager() as session:
         for identity in old_revisions:
-            assert await session.get(RDBConsolidationRevision, identity) is not None
-        changed = await session.get(RDBHistoricalMemorySource, corpus.team_source)
-        personal = await session.get(RDBHistoricalMemorySource, corpus.personal_source)
+            assert (
+                await session.write_session.get(RDBConsolidationRevision, identity)
+                is not None
+            )
+        changed = await session.write_session.get(
+            RDBHistoricalMemorySource, corpus.team_source
+        )
+        personal = await session.write_session.get(
+            RDBHistoricalMemorySource, corpus.personal_source
+        )
         assert changed is not None and personal is not None
         # Emulate the previous application: no new generation/outbox maintenance.
         changed.summary = "Canonical body written by old application"
         original_generation = changed.summary_generation
         unchanged_personal_generation = personal.summary_generation
         original_personal_hash = personal.evidence_hash
-        session.add(
+        session.write_session.add(
             RDBToolkitState(
                 agent_id=corpus.team.agent_id,
                 session_id=corpus.personal_source,
@@ -296,24 +305,33 @@ async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_s
             RDBConsolidationMutationReceipt,
         ):
             assert (
-                await session.scalar(sa.select(sa.func.count()).select_from(table)) == 0
+                await session.write_session.scalar(
+                    sa.select(sa.func.count()).select_from(table)
+                )
+                == 0
             )
         assert all(
             unit.published_revision_id is None
-            for unit in await session.scalars(sa.select(RDBConsolidationUnit))
+            for unit in await session.write_session.scalars(
+                sa.select(RDBConsolidationUnit)
+            )
         )
-        changed = await session.get(RDBHistoricalMemorySource, corpus.team_source)
-        personal = await session.get(RDBHistoricalMemorySource, corpus.personal_source)
+        changed = await session.write_session.get(
+            RDBHistoricalMemorySource, corpus.team_source
+        )
+        personal = await session.write_session.get(
+            RDBHistoricalMemorySource, corpus.personal_source
+        )
         assert changed is not None and personal is not None
         assert changed.summary == "Canonical body written by old application"
         assert changed.summary_generation == original_generation + 1
         assert personal.summary_generation == unchanged_personal_generation
         assert personal.evidence_hash == original_personal_hash
-        assert await session.get(RDBAgentMemory, saved.id) is not None
+        assert await session.write_session.get(RDBAgentMemory, saved.id) is not None
         assert (
             list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(
                             RDBEvent.id, RDBEvent.session_id, RDBEvent.payload
                         ).order_by(RDBEvent.id)
@@ -323,7 +341,7 @@ async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_s
             == events_before
         )
         for identity in run_ids:
-            run = await session.get(RDBAgentRun, identity)
+            run = await session.write_session.get(RDBAgentRun, identity)
             assert run is not None and run.status is AgentRunStatus.INTERRUPTED
             assert run.phase is AgentRunPhase.WAITING_FOR_MODEL
     due = await ConsolidationDiscoveryRepository(manager).list_due(
@@ -347,7 +365,7 @@ async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_s
 
 @pytest.mark.parametrize("action", list(MemoryHandoverAction))
 async def test_handover_refuses_unconfirmed_execution_quiescence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     action: MemoryHandoverAction,
 ) -> None:
     with pytest.raises(ValueError, match="quiesced"):
@@ -357,7 +375,7 @@ async def test_handover_refuses_unconfirmed_execution_quiescence(
 
 
 async def test_unit_handover_cannot_run_before_snapshot_reset(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)

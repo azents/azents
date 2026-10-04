@@ -1,10 +1,8 @@
 """Database dependency injection."""
 
-from contextlib import asynccontextmanager
 from typing import (
     Annotated,
     Any,
-    AsyncGenerator,
     AsyncIterator,
     Callable,
 )
@@ -13,13 +11,19 @@ import boto3
 from fastapi import Depends
 from mypy_boto3_rds import RDSClient
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from azents.core.config import Config, PostgreSQLConfig
 from azents.core.deps import get_appctx
 from azents.utils.appctx import AppContext
 
 from .session import SessionManager
+from .session_capabilities import (
+    ReadOnlySession,
+    ReadWriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 
 #: Function type for creating IAM auth tokens.
 IAMTokenGenerator = Callable[[], str]
@@ -110,18 +114,13 @@ async def get_engine(
 
 async def get_session_manager(
     engine: Annotated[AsyncEngine, Depends(get_engine)],
-) -> SessionManager[AsyncSession]:
-    """SessionManager dependency."""
+) -> SessionManager[ReadWriteSession]:
+    """Provide write scopes for existing mixed database compositions."""
+    return create_read_write_session_manager(engine)
 
-    @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
-            else:
-                await session.commit()
 
-    return session_manager
+async def get_read_only_session_manager(
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+) -> SessionManager[ReadOnlySession]:
+    """Provide DB-enforced read-only scopes for independent reads."""
+    return create_read_only_session_manager(engine)

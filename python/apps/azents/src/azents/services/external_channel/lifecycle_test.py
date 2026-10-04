@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from typing import cast
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -24,6 +23,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelArchiveTermination,
     ExternalChannelPurgeCleanup,
@@ -103,7 +103,7 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
 
     async def terminate_session_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
         now: datetime.datetime,
@@ -119,7 +119,7 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
 
     async def validate_restore_session_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelRestoreValidation:
@@ -132,7 +132,7 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
 
     async def purge_session_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeCleanup:
@@ -148,7 +148,7 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
 
     async def verify_session_tree_purged(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeVerification:
@@ -185,7 +185,7 @@ def _service(
 
 @pytest.mark.asyncio
 async def test_external_channel_dispatches_only_its_participant(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = _RepositoryDouble()
     service = _service(repository)
@@ -220,7 +220,7 @@ async def test_external_channel_dispatches_only_its_participant(
 
 @pytest.mark.asyncio
 async def test_purge_has_no_provider_delivery_preparation(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     repository = _RepositoryDouble()
     service = _service(repository)

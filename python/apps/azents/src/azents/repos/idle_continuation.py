@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
@@ -19,6 +18,7 @@ from azents.core.mailbox_data import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
@@ -75,7 +75,7 @@ class IdleContinuationRepository:
     """Own idle eligibility and atomic continuation finalization."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     agent_session_repository: Annotated[
@@ -170,7 +170,7 @@ class IdleContinuationRepository:
 
     async def _eligibility(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         run_id: str,
         *,
@@ -227,7 +227,7 @@ class IdleContinuationRepository:
 
     async def _enqueue(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         input: IdleContinuationInput,
     ) -> IdleContinuationAdmission:
         """Idempotently create one wake-producing continuation."""

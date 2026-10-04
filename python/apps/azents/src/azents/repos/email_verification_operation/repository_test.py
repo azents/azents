@@ -6,9 +6,9 @@ import datetime
 import pytest
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification.data import (
     AlreadyVerified,
@@ -41,7 +41,7 @@ class _FailingDeliveryRepository(EmailVerificationRepository):
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: EmailVerificationCreate,
     ) -> EmailVerification:
         """Fail the insert portion of the delivery operation."""
@@ -57,7 +57,7 @@ class _BarrierEmailVerificationRepository(EmailVerificationRepository):
 
     async def get_by_email_and_csrf(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         email: str,
         csrf_token: str,
     ) -> EmailVerification | None:
@@ -72,7 +72,7 @@ class _BarrierEmailVerificationRepository(EmailVerificationRepository):
 
 
 def _operation_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     email_verification_repository: EmailVerificationRepository | None = None,
 ) -> EmailVerificationOperationRepository:
@@ -85,7 +85,7 @@ def _operation_repository(
 
 
 async def test_create_delivery_record_rolls_back_stale_deletion_on_insert_failure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A failed insert preserves the stale row deleted by the same operation."""
     email = "rollback-delivery@example.com"
@@ -122,7 +122,7 @@ async def test_create_delivery_record_rolls_back_stale_deletion_on_insert_failur
 
 
 async def test_verify_and_mark_rejects_expiry_and_csrf(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Expiry and CSRF validation fail without marking the record verified."""
     email = "verification-rejection@example.com"
@@ -161,7 +161,7 @@ async def test_verify_and_mark_rejects_expiry_and_csrf(
 
 
 async def test_verify_and_mark_allows_one_concurrent_winner(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Two simultaneous verification attempts cannot both mark one record."""
     email = "verification-race@example.com"

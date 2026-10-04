@@ -7,12 +7,12 @@ from urllib.parse import urlsplit
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -47,7 +47,7 @@ from azents.services.terminal_policy.service import TerminalPolicyResolver
 
 def get_runtime_terminal_authority_resolver(
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ],
     user_repository: Annotated[UserRepository, Depends(UserRepository)],

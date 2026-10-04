@@ -9,7 +9,6 @@ from typing import Any, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import SessionAgent
 from azents.core.enums import (
@@ -22,6 +21,7 @@ from azents.core.enums import (
 )
 from azents.core.mailbox_data import MailboxItem
 from azents.engine.events.types import AgentRunState
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.subagent_terminal_result import SubagentTerminalResultRepository
 from azents.services.subagent_terminal_result import SubagentTerminalResultService
 from azents.testing.types import require_instance
@@ -155,7 +155,7 @@ class _AgentRunRepository:
 
     async def list_parent_result_delivery_candidate_ids_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[str]:
@@ -173,7 +173,7 @@ class _AgentRunRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         del session
@@ -182,7 +182,7 @@ class _AgentRunRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         del session
@@ -219,7 +219,7 @@ class _AgentSessionRepository:
 
     async def get_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         del session
@@ -227,7 +227,7 @@ class _AgentSessionRepository:
 
     async def get_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         del session
@@ -235,7 +235,7 @@ class _AgentSessionRepository:
 
     async def lock_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         del session
@@ -243,7 +243,7 @@ class _AgentSessionRepository:
 
     async def list_descendant_session_agents(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
         include_self: bool,

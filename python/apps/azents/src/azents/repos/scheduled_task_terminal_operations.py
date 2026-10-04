@@ -4,13 +4,13 @@ import dataclasses
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRunStatus, EventKind, ScheduledTaskScheduleType
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import Event, ScheduledTaskResultPayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
@@ -52,7 +52,7 @@ class ScheduledTaskTerminalOperations:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         run_repository: AgentRunRepository,
         event_repository: EventTranscriptRepository,
         task_repository: ScheduledTaskRepository,
@@ -237,7 +237,7 @@ def _result_external_id(cycle_id: str) -> str:
 
 def get_scheduled_task_terminal_operations(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
     event_repository: Annotated[

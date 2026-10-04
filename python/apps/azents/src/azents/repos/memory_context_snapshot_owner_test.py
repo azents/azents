@@ -2,12 +2,12 @@
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory_context_snapshot import MemoryContextSnapshotRepository
@@ -21,7 +21,7 @@ from azents.testing.consolidation import seed_consolidation_corpus
 
 
 async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -35,7 +35,7 @@ async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_muta
         )
     )
     async with manager() as session:
-        root = await session.get(RDBAgentSession, corpus.team_source)
+        root = await session.write_session.get(RDBAgentSession, corpus.team_source)
         assert root is not None
         generation = root.owner_generation
     bound = service.with_owner(SessionExecutionOwner(corpus.team_source, generation))
@@ -44,7 +44,7 @@ async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_muta
         session_id=corpus.team_source, after_compaction=False
     )
     async with manager() as session:
-        row = await session.scalar(
+        row = await session.write_session.scalar(
             sa.select(RDBToolkitState).where(
                 RDBToolkitState.session_id == corpus.team_source,
                 RDBToolkitState.toolkit_namespace == "memory",
@@ -53,7 +53,7 @@ async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_muta
         )
         assert row is not None
         snapshot_id, version, payload = row.id, row.version, row.state_json
-        root = await session.get(RDBAgentSession, corpus.team_source)
+        root = await session.write_session.get(RDBAgentSession, corpus.team_source)
         assert root is not None
         root.owner_generation = generation + 1
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
@@ -63,7 +63,7 @@ async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_muta
             session_id=corpus.team_source, after_compaction=False
         )
     async with manager() as session:
-        row = await session.get(RDBToolkitState, snapshot_id)
+        row = await session.write_session.get(RDBToolkitState, snapshot_id)
         assert row is not None
         assert row.version == version and row.state_json == payload
     current = service.with_owner(

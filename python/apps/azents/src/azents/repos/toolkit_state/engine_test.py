@@ -3,8 +3,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.engine_tool_state import (
     AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
     AGENTS_TOOLKIT_NAMESPACE,
@@ -23,6 +21,7 @@ from azents.core.engine_tool_state import (
 )
 from azents.engine.tooling.toolkit_state_test import _create_agent_and_session
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.engine import (
     GitHubSelectedInstallationStore,
@@ -35,7 +34,7 @@ from azents.repos.toolkit_state.engine import (
 
 
 async def test_engine_tool_state_operations_close_transactions_before_returning(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Completed state results return only after their transaction closes."""
     async with rdb_session_manager() as session:
@@ -44,7 +43,7 @@ async def test_engine_tool_state_operations_close_transactions_before_returning(
     transaction_active = False
 
     @asynccontextmanager
-    async def tracked_session_manager() -> AsyncIterator[AsyncSession]:
+    async def tracked_session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         assert not transaction_active
         transaction_active = True
@@ -221,7 +220,7 @@ async def test_engine_tool_state_operations_close_transactions_before_returning(
 
 
 async def test_working_set_composition_uses_the_callers_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Compaction composition preserves one caller-owned atomic transaction."""
     async with rdb_session_manager() as session:
@@ -230,7 +229,7 @@ async def test_working_set_composition_uses_the_callers_transaction(
     manager_call_count = 0
 
     @asynccontextmanager
-    async def counted_session_manager() -> AsyncIterator[AsyncSession]:
+    async def counted_session_manager() -> AsyncIterator[WriteSession]:
         nonlocal manager_call_count
         manager_call_count += 1
         async with rdb_session_manager() as session:

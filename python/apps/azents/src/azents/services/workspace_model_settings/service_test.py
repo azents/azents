@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     ActiveModelMetadataUnavailable,
@@ -29,6 +28,7 @@ from azents.core.agent import (
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.rdb.models.workspace_model_settings import RDBWorkspaceModelSettings
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
@@ -63,7 +63,7 @@ from azents.testing.types import require_instance
 
 
 async def test_active_workspace_read_and_label_save_keep_raw_settings(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Read capabilities are active; label changes never persist their projection."""
     fixture = await _fixture(
@@ -131,7 +131,7 @@ async def test_active_workspace_read_and_label_save_keep_raw_settings(
 
 
 async def test_active_workspace_missing_metadata_retains_default_identity(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Missing metadata produces diagnostics instead of changing the user's model."""
     fixture = await _fixture(
@@ -307,7 +307,7 @@ class _Fixture:
 
 
 async def _fixture(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     handle: str,
     *,
     missing: set[str],
@@ -371,7 +371,7 @@ def _inputs() -> list[SelectableModelOptionInput]:
 
 
 async def test_normalizers_see_closed_current_scope_and_final_snapshot_is_exact(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Typed collaborators run between current read and the complete final write."""
     fixture = await _fixture(
@@ -434,7 +434,9 @@ async def test_normalizers_see_closed_current_scope_and_final_snapshot_is_exact(
     assert result.value.default_main_model_label == "Quality"
     assert result.value.default_lightweight_model_label == "Quick"
     async with rdb_session_manager() as session:
-        stored = await session.get(RDBWorkspaceModelSettings, fixture.workspace_id)
+        stored = await session.read_session.get(
+            RDBWorkspaceModelSettings, fixture.workspace_id
+        )
         assert stored is not None
         assert stored.default_selectable_model_options == [
             option.model_dump(mode="json") for option in options
@@ -443,7 +445,7 @@ async def test_normalizers_see_closed_current_scope_and_final_snapshot_is_exact(
 
 
 async def test_get_creates_empty_row_without_catalog_and_preserves_lightweight_fallback(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """GET's side effect and legacy effective lightweight fallback remain exact."""
     fixture = await _fixture(
@@ -514,7 +516,7 @@ async def test_get_creates_empty_row_without_catalog_and_preserves_lightweight_f
     ],
 )
 async def test_empty_row_null_omission_and_label_error_matrix(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     update: WorkspaceModelSettingsUpdateInput,
     expected_error: type[object] | None,
     creates_row: bool,
@@ -544,7 +546,9 @@ async def test_empty_row_null_omission_and_label_error_matrix(
     fixture.manager.assert_closed()
     async with rdb_session_manager() as session:
         assert (
-            await session.get(RDBWorkspaceModelSettings, fixture.workspace_id)
+            await session.read_session.get(
+                RDBWorkspaceModelSettings, fixture.workspace_id
+            )
             is not None
         ) == creates_row
         assert await marker_state(session) == marker_before
@@ -597,7 +601,7 @@ async def test_empty_row_null_omission_and_label_error_matrix(
     ],
 )
 async def test_configured_label_only_matrix_preserves_options_without_catalog_refresh(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     update: WorkspaceModelSettingsUpdateInput,
     main: str,
     lightweight: str,
@@ -634,7 +638,7 @@ async def test_configured_label_only_matrix_preserves_options_without_catalog_re
 
 
 async def test_configured_options_null_is_rejected_without_final_write(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Configured options cannot be cleared even if labels are supplied as well."""
     fixture = await _fixture(
@@ -663,7 +667,7 @@ async def test_configured_options_null_is_rejected_without_final_write(
 
 @pytest.mark.parametrize("failure_source", ["catalog", "image"])
 async def test_catalog_and_image_rejections_keep_distinct_domain_results(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure_source: Literal["catalog", "image"],
 ) -> None:
     """Catalog miss and image eligibility rejection retain their distinct mappings."""
@@ -697,7 +701,10 @@ async def test_catalog_and_image_rejections_keep_distinct_domain_results(
     fixture.manager.assert_closed()
     async with rdb_session_manager() as session:
         assert (
-            await session.get(RDBWorkspaceModelSettings, fixture.workspace_id) is None
+            await session.read_session.get(
+                RDBWorkspaceModelSettings, fixture.workspace_id
+            )
+            is None
         )
 
 
@@ -706,7 +713,7 @@ async def test_catalog_and_image_rejections_keep_distinct_domain_results(
     [("catalog", False), ("image", False), ("catalog", True), ("image", True)],
 )
 async def test_failed_or_cancelled_normalization_propagates_without_final_write(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure_source: Literal["catalog", "image"],
     cancel: bool,
 ) -> None:
@@ -733,7 +740,10 @@ async def test_failed_or_cancelled_normalization_propagates_without_final_write(
     fixture.manager.assert_closed()
     async with rdb_session_manager() as session:
         assert (
-            await session.get(RDBWorkspaceModelSettings, fixture.workspace_id) is None
+            await session.read_session.get(
+                RDBWorkspaceModelSettings, fixture.workspace_id
+            )
+            is None
         )
 
 
@@ -742,7 +752,7 @@ class _RejectUpdateRepository(WorkspaceModelSettingsRepository):
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         update: WorkspaceModelSettingsUpdate,
     ) -> Result[WorkspaceModelSettings, RepositoryClearError]:
@@ -751,7 +761,7 @@ class _RejectUpdateRepository(WorkspaceModelSettingsRepository):
 
 
 async def test_final_repository_failure_maps_existing_service_error_after_resolution(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Translate final rejection after the write scope has closed."""
     fixture = await _fixture(

@@ -22,6 +22,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.runtime_connection_generation.data import (
     RuntimeConnectionGeneration,
 )
@@ -49,18 +50,18 @@ from .service import (
 
 class _SessionManager:
     def __init__(self) -> None:
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
 
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
+    def __call__(self) -> AbstractAsyncContextManager[WriteSession]:
         return self._open()
 
     @asynccontextmanager
-    async def _open(self) -> AsyncGenerator[AsyncSession, None]:
+    async def _open(self) -> AsyncGenerator[WriteSession, None]:
         session = AsyncSession()
         await session.begin()
-        self.sessions.append(session)
+        self.sessions.append(ReadWriteSession(session))
         try:
-            yield session
+            yield ReadWriteSession(session)
         except Exception:
             await session.rollback()
             raise
@@ -74,18 +75,18 @@ class _GenerationAuthority:
     def __init__(self) -> None:
         self.high_water: dict[tuple[RuntimeConnectionAuthorityKind, str], int] = {}
         self.accepted: dict[tuple[RuntimeConnectionAuthorityKind, str], int] = {}
-        self.accept_session: AsyncSession | None = None
+        self.accept_session: WriteSession | None = None
         self.reject_acceptance = False
         self.cancel_acceptance = False
 
     async def allocate_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
     ) -> RuntimeConnectionGeneration:
-        assert session.in_transaction()
+        assert session.write_session.in_transaction()
         key = (connection_kind, subject_id)
         generation = self.high_water.get(key, 0) + 1
         self.high_water[key] = generation
@@ -93,24 +94,24 @@ class _GenerationAuthority:
 
     async def generation_is_current_high_water(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
         generation: int,
     ) -> bool:
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         return self.high_water.get((connection_kind, subject_id)) == generation
 
     async def accept_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
         generation: int,
     ) -> RuntimeConnectionGeneration | None:
-        assert session.in_transaction()
+        assert session.write_session.in_transaction()
         self.accept_session = session
         if self.cancel_acceptance:
             raise asyncio.CancelledError
@@ -143,7 +144,8 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
 
     def _assert_transactions_closed(self) -> None:
         assert all(
-            not session.in_transaction() for session in self.session_manager.sessions
+            not session.write_session.in_transaction()
+            for session in self.session_manager.sessions
         )
         self.external_calls += 1
 
@@ -194,18 +196,18 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
 
 class _ProviderAuthority:
     def __init__(self) -> None:
-        self.validate_sessions: list[AsyncSession] = []
+        self.validate_sessions: list[WriteSession] = []
         self.validated_at: list[datetime] = []
-        self.create_session: AsyncSession | None = None
+        self.create_session: WriteSession | None = None
 
     async def validate_connection_authority_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         validated_at: datetime,
     ) -> None:
-        assert session.in_transaction()
+        assert session.write_session.in_transaction()
         self.validate_sessions.append(session)
         self.validated_at.append(validated_at)
         if (
@@ -216,7 +218,7 @@ class _ProviderAuthority:
 
     async def create_connection_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         connection_id: str,
@@ -235,7 +237,7 @@ class _ProviderAuthority:
             operational_diagnostics,
             connected_at,
         )
-        assert session.in_transaction()
+        assert session.write_session.in_transaction()
         await self.validate_connection_authority_in_transaction(
             session,
             authentication=authentication,
@@ -248,11 +250,11 @@ class _ProviderAuthority:
 class _RunnerAuthority:
     async def authorize_runner_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         credential: RuntimeRunnerCredential,
     ) -> bool:
         del credential
-        assert session.in_transaction()
+        assert session.write_session.in_transaction()
         return True
 
 

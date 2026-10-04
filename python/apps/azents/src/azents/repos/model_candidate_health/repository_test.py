@@ -3,13 +3,13 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider, ModelCandidateClaimKind
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import (
     CandidateHealthSettlement,
@@ -21,14 +21,14 @@ from azents.repos.model_candidate_health.data import (
 
 
 async def _fixture(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     slug: str,
 ) -> ModelCandidateIdentity:
     async with session_manager() as session:
         workspace = RDBWorkspace(name=slug, handle=slug)
-        session.add(workspace)
-        await session.flush()
+        session.write_session.add(workspace)
+        await session.write_session.flush()
         integration = RDBLLMProviderIntegration(
             workspace_id=workspace.id,
             provider=LLMProvider.OPENAI,
@@ -38,8 +38,8 @@ async def _fixture(
             enabled=True,
             catalog_configuration_version=1,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         return ModelCandidateIdentity(
             workspace_id=workspace.id,
             llm_provider_integration_id=integration.id,
@@ -48,17 +48,17 @@ async def _fixture(
 
 
 def _repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> ModelCandidateHealthRepository:
     return ModelCandidateHealthRepository(session_manager=session_manager)
 
 
 async def _expire_cooldown(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     identity: ModelCandidateIdentity,
 ) -> None:
     async with session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBModelCandidateHealth)
             .where(
                 RDBModelCandidateHealth.workspace_id == identity.workspace_id,
@@ -74,11 +74,11 @@ async def _expire_cooldown(
 
 
 async def _expire_claim(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     identity: ModelCandidateIdentity,
 ) -> None:
     async with session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBModelCandidateHealth)
             .where(
                 RDBModelCandidateHealth.workspace_id == identity.workspace_id,
@@ -93,7 +93,7 @@ async def _expire_claim(
 
 
 async def test_quota_renews_generation_and_clears_reservation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A newer quota generation immediately revokes an older reservation."""
     identity = await _fixture(rdb_session_manager, slug="candidate-health-renew")
@@ -122,7 +122,7 @@ async def test_quota_renews_generation_and_clears_reservation(
 
 
 async def test_foreground_probe_single_flight_and_stale_success_fence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Only one foreground probe wins and stale success cannot clear newer quota."""
     identity = await _fixture(rdb_session_manager, slug="candidate-health-probe")
@@ -163,7 +163,7 @@ async def test_foreground_probe_single_flight_and_stale_success_fence(
 
 
 async def test_background_never_claims_expired_health(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Background reads continue to skip until a foreground probe proves recovery."""
     identity = await _fixture(rdb_session_manager, slug="candidate-health-background")
@@ -183,7 +183,7 @@ async def test_background_never_claims_expired_health(
 
 
 async def test_reservation_idempotency_transfer_and_success(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """One Session may repeat reserve and transfer its exact claim to a probe."""
     identity = await _fixture(rdb_session_manager, slug="candidate-health-reservation")
@@ -230,7 +230,7 @@ async def test_reservation_idempotency_transfer_and_success(
 
 
 async def test_cancel_and_expiry_are_owner_generation_fenced(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Stale cancellation and premature expiry cannot release a current claim."""
     identity = await _fixture(rdb_session_manager, slug="candidate-health-settlement")
@@ -279,7 +279,7 @@ async def test_cancel_and_expiry_are_owner_generation_fenced(
 
 
 async def test_in_session_transition_rolls_back_with_caller_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A composable transition has no independent commit boundary."""
     identity = await _fixture(rdb_session_manager, slug="candidate-health-rollback")
@@ -289,7 +289,7 @@ async def test_in_session_transition_rolls_back_with_caller_transaction(
         renewed = await repository.renew_quota_in_session(session, identity)
         assert renewed.status is ModelCandidateHealthStatus.COOLDOWN
         assert renewed.health is not None
-        await session.rollback()
+        await session.write_session.rollback()
 
     observation = await repository.snapshot(identity)
     assert observation.status is ModelCandidateHealthStatus.AVAILABLE

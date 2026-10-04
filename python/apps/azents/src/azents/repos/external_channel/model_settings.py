@@ -12,7 +12,6 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     apply_to_options,
@@ -76,6 +75,7 @@ from azents.rdb.models.external_model_settings import (
 )
 from azents.rdb.models.user import RDBUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
@@ -238,7 +238,7 @@ class ExternalModelSettingsRepository:
     def __init__(
         self,
         session_manager: Annotated[
-            SessionManager[AsyncSession], Depends(get_session_manager)
+            SessionManager[WriteSession], Depends(get_session_manager)
         ],
         external_channel_repository: Annotated[
             ExternalChannelRepository, Depends(ExternalChannelRepository.create)
@@ -279,7 +279,7 @@ class ExternalModelSettingsRepository:
         """Create or replay one authorized actor-private draft."""
         self._validate_page(offset=offset, limit=limit)
 
-        async def operation(session: AsyncSession) -> ExternalModelEditorResult:
+        async def operation(session: WriteSession) -> ExternalModelEditorResult:
             authorization = await self._authorize(
                 session,
                 actor=actor,
@@ -288,7 +288,7 @@ class ExternalModelSettingsRepository:
             if authorization.rejection is not None:
                 return authorization.rejection
             authorized = self._require_authorized(authorization)
-            existing = await session.scalar(
+            existing = await session.write_session.scalar(
                 sa.select(RDBExternalModelDraft)
                 .where(
                     RDBExternalModelDraft.connection_id == actor.connection_id,
@@ -309,7 +309,7 @@ class ExternalModelSettingsRepository:
                     return rejection
                 authorized = await self._project_authorized_options(session, authorized)
                 self._refresh_options(existing, authorized.agent)
-                await session.flush()
+                await session.write_session.flush()
                 return ExternalModelEditorReady(
                     editor=self._editor(
                         existing,
@@ -326,8 +326,8 @@ class ExternalModelSettingsRepository:
                 owner_interaction_key=owner_interaction_key,
                 now=now,
             )
-            session.add(draft)
-            await session.flush()
+            session.write_session.add(draft)
+            await session.write_session.flush()
             return ExternalModelEditorReady(
                 editor=self._editor(
                     draft,
@@ -352,7 +352,7 @@ class ExternalModelSettingsRepository:
         """Update only one live private draft and re-render current capabilities."""
         self._validate_page(offset=offset, limit=limit)
 
-        async def operation(session: AsyncSession) -> ExternalModelEditorResult:
+        async def operation(session: WriteSession) -> ExternalModelEditorResult:
             draft = await self._lock_draft(session, draft_id=draft_id)
             if draft is None:
                 return ExternalModelRejected(
@@ -405,7 +405,7 @@ class ExternalModelSettingsRepository:
             draft.selected_enabled_execution_options = [
                 value.value for value in profile.enabled_execution_options
             ]
-            await session.flush()
+            await session.write_session.flush()
             return ExternalModelEditorReady(
                 editor=self._editor(
                     draft,
@@ -429,7 +429,7 @@ class ExternalModelSettingsRepository:
         """Refresh authority and return one bounded private option page."""
         self._validate_page(offset=offset, limit=limit)
 
-        async def operation(session: AsyncSession) -> ExternalModelEditorResult:
+        async def operation(session: WriteSession) -> ExternalModelEditorResult:
             draft = await self._lock_draft(session, draft_id=draft_id)
             if draft is None:
                 return ExternalModelRejected(
@@ -451,7 +451,7 @@ class ExternalModelSettingsRepository:
             authorized = self._require_authorized(authorization)
             authorized = await self._project_authorized_options(session, authorized)
             self._refresh_options(draft, authorized.agent)
-            await session.flush()
+            await session.write_session.flush()
             return ExternalModelEditorReady(
                 editor=self._editor(
                     draft,
@@ -472,7 +472,7 @@ class ExternalModelSettingsRepository:
     ) -> ExternalModelCancelResult:
         """Idempotently terminalize only the exact actor-owned draft."""
 
-        async def operation(session: AsyncSession) -> ExternalModelCancelResult:
+        async def operation(session: WriteSession) -> ExternalModelCancelResult:
             draft = await self._lock_draft(session, draft_id=draft_id)
             if draft is None:
                 return ExternalModelRejected(
@@ -492,7 +492,7 @@ class ExternalModelSettingsRepository:
                 )
             if draft.cancelled_at is None:
                 draft.cancelled_at = now
-                await session.flush()
+                await session.write_session.flush()
             return ExternalModelDraftCancelled(draft_id=draft.id)
 
         return await self._run_with_retry(operation, ExternalModelBusy())
@@ -508,7 +508,7 @@ class ExternalModelSettingsRepository:
     ) -> ExternalModelApplyCommit:
         """Apply one generation-fenced draft and preclaim one unknown notice."""
 
-        async def operation(session: AsyncSession) -> ExternalModelApplyCommit:
+        async def operation(session: WriteSession) -> ExternalModelApplyCommit:
             draft = await self._lock_draft(session, draft_id=draft_id)
             if draft is None:
                 return ExternalModelApplyCommit(
@@ -534,7 +534,7 @@ class ExternalModelSettingsRepository:
                     notice_plan=None,
                 )
             authorized = self._require_authorized(authorization)
-            existing = await session.scalar(
+            existing = await session.write_session.scalar(
                 sa.select(RDBExternalModelMutation)
                 .where(
                     RDBExternalModelMutation.provider == actor.provider,
@@ -593,7 +593,7 @@ class ExternalModelSettingsRepository:
                 refreshed_fingerprint != expected_selection_fingerprint
                 or refreshed_fingerprint != previous_fingerprint
             ):
-                await session.flush()
+                await session.write_session.flush()
                 return ExternalModelApplyCommit(
                     result=ExternalModelStale(
                         editor=self._editor(
@@ -689,9 +689,9 @@ class ExternalModelSettingsRepository:
                 notice_attempted_at=None,
                 notice_error_summary=None,
             )
-            session.add(mutation)
+            session.write_session.add(mutation)
             draft.applied_at = now
-            await session.flush()
+            await session.write_session.flush()
             updated_editor = self._editor(
                 draft,
                 updated,
@@ -741,7 +741,7 @@ class ExternalModelSettingsRepository:
         """Load one committed preclaimed notice and its encrypted credentials."""
         async with self.session_manager() as session:
             row = (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBExternalModelMutation, RDBExternalChannelConnection)
                     .join(
                         RDBExternalChannelConnection,
@@ -775,7 +775,7 @@ class ExternalModelSettingsRepository:
     ) -> ExternalModelNoticeOutcome:
         """Record one terminal delivery observation without retry scheduling."""
         async with self.session_manager() as session:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.update(RDBExternalModelMutation)
                 .where(
                     RDBExternalModelMutation.id == mutation_id,
@@ -795,7 +795,7 @@ class ExternalModelSettingsRepository:
             stored = result.scalar_one_or_none()
             if stored is not None:
                 return stored
-            existing = await session.scalar(
+            existing = await session.write_session.scalar(
                 sa.select(RDBExternalModelMutation.notice_outcome).where(
                     RDBExternalModelMutation.id == mutation_id
                 )
@@ -806,13 +806,13 @@ class ExternalModelSettingsRepository:
 
     async def _run_with_retry(
         self,
-        operation: Callable[[AsyncSession], Awaitable[T]],
+        operation: Callable[[WriteSession], Awaitable[T]],
         busy_result: T,
     ) -> T:
         for _attempt in range(_MAX_TRANSACTION_ATTEMPTS):
             try:
                 async with self.session_manager() as session:
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.text(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'")
                     )
                     return await operation(session)
@@ -823,12 +823,12 @@ class ExternalModelSettingsRepository:
 
     async def _authorize(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         actor: ExternalModelActorContext,
         target: ExternalModelTargetContext,
     ) -> _AuthorizationResult:
-        connection = await session.scalar(
+        connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == actor.connection_id)
             .with_for_update(nowait=True)
@@ -845,7 +845,7 @@ class ExternalModelSettingsRepository:
             }
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
-        principal = await session.scalar(
+        principal = await session.write_session.scalar(
             sa.select(RDBExternalChannelPrincipal)
             .where(RDBExternalChannelPrincipal.id == actor.principal_id)
             .with_for_update(nowait=True)
@@ -858,7 +858,7 @@ class ExternalModelSettingsRepository:
             or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.ACTOR_MISMATCH)
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(RDBExternalChannelBinding.id == target.binding_id)
             .with_for_update(nowait=True)
@@ -869,12 +869,12 @@ class ExternalModelSettingsRepository:
             or binding.agent_session_id != target.session_id
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
-        resource = await session.scalar(
+        resource = await session.write_session.scalar(
             sa.select(RDBExternalChannelResource)
             .where(RDBExternalChannelResource.id == binding.resource_id)
             .with_for_update(nowait=True)
         )
-        route = await session.scalar(
+        route = await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
             .where(RDBExternalChannelAgentRoute.id == binding.route_id)
             .with_for_update(nowait=True)
@@ -903,7 +903,7 @@ class ExternalModelSettingsRepository:
         )
         if link is None:
             return self._rejected(ExternalModelSettingsRejectionCode.LINK_REQUIRED)
-        user = await session.scalar(
+        user = await session.write_session.scalar(
             sa.select(RDBUser)
             .where(RDBUser.id == link.user_id)
             .with_for_update(nowait=True)
@@ -950,7 +950,7 @@ class ExternalModelSettingsRepository:
         )
         if not acquired:
             raise self._lock_not_available()
-        block = await session.scalar(
+        block = await session.write_session.scalar(
             sa.select(RDBExternalChannelBlock)
             .where(
                 RDBExternalChannelBlock.agent_id == agent.id,
@@ -963,7 +963,7 @@ class ExternalModelSettingsRepository:
             return self._rejected(
                 ExternalModelSettingsRejectionCode.PARTICIPATION_DENIED
             )
-        grant = await session.scalar(
+        grant = await session.write_session.scalar(
             sa.select(RDBExternalChannelAccessGrant)
             .where(
                 RDBExternalChannelAccessGrant.agent_id == agent.id,
@@ -1016,7 +1016,7 @@ class ExternalModelSettingsRepository:
 
     async def _project_authorized_options(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         authorized: _AuthorizedModelTarget,
     ) -> _AuthorizedModelTarget:
         """Compile exact local metadata into a detached authorized option view."""
@@ -1268,11 +1268,11 @@ class ExternalModelSettingsRepository:
 
     async def _lock_draft(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         draft_id: str,
     ) -> RDBExternalModelDraft | None:
-        return await session.scalar(
+        return await session.write_session.scalar(
             sa.select(RDBExternalModelDraft)
             .where(RDBExternalModelDraft.id == draft_id)
             .with_for_update(nowait=True)

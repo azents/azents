@@ -5,7 +5,6 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -26,6 +25,7 @@ from azents.core.external_channel_title import (
 from azents.engine.events.types import Event, ExternalChannelMessagePayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -57,7 +57,7 @@ class ExternalChannelThreadTitleService:
     """Attempt one eligible Discord thread rename without durable attempt state."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     external_channel_repository: Annotated[
         ExternalChannelRepository, Depends(ExternalChannelRepository.create)

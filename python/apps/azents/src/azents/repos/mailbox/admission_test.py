@@ -21,6 +21,7 @@ from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.mailbox import MailboxRepository
@@ -31,18 +32,18 @@ from azents.repos.mailbox.admission_data import MailboxEnqueue
 class _ObservedManager:
     """Observe resolution of real database sessions before operation return."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.resolved: list[bool] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Yield a real session and observe its completed transaction lifetime."""
         assert not self.active
         self.active = True
-        session: AsyncSession | None = None
+        session: WriteSession | None = None
         try:
             async with self.manager() as current:
                 session = current
@@ -51,7 +52,7 @@ class _ObservedManager:
         finally:
             self.active = False
             if session is not None:
-                self.resolved.append(not session.in_transaction())
+                self.resolved.append(not session.write_session.in_transaction())
 
 
 class _WakeRepository(AgentSessionRepository):
@@ -60,10 +61,10 @@ class _WakeRepository(AgentSessionRepository):
     def __init__(self, failure: ValueError | None) -> None:
         self.failure = failure
         self.wakes: list[str] = []
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
 
     async def mark_running_for_input_wakeup(
-        self, session: AsyncSession, session_id: str
+        self, session: WriteSession, session_id: str
     ) -> None:
         """Apply the real wake transition before injecting a late failure."""
         await super().mark_running_for_input_wakeup(session, session_id)
@@ -82,7 +83,7 @@ class _CancellationWakeRepository(_WakeRepository):
         self.release = asyncio.Event()
 
     async def mark_running_for_input_wakeup(
-        self, session: AsyncSession, session_id: str
+        self, session: WriteSession, session_id: str
     ) -> None:
         """Pause after the second mutation until cancellation is requested."""
         await super().mark_running_for_input_wakeup(session, session_id)
@@ -91,7 +92,7 @@ class _CancellationWakeRepository(_WakeRepository):
             await self.release.wait()
 
 
-async def _sessions(manager: SessionManager[AsyncSession], name: str) -> list[str]:
+async def _sessions(manager: SessionManager[WriteSession], name: str) -> list[str]:
     """Create two root Sessions with real Mailbox foreign-key authority."""
     async with manager() as session:
         workspace_id = await _create_workspace(session, name)
@@ -139,7 +140,7 @@ def _input(
 
 
 async def _assert_rolled_back(
-    manager: SessionManager[AsyncSession], session_ids: list[str]
+    manager: SessionManager[WriteSession], session_ids: list[str]
 ) -> None:
     """Verify all real row writes and wake changes were abandoned."""
     async with manager() as session:
@@ -153,7 +154,7 @@ async def _assert_rolled_back(
 
 
 async def test_completed_batch_closes_and_wakes_distinct_sessions_in_order(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Input order and sorted wakes share one completed database transaction."""
     ids = await _sessions(rdb_session_manager, "admission-completed-batch")
@@ -183,7 +184,7 @@ async def test_completed_batch_closes_and_wakes_distinct_sessions_in_order(
 
 
 async def test_queue_only_batch_does_not_wake(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Queue-only admission completes without changing idle state."""
     ids = await _sessions(rdb_session_manager, "admission-queue-only")
@@ -203,7 +204,7 @@ async def test_queue_only_batch_does_not_wake(
 
 
 async def test_idle_continuation_admission_preserves_composer_session_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Idle-hook row scheduling intent does not independently wake the Session."""
     ids = await _sessions(rdb_session_manager, "admission-idle-no-wake")
@@ -223,7 +224,7 @@ async def test_idle_continuation_admission_preserves_composer_session_state(
 
 
 async def test_idempotent_replay_reapplies_wake_without_a_second_row(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Replayed input restores the wake transition and preserves row identity."""
     ids = await _sessions(rdb_session_manager, "admission-replay-wake")
@@ -246,7 +247,7 @@ async def test_idempotent_replay_reapplies_wake_without_a_second_row(
 
 
 async def test_late_wake_failure_rolls_back_all_rows_and_session_changes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A failure after both wake writes cannot leave partially committed admission."""
     ids = await _sessions(rdb_session_manager, "admission-late-wake-rollback")
@@ -267,7 +268,7 @@ async def test_late_wake_failure_rolls_back_all_rows_and_session_changes(
 
 
 async def test_cancellation_after_wake_writes_rolls_back_the_completed_operation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Cancellation propagates after abandoning real Mailbox and Session writes."""
     ids = await _sessions(rdb_session_manager, "admission-cancel-rollback")
@@ -291,7 +292,7 @@ async def test_cancellation_after_wake_writes_rolls_back_the_completed_operation
 
 
 async def test_profile_failure_on_later_row_rolls_back_earlier_row(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Late dedupe validation cannot commit an earlier new row or any wake."""
     ids = await _sessions(rdb_session_manager, "admission-late-profile-rollback")
@@ -364,7 +365,8 @@ async def test_upsert_result_validation_and_pre_read_created_semantics(
     sessions = AsyncMock(spec=AgentSessionRepository)
     manager = AsyncMock()
     repository = MailboxAdmissionRepository(manager, mailbox, sessions)
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     if message is not None:
         with pytest.raises(ValueError, match=message):
             await repository.enqueue_in_session(session, input)

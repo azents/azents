@@ -4,13 +4,13 @@ import dataclasses
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider, ExternalChannelResourceStatus
 from azents.core.external_channel_conversation_preparation import (
     ExternalChannelConversationPreparation,
     ExternalChannelConversationProvisioningError,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningRepository,
 )
@@ -44,7 +44,7 @@ class ExternalChannelIngressProvisioningRepository:
 
     async def complete_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: ExternalChannelIngressOwner,
         preparation: ExternalChannelIngressProviderPreparation,

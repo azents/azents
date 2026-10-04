@@ -2,11 +2,10 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentSessionKind, AgentSessionProductMode
 from azents.core.memory_scope import MemoryScope
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import (
@@ -37,7 +36,7 @@ class MemorySearchResult:
 class MemoryOperationRepository:
     """Own completed Memory tool and prompt database operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     memory_repository: MemoryRepository
     agent_session_repository: AgentSessionRepository
 

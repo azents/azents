@@ -16,6 +16,7 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelWakeDispatchUnavailable,
 )
 from azents.core.mailbox_data import MailboxItem
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeRepository,
 )
@@ -43,7 +44,7 @@ class _MailboxRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         mailbox_item_id: str,
     ) -> MailboxItem | None:
         del session, mailbox_item_id
@@ -74,8 +75,8 @@ async def test_dispatch_sends_routing_only_wake_after_mailbox_commit() -> None:
     session = _Session(calls)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
@@ -109,8 +110,8 @@ async def test_missing_mailbox_item_does_not_send_duplicate_wake() -> None:
     session = _Session(calls)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     broker = _Broker(calls)
     dispatcher = ExternalChannelMailboxWakeDispatcher(
@@ -144,8 +145,8 @@ async def test_injected_wake_failure_is_one_shot_and_precedes_broker_io() -> Non
     session = _Session(calls)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     control = ExternalChannelIngressTestControl()
     control.fail_next_wake(session_id="session-1")

@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -24,6 +23,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionAdmission,
@@ -120,7 +120,7 @@ class _RepositoryDouble:
 
     async def get_discord_http_configuration_by_selector_hash(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         selector_hash: str,
     ) -> ExternalChannelConnectionConfiguration:
@@ -378,7 +378,7 @@ def _service(
     cleanup_plans: tuple[object, ...] = (),
 ) -> _DiscordHTTPServiceFixture:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
 
     repository = _RepositoryDouble(configuration)
@@ -419,7 +419,7 @@ def _ingress_service(
     dispatcher: DiscordHTTPAdmissionService,
 ) -> _DiscordHTTPIngressFixture:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
 
     resolver = _DispatcherResolverDouble(dispatcher)

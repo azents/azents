@@ -3,10 +3,10 @@
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentProjectCatalogStatus
 from azents.rdb.models.agent_project_catalog import RDBAgentProjectCatalogEntry
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import AgentProjectCatalogEntry, AgentProjectCatalogStatusPatch
 
@@ -16,13 +16,13 @@ class AgentProjectCatalogRepository:
 
     async def upsert_entry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         path: str,
     ) -> AgentProjectCatalogEntry:
         """Create or refresh an Agent Project catalog row."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             pg_insert(RDBAgentProjectCatalogEntry)
             .values(
                 id=uuid7().hex,
@@ -37,17 +37,17 @@ class AgentProjectCatalogRepository:
             .returning(RDBAgentProjectCatalogEntry)
         )
         rdb = result.scalar_one()
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def list_entries(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[AgentProjectCatalogEntry]:
         """Fetch Agent Project catalog entries ordered by recent update."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentProjectCatalogEntry)
             .where(RDBAgentProjectCatalogEntry.agent_id == agent_id)
             .order_by(
@@ -59,7 +59,7 @@ class AgentProjectCatalogRepository:
 
     async def list_entries_by_paths(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         paths: list[str],
@@ -67,7 +67,7 @@ class AgentProjectCatalogRepository:
         """Fetch Agent Project catalog entries matching exact paths."""
         if not paths:
             return []
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentProjectCatalogEntry)
             .where(
                 RDBAgentProjectCatalogEntry.agent_id == agent_id,
@@ -79,13 +79,13 @@ class AgentProjectCatalogRepository:
 
     async def get_entry_by_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         path: str,
     ) -> AgentProjectCatalogEntry | None:
         """Fetch one Agent Project catalog entry by path."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentProjectCatalogEntry).where(
                 RDBAgentProjectCatalogEntry.agent_id == agent_id,
                 RDBAgentProjectCatalogEntry.path == path,
@@ -98,30 +98,30 @@ class AgentProjectCatalogRepository:
 
     async def delete_entry_by_path(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         path: str,
     ) -> None:
         """Delete one Agent Project catalog row by exact path."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentProjectCatalogEntry).where(
                 RDBAgentProjectCatalogEntry.agent_id == agent_id,
                 RDBAgentProjectCatalogEntry.path == path,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def update_status(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         path: str,
         patch: AgentProjectCatalogStatusPatch,
     ) -> AgentProjectCatalogEntry:
         """Upsert one path status projection."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             pg_insert(RDBAgentProjectCatalogEntry)
             .values(
                 id=uuid7().hex,
@@ -143,7 +143,7 @@ class AgentProjectCatalogRepository:
             .returning(RDBAgentProjectCatalogEntry)
         )
         rdb = result.scalar_one()
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     def _build(self, rdb: RDBAgentProjectCatalogEntry) -> AgentProjectCatalogEntry:

@@ -43,6 +43,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelConnection,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelMultiConnectionDisconnect,
 )
@@ -170,7 +171,7 @@ def _binding(
 
 def _management_service(
     *,
-    session: AsyncSession,
+    session: WriteSession,
     repository: AsyncMock,
     agent_repository: AsyncMock,
     agent_admin_repository: AsyncMock,
@@ -179,7 +180,7 @@ def _management_service(
     participation_lock: ExternalChannelParticipationLock | None = None,
 ) -> ExternalChannelManagementService:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     _operation_repository = repository
@@ -237,12 +238,15 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
         updated_at=expected_generation,
     )
     selected = _channel_default()
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     async def commit() -> None:
         events.append("commit")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
     repository = AsyncMock()
     repository.get_multi_connection.return_value = connection
     first_plan = make_provider_effect_plan("default-cleanup-1")
@@ -317,7 +321,10 @@ async def test_replace_same_multi_default_preserves_connection_generation() -> N
         id="connection-1",
         updated_at=expected_generation,
     )
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     repository = AsyncMock()
     repository.get_multi_connection.return_value = connection
     repository.replace_multi_channel_default.return_value = SimpleNamespace(
@@ -349,13 +356,16 @@ async def test_replace_same_multi_default_preserves_connection_generation() -> N
     )
 
     assert connection.updated_at == expected_generation
-    session.commit.assert_awaited_once_with()
+    commit_mock.assert_awaited_once_with()
     action_service.execute_terminal_control.assert_not_awaited()
 
 
 async def test_default_response_mode_read_projects_agent_value() -> None:
     """Visible Agent management state includes the concrete creation default."""
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1",
@@ -383,7 +393,10 @@ async def test_default_response_mode_read_projects_agent_value() -> None:
 
 async def test_default_response_mode_update_requires_agent_admin() -> None:
     """A non-admin cannot mutate the Agent-scoped creation default."""
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1"
@@ -408,12 +421,15 @@ async def test_default_response_mode_update_requires_agent_admin() -> None:
         )
 
     agent_repository.update_external_channel_default_response_mode.assert_not_awaited()
-    session.commit.assert_not_awaited()
+    commit_mock.assert_not_awaited()
 
 
 async def test_default_response_mode_update_does_not_rewrite_bindings() -> None:
     """Replacing the Agent default calls only the Agent repository mutation."""
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1"
@@ -452,12 +468,15 @@ async def test_default_response_mode_update_does_not_rewrite_bindings() -> None:
         response_mode=ExternalChannelResponseMode.MENTION_ONLY,
     )
     repository.update_binding_response_mode.assert_not_awaited()
-    session.commit.assert_awaited_once()
+    commit_mock.assert_awaited_once()
 
 
 async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
     """The service supplies Workspace, Agent, Session, and binding ownership."""
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     repository = AsyncMock()
     repository.get_binding_mutation_scope.return_value = SimpleNamespace(
         connection_id="connection-1",
@@ -501,18 +520,21 @@ async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
         configured_by_user_id="user-1",
         response_mode=ExternalChannelResponseMode.MENTION_ONLY,
     )
-    session.commit.assert_awaited_once()
+    commit_mock.assert_awaited_once()
 
 
 async def test_parent_binding_response_mode_update_uses_participation_locks() -> None:
     """Parent response-mode mutation commits inside canonical coordination locks."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     async def commit() -> None:
         events.append("commit")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
     repository = AsyncMock()
     repository.get_binding_mutation_scope.return_value = SimpleNamespace(
         connection_id="connection-1",
@@ -585,17 +607,20 @@ async def test_setup_discord_commits_route_before_callback_activation(
 ) -> None:
     """Dedicated setup cannot make provider ingress active before its route exists."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     async def commit() -> None:
         events.append("commit")
         if commit_fails:
             raise RuntimeError("Route commit failed")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         events.append("open")
         try:
             yield session
@@ -696,15 +721,18 @@ async def test_setup_discord_commits_route_before_callback_activation(
 async def test_update_discord_commits_reset_before_callback_activation() -> None:
     """Dedicated replacement fences durable authority before provider mutation."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     async def commit() -> None:
         events.append("commit")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     repository = AsyncMock()
@@ -795,15 +823,18 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
 async def test_update_multi_discord_commits_reset_before_callback_activation() -> None:
     """Multi replacement cannot invoke Discord before durable fencing commits."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     async def commit() -> None:
         events.append("commit")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     repository = AsyncMock()
@@ -883,10 +914,13 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
 
 async def test_discord_replacement_failure_leaves_durable_fence_committed() -> None:
     """Activation failure retains configuring state instead of restoring authority."""
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     repository = AsyncMock()
@@ -937,7 +971,7 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
             credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
         )
 
-    session.commit.assert_awaited_once()
+    commit_mock.assert_awaited_once()
     activation_service.activate.assert_awaited_once_with(connection_id="connection-1")
 
 
@@ -978,7 +1012,10 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
         ),
         RDBExternalChannelAgentRoute,
     )
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     repository = ExternalChannelManagementRepository()
     repository.get_connection = AsyncMock(return_value=(connection, route))
 
@@ -1184,10 +1221,13 @@ def test_http_manifest_routes_commands_interactivity_and_events_to_callback() ->
 
 async def test_add_multi_route_returns_existing_available_association() -> None:
     """Repeated catalog addition is idempotent under the connection lock."""
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     repository = AsyncMock()
@@ -1240,7 +1280,7 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
         agent_id="agent-1",
     )
     domain_repository.create_agent_route.assert_not_awaited()
-    session.commit.assert_not_awaited()
+    commit_mock.assert_not_awaited()
 
 
 async def test_repeated_disconnect_reterminalizes_connection() -> None:
@@ -1249,10 +1289,16 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
         status=ExternalChannelConnectionStatus.DISCONNECTED,
     )
     route = SimpleNamespace(id="route-1")
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     scalars = Mock()
     scalars.all.return_value = []
-    session.scalars.return_value = scalars
+    scalars_mock = AsyncMock(return_value=scalars)
+    raw_session.scalars = scalars_mock
+    flush_mock = AsyncMock()
+    raw_session.flush = flush_mock
     repository = ExternalChannelManagementRepository()
     repository.get_connection = AsyncMock(return_value=(connection, route))
     now = datetime.datetime.now(datetime.UTC)
@@ -1275,7 +1321,7 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
         lock=True,
         include_disconnected=True,
     )
-    session.flush.assert_awaited_once()
+    flush_mock.assert_awaited_once()
 
 
 @pytest.mark.parametrize("failed_commit", [None, 1, 2])
@@ -1284,7 +1330,10 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge(
 ) -> None:
     """Provider cleanup retains its target while terminal state commits first."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
     commits = 0
 
     async def commit() -> None:
@@ -1294,10 +1343,10 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge(
         if commits == failed_commit:
             raise RuntimeError("Disconnect commit failed")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         events.append("open")
         try:
             yield session
@@ -1407,15 +1456,18 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge(
 async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -> None:
     """Multi disconnect captures cleanup before it purges provider state."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     async def commit() -> None:
         events.append("commit")
 
-    session.commit.side_effect = commit
+    commit_mock.side_effect = commit
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     now = datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC)
@@ -1498,10 +1550,13 @@ async def test_validate_connection_finishes_db_reads_before_provider_io(
 ) -> None:
     """Provider validation starts only after all authorization reads finish."""
     events: list[str] = []
-    session = AsyncMock(spec=AsyncSession)
+    commit_mock = AsyncMock()
+    raw_session = AsyncMock(spec=AsyncSession)
+    raw_session.commit = commit_mock
+    session = ReadWriteSession(raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         events.append("open")
         try:
             yield session

@@ -65,6 +65,7 @@ from azents.engine.run.errors import ModelCallError
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.engine_event_contracts import (
     RunStateRepository,
@@ -119,11 +120,11 @@ class _Session(AsyncSession):
 
 
 @asynccontextmanager
-async def _session_context() -> AsyncIterator[AsyncSession]:
+async def _session_context() -> AsyncIterator[WriteSession]:
     """Create a recording session for each production-style DB scope."""
     session = _Session()
     try:
-        yield session
+        yield ReadWriteSession(session)
     except Exception:
         await session.rollback()
         raise
@@ -133,13 +134,13 @@ async def _session_context() -> AsyncIterator[AsyncSession]:
 
 def _session_manager_for(
     session: _Session,
-) -> Callable[[], AsyncContextManager[AsyncSession]]:
+) -> Callable[[], AsyncContextManager[WriteSession]]:
     """Return a session manager that reuses one assertion-visible session."""
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
+    async def manager() -> AsyncIterator[WriteSession]:
         try:
-            yield session
+            yield ReadWriteSession(session)
         except Exception:
             await session.rollback()
             raise
@@ -205,7 +206,7 @@ class _RunRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState:
         """Return run state."""
@@ -235,7 +236,7 @@ class _RunRepo:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState:
         """Return locked run state."""
@@ -243,7 +244,7 @@ class _RunRepo:
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -262,7 +263,7 @@ class _RunRepo:
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -281,7 +282,7 @@ class _RunRepo:
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         retry_state: object | None,
     ) -> object:
@@ -292,7 +293,7 @@ class _RunRepo:
 
     async def mark_parent_result_suppressed(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         run_id: str,
         finalized_at: datetime.datetime,
@@ -309,12 +310,12 @@ class _TranscriptRepo:
     def __init__(self) -> None:
         self.events: list[Event] = []
         self.head_event_ids: list[str | None] = []
-        self.append_sessions: list[AsyncSession] = []
+        self.append_sessions: list[WriteSession] = []
         self.client_tool_result_ready = asyncio.Event()
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None = None,
@@ -326,7 +327,7 @@ class _TranscriptRepo:
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
@@ -343,7 +344,7 @@ class _TranscriptRepo:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Materialize append request as event."""
@@ -386,7 +387,7 @@ class _FailingTranscriptRepo(_TranscriptRepo):
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         self.append_sessions.append(session)
@@ -405,7 +406,7 @@ class _SystemPromptSnapshotRepo:
 
     async def replace(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         system_prompt: SystemPromptAnalysisPayload,
@@ -417,7 +418,7 @@ class _SystemPromptSnapshotRepo:
 
     async def delete(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> None:
@@ -503,7 +504,7 @@ class _SessionRepo:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> _SessionState:
         """Return session head."""
@@ -850,11 +851,11 @@ class _OutputMetadataRepository:
 
     def __init__(self, *, failure: Exception | None) -> None:
         self.failure = failure
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
 
     async def persist_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authority: FileResourceAuthority,
         generated_images: Sequence[ProviderOutputFileMetadata],
@@ -870,7 +871,7 @@ class _ModelOperationRepository:
     """Reject unexpected settlement in fixtures without an operation identity."""
 
     async def complete_success_in_session(
-        self, session: AsyncSession, completion: ModelOperationCompletion
+        self, session: ReadSession, completion: ModelOperationCompletion
     ) -> None:
         """Require a focused settlement fake when a test enables completion."""
         del session, completion
@@ -895,7 +896,7 @@ def _metadata_admission() -> ProviderOutputMetadataAdmission:
 
 def _execution(
     *,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     input_projection_repository: EngineInputProjectionRepository | None,
     terminal_finalization_repository: TerminalRunFinalizationRepository | None,
     metadata_repository: _OutputMetadataRepository,
@@ -1469,12 +1470,12 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
     open_sessions = 0
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal open_sessions
         open_sessions += 1
         session = _Session()
         try:
-            yield session
+            yield ReadWriteSession(session)
         finally:
             await session.commit()
             open_sessions -= 1

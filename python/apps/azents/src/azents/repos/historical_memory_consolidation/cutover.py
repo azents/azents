@@ -3,7 +3,6 @@
 import dataclasses
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -39,6 +38,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     consolidation_session,
     database_now,
@@ -60,7 +60,7 @@ def _snapshot_predicate() -> sa.ColumnElement[bool]:
 class MemoryHandoverRepository:
     """Requires operator-owned quiescence; never controls live infrastructure."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def reset_snapshots(
         self,
@@ -74,14 +74,14 @@ class MemoryHandoverRepository:
             if after is not None:
                 query = query.where(RDBToolkitState.id > after)
             ids = list(
-                await session.scalars(
+                await session.write_session.scalars(
                     query.order_by(RDBToolkitState.id)
                     .limit(request.batch_size)
                     .with_for_update(nowait=True)
                 )
             )
             if ids:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBToolkitState).where(RDBToolkitState.id.in_(ids))
                 )
         return MemoryHandoverPage(len(ids), ids[-1] if ids else None)
@@ -94,7 +94,7 @@ class MemoryHandoverRepository:
     ) -> MemoryHandoverPage:
         request.validate()
         async with consolidation_session(self.session_manager) as session:
-            if await session.scalar(
+            if await session.write_session.scalar(
                 sa.select(
                     sa.select(RDBToolkitState.id).where(_snapshot_predicate()).exists()
                 )
@@ -106,7 +106,7 @@ class MemoryHandoverRepository:
             if after is not None:
                 query = query.where(RDBConsolidationUnit.id > after)
             units = list(
-                await session.scalars(
+                await session.write_session.scalars(
                     query.order_by(RDBConsolidationUnit.id)
                     .limit(request.batch_size)
                     .with_for_update(nowait=True)
@@ -123,7 +123,7 @@ class MemoryHandoverRepository:
                 attempts = sa.select(RDBConsolidationAttempt.id).where(
                     RDBConsolidationAttempt.unit_id == unit.id
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBConsolidationAttempt)
                     .where(
                         RDBConsolidationAttempt.unit_id == unit.id,
@@ -147,7 +147,7 @@ class MemoryHandoverRepository:
                     # Old application code cannot attest to denial continuity.
                     # Discard the entire derived graph, even when hashes match.
                     unit.published_revision_id = None
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.update(RDBConsolidationWork)
                         .where(work_predicate(key))
                         .values(
@@ -160,27 +160,27 @@ class MemoryHandoverRepository:
                             published_revision_id=None,
                         )
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.delete(RDBConsolidationDraft).where(
                             RDBConsolidationDraft.unit_id == unit.id
                         )
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.delete(RDBConsolidationEvidence).where(
                             RDBConsolidationEvidence.attempt_id.in_(attempts)
                         )
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.delete(RDBConsolidationMutationReceipt).where(
                             RDBConsolidationMutationReceipt.attempt_id.in_(attempts)
                         )
                     )
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.delete(RDBConsolidationRevision).where(
                             RDBConsolidationRevision.unit_id == unit.id
                         )
                     )
-                await session.flush()
+                await session.write_session.flush()
         return MemoryHandoverPage(len(units), units[-1].id if units else None)
 
     async def reconcile_sources(
@@ -208,7 +208,7 @@ class MemoryHandoverRepository:
             if after is not None:
                 query = query.where(RDBHistoricalMemorySource.source_session_id > after)
             rows = (
-                await session.execute(
+                await session.write_session.execute(
                     query.order_by(RDBHistoricalMemorySource.source_session_id)
                     .limit(request.batch_size)
                     .with_for_update(nowait=True)
@@ -245,7 +245,7 @@ class MemoryHandoverRepository:
                     continue
                 grant = None
                 if root.product_mode is AgentSessionProductMode.USER:
-                    grant = await session.scalar(
+                    grant = await session.write_session.scalar(
                         sa.select(RDBWorkspaceUser.memory_grant_identity)
                         .where(
                             RDBWorkspaceUser.workspace_id == root.workspace_id,
@@ -264,7 +264,7 @@ class MemoryHandoverRepository:
                 if request.action is MemoryHandoverAction.REACTIVATE:
                     # Reuse an identical existing metadata enrollment idempotently.
                     # No prior draft, revision or receipt remains to supply input.
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.update(RDBConsolidationWork)
                         .where(
                             RDBConsolidationWork.agent_id == root.agent_id,
@@ -292,7 +292,7 @@ class MemoryHandoverRepository:
                         )
                         .values(state=ConsolidationWorkState.PENDING)
                     )
-            await session.flush()
+            await session.write_session.flush()
         return MemoryHandoverPage(
             len(rows), rows[-1][0].source_session_id if rows else None
         )

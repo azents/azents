@@ -9,7 +9,6 @@ from uuid import uuid4
 
 from azcommon.infra.s3.service import S3Service
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
@@ -18,6 +17,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_avatar_cleanup import AgentAvatarCleanupRepository
 from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
 from azents.repos.agent_execution import EventTranscriptRepository
@@ -123,7 +123,7 @@ class FileLifecycleCleanupService:
     """Run bounded cleanup for file lifecycle resources."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     artifact_repository: Annotated[ArtifactRepository, Depends(ArtifactRepository)]
     exchange_file_repository: Annotated[

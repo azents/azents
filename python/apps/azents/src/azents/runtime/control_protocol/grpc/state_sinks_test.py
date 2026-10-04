@@ -13,7 +13,6 @@ from azents_runtime_control.provider import RuntimeProviderReport
 from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMProvider,
@@ -33,6 +32,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
 from azents.repos.runtime_profile.data import RuntimeConfigurationState
@@ -61,13 +61,13 @@ class _RuntimeRepository(AgentRuntimeRepository):
         self.record_provider_connection_state_call = AsyncMock(return_value=None)
 
     async def get_by_id(
-        self, session: AsyncSession, runtime_id: str
+        self, session: ReadSession, runtime_id: str
     ) -> AgentRuntime | None:
         return await self.get_by_id_call(session, runtime_id)
 
     async def provider_report_matches_binding(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         provider_logical_id: str,
@@ -80,7 +80,7 @@ class _RuntimeRepository(AgentRuntimeRepository):
 
     async def record_provider_observed_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
         observed_state: RuntimeProviderObservedState,
         provider_generation: int,
@@ -101,7 +101,7 @@ class _RuntimeRepository(AgentRuntimeRepository):
 
     async def record_provider_connection_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
         connection_state: RuntimeProviderConnectionState,
     ) -> AgentRuntime | None:
@@ -124,7 +124,7 @@ class _ProfileRepository(RuntimeProfileRepository):
 
     async def get_configuration_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         for_update: bool = False,
@@ -135,7 +135,7 @@ class _ProfileRepository(RuntimeProfileRepository):
 
     async def configuration_evidence_matches_current(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -147,7 +147,7 @@ class _ProfileRepository(RuntimeProfileRepository):
 
     async def configuration_evidence_matches_applied(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -159,7 +159,7 @@ class _ProfileRepository(RuntimeProfileRepository):
 
     async def record_provider_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -176,7 +176,7 @@ class _ProfileRepository(RuntimeProfileRepository):
 
     async def record_runner_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -193,7 +193,7 @@ class _ProfileRepository(RuntimeProfileRepository):
 
 
 async def test_runner_heartbeat_configuration_waits_for_provider_ack(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     runtime_repository = _RuntimeRepository()
     runtime_repository.get_by_id_call.return_value = Mock(
@@ -229,7 +229,7 @@ async def test_runner_heartbeat_configuration_waits_for_provider_ack(
 
 
 async def test_runner_heartbeat_configuration_stops_after_runner_report(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     runtime_repository = _RuntimeRepository()
     runtime_repository.get_by_id_call.return_value = Mock(
@@ -275,7 +275,7 @@ async def test_runner_heartbeat_configuration_stops_after_runner_report(
 
 
 async def test_runner_heartbeat_configuration_rejects_stale_current_target(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Evidence read before a target race is fenced by the current pointer."""
     runtime_repository = _RuntimeRepository()
@@ -314,7 +314,7 @@ async def test_runner_heartbeat_configuration_rejects_stale_current_target(
 
 
 async def test_runner_heartbeat_configuration_skips_already_applied_target(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """No heartbeat evidence is emitted after the applied pointer catches up."""
     runtime_repository = _RuntimeRepository()
@@ -344,7 +344,7 @@ async def test_runner_heartbeat_configuration_skips_already_applied_target(
 
 
 async def test_provider_running_report_clears_start_timeout_failure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Late provider RUNNING report recovers a Control start timeout."""
     repo = AgentRuntimeRepository()
@@ -404,7 +404,7 @@ async def test_provider_running_report_clears_start_timeout_failure(
 
 
 async def test_provider_sink_completes_current_restart_handoff(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A current Provider Restart completion rearms ordinary Start."""
     repo = AgentRuntimeRepository()
@@ -461,7 +461,7 @@ async def test_provider_sink_completes_current_restart_handoff(
 
 
 async def test_provider_starting_report_does_not_acknowledge_configuration(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Only a ready Provider report can unlock Runner evidence delivery."""
     runtime_repository = _RuntimeRepository()
@@ -505,7 +505,7 @@ async def test_provider_starting_report_does_not_acknowledge_configuration(
 
 
 async def test_provider_running_report_without_enforcement_ack_skips_configuration(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Lifecycle-only or drifted v3 reports cannot acknowledge configuration."""
     runtime_repository = _RuntimeRepository()
@@ -551,7 +551,7 @@ async def test_provider_running_report_without_enforcement_ack_skips_configurati
 
 
 async def test_provider_report_ignores_finalized_runtime(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A late orphan report cannot interrupt the shared Provider stream."""
     repo = AgentRuntimeRepository()
@@ -587,13 +587,13 @@ async def test_provider_report_ignores_finalized_runtime(
 
 
 async def test_provider_report_rejects_bound_runtime_provider_mismatch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A bound Runtime accepts reports only from its selected Provider."""
     repo = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         runtime_id = await _create_runtime(session, "provider-sink-binding-mismatch")
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
             .values(runtime_provider_id="provider-bound")
@@ -627,7 +627,7 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
 
 
 async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A terminal Provider acknowledgement becomes the finalization precondition."""
     repo = AgentRuntimeRepository()
@@ -672,7 +672,7 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
 
 
 async def test_runner_state_sink_persists_runner_workspace_path(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Runner report owns the persisted Agent Workspace path."""
     repo = AgentRuntimeRepository()
@@ -697,7 +697,7 @@ async def test_runner_state_sink_persists_runner_workspace_path(
 
 
 async def test_runner_state_sink_rejects_missing_workspace_path(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Runner readiness requires Agent Workspace path evidence."""
     repo = AgentRuntimeRepository()
@@ -722,7 +722,7 @@ async def test_runner_state_sink_rejects_missing_workspace_path(
 
 
 async def test_runner_state_sink_normalizes_workspace_path(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Runner workspace evidence is normalized before persistence."""
     repo = AgentRuntimeRepository()
@@ -747,7 +747,7 @@ async def test_runner_state_sink_normalizes_workspace_path(
 
 
 async def test_runner_state_sink_rejects_relative_workspace_path(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Runner workspace evidence must be absolute."""
     repo = AgentRuntimeRepository()
@@ -774,7 +774,7 @@ async def test_runner_state_sink_rejects_relative_workspace_path(
 
 
 async def test_runner_state_sink_treats_busy_runner_as_ready(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An active Runner operation keeps the Runtime available."""
     repo = AgentRuntimeRepository()
@@ -807,7 +807,7 @@ async def test_runner_state_sink_treats_busy_runner_as_ready(
 
 
 async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Runner stream close makes route unavailability visible in durable state."""
     repo = AgentRuntimeRepository()
@@ -845,7 +845,7 @@ async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
 
 
 async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Stale Runner reports do not overwrite newer durable generations."""
     repo = AgentRuntimeRepository()
@@ -892,7 +892,7 @@ async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
 
 
 async def test_runner_state_sink_ignores_previous_desired_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A replaced Runner cannot fail the next desired Runtime generation."""
     repo = AgentRuntimeRepository()
@@ -941,7 +941,7 @@ async def test_runner_state_sink_ignores_previous_desired_generation(
 
 
 async def test_runner_state_sink_fences_generation_changed_during_validation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A report cannot mutate state after its desired generation is replaced."""
     repo = AgentRuntimeRepository()
@@ -957,7 +957,7 @@ async def test_runner_state_sink_fences_generation_changed_during_validation(
     profile_repository = _profile_repository()
 
     async def replace_generation(
-        session: AsyncSession,
+        session: WriteSession,
         **_: object,
     ) -> None:
         command = await repo.set_desired_state(
@@ -998,7 +998,7 @@ async def test_runner_state_sink_fences_generation_changed_during_validation(
     assert runtime.failure_code is None
 
 
-async def _create_runtime(session: AsyncSession, slug: str) -> str:
+async def _create_runtime(session: WriteSession, slug: str) -> str:
     workspace_repo = WorkspaceRepository()
     result = await workspace_repo.create(
         session,
@@ -1015,8 +1015,8 @@ async def _create_runtime(session: AsyncSession, slug: str) -> str:
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -1050,8 +1050,8 @@ async def _create_runtime(session: AsyncSession, slug: str) -> str:
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
 
     provider = await RuntimeProviderRepository().create(
         session,
@@ -1071,7 +1071,7 @@ async def _create_runtime(session: AsyncSession, slug: str) -> str:
         ),
     )
     runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentRuntime)
         .where(RDBAgentRuntime.id == runtime.id)
         .values(runtime_provider_resource_id=provider.id)

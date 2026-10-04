@@ -1,7 +1,6 @@
 """Final database deletion boundary for a retention-purged Session tree."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -16,6 +15,7 @@ from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContextGitWorktree,
     RDBSessionAgentContextProject,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 class SessionLifecycleFinalizerRepository:
@@ -23,7 +23,7 @@ class SessionLifecycleFinalizerRepository:
 
     async def finalize_purged_root_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         session_ids: list[str],
@@ -33,14 +33,14 @@ class SessionLifecycleFinalizerRepository:
             session,
             session_ids=session_ids,
         )
-        scheduled_task_id = await session.scalar(
+        scheduled_task_id = await session.write_session.scalar(
             sa.select(RDBScheduledTask.id)
             .where(RDBScheduledTask.session_id.in_(session_ids))
             .limit(1)
         )
         if scheduled_task_id is not None:
             raise RuntimeError("Scheduled Tasks remain for the purged Session tree.")
-        root_session_agent_id = await session.scalar(
+        root_session_agent_id = await session.write_session.scalar(
             sa.select(RDBSessionAgent.id).where(
                 RDBSessionAgent.agent_session_id == root_session_id
             )
@@ -48,7 +48,7 @@ class SessionLifecycleFinalizerRepository:
         if root_session_agent_id is not None:
             context_ids = list(
                 (
-                    await session.scalars(
+                    await session.write_session.scalars(
                         sa.select(RDBSessionAgent.context_id).where(
                             RDBSessionAgent.root_session_agent_id
                             == root_session_agent_id
@@ -57,26 +57,26 @@ class SessionLifecycleFinalizerRepository:
                 ).all()
             )
             if context_ids:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBSessionAgentContextGitWorktree).where(
                         RDBSessionAgentContextGitWorktree.session_agent_context_id.in_(
                             context_ids
                         )
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBSessionAgentContextProject).where(
                         RDBSessionAgentContextProject.session_agent_context_id.in_(
                             context_ids
                         )
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBSessionAgentContext)
                     .where(RDBSessionAgentContext.id.in_(context_ids))
                     .values(root_session_agent_id=None)
                 )
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSessionAgent)
                 .where(
                     RDBSessionAgent.root_session_agent_id == root_session_agent_id,
@@ -84,30 +84,30 @@ class SessionLifecycleFinalizerRepository:
                 )
                 .values(parent_session_agent_id=None)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSessionAgent).where(
                     RDBSessionAgent.id == root_session_agent_id
                 )
             )
             if context_ids:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBSessionAgentContext).where(
                         RDBSessionAgentContext.id.in_(context_ids)
                     )
                 )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def _require_absent_external_channel_roots(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: list[str],
     ) -> None:
         """Require External Channel lifecycle roots to be purged before deletion."""
-        binding_id = await session.scalar(
+        binding_id = await session.read_session.scalar(
             sa.select(RDBExternalChannelBinding.id)
             .where(RDBExternalChannelBinding.agent_session_id.in_(session_ids))
             .limit(1)
@@ -116,7 +116,7 @@ class SessionLifecycleFinalizerRepository:
             raise RuntimeError(
                 "External Channel bindings remain for the purged Session tree."
             )
-        request_id = await session.scalar(
+        request_id = await session.read_session.scalar(
             sa.select(RDBExternalChannelAccessRequest.id)
             .where(RDBExternalChannelAccessRequest.agent_session_id.in_(session_ids))
             .limit(1)
@@ -125,7 +125,7 @@ class SessionLifecycleFinalizerRepository:
             raise RuntimeError(
                 "External Channel access requests remain for the purged Session tree."
             )
-        grant_id = await session.scalar(
+        grant_id = await session.read_session.scalar(
             sa.select(RDBExternalChannelAccessGrant.id)
             .where(RDBExternalChannelAccessGrant.agent_session_id.in_(session_ids))
             .limit(1)

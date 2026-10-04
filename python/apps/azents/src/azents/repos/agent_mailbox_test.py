@@ -18,6 +18,7 @@ from azents.core.enums import (
 )
 from azents.core.mailbox_data import MailboxItem
 from azents.engine.events.types import AgentRunState
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
@@ -90,7 +91,7 @@ class _MailboxAdmissionRepository(MailboxAdmissionRepository):
 
     async def enqueue_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         input: MailboxEnqueue,
     ) -> MailboxAdmissionResult:
         del session
@@ -135,7 +136,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def lock_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_agent_id: str,
     ) -> SessionAgent:
         del session
@@ -150,7 +151,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession:
         del session
@@ -163,7 +164,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def mark_session_agent_message_activity(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_agent_id: str,
     ) -> None:
@@ -172,7 +173,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def mark_running_for_input_wakeup(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> None:
         del session
@@ -284,7 +285,7 @@ async def test_terminal_result_is_queue_only_and_contains_run_metadata(
         parent_id="root-agent",
     )
     result = await repository.enqueue_terminal_result(
-        require_instance(MagicMock(spec=AsyncSession), AsyncSession),
+        ReadWriteSession(require_instance(MagicMock(spec=AsyncSession), AsyncSession)),
         source=source,
         target=parent,
         run=_terminal_run(status),
@@ -329,7 +330,9 @@ async def test_terminal_result_requires_direct_parent() -> None:
     )
     with pytest.raises(ValueError, match="direct parent"):
         await repository.enqueue_terminal_result(
-            require_instance(MagicMock(spec=AsyncSession), AsyncSession),
+            ReadWriteSession(
+                require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+            ),
             source=source,
             target=wrong_target,
             run=_terminal_run(AgentRunStatus.COMPLETED),
@@ -360,7 +363,9 @@ async def test_mailbox_rejects_archived_target_before_enqueue() -> None:
     )
     with pytest.raises(ValueError, match="Target AgentSession is not active"):
         await repository.enqueue_followup_task(
-            require_instance(MagicMock(spec=AsyncSession), AsyncSession),
+            ReadWriteSession(
+                require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+            ),
             source=source,
             target=target,
             content="Resume work.",
@@ -389,7 +394,9 @@ async def test_wake_mailbox_rejects_stopping_target_before_enqueue() -> None:
     )
     with pytest.raises(ValueError, match="Target AgentSession is stopping"):
         await repository.enqueue_followup_task(
-            require_instance(MagicMock(spec=AsyncSession), AsyncSession),
+            ReadWriteSession(
+                require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+            ),
             source=source,
             target=target,
             content="Resume work.",

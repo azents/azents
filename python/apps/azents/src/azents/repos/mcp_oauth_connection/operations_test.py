@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MCPOAuthConnectionStatus
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 from azents.repos.mcp_oauth_connection.operations import (
@@ -47,11 +48,12 @@ def _connection(
 
 async def test_oauth_operations_close_transactions_before_returning() -> None:
     """OAuth load and finalization return only after transactions close."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         assert not transaction_active
         transaction_active = True
@@ -64,7 +66,7 @@ async def test_oauth_operations_close_transactions_before_returning() -> None:
     repository = AsyncMock(spec=MCPOAuthConnectionRepository)
 
     async def get_by_toolkit_id(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         toolkit_id: str,
     ) -> MCPOAuthConnection:
         assert transaction_active
@@ -73,13 +75,13 @@ async def test_oauth_operations_close_transactions_before_returning() -> None:
         return stored
 
     async def get_by_toolkit_id_for_update(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         toolkit_id: str,
     ) -> MCPOAuthConnection:
         return await get_by_toolkit_id(current_session, toolkit_id)
 
     async def update_tokens(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         toolkit_id: str,
         access_token: str,
@@ -129,11 +131,12 @@ async def test_oauth_operations_preserve_concurrent_credentials_and_failure_stat
     None
 ):
     """Stale writes yield to newer credentials and current failures persist."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         assert not transaction_active
         transaction_active = True

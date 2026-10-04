@@ -19,6 +19,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_web import RDBRuntimeWebSessionRoute
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
@@ -45,20 +46,22 @@ def epoch(route: RuntimeWebSessionRoute) -> RuntimeStreamRouteEpoch:
 class RouteManager:
     """Observe real sessions and authoritative transaction timestamps."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.server_times: list[datetime] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "No nesting of completed route operations"
         self.active = True
         try:
             async with self.manager() as session:
                 self.sessions.append(session)
-                server_time = await session.scalar(sa.select(sa.func.now()))
+                server_time = await session.write_session.scalar(
+                    sa.select(sa.func.now())
+                )
                 assert isinstance(server_time, datetime)
                 self.server_times.append(server_time)
                 yield session
@@ -67,7 +70,9 @@ class RouteManager:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -80,7 +85,7 @@ class RouteFixture:
 
 
 async def route_fixture(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     name: str,
 ) -> RouteFixture:
     observed = RouteManager(manager)
@@ -92,8 +97,8 @@ async def route_fixture(
         runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent_id)
         runtime.desired_generation = 3
         runtime.runner_generation = 4
-        session.add(runtime)
-        await session.flush()
+        session.write_session.add(runtime)
+        await session.write_session.flush()
         runtime_id = runtime.id
     return RouteFixture(
         runtime_id,
@@ -129,13 +134,15 @@ async def acquire(
 
 async def stored_route(fixture: RouteFixture) -> RuntimeWebSessionRoute | None:
     async with fixture.manager.manager() as session:
-        row = await session.get(RDBRuntimeWebSessionRoute, fixture.runtime_id)
+        row = await session.write_session.get(
+            RDBRuntimeWebSessionRoute, fixture.runtime_id
+        )
         return None if row is None else RuntimeWebSessionRouteRepository._route(row)
 
 
 async def expire(fixture: RouteFixture) -> None:
     async with fixture.manager.manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeWebSessionRoute)
             .where(RDBRuntimeWebSessionRoute.runtime_id == fixture.runtime_id)
             .values(
@@ -177,7 +184,7 @@ async def consume(
 
 
 async def test_completed_routes_preserve_sql_clock_and_atomic_nonce(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, "completed-route-clock")
     route = await acquire(fixture, lease_seconds=30)
@@ -213,7 +220,7 @@ async def test_completed_routes_preserve_sql_clock_and_atomic_nonce(
     "part", ["owner_boot_id", "session_lease_id", "lease_generation"]
 )
 async def test_stale_epoch_never_changes_current_route(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     part: str,
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, f"completed-route-stale-{part}")
@@ -241,7 +248,7 @@ async def test_stale_epoch_never_changes_current_route(
 
 
 async def test_expired_replacement_increments_generation_and_release_has_no_ttl_guard(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, "completed-route-replace")
     old = await acquire(fixture)
@@ -268,7 +275,7 @@ async def test_expired_replacement_increments_generation_and_release_has_no_ttl_
 @pytest.mark.parametrize("generation", ["desired_generation", "runner_generation"])
 @pytest.mark.parametrize("operation", ["renew", "consume", "resolve"])
 async def test_changed_runtime_generation_keeps_current_route_unchanged(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     generation: str,
     operation: str,
 ) -> None:
@@ -277,7 +284,7 @@ async def test_changed_runtime_generation_keeps_current_route_unchanged(
     )
     route = await acquire(fixture)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == fixture.runtime_id)
             .values(**{generation: 5})
@@ -303,7 +310,7 @@ async def test_changed_runtime_generation_keeps_current_route_unchanged(
 
 @pytest.mark.parametrize("field", ["protocol", "nonce", "deadline", "draining"])
 async def test_join_exact_authority_mismatch_does_not_consume_nonce(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     field: str,
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, f"completed-join-{field}")
@@ -328,7 +335,7 @@ async def test_join_exact_authority_mismatch_does_not_consume_nonce(
 
 
 async def test_route_lock_order_retains_existing_asymmetry(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, "completed-route-locks")
     statements: list[str] = []
@@ -347,9 +354,9 @@ async def test_route_lock_order_retains_existing_asymmetry(
             statements.append(normalized)
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
+    async def manager() -> AsyncIterator[WriteSession]:
         async with fixture.manager() as session:
-            connection = await session.connection()
+            connection = await session.write_session.connection()
             event.listen(connection.sync_connection, "before_cursor_execute", observe)
             try:
                 yield session
@@ -397,7 +404,7 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
 
     async def acquire(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         desired_generation: int,
@@ -422,13 +429,13 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
             lease_seconds=lease_seconds,
         )
         if self.stage == "acquire":
-            assert session.in_transaction()
+            assert session.read_session.in_transaction()
             raise self.error
         return result
 
     async def renew(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -447,13 +454,13 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
             lease_seconds=lease_seconds,
         )
         if self.stage == "renew":
-            assert session.in_transaction()
+            assert session.read_session.in_transaction()
             raise self.error
         return result
 
     async def consume_join(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -474,13 +481,13 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
             join_deadline_at=join_deadline_at,
         )
         if self.stage == "consume_join":
-            assert session.in_transaction()
+            assert session.read_session.in_transaction()
             raise self.error
         return result
 
     async def mark_draining(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -495,13 +502,13 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
             lease_generation=lease_generation,
         )
         if self.stage == "mark_draining":
-            assert session.in_transaction()
+            assert session.read_session.in_transaction()
             raise self.error
         return result
 
     async def release(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -516,7 +523,7 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
             lease_generation=lease_generation,
         )
         if self.stage == "release":
-            assert session.in_transaction()
+            assert session.read_session.in_transaction()
             raise self.error
         return result
 
@@ -526,7 +533,7 @@ class RouteWriteFault(RuntimeWebSessionRouteRepository):
 )
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_real_route_write_fault_or_cancellation_rolls_back_exact_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
     cancel: bool,
 ) -> None:
@@ -565,7 +572,7 @@ async def test_real_route_write_fault_or_cancellation_rolls_back_exact_mutation(
 
 
 async def test_resolve_only_suppresses_existing_runtime_route_conflict(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await route_fixture(rdb_session_manager, "route-resolve-error")
     route = await acquire(fixture)
@@ -573,7 +580,7 @@ async def test_resolve_only_suppresses_existing_runtime_route_conflict(
     class FailedRuntimeValidation(RuntimeWebSessionRouteRepository):
         async def _validate_runtime(
             self,
-            session: AsyncSession,
+            session: WriteSession,
             *,
             runtime_id: str,
             desired_generation: int,
@@ -602,17 +609,17 @@ async def test_resolve_only_suppresses_existing_runtime_route_conflict(
 
 
 async def cleanup_committed_route(
-    manager: SessionManager[AsyncSession], fixture: RouteFixture
+    manager: SessionManager[WriteSession], fixture: RouteFixture
 ) -> None:
     """Delete only the independent race's committed fixture identity graph."""
     async with manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentRuntime).where(RDBAgentRuntime.id == fixture.runtime_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgent).where(RDBAgent.id == fixture.agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == fixture.workspace_id)
         )
 
@@ -627,15 +634,16 @@ async def test_independent_route_transactions_have_exactly_one_winner(
     del latest_db_schema
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     fixture = await route_fixture(manager, f"route-race-{uuid4().hex[:12]}")
     route: RuntimeWebSessionRoute | None = None
@@ -644,9 +652,9 @@ async def test_independent_route_transactions_have_exactly_one_winner(
     tasks: list[asyncio.Task[RuntimeWebSessionRoute]] = []
 
     @asynccontextmanager
-    async def contender_manager() -> AsyncIterator[AsyncSession]:
+    async def contender_manager() -> AsyncIterator[WriteSession]:
         async with manager() as session:
-            pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+            pid = await session.read_session.scalar(sa.text("SELECT pg_backend_pid()"))
             assert isinstance(pid, int)
             pids.append(pid)
             await barrier.wait()
@@ -721,15 +729,16 @@ async def test_independent_uncommitted_authority_change_blocks_exact_contender(
     del latest_db_schema
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     fixture = await route_fixture(manager, f"route-block-{uuid4().hex[:12]}")
     route = await acquire(fixture)
@@ -739,23 +748,23 @@ async def test_independent_uncommitted_authority_change_blocks_exact_contender(
     second_started = asyncio.Event()
     release = asyncio.Event()
     pids: list[int] = []
-    opened: list[AsyncSession] = []
+    opened: list[WriteSession] = []
     replacement: list[RuntimeWebSessionRoute] = []
 
     async def first() -> None:
         async with manager() as session:
             opened.append(session)
-            pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+            pid = await session.read_session.scalar(sa.text("SELECT pg_backend_pid()"))
             assert isinstance(pid, int)
             pids.append(pid)
             if change.startswith("generation"):
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBAgentRuntime)
                     .where(RDBAgentRuntime.id == fixture.runtime_id)
                     .values(desired_generation=4)
                 )
             elif change == "expired-renew":
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBRuntimeWebSessionRoute)
                     .where(RDBRuntimeWebSessionRoute.runtime_id == fixture.runtime_id)
                     .values(
@@ -782,11 +791,11 @@ async def test_independent_uncommitted_authority_change_blocks_exact_contender(
             await release.wait()
 
     @asynccontextmanager
-    async def second_manager() -> AsyncIterator[AsyncSession]:
+    async def second_manager() -> AsyncIterator[WriteSession]:
         await first_locked.wait()
         async with manager() as session:
             opened.append(session)
-            pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+            pid = await session.read_session.scalar(sa.text("SELECT pg_backend_pid()"))
             assert isinstance(pid, int)
             pids.append(pid)
             second_started.set()
@@ -827,7 +836,7 @@ async def test_independent_uncommitted_authority_change_blocks_exact_contender(
         async with asyncio.timeout(10):
             async with manager() as observer:
                 while True:
-                    blockers = await observer.scalar(
+                    blockers = await observer.write_session.scalar(
                         sa.text("SELECT pg_blocking_pids(:pid)"), {"pid": pids[1]}
                     )
                     if pids[0] in blockers:
@@ -847,7 +856,7 @@ async def test_independent_uncommitted_authority_change_blocks_exact_contender(
             assert current.session_lease_id == route.session_lease_id
             assert current.lease_expires_at < route.lease_expires_at
             assert current.join_nonce_hash == route.join_nonce_hash
-        assert all(not session.in_transaction() for session in opened)
+        assert all(not session.read_session.in_transaction() for session in opened)
         fixture.manager.assert_closed()
     finally:
         release.set()

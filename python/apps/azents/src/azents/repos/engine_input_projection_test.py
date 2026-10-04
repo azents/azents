@@ -23,6 +23,7 @@ from azents.engine.events.types import (
     ProviderToolSemanticContent,
     build_native_compat_key,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
 
 
@@ -30,11 +31,11 @@ from azents.repos.engine_input_projection import EngineInputProjectionRepository
 class _ProjectionState:
     """Track the single caller-repository session and ordered payload changes."""
 
-    session: AsyncSession
+    session: WriteSession
     events: list[Event]
     operations: list[str]
 
-    def assert_session(self, session: AsyncSession) -> None:
+    def assert_session(self, session: ReadSession) -> None:
         """Require the projection primitive to retain its caller's session."""
         assert session is self.session
 
@@ -49,7 +50,7 @@ class _ExchangeRepository:
         self.status = status
 
     async def list_statuses_by_object_key(
-        self, session: AsyncSession, *, object_keys: Sequence[str]
+        self, session: ReadSession, *, object_keys: Sequence[str]
     ) -> dict[str, ExchangeFileStatus]:
         """Read attachment status once in transcript order."""
         self.state.assert_session(session)
@@ -69,7 +70,7 @@ class _ModelFileRepository:
 
     async def list_statuses_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_file_ids: Sequence[str],
@@ -89,7 +90,7 @@ class _TranscriptRepository:
         self.state = state
 
     async def update_payload(
-        self, session: AsyncSession, event_id: str, payload: EventPayload
+        self, session: ReadSession, event_id: str, payload: EventPayload
     ) -> Event:
         """Return the immutable updated Event used by the next projection."""
         self.state.assert_session(session)
@@ -207,7 +208,8 @@ async def test_input_projection_preserves_all_supported_output_shapes(
 ) -> None:
     """Keep output order and provider metadata through both durable projections."""
     original = _event(source)
-    async with AsyncSession() as session:
+    async with AsyncSession() as _raw_session:
+        session = ReadWriteSession(_raw_session)
         state = _ProjectionState(session=session, events=[original], operations=[])
         repository = EngineInputProjectionRepository(
             exchange_file_repository=_ExchangeRepository(
@@ -258,7 +260,8 @@ async def test_input_projection_preserves_all_supported_output_shapes(
 async def test_input_projection_does_not_rewrite_available_parts() -> None:
     """Available parts retain the original Event and require no payload mutation."""
     original = _event("provider_tool")
-    async with AsyncSession() as session:
+    async with AsyncSession() as _raw_session:
+        session = ReadWriteSession(_raw_session)
         state = _ProjectionState(session=session, events=[original], operations=[])
         repository = EngineInputProjectionRepository(
             exchange_file_repository=_ExchangeRepository(

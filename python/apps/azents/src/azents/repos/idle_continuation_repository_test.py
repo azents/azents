@@ -14,6 +14,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.mailbox_data import MailboxItem
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.idle_continuation import (
@@ -26,12 +27,13 @@ from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 
 async def test_failed_boundary_consume_rolls_back_new_admissions() -> None:
     """Commit-on-exit cannot persist admissions after conditional consume fails."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     staged: list[MailboxItem] = []
     persisted: list[MailboxItem] = []
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         try:
             yield session
         except BaseException:

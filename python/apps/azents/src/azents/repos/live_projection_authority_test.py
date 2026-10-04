@@ -4,7 +4,6 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.enums import (
@@ -16,6 +15,7 @@ from azents.engine.events.types import AgentRunState
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -23,7 +23,7 @@ from azents.repos.agent_session.repository_test import _create_agent, _create_wo
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 
 
-async def _create_session(manager: SessionManager[AsyncSession], *, handle: str) -> str:
+async def _create_session(manager: SessionManager[WriteSession], *, handle: str) -> str:
     async with manager() as session:
         workspace_id = await _create_workspace(session, handle)
         agent_id = await _create_agent(session, workspace_id, handle)
@@ -41,14 +41,14 @@ async def _create_session(manager: SessionManager[AsyncSession], *, handle: str)
 
 
 async def test_missing_projection_authority_preserves_distinct_owner_and_terminal_rules(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Missing owner suppresses writes; missing current Run permits terminal cleanup."""
-    sessions: list[AsyncSession] = []
-    active: list[AsyncSession] = []
+    sessions: list[ReadSession] = []
+    active: list[ReadSession] = []
 
     @asynccontextmanager
-    async def tracked() -> AsyncIterator[AsyncSession]:
+    async def tracked() -> AsyncIterator[WriteSession]:
         async with rdb_session_manager() as session:
             active.append(session)
             sessions.append(session)
@@ -67,19 +67,23 @@ async def test_missing_projection_authority_preserves_distinct_owner_and_termina
         await repository.owns_generation(session_id=missing_id, owner_generation=1)
         is False
     )
-    assert not active and all(not session.in_transaction() for session in sessions)
+    assert not active and all(
+        not session.read_session.in_transaction() for session in sessions
+    )
     assert (
         await repository.terminal_matches_current_run(
             session_id=missing_id, run_id="1" * 32
         )
         is True
     )
-    assert not active and all(not session.in_transaction() for session in sessions)
+    assert not active and all(
+        not session.read_session.in_transaction() for session in sessions
+    )
     assert len(sessions) == 2
 
 
 async def test_owner_generation_is_the_only_projection_owner_predicate(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Idle Sessions remain eligible and takeover invalidates the old scalar result."""
     session_id = await _create_session(rdb_session_manager, handle="projection-owner")
@@ -98,7 +102,7 @@ async def test_owner_generation_is_the_only_projection_owner_predicate(
     )
     assert type(original) is bool and original is True
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(owner_generation=generation + 1)
@@ -119,7 +123,7 @@ async def test_owner_generation_is_the_only_projection_owner_predicate(
 
 
 async def test_terminal_read_uses_only_running_run_from_the_requested_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Pending/foreign/terminal rows do not add eligibility restrictions."""
     current_id = await _create_session(rdb_session_manager, handle="projection-current")
@@ -167,7 +171,7 @@ async def test_terminal_read_uses_only_running_run_from_the_requested_session(
         is False
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRun)
             .where(RDBAgentRun.id == pending.id)
             .values(status=AgentRunStatus.RUNNING)
@@ -183,7 +187,7 @@ async def test_terminal_read_uses_only_running_run_from_the_requested_session(
         is False
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRun)
             .where(RDBAgentRun.id == pending.id)
             .values(status=AgentRunStatus.STOPPED)
@@ -198,18 +202,18 @@ async def test_terminal_read_uses_only_running_run_from_the_requested_session(
 
 
 async def test_each_projection_read_completes_one_same_session_query(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Each operation closes its own query context and returns a detached scalar."""
     session_id = await _create_session(
         rdb_session_manager, handle="projection-detached"
     )
-    queried: list[AsyncSession] = []
-    opened: list[AsyncSession] = []
+    queried: list[ReadSession] = []
+    opened: list[ReadSession] = []
 
     class TrackedSessions(AgentSessionRepository):
         async def get_by_id(
-            self, session: AsyncSession, agent_session_id: str
+            self, session: ReadSession, agent_session_id: str
         ) -> AgentSession | None:
             queried.append(session)
             assert session is opened[-1]
@@ -217,7 +221,7 @@ async def test_each_projection_read_completes_one_same_session_query(
 
     class TrackedRuns(AgentRunRepository):
         async def get_running_by_session_id(
-            self, session: AsyncSession, *, session_id: str
+            self, session: ReadSession, *, session_id: str
         ) -> AgentRunState | None:
             queried.append(session)
             assert session is opened[-1]
@@ -226,7 +230,7 @@ async def test_each_projection_read_completes_one_same_session_query(
             )
 
     @asynccontextmanager
-    async def tracked_manager() -> AsyncIterator[AsyncSession]:
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
         async with rdb_session_manager() as session:
             opened.append(session)
             yield session
@@ -243,5 +247,5 @@ async def test_each_projection_read_completes_one_same_session_query(
     assert type(owner) is bool
     assert type(terminal) is bool
     assert len(opened) == len(queried) == 2
-    assert all(not session.in_transaction() for session in opened)
+    assert all(not session.read_session.in_transaction() for session in opened)
     assert queried == opened

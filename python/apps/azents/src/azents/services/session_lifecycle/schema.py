@@ -6,12 +6,12 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.session_lifecycle import (
     SessionLifecycleOwnershipManifest,
     SessionLifecycleResourceClassification,
 )
+from azents.rdb.session_capabilities import ReadSession
 
 
 class PostgreSQLForeignKeyDeleteAction(enum.StrEnum):
@@ -118,11 +118,11 @@ class PostgreSQLSessionLifecycleGraphReader:
 
     async def read_foreign_keys(
         self,
-        session: AsyncSession,
+        session: ReadSession,
     ) -> tuple[PostgreSQLForeignKey, ...]:
         """Read application foreign keys and their installed PostgreSQL triggers."""
         constraint_rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.text(
                     """
                     SELECT
@@ -153,7 +153,7 @@ class PostgreSQLSessionLifecycleGraphReader:
             )
         ).mappings()
         trigger_rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.text(
                     """
                     SELECT

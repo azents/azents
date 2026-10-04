@@ -5,12 +5,12 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.job_runtime.deps import get_job_runtime
 from azents.job_runtime.types import JobRequest, JobRuntime
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.cleanup import (
     ConsolidationCleanupRepository,
 )
@@ -36,7 +36,7 @@ class HistoricalMemoryConsolidationDiscoveryService:
     """Five-minute recovery plus event-driven post-commit work continuation."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     job_runtime: Annotated[JobRuntime, Depends(get_job_runtime)]
 

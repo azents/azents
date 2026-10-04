@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Subquery
 from uuid6 import uuid7
 
@@ -26,6 +25,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationRevisionDependency,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     LockedConsolidationOwner,
@@ -90,7 +90,7 @@ def require_draft_path(path: str) -> None:
 
 
 async def check_draft_influence(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     principal: ConsolidationJobPrincipal,
     owner: LockedConsolidationOwner,
@@ -123,7 +123,7 @@ async def check_draft_influence(
 
 
 async def check_dependency_manifest(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     key: ConsolidationUnitKey,
     membership_grant_id: str | None,
@@ -144,7 +144,7 @@ async def check_dependency_manifest(
         .with_for_update(read=True, nowait=True)
         .subquery()
     )
-    roots_complete = await session.scalar(
+    roots_complete = await session.write_session.scalar(
         sa.select(
             sa.select(sa.func.count()).select_from(roots).scalar_subquery()
             == expected.scalar_subquery()
@@ -159,7 +159,7 @@ async def check_dependency_manifest(
         .with_for_update(read=True, nowait=True)
         .subquery()
     )
-    sources_complete = await session.scalar(
+    sources_complete = await session.write_session.scalar(
         sa.select(
             sa.select(sa.func.count()).select_from(sources).scalar_subquery()
             == expected.scalar_subquery()
@@ -192,19 +192,19 @@ async def check_dependency_manifest(
             )
         )
     )
-    if await session.scalar(sa.select(invalid.exists())):
+    if await session.write_session.scalar(sa.select(invalid.exists())):
         raise ConsolidationAuthorityError("Consolidation evidence is no longer valid.")
 
 
 async def copy_draft_dependencies(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     draft_id: str,
     source: type[RDBConsolidationEvidence] | type[RDBConsolidationRevisionDependency],
     predicate: sa.ColumnElement[bool],
 ) -> None:
     """Copy the complete body-free manifest server-side in one indexed statement."""
-    await session.execute(
+    await session.write_session.execute(
         insert(RDBConsolidationDraftDependency)
         .from_select(
             [
@@ -236,7 +236,7 @@ async def copy_draft_dependencies(
 class ConsolidationDraftRepository:
     """Own database-only file/manifest/receipt transactions, without Runtime I/O."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def inventory(
         self, principal: ConsolidationJobPrincipal
@@ -248,7 +248,7 @@ class ConsolidationDraftRepository:
             await check_draft_influence(
                 session, principal=principal, owner=owner, draft=draft
             )
-            files = await session.scalars(
+            files = await session.write_session.scalars(
                 sa.select(RDBConsolidationDraftFile)
                 .where(RDBConsolidationDraftFile.draft_id == draft.id)
                 .order_by(RDBConsolidationDraftFile.path)
@@ -279,7 +279,9 @@ class ConsolidationDraftRepository:
             await check_draft_influence(
                 session, principal=principal, owner=owner, draft=draft
             )
-            file = await session.get(RDBConsolidationDraftFile, (draft.id, path))
+            file = await session.write_session.get(
+                RDBConsolidationDraftFile, (draft.id, path)
+            )
             result = DraftFileObservation(
                 draft_revision_id=draft.revision_id,
                 file_revision_id=None if file is None else file.revision_id,
@@ -287,7 +289,7 @@ class ConsolidationDraftRepository:
                 content=None if file is None else file.content,
             )
             await require_commit_owner(session, owner)
-            await session.flush()
+            await session.write_session.flush()
         return result
 
     async def replay_receipt(
@@ -304,7 +306,7 @@ class ConsolidationDraftRepository:
             await check_draft_influence(
                 session, principal=principal, owner=owner, draft=draft
             )
-            receipt = await session.get(
+            receipt = await session.write_session.get(
                 RDBConsolidationMutationReceipt, (principal.attempt_id, tool_call_id)
             )
             if receipt is None:
@@ -345,7 +347,7 @@ class ConsolidationDraftRepository:
             await check_draft_influence(
                 session, principal=principal, owner=owner, draft=draft
             )
-            receipt = await session.get(
+            receipt = await session.write_session.get(
                 RDBConsolidationMutationReceipt, (principal.attempt_id, tool_call_id)
             )
             if receipt is not None:
@@ -361,7 +363,7 @@ class ConsolidationDraftRepository:
                 or owner.attempt.observation_epoch != expected_observation_epoch
             ):
                 raise ConsolidationDraftConflict("Draft read evidence is stale.")
-            count = await session.scalar(
+            count = await session.write_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBConsolidationMutationReceipt)
                 .where(
@@ -372,7 +374,7 @@ class ConsolidationDraftRepository:
                 raise ValueError("Private mutation receipt budget is exhausted.")
             files = {
                 file.path: file
-                for file in await session.scalars(
+                for file in await session.write_session.scalars(
                     sa.select(RDBConsolidationDraftFile).where(
                         RDBConsolidationDraftFile.draft_id == draft.id
                     )
@@ -402,9 +404,9 @@ class ConsolidationDraftRepository:
                 existing = files.get(change.path)
                 if change.content is None:
                     if existing is not None:
-                        await session.delete(existing)
+                        await session.write_session.delete(existing)
                 elif existing is None:
-                    session.add(
+                    session.write_session.add(
                         RDBConsolidationDraftFile(
                             draft_id=draft.id,
                             path=change.path,
@@ -432,7 +434,7 @@ class ConsolidationDraftRepository:
                 file_count=draft.file_count,
                 byte_count=draft.byte_count,
             )
-            session.add(
+            session.write_session.add(
                 RDBConsolidationMutationReceipt(
                     attempt_id=principal.attempt_id,
                     tool_call_id=tool_call_id,
@@ -441,14 +443,14 @@ class ConsolidationDraftRepository:
                 )
             )
             await require_commit_owner(session, owner)
-            await session.flush()
+            await session.write_session.flush()
         return result
 
     async def _draft(
-        self, session: AsyncSession, owner: LockedConsolidationOwner
+        self, session: WriteSession, owner: LockedConsolidationOwner
     ) -> RDBConsolidationDraft:
         """Initialize once from published prose and its body-free dependencies."""
-        draft = await session.scalar(
+        draft = await session.write_session.scalar(
             sa.select(RDBConsolidationDraft).where(
                 RDBConsolidationDraft.unit_id == owner.unit.id
             )
@@ -461,17 +463,17 @@ class ConsolidationDraftRepository:
             revision_id=uuid7().hex,
             base_revision_id=owner.unit.published_revision_id,
         )
-        session.add(draft)
-        await session.flush()
+        session.write_session.add(draft)
+        await session.write_session.flush()
         if owner.unit.published_revision_id is not None:
-            revision = await session.get(
+            revision = await session.write_session.get(
                 RDBConsolidationRevision, owner.unit.published_revision_id
             )
             if revision is None or revision.unit_id != owner.unit.id:
                 raise ConsolidationAuthorityError(
                     "Consolidation checkpoint is unavailable."
                 )
-            session.add(
+            session.write_session.add(
                 RDBConsolidationDraftFile(
                     draft_id=draft.id,
                     path="summary.md",
@@ -487,5 +489,5 @@ class ConsolidationDraftRepository:
                 source=RDBConsolidationRevisionDependency,
                 predicate=RDBConsolidationRevisionDependency.revision_id == revision.id,
             )
-        await session.flush()
+        await session.write_session.flush()
         return draft

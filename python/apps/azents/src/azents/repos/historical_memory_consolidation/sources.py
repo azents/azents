@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.enums import (
@@ -22,6 +21,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationEvidence
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     LockedConsolidationOwner,
@@ -76,20 +76,20 @@ def source_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
 
 
 async def lock_source(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     key: ConsolidationUnitKey,
     source_session_id: str,
 ) -> RDBHistoricalMemorySource:
     """Lock root then current evidence without waiting on source/lifecycle writers."""
-    root = await session.scalar(
+    root = await session.write_session.scalar(
         sa.select(RDBAgentSession)
         .where(RDBAgentSession.id == source_session_id, source_predicate(key))
         .with_for_update(read=True, nowait=True)
     )
     if root is None:
         raise ConsolidationAuthorityError("Consolidation source is unavailable.")
-    source = await session.scalar(
+    source = await session.write_session.scalar(
         sa.select(RDBHistoricalMemorySource)
         .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
         .with_for_update(read=True, nowait=True)
@@ -100,13 +100,13 @@ async def lock_source(
 
 
 async def record_evidence(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     owner: LockedConsolidationOwner,
     version: ConsolidationSourceVersion,
 ) -> None:
     """Commit exposure receipt and ledger epoch before model-visible return."""
-    await session.execute(
+    await session.write_session.execute(
         insert(RDBConsolidationEvidence)
         .values(id=uuid7().hex, attempt_id=owner.attempt.id, **version.model_dump())
         .on_conflict_do_nothing(
@@ -114,14 +114,14 @@ async def record_evidence(
         )
     )
     owner.attempt.observation_epoch += 1
-    await session.flush()
+    await session.write_session.flush()
 
 
 @dataclass(frozen=True)
 class ConsolidationSourceRepository:
     """Source reads establish conservative dependencies in a private attempt ledger."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def inventory(
         self,
@@ -168,7 +168,7 @@ class ConsolidationSourceRepository:
                         source_id_prefix
                     )
                 )
-            ids = list(await session.scalars(query))
+            ids = list(await session.write_session.scalars(query))
             entries: list[ConsolidationSourceInventoryEntry] = []
             for source_id in ids[:limit]:
                 source = await lock_source(

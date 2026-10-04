@@ -29,6 +29,7 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.access_operations import (
@@ -73,7 +74,7 @@ class _ProviderRetentionFake(ExternalChannelConversationProvisioningRepository):
 
     async def apply_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         target_resource_id: str,
         preparation: ExternalChannelConversationPreparation,
@@ -100,19 +101,19 @@ class _Session(AsyncSession):
         await self.commit_mock()
 
 
-class _SessionContext(AbstractAsyncContextManager[AsyncSession]):
+class _SessionContext(AbstractAsyncContextManager[WriteSession]):
     def __init__(self) -> None:
         self.session = _Session()
 
-    async def __aenter__(self) -> AsyncSession:
-        return self.session
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(self.session)
 
     async def __aexit__(self, *exc_info: object) -> None:
         return None
 
 
 class _SessionManager:
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
+    def __call__(self) -> AbstractAsyncContextManager[WriteSession]:
         return _SessionContext()
 
 

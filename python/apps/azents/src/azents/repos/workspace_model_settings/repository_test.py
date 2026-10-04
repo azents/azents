@@ -1,18 +1,18 @@
 """Workspace model settings repository tests."""
 
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
 from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.workspace import WorkspaceRepository
 
 from . import WorkspaceModelSettingsRepository
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests and return internal ID."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -45,7 +45,7 @@ class TestWorkspaceModelSettingsRepository:
 
     async def test_get_or_create_returns_generated_timestamps(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Return DB creation timestamp when creating empty settings row."""
         workspace_id = await _create_workspace(
@@ -63,7 +63,7 @@ class TestWorkspaceModelSettingsRepository:
 
     async def test_set_default_model_if_empty_returns_generated_timestamps(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Return DB creation timestamp when creating default model settings."""
         workspace_id = await _create_workspace(

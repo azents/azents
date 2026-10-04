@@ -6,7 +6,6 @@ from typing import Annotated, NamedTuple, assert_never
 from azcommon.result import Failure, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.chat_write_data import (
@@ -44,6 +43,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     ActiveProfileCaptureRequired,
@@ -122,7 +122,7 @@ class ChatWriteOperationsRepository:
         ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def create_idempotent_edit_input(
@@ -601,7 +601,7 @@ class ChatWriteOperationsRepository:
 
     async def _lock_and_reauthorize_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -659,7 +659,7 @@ class ChatWriteOperationsRepository:
 
     async def _get_existing_idempotent_record(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         user_id: str,
@@ -685,7 +685,7 @@ class ChatWriteOperationsRepository:
 
     async def _create_idempotent_record(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         user_id: str,

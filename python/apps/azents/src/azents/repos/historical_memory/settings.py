@@ -9,7 +9,6 @@ from typing import Annotated
 import sqlalchemy as sa
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionKind,
@@ -23,6 +22,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsCursorError,
     HistoricalMemorySettingsPage,
@@ -45,7 +45,7 @@ class HistoricalMemorySettingsRepository:
     """Own current-scope Historical Memory settings SQL."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
 
@@ -91,7 +91,7 @@ class HistoricalMemorySettingsRepository:
             RDBHistoricalMemorySource.source_session_id,
         ).limit(limit + 1)
         async with self.session_manager() as session:
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
         records = tuple(
             self._record(
                 source_session_id=source_session_id,
@@ -145,7 +145,7 @@ class HistoricalMemorySettingsRepository:
             ),
         )
         async with self.session_manager() as session:
-            row = (await session.execute(statement)).one_or_none()
+            row = (await session.write_session.execute(statement)).one_or_none()
         if row is None:
             return None
         (

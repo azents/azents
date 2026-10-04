@@ -31,6 +31,7 @@ DeterministicFixtureVariant = Literal[
     "deterministic-failure",
     "deterministic-brave-text-only",
     "deterministic-provider-core",
+    "deterministic-title-plain",
 ]
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
@@ -43,6 +44,7 @@ DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-failure",
     "deterministic-brave-text-only",
     "deterministic-provider-core",
+    "deterministic-title-plain",
 )
 
 
@@ -68,6 +70,22 @@ def build_deterministic_listing(
     fetched_at = datetime.now(timezone.utc)
     source = f"testenv_fixture:{variant}"
     match variant:
+        case "deterministic-title-plain":
+            if provider != LLMProvider.OPENAI:
+                raise ValueError("The plain-title fixture requires provider=openai.")
+            models = [
+                _candidate(
+                    provider=provider,
+                    identifier="gpt-5.5-title-plain",
+                    display_name="Plain Title Deterministic",
+                    family="gpt-5.5",
+                    integration_id=integration_id,
+                    source=source,
+                    fetched_at=fetched_at,
+                    lightweight=True,
+                )
+            ]
+            skips = []
         case "deterministic-provider-core":
             models = _provider_core_candidates(
                 provider=provider,

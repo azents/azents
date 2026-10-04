@@ -9,7 +9,6 @@ from azcommon.datetime import tznow
 from cryptography.fernet import Fernet
 from fastapi import HTTPException
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
 
 from azents.api.public.runtime_provider_enrollment.v1 import exchange_credential
@@ -29,6 +28,7 @@ from azents.core.runtime_provider_bootstrap import (
 )
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderBootstrapSourceCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
@@ -61,20 +61,20 @@ from azents.services.runtime_provider_control.service import (
 
 @asynccontextmanager
 async def _session_context(
-    session: AsyncSession,
-) -> AsyncGenerator[AsyncSession, None]:
+    session: WriteSession,
+) -> AsyncGenerator[WriteSession, None]:
     """Expose one test session through the production SessionManager shape."""
     yield session
 
 
-def _session_manager(session: AsyncSession) -> SessionManager[AsyncSession]:
+def _session_manager(session: WriteSession) -> SessionManager[WriteSession]:
     """Build one production-shaped SessionManager."""
     return lambda: _session_context(session)
 
 
 async def _create_bootstrap_issued_token_binding(
     *,
-    session: AsyncSession,
+    session: WriteSession,
     provider_repository: RuntimeProviderRepository,
     binding_repository: RuntimeProviderAuthBindingRepository,
     provider_id: str,
@@ -118,7 +118,7 @@ class TestRuntimeProviderEnrollmentService:
 
     async def test_bootstrap_source_can_issue_only_for_owned_declaration(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Another trusted source cannot enroll a Provider it does not own."""
         session_manager = _session_manager(rdb_session)
@@ -200,7 +200,7 @@ class TestRuntimeProviderEnrollmentService:
 
     async def test_new_bootstrap_connection_revokes_only_older_credentials(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Credential rotation keeps the old credential until the new one connects."""
         session_manager = _session_manager(rdb_session)
@@ -320,7 +320,7 @@ class TestRuntimeProviderEnrollmentService:
 
     async def test_redis_reset_keeps_invalid_durable_grants_unavailable(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
         redis_url: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:

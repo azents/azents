@@ -13,6 +13,7 @@ from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_history.operations import (
@@ -29,11 +30,12 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 
 async def test_session_history_search_closes_transaction_before_returning() -> None:
     """Authorized History search returns after its repository transaction closes."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         assert not transaction_active
         transaction_active = True
@@ -57,7 +59,7 @@ async def test_session_history_search_closes_transaction_before_returning() -> N
     )
 
     async def get_session(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         session_id: str,
     ) -> object:
         assert transaction_active
@@ -66,7 +68,7 @@ async def test_session_history_search_closes_transaction_before_returning() -> N
         return root
 
     async def search_roots(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         scope: SessionHistoryScope,
         query: str,

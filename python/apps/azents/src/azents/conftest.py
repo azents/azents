@@ -27,6 +27,7 @@ from testcontainers.redis import (
 
 from azents.consts import PROJECT_ROOT
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 
 #
 # Docker
@@ -113,7 +114,7 @@ async def rdb_engine(
 async def rdb_session_manager(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
-) -> AsyncGenerator[SessionManager[AsyncSession], None]:
+) -> AsyncGenerator[SessionManager[WriteSession], None]:
     """SessionManager fixture with auto-commit/rollback and test rollback.
 
     This mirrors the production session manager's auto-commit/rollback behavior,
@@ -122,7 +123,7 @@ async def rdb_session_manager(
     async with rdb_engine.connect() as connection:
 
         @asynccontextmanager
-        async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        async def session_manager() -> AsyncGenerator[WriteSession, None]:
             async with AsyncExitStack() as stack:
                 async_session = await stack.enter_async_context(
                     AsyncSession(bind=connection, expire_on_commit=False)
@@ -141,7 +142,7 @@ async def rdb_session_manager(
                         nested = connection.begin_nested()
 
                 try:
-                    yield async_session
+                    yield ReadWriteSession(async_session)
                 except Exception:
                     await async_session.rollback()
                     raise
@@ -157,8 +158,8 @@ async def rdb_session_manager(
 
 @pytest_asyncio.fixture(scope="function")
 async def rdb_session(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> AsyncGenerator[AsyncSession, None]:
+    rdb_session_manager: SessionManager[WriteSession],
+) -> AsyncGenerator[WriteSession, None]:
     """SQLAlchemy session fixture."""
     async with rdb_session_manager() as session:
         yield session

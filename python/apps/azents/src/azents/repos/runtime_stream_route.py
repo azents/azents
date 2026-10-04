@@ -5,10 +5,10 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
 from azents.repos.runtime_web.data import RuntimeWebSessionRoute
 from azents.repos.runtime_web.session_route_repository import (
@@ -21,7 +21,7 @@ class RuntimeStreamRouteOperationRepository:
     """Resolve each existing route transaction before application effects."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     route_repository: Annotated[
         RuntimeWebSessionRouteRepository, Depends(RuntimeWebSessionRouteRepository)

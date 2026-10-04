@@ -2,21 +2,21 @@
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.model_candidate_chain_cutover import (
     RDBModelCandidateChainCutover,
 )
+from azents.rdb.session_capabilities import WriteSession
 
 
-async def mark_model_candidate_chain_write(session: AsyncSession) -> None:
+async def mark_model_candidate_chain_write(session: WriteSession) -> None:
     """Fence database downgrade after the first canonical configuration write."""
     statement = insert(RDBModelCandidateChainCutover).values(
         id=1,
         schema_version=1,
         new_format_written_at=sa.func.now(),
     )
-    await session.execute(
+    await session.write_session.execute(
         statement.on_conflict_do_update(
             index_elements=[RDBModelCandidateChainCutover.id],
             set_={

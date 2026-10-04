@@ -6,11 +6,11 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_publication import ConsolidationOutputError
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.discovery import (
     ConsolidationDiscoveryRepository,
 )
@@ -45,7 +45,7 @@ class HistoricalMemorySamplingService:
     """No SQL, fake foreground identity, alternate loop or product clock override."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     discovery: Annotated[
         HistoricalMemoryDiscoveryService, Depends(HistoricalMemoryDiscoveryService)

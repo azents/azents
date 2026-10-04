@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import (
@@ -17,6 +16,7 @@ from azents.core.workspace import (
     WorkspaceCreate,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -34,17 +34,17 @@ from azents.repos.workspace_user.data import (
 class ObservedWorkspaceManager:
     """Observe real session resolution before detached results leave operations."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.resolved: list[bool] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Record closure on success and after rollback."""
         self.active = True
-        current: AsyncSession | None = None
+        current: WriteSession | None = None
         try:
             async with self.manager() as session:
                 current = session
@@ -53,14 +53,14 @@ class ObservedWorkspaceManager:
         finally:
             self.active = False
             if current is not None:
-                self.resolved.append(not current.in_transaction())
+                self.resolved.append(not current.write_session.in_transaction())
 
 
 class _FailingMembershipRepository(WorkspaceUserRepository):
     """Raise after the ordinary membership insert to prove aggregate rollback."""
 
     async def create(
-        self, session: AsyncSession, create: WorkspaceUserCreate
+        self, session: WriteSession, create: WorkspaceUserCreate
     ) -> Result[WorkspaceUser, WorkspaceNotFound]:
         """Execute ordinary creation, then fail without Admin conflict handling."""
         result = await super().create(session, create)
@@ -71,13 +71,13 @@ class _FailingMembershipRepository(WorkspaceUserRepository):
 class _MissingIdRepository(WorkspaceRepository):
     """Violate the just-created internal-ID invariant deterministically."""
 
-    async def resolve_id(self, session: AsyncSession, handle: str) -> str | None:
+    async def resolve_id(self, session: ReadSession, handle: str) -> str | None:
         """Return no ID after creation to retain the assertion contract."""
         del session, handle
         return None
 
 
-async def _user(manager: SessionManager[AsyncSession], name: str) -> str:
+async def _user(manager: SessionManager[WriteSession], name: str) -> str:
     """Create a real User for ownership foreign keys."""
     async with manager() as session:
         return (
@@ -98,7 +98,7 @@ def _owner(user_id: str, handle: str) -> CreateWithOwnerInput:
 
 
 async def test_admin_create_is_workspace_only_and_public_create_has_owner(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Both paths resolve before return while only public create adds membership."""
     user_id = await _user(rdb_session_manager, "workspace-operation-owner")
@@ -134,7 +134,7 @@ async def test_admin_create_is_workspace_only_and_public_create_has_owner(
 
 
 async def test_membership_exception_rolls_back_both_workspace_and_owner(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An actual insert followed by failure leaves neither aggregate row behind."""
     user_id = await _user(rdb_session_manager, "workspace-operation-rollback")
@@ -154,7 +154,7 @@ async def test_membership_exception_rolls_back_both_workspace_and_owner(
 
 
 async def test_resolve_id_invariant_failure_rolls_back_workspace(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A missing just-created ID retains the existing assertion failure."""
     memberships = AsyncMock(spec=WorkspaceUserRepository)
@@ -172,7 +172,7 @@ async def test_resolve_id_invariant_failure_rolls_back_workspace(
 
 
 async def test_create_and_update_conflicts_preserve_typed_errors_and_rollback(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Conflicting handle mutations cannot persist partial names or ownership."""
     async with rdb_session_manager() as session:
@@ -207,7 +207,7 @@ async def test_create_and_update_conflicts_preserve_typed_errors_and_rollback(
 
 
 async def test_update_omission_and_missing_results_are_unchanged(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Empty and partial updates preserve untouched fields and missing semantics."""
     repository = WorkspaceOperationRepository(
@@ -236,7 +236,7 @@ async def test_update_omission_and_missing_results_are_unchanged(
 
 
 async def test_user_list_keeps_membership_order_and_omits_missing_projections(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Membership read and all referenced projections share one completed lifetime."""
     now = datetime.now(UTC)

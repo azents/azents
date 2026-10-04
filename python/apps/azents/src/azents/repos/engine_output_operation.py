@@ -5,8 +5,6 @@ import datetime
 from collections.abc import Sequence
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunPhase
 from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.types import (
@@ -18,6 +16,7 @@ from azents.engine.events.types import (
     TokenUsagePayload,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.engine_event_contracts import (
     AgentRunCreateRepository,
     RunStateRepository,
@@ -42,7 +41,7 @@ class OutputMetadataRepository(Protocol):
 
     async def persist_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authority: FileResourceAuthority,
         generated_images: Sequence[ProviderOutputFileMetadata],
@@ -56,7 +55,7 @@ class OutputSystemPromptRepository(Protocol):
 
     async def replace(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         system_prompt: SystemPromptAnalysisPayload,
@@ -64,7 +63,7 @@ class OutputSystemPromptRepository(Protocol):
         """Replace the Session snapshot in the output transaction."""
         ...
 
-    async def delete(self, session: AsyncSession, *, session_id: str) -> None:
+    async def delete(self, session: WriteSession, *, session_id: str) -> None:
         """Remove the Session snapshot when this turn has no prompt analysis."""
         ...
 
@@ -96,7 +95,7 @@ class AdmittedModelOutput:
 class EngineOutputOperationRepository:
     """Own model output and generated client-result admission transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: RunStateRepository
     event_mutation_repository: EngineEventMutationRepository
     metadata_repository: OutputMetadataRepository
@@ -182,7 +181,7 @@ class EngineOutputOperationRepository:
             )
 
     async def _admit_metadata(
-        self, session: AsyncSession, admission: ProviderOutputMetadataAdmission
+        self, session: WriteSession, admission: ProviderOutputMetadataAdmission
     ) -> None:
         """Compose typed metadata with no transient upload or service dependency."""
         await self.metadata_repository.persist_in_session(

@@ -24,6 +24,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -64,14 +65,14 @@ class _TransactionTracker:
     """Create sessions whose transaction lifetime is directly observable."""
 
     def __init__(self) -> None:
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[_TrackedSession] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
         session = _TrackedSession()
         self.sessions.append(session)
         try:
-            yield session
+            yield ReadWriteSession(session)
         finally:
             session.active = False
             await session.close()
@@ -213,7 +214,7 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
     cycle_repository.claim_tracker_projection.return_value = claimed
 
     async def prepare_tracker(
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> ProviderEffectPlan:
         seed = kwargs["operation_seed"]
@@ -221,7 +222,7 @@ async def test_prepare_progress_commits_plans_and_stable_operation_seeds() -> No
         return _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE, seed=seed)
 
     async def prepare_reply(
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> tuple[ProviderEffectPlan, ...]:
         seed = kwargs["operation_seed"]

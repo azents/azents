@@ -3,9 +3,9 @@
 import datetime
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import SignupTokenDeliveryMethod
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.signup_token import SignupTokenRepository
 from azents.repos.signup_token.data import (
     SignupTokenCreate,
@@ -21,7 +21,7 @@ class TestSignupTokenRepository:
 
     async def test_claim_for_redemption_increments_used_count(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Increment used_count when claiming redeem."""
         repo = SignupTokenRepository()
@@ -49,7 +49,7 @@ class TestSignupTokenRepository:
 
     async def test_claim_for_redemption_rejects_exhausted_token(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Token with exhausted use count cannot be claimed."""
         repo = SignupTokenRepository()
@@ -75,7 +75,7 @@ class TestSignupTokenRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, SignupTokenUnavailable)
 
-    async def test_create_redemption(self, rdb_session: AsyncSession) -> None:
+    async def test_create_redemption(self, rdb_session: WriteSession) -> None:
         """Create Signup token usage record."""
         repo = SignupTokenRepository()
         now = datetime.datetime.now(datetime.UTC)

@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock
 import httpx2
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMCatalogPurpose, LLMProvider
 from azents.core.model_catalog_source import (
@@ -17,6 +16,7 @@ from azents.core.model_catalog_source import (
 from azents.core.model_metadata_collection_data import FetchedModelMetadataSource
 from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
@@ -75,7 +75,7 @@ def _fetched(payload: CatalogSourcePayload) -> FetchedModelMetadataSource:
 
 
 def _service(
-    manager: SessionManager[AsyncSession], adapter: CatalogSourceAdapter
+    manager: SessionManager[WriteSession], adapter: CatalogSourceAdapter
 ) -> ModelMetadataSourceSyncService:
     return ModelMetadataSourceSyncService(
         operations=ModelMetadataSourceOperations(
@@ -140,7 +140,7 @@ async def test_busy_atomic_claim_performs_no_collection() -> None:
 
 
 async def test_sync_publishes_source_and_affected_systems(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     adapter = AsyncMock(spec=CatalogSourceAdapter)
     adapter.fetch.return_value = _fetched(_payload(12))
@@ -169,7 +169,7 @@ async def test_sync_publishes_source_and_affected_systems(
 
 
 async def test_valid_single_provider_source_records_scoped_projection_failures(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Absent unrelated providers do not reject an otherwise valid source."""
     adapter = AsyncMock(spec=CatalogSourceAdapter)
@@ -204,7 +204,7 @@ async def test_valid_single_provider_source_records_scoped_projection_failures(
 
 
 async def test_local_projection_failure_preserves_data_and_truthful_summary(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Keep failed provider data while valid source/other catalogs update together."""
     adapter = AsyncMock(spec=CatalogSourceAdapter)
@@ -221,7 +221,7 @@ async def test_local_projection_failure_preserves_data_and_truthful_summary(
         assert before is not None
         before_rows = (
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBLLMCatalogEntry.__table__).where(
                         RDBLLMCatalogEntry.catalog_id == before.id
                     )
@@ -260,7 +260,7 @@ async def test_local_projection_failure_preserves_data_and_truthful_summary(
     async with rdb_session_manager() as session:
         after_rows = (
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBLLMCatalogEntry.__table__).where(
                         RDBLLMCatalogEntry.catalog_id == before.id
                     )
@@ -277,7 +277,7 @@ async def test_local_projection_failure_preserves_data_and_truthful_summary(
 
 
 async def test_unexpected_catalog_write_failure_rolls_back_source_and_rows(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Provider-local outcomes do not swallow or partially commit unexpected bugs."""
@@ -293,7 +293,11 @@ async def test_unexpected_catalog_write_failure_rolls_back_source_and_rows(
     before = await service.sync_current_source()
     async with rdb_session_manager() as session:
         before_rows = (
-            (await session.execute(sa.select(RDBLLMCatalogEntry.__table__)))
+            (
+                await session.write_session.execute(
+                    sa.select(RDBLLMCatalogEntry.__table__)
+                )
+            )
             .mappings()
             .all()
         )
@@ -308,7 +312,11 @@ async def test_unexpected_catalog_write_failure_rolls_back_source_and_rows(
     assert await service.get_current_source() == before
     async with rdb_session_manager() as session:
         after_rows = (
-            (await session.execute(sa.select(RDBLLMCatalogEntry.__table__)))
+            (
+                await session.write_session.execute(
+                    sa.select(RDBLLMCatalogEntry.__table__)
+                )
+            )
             .mappings()
             .all()
         )
@@ -316,7 +324,7 @@ async def test_unexpected_catalog_write_failure_rolls_back_source_and_rows(
 
 
 async def test_sync_rejects_material_provider_reduction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     adapter = AsyncMock(spec=CatalogSourceAdapter)
     adapter.policy = CatalogCollectionPolicy(
@@ -348,7 +356,7 @@ async def test_sync_rejects_material_provider_reduction(
     "failure", [ValueError("invalid data"), TimeoutError("deadline")]
 )
 async def test_fetch_failure_updates_latest_status_and_preserves_current_data(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: ValueError | TimeoutError,
 ) -> None:
     adapter = AsyncMock(spec=CatalogSourceAdapter)

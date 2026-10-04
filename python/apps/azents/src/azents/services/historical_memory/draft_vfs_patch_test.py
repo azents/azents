@@ -3,7 +3,6 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
 from azents.core.vfs import parse_vfs_search_uri
@@ -29,6 +28,7 @@ from azents.engine.tooling.tool_search import (
     ToolExposure,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.services.vfs_mutation import VfsAtomicPatchRequest, VfsMutationError
 from azents.services.vfs_read import VfsReadError
 from azents.testing.consolidation_vfs import (
@@ -45,7 +45,7 @@ _URI = "azents://memory-draft/summary.md"
 
 
 async def test_private_atomic_patch_both_wire_variants_and_result_loss(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -101,7 +101,7 @@ async def test_private_atomic_patch_both_wire_variants_and_result_loss(
 
 
 async def test_patch_applicability_failure_changes_no_file_or_revision(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -142,7 +142,7 @@ async def test_patch_applicability_failure_changes_no_file_or_revision(
     "target", ["/tmp/runtime", "../escape", "azents://memory/other"]
 )
 async def test_mixed_patch_targets_reject_before_native_runtime(
-    rdb_session_manager: SessionManager[AsyncSession], target: str
+    rdb_session_manager: SessionManager[WriteSession], target: str
 ) -> None:
     binding = await _binding(rdb_session_manager)
     runtime = AsyncMock(return_value="unexpected native call")
@@ -169,7 +169,7 @@ async def test_mixed_patch_targets_reject_before_native_runtime(
 
 
 async def test_queued_patch_rejects_delete_recreate_aba(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -193,7 +193,7 @@ async def test_queued_patch_rejects_delete_recreate_aba(
 
 
 async def test_patch_existing_target_requires_read_before_applicability(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -214,7 +214,7 @@ async def test_patch_existing_target_requires_read_before_applicability(
 
 
 async def test_model_without_v4a_keeps_all_required_ordinary_mutations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})

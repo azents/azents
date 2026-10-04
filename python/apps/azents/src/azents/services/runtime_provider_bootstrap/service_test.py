@@ -3,8 +3,6 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
     RuntimeProviderAvailabilityMode,
@@ -26,6 +24,7 @@ from azents.core.runtime_provider_bootstrap import (
 )
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
@@ -84,13 +83,13 @@ def _snapshot(
 
 @asynccontextmanager
 async def _session_context(
-    session: AsyncSession,
-) -> AsyncGenerator[AsyncSession, None]:
+    session: WriteSession,
+) -> AsyncGenerator[WriteSession, None]:
     """Expose one test session through the production SessionManager shape."""
     yield session
 
 
-def _single_session_manager(session: AsyncSession) -> SessionManager[AsyncSession]:
+def _single_session_manager(session: WriteSession) -> SessionManager[WriteSession]:
     """Build a production-shaped SessionManager for one test session."""
     return lambda: _session_context(session)
 
@@ -100,7 +99,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_creates_bootstrap_provider_and_is_idempotent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A matching second snapshot reuses the original aggregate."""
         repository = RuntimeProviderRepository()
@@ -176,7 +175,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_conflicts_without_adopting_admin_provider(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Bootstrap must never adopt an aggregate created by an Admin."""
         repository = RuntimeProviderRepository()
@@ -249,7 +248,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_auth_subject_conflict_does_not_create_provider(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A pre-owned auth subject cannot leave a new orphan Provider."""
         repository = RuntimeProviderRepository()
@@ -310,7 +309,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_conflicts_when_authentication_config_changes(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A declaration cannot silently replace its bound authentication config."""
         repository = RuntimeProviderRepository()
@@ -355,7 +354,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_conflicts_without_adopting_other_source_provider(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A source cannot claim the logical identity owned by another source."""
         repository = RuntimeProviderRepository()
@@ -385,7 +384,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_authoritative_omission_marks_declaration_absent(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Withdrawal preserves the aggregate and records declaration absence."""
         repository = RuntimeProviderRepository()
@@ -430,7 +429,7 @@ class TestRuntimeProviderBootstrapService:
 
     async def test_terminal_provider_is_not_restored_by_bootstrap(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A force-retired logical identity remains reserved after source return."""
         repository = RuntimeProviderRepository()

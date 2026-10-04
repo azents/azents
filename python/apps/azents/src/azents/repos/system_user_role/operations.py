@@ -5,7 +5,6 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import SystemUserRole
 from azents.core.system_user_role import (
@@ -15,6 +14,7 @@ from azents.core.system_user_role import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.system_user_role.data import (
     SystemUserRoleAssignment,
     SystemUserRoleAssignmentCreate,
@@ -31,7 +31,7 @@ class SystemUserRoleOperationRepository:
     """Own role reads and grants/revocations under one advisory lock."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     system_role_repository: Annotated[SystemUserRoleRepository, Depends()]
     user_repository: Annotated[UserRepository, Depends()]

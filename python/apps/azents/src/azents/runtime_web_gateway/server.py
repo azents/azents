@@ -33,10 +33,14 @@ from azents_runtime_control.runtime_stream_session import (
 from mypy_boto3_rds import RDSClient
 from sqlalchemy import event
 from sqlalchemy import text as sql_text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from azents.core.config import PostgreSQLConfig
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -1853,18 +1857,5 @@ def _create_engine(settings: RuntimeWebGatewaySettings) -> AsyncEngine:
     )
 
 
-def _session_manager(
-    engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
-    @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
-            else:
-                await session.commit()
-
-    return session_manager
+def _session_manager(engine: AsyncEngine) -> SessionManager[WriteSession]:
+    return create_read_write_session_manager(engine)

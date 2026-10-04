@@ -2,7 +2,6 @@
 
 import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory_consolidation import (
@@ -17,6 +16,7 @@ from azents.core.historical_memory_publication import (
 )
 from azents.core.historical_memory_snapshot import ConsolidatedMemorySnapshotEntry
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
     DraftFileChange,
@@ -71,7 +71,7 @@ def context_entry(
 
 
 async def publish_context_overview(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     key: ConsolidationUnitKey,
     markdown: str,

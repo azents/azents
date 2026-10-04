@@ -7,10 +7,10 @@ import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.session import RDBSession
 from azents.rdb.models.user import RDBUser
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import NotFound, Session, SessionCreate, TokenMatch
 
@@ -18,7 +18,7 @@ from .data import NotFound, Session, SessionCreate, TokenMatch
 class SessionRepository:
     """Session CRUD repository."""
 
-    async def create(self, session: AsyncSession, create: SessionCreate) -> Session:
+    async def create(self, session: WriteSession, create: SessionCreate) -> Session:
         """Create Session.
 
         :param session: Database session
@@ -33,13 +33,13 @@ class SessionRepository:
             user_agent=create.user_agent,
             ip_address=create.ip_address,
         )
-        session.add(rdb_session)
-        await session.flush()
+        session.write_session.add(rdb_session)
+        await session.write_session.flush()
         return Session.from_rdb(rdb_session)
 
     async def create_for_active_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: SessionCreate,
     ) -> Result[Session, NotFound]:
         """Create Session only when the User currently has access.
@@ -48,7 +48,7 @@ class SessionRepository:
         :param create: Create data
         :return: Created Session or unavailable User error
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBUser.id)
             .where(
                 RDBUser.id == create.user_id,
@@ -60,20 +60,20 @@ class SessionRepository:
             return Failure(NotFound(id=create.user_id))
         return Success(await self.create(session, create))
 
-    async def get(self, session: AsyncSession, session_id: str) -> Session | None:
+    async def get(self, session: ReadSession, session_id: str) -> Session | None:
         """Fetch Session by ID.
 
         :param session: Database session
         :param session_id: Session ID
         :return: Session or None
         """
-        rdb_session = await session.get(RDBSession, session_id)
+        rdb_session = await session.read_session.get(RDBSession, session_id)
         if rdb_session is None:
             return None
         return Session.from_rdb(rdb_session)
 
     async def get_by_refresh_token(
-        self, session: AsyncSession, refresh_token: str
+        self, session: WriteSession, refresh_token: str
     ) -> tuple[Session, TokenMatch] | None:
         """Fetch Session by refresh token, current or previous token.
 
@@ -82,7 +82,7 @@ class SessionRepository:
         :return: (Session, TokenMatch) tuple or None
         """
         # Fetch by current token
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSession).where(RDBSession.refresh_token == refresh_token)
         )
         rdb_session = result.scalar_one_or_none()
@@ -90,7 +90,7 @@ class SessionRepository:
             return (Session.from_rdb(rdb_session), TokenMatch.CURRENT)
 
         # Fetch by previous token (grace period)
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSession).where(RDBSession.prev_refresh_token == refresh_token)
         )
         rdb_session = result.scalar_one_or_none()
@@ -100,7 +100,7 @@ class SessionRepository:
         return None
 
     async def revoke(
-        self, session: AsyncSession, session_id: str
+        self, session: WriteSession, session_id: str
     ) -> Result[Session, NotFound]:
         """Revoke Session.
 
@@ -109,7 +109,7 @@ class SessionRepository:
         :return: Revoked Session or error
         """
         now = tznow()
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSession)
             .where(RDBSession.id == session_id)
             .values(revoked_at=now)
@@ -123,7 +123,7 @@ class SessionRepository:
 
     async def revoke_all_by_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         user_id: str,
         *,
         except_session_id: str | None = None,
@@ -150,12 +150,14 @@ class SessionRepository:
         if except_session_id is not None:
             query = query.where(RDBSession.id != except_session_id)
 
-        cursor_result = cast(CursorResult[Any], await session.execute(query))
+        cursor_result = cast(
+            CursorResult[Any], await session.write_session.execute(query)
+        )
         return cursor_result.rowcount or 0
 
     async def rotate_refresh_token(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         current_refresh_token: str,
         new_refresh_token: str,
@@ -176,7 +178,7 @@ class SessionRepository:
         now = tznow()
 
         # Check max_expires_at
-        rdb_session = await session.get(RDBSession, session_id)
+        rdb_session = await session.write_session.get(RDBSession, session_id)
         if rdb_session is None:
             return Failure(NotFound(id=session_id))
 
@@ -186,7 +188,7 @@ class SessionRepository:
             actual_expires_at = min(new_expires_at, rdb_session.max_expires_at)
 
         # Atomic update: current token -> prev, set new token
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSession)
             .where(
                 RDBSession.id == session_id,
@@ -209,15 +211,15 @@ class SessionRepository:
         # Failed due to concurrent request: refetch latest session
         # After UPDATE, object in identity map is expired, so explicitly issue
         # async SELECT with refresh
-        rdb_session = await session.get(RDBSession, session_id)
+        rdb_session = await session.write_session.get(RDBSession, session_id)
         if rdb_session is None:
             return Failure(NotFound(id=session_id))
-        await session.refresh(rdb_session)
+        await session.write_session.refresh(rdb_session)
 
         return Success(Session.from_rdb(rdb_session))
 
     async def update_last_used(
-        self, session: AsyncSession, session_id: str
+        self, session: WriteSession, session_id: str
     ) -> Result[Session, NotFound]:
         """Update Session last used time.
 
@@ -226,7 +228,7 @@ class SessionRepository:
         :return: Updated Session or error
         """
         now = tznow()
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSession)
             .where(RDBSession.id == session_id)
             .values(last_used_at=now)
@@ -238,10 +240,12 @@ class SessionRepository:
 
         return Success(Session.from_rdb(rdb_session))
 
-    async def delete(self, session: AsyncSession, session_id: str) -> None:
+    async def delete(self, session: WriteSession, session_id: str) -> None:
         """Delete Session.
 
         :param session: Database session
         :param session_id: Session ID
         """
-        await session.execute(sa.delete(RDBSession).where(RDBSession.id == session_id))
+        await session.write_session.execute(
+            sa.delete(RDBSession).where(RDBSession.id == session_id)
+        )

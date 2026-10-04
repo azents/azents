@@ -6,10 +6,10 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository
@@ -50,7 +50,7 @@ class ArtifactOperationRepository:
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     @property
@@ -231,7 +231,7 @@ class ArtifactOperationRepository:
 
     async def _authorize_user_artifact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         artifact: Artifact | None,
         user_id: str,
@@ -249,7 +249,7 @@ class ArtifactOperationRepository:
 
     async def _has_workspace_access(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         user_id: str,

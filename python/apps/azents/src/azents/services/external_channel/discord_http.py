@@ -9,7 +9,6 @@ from typing import Annotated
 
 from azcommon import di
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -21,6 +20,7 @@ from azents.core.enums import (
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionAdmission,
@@ -138,7 +138,7 @@ class DiscordHTTPAdmissionService:
     """Select, authenticate, and exactly dispatch a Discord interaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -909,7 +909,7 @@ class DiscordHTTPIngressService:
     """Acknowledge slow controls before resolving the heavy replay graph."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -1082,7 +1082,7 @@ async def _authenticate_discord_interaction(
     timestamp: str | None,
     signature: str | None,
     received_at: datetime.datetime,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     repository: ExternalChannelRepository,
     admission_service: ExternalChannelAdmissionService,
 ) -> DiscordAuthenticatedInteraction:

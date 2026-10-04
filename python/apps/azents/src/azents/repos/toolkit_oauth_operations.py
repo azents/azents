@@ -5,7 +5,6 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.account_access import ActiveAccountSubjectStatus
 from azents.core.auth.permissions import Permissions, has_permission
@@ -13,6 +12,7 @@ from azents.core.auth.roles import get_permissions_for_role
 from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.account_access import evaluate_active_subject
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -41,7 +41,7 @@ class ToolkitOAuthOperationRepository:
     """Own original atomic groups and final current admission after external work."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     toolkit_repository: Annotated[
         ToolkitRepository, Depends(get_encrypted_toolkit_repository)
@@ -179,7 +179,7 @@ class ToolkitOAuthOperationRepository:
         )
 
     async def _evaluate_write_authority(
-        self, session: AsyncSession, requester: ToolkitOAuthRequester
+        self, session: ReadSession, requester: ToolkitOAuthRequester
     ) -> ToolkitOAuthDenied | None:
         """Repeat existing admission, without locking or commit-time serialization."""
         subject_status = await evaluate_active_subject(

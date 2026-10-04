@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.api.public.llm_provider_integration.v1.data import (
     LLMProviderIntegrationResponse,
@@ -22,6 +21,7 @@ from azents.core.xai_oauth import (
     XaiOAuthConnectionStatus,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -44,23 +44,23 @@ from .runtime import (
 _TEST_KEY = Fernet.generate_key().decode()
 
 
-class _SessionManager(SessionManager[AsyncSession]):
+class _SessionManager(SessionManager[WriteSession]):
     """Expose single test DB session as context manager."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self._session = session
 
     def __call__(self) -> "_SessionManager":
         return self
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         return self._session
 
     async def __aexit__(self, *_args: object) -> None:
         return None
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(session: WriteSession) -> str:
     """Create workspace for tests."""
     suffix = uuid.uuid4().hex[:12]
     handle = f"xai-runtime-{suffix}"
@@ -82,7 +82,7 @@ class _CreatedIntegration(NamedTuple):
 
 
 async def _create_integration(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     expires_at: datetime.datetime,
 ) -> _CreatedIntegration:
@@ -113,7 +113,7 @@ async def _create_integration(
 
 def _persistence_repository(
     integration_repository: LLMProviderIntegrationRepository,
-    session: AsyncSession,
+    session: WriteSession,
 ) -> XaiOAuthRuntimeRepository:
     """Create the completed runtime persistence boundary for existing tests."""
     return XaiOAuthRuntimeRepository(
@@ -135,7 +135,7 @@ class TestEnsureRuntimeTokens:
     )
     async def test_failure_persistence_and_public_projection_are_safe(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
         error: ProviderRejected | ProviderEntitlementDenied | ProviderUnavailable,
     ) -> None:
         """Even an unsafe collaborator reason cannot escape through stored config."""
@@ -163,7 +163,7 @@ class TestEnsureRuntimeTokens:
         assert "old-refresh-token" not in response.model_dump_json()
 
     async def test_fresh_token_returns_existing_integration(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Sufficiently fresh token is not refreshed."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
@@ -184,7 +184,7 @@ class TestEnsureRuntimeTokens:
         assert result.value.id == integration_id
 
     async def test_more_than_five_minutes_remaining_skips_refresh(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A token outside the five-minute window remains unchanged."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
@@ -212,7 +212,7 @@ class TestEnsureRuntimeTokens:
         refresh.assert_not_awaited()
 
     async def test_within_five_minutes_uses_shared_refresh_path(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A token inside the five-minute window delegates to forced refresh."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=4)
@@ -237,7 +237,7 @@ class TestEnsureRuntimeTokens:
         refresh.assert_awaited_once()
 
     async def test_forced_refresh_rotates_a_fresh_rejected_token(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Refresh a still-fresh token after Imagine rejects it with 401."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
@@ -281,7 +281,7 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.access_token == "forced-access-token"
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Nearly expired token refreshes and updates encrypted secrets."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
@@ -326,7 +326,7 @@ class TestEnsureRuntimeTokens:
         assert result.value.secrets.refresh_token == "new-refresh-token"
 
     async def test_entitlement_denied_marks_entitlement_state(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """HTTP 403 refresh failure is stored as entitlement denial."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)
@@ -366,7 +366,7 @@ class TestEnsureRuntimeTokens:
         assert updated.config.entitlement_status == "denied"
 
     async def test_temporary_failure_remains_retryable(
-        self, rdb_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+        self, rdb_session: WriteSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Transient failure state retries refresh on next runtime preflight."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=1)

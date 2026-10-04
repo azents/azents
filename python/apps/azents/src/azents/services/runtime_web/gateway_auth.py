@@ -4,8 +4,6 @@ import datetime
 import hashlib
 import secrets
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -13,6 +11,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_web.gateway_data import (
@@ -40,7 +39,7 @@ class RuntimeWebGatewayAuthService:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         repository: RuntimeWebGatewayRepository,
         agent_repository: AgentRepository,
         agent_admin_repository: AgentAdminRepository,

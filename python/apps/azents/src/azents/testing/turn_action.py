@@ -1,8 +1,7 @@
 """TurnAction capability fixtures shared by backend tests."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -15,7 +14,7 @@ from azents.services.turn_action import TurnActionCapabilityRegistry
 
 
 def make_test_turn_action_capabilities(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> TurnActionCapabilityRegistry:
     """Create the production registry with deterministic repository-backed stores."""
     return TurnActionCapabilityRegistry(
@@ -25,7 +24,7 @@ def make_test_turn_action_capabilities(
 
 
 def make_test_mailbox_promotion_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> MailboxPromotionRepository:
     """Create the production Mailbox promotion composition for tests."""
     return MailboxPromotionRepository(

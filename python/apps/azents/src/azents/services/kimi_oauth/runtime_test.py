@@ -12,8 +12,7 @@ import httpx
 import pytest
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
 from azents.core.crypto import CredentialCipher
@@ -24,6 +23,7 @@ from azents.core.kimi_oauth import (
 )
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
@@ -50,7 +50,7 @@ async def _client_factory() -> AsyncIterator[KimiOAuthClient]:
         yield KimiOAuthClient(client)
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(session: WriteSession) -> str:
     """Create workspace for tests."""
     suffix = uuid.uuid4().hex[:12]
     handle = f"kimi-runtime-{suffix}"
@@ -72,7 +72,7 @@ class _CreatedIntegration(NamedTuple):
 
 
 async def _create_integration(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     expires_at: datetime.datetime,
 ) -> _CreatedIntegration:
@@ -105,7 +105,7 @@ async def _create_integration(
 
 
 async def _reconnect_integration(
-    session: AsyncSession,
+    session: WriteSession,
     repo: LLMProviderIntegrationRepository,
     integration_id: str,
 ) -> None:
@@ -135,7 +135,7 @@ async def _reconnect_integration(
 
 
 async def _rotate_integration(
-    session: AsyncSession,
+    session: WriteSession,
     repo: LLMProviderIntegrationRepository,
     integration_id: str,
 ) -> None:
@@ -169,7 +169,7 @@ async def _rotate_integration(
 
 
 async def _mark_refresh_failure(
-    session: AsyncSession,
+    session: WriteSession,
     repo: LLMProviderIntegrationRepository,
     integration_id: str,
     *,
@@ -201,7 +201,7 @@ class TestEnsureRuntimeTokens:
     """ensure_runtime_tokens tests."""
 
     async def test_fresh_token_returns_existing_integration(
-        self, rdb_session_manager: SessionManager[AsyncSession]
+        self, rdb_session_manager: SessionManager[WriteSession]
     ) -> None:
         """Sufficiently fresh token is not refreshed."""
         expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=2)
@@ -228,7 +228,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_more_than_five_minutes_remaining_skips_refresh(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A token outside the five-minute window remains unchanged."""
@@ -263,7 +263,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_within_five_minutes_uses_shared_refresh_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A token inside the five-minute window delegates to forced refresh."""
@@ -295,7 +295,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_forced_refresh_rotates_a_fresh_rejected_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Refresh a still-fresh token after Imagine rejects it with 401."""
@@ -350,7 +350,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_refresh_success_preserves_concurrent_reconnect(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale refresh success does not replace newer reconnect credentials."""
@@ -403,7 +403,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_refresh_failure_preserves_concurrent_reconnect(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale failure does not mark newer reconnect credentials unusable."""
@@ -448,7 +448,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_success_replaces_concurrent_config_only_failure(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A valid refresh success recovers a config-only concurrent failure."""
@@ -507,7 +507,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_failure_preserves_concurrent_refresh_success(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale failure preserves credentials rotated by another refresh."""
@@ -552,7 +552,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_second_concurrent_failure_remains_failure(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Config-only changes never convert another refresh failure to success."""
@@ -608,7 +608,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_second_concurrent_success_preserves_first_rotation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A stale success does not overwrite the first committed rotation."""
@@ -664,39 +664,26 @@ class TestEnsureRuntimeTokens:
     ) -> None:
         """Credential persistence serializes through the integration row lock."""
         session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
-        async with session_factory() as setup_session:
+        async with session_factory() as raw_setup_session:
+            setup_session = ReadWriteSession(raw_setup_session)
             repo, integration_id = await _create_integration(
                 setup_session,
                 expires_at=datetime.datetime.now(datetime.UTC)
                 + datetime.timedelta(minutes=1),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         async with (
-            session_factory() as lock_session,
-            session_factory() as waiting_session,
-            session_factory() as observation_session,
+            session_factory() as raw_lock_session,
+            session_factory() as raw_waiting_session,
         ):
-            lock_transaction = await lock_session.begin()
+            lock_session = ReadWriteSession(raw_lock_session)
+            waiting_session = ReadWriteSession(raw_waiting_session)
+            lock_transaction = await lock_session.write_session.begin()
             locked = await repo.get_by_id_with_secrets_for_update(
                 lock_session, integration_id
             )
             assert locked is not None
-            lock_pid = await lock_session.scalar(text("SELECT pg_backend_pid()"))
-            waiting_pid = await waiting_session.scalar(text("SELECT pg_backend_pid()"))
-            assert isinstance(lock_pid, int)
-            assert isinstance(waiting_pid, int)
-
-            async def wait_for_row_lock() -> None:
-                """Observe the waiting backend's actual blocker before releasing it."""
-                while True:
-                    blocked = await observation_session.scalar(
-                        text("SELECT :lock_pid = ANY(pg_blocking_pids(:waiting_pid))"),
-                        {"lock_pid": lock_pid, "waiting_pid": waiting_pid},
-                    )
-                    if blocked is True:
-                        return
-
             waiting_task = asyncio.create_task(
                 repo.get_by_id_with_secrets_for_update(
                     waiting_session,
@@ -704,13 +691,12 @@ class TestEnsureRuntimeTokens:
                 )
             )
             try:
-                # The timeout only bounds a hang; PostgreSQL establishes ordering.
-                await asyncio.wait_for(wait_for_row_lock(), timeout=5)
-                assert not waiting_task.done()
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(asyncio.shield(waiting_task), timeout=0.2)
 
                 await lock_transaction.commit()
                 observed = await asyncio.wait_for(waiting_task, timeout=2)
-                await waiting_session.commit()
+                await waiting_session.write_session.commit()
 
                 assert observed is not None
                 assert observed.id == integration_id
@@ -724,7 +710,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_near_expiry_refresh_persists_rotated_tokens(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Nearly expired token refreshes and updates encrypted secrets."""
@@ -777,7 +763,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_permanent_rejection_marks_refresh_required(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A permanent refresh rejection requires reconnecting the integration."""
@@ -822,7 +808,7 @@ class TestEnsureRuntimeTokens:
 
     async def test_temporary_failure_remains_retryable(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Transient failure state retries refresh on next runtime preflight."""

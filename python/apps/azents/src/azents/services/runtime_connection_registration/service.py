@@ -13,11 +13,11 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeConnectionAuthorityKind
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_connection_generation.data import (
     RuntimeConnectionGeneration,
 )
@@ -77,7 +77,7 @@ class RuntimeRunnerConnectionRegistrar(Protocol):
 class RuntimeConnectionGenerationAuthority(Protocol):
     async def allocate_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
@@ -87,7 +87,7 @@ class RuntimeConnectionGenerationAuthority(Protocol):
 
     async def generation_is_current_high_water(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
@@ -98,7 +98,7 @@ class RuntimeConnectionGenerationAuthority(Protocol):
 
     async def accept_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_kind: RuntimeConnectionAuthorityKind,
         subject_id: str,
@@ -111,7 +111,7 @@ class RuntimeConnectionGenerationAuthority(Protocol):
 class RuntimeProviderConnectionAuthority(Protocol):
     async def validate_connection_authority_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         validated_at: datetime,
@@ -121,7 +121,7 @@ class RuntimeProviderConnectionAuthority(Protocol):
 
     async def create_connection_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         connection_id: str,
@@ -139,7 +139,7 @@ class RuntimeProviderConnectionAuthority(Protocol):
 class RuntimeRunnerConnectionAuthority(Protocol):
     async def authorize_runner_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         credential: RuntimeRunnerCredential,
     ) -> bool:
         """Validate Runner authority inside a caller-owned transaction."""
@@ -150,7 +150,7 @@ class RuntimeRunnerConnectionAuthority(Protocol):
 class RuntimeProviderConnectionRegistrationService:
     """Register Provider connections across durable and volatile authority."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     generation_repository: RuntimeConnectionGenerationAuthority
     coordination_store: RuntimeCoordinationStore
     provider_control: RuntimeProviderConnectionAuthority
@@ -282,7 +282,7 @@ class RuntimeProviderConnectionRegistrationService:
 class RuntimeRunnerConnectionRegistrationService:
     """Register Runner connections across durable and volatile authority."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     generation_repository: RuntimeConnectionGenerationAuthority
     coordination_store: RuntimeCoordinationStore
     runner_authentication: RuntimeRunnerConnectionAuthority

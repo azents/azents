@@ -3,10 +3,11 @@
 import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.workspace import CreateWithOwnerInput, HandleConflict, NotFound
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.user_email.operations_test import CommittedOperationManager
@@ -19,7 +20,7 @@ from azents.services.workspace.data import WorkspaceCreateInput, WorkspaceOutput
 
 
 async def test_service_projects_only_completed_operations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Every CRUD projection returns after closure without service DB injection."""
     async with rdb_session_manager() as session:

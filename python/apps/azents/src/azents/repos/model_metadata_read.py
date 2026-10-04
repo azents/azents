@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import (
     CapturedContextSource,
@@ -23,7 +23,7 @@ class ModelMetadataReadRepository:
     """Own finished reads, with whole-current views reserved for maintenance."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     source_repository: Annotated[
         ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)

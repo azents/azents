@@ -6,7 +6,6 @@ from typing import Annotated, Any
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
@@ -23,6 +22,7 @@ from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.llm_catalog import CatalogEntryWithCatalog, LLMCatalogRepository
@@ -122,7 +122,7 @@ class LLMCatalogOperationsRepository:
     """Own complete DB-only operations outside service/provider I/O."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     integration_repository: Annotated[
@@ -227,7 +227,7 @@ class LLMCatalogOperationsRepository:
     ) -> list[SystemCatalogRead]:
         """Acquire all owner read locks in the same sorted order as publication."""
         async with self.session_manager() as session:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.select(RDBLLMCatalog.id, RDBLLMCatalog.provider)
                 .where(
                     RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
@@ -363,7 +363,7 @@ class LLMCatalogOperationsRepository:
                         "automatic_retry_blocked": False,
                     },
                 )
-                await session.flush()
+                await session.write_session.flush()
                 return CatalogPublicationSuperseded(
                     superseding_work_token=owner.sync_work_token
                 )
@@ -395,7 +395,7 @@ class LLMCatalogOperationsRepository:
 
     async def fail_sync(self, failure: CatalogSyncFailure) -> None:
         async with self.session_manager() as session:
-            initial = await session.get(RDBLLMCatalog, failure.catalog_id)
+            initial = await session.write_session.get(RDBLLMCatalog, failure.catalog_id)
             if initial is None:
                 return
             if initial.provider_integration_id is not None:

@@ -6,7 +6,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_project_preset import AgentProjectPreset
 from azents.core.agent_session_data import (
@@ -103,6 +102,7 @@ from azents.engine.events.types import Event
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -146,7 +146,7 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 
 def get_chat_goal_state_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> GoalStateStore:
     """Compose unbound user-managed Goal persistence at the dependency root."""
@@ -155,7 +155,7 @@ def get_chat_goal_state_store(
 
 def get_chat_todo_state_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> TodoStateStore:
     """Compose unbound Todo reads at the dependency root."""
@@ -219,7 +219,7 @@ class ChatOperationsRepository:
         MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     lifecycle_operations: Annotated[
         SessionLifecycleOperationsRepository,
@@ -305,7 +305,7 @@ class ChatOperationsRepository:
 
     async def _repair_session_profile_for_read(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_session: AgentSession,
     ) -> AgentSession:
@@ -456,7 +456,7 @@ class ChatOperationsRepository:
                 AgentRunStatus.CANCELLED,
             }:
                 return Failure(UnreadTerminalRunNotTerminal())
-            await session.commit()
+            await session.write_session.commit()
             return Success(None)
 
     async def get_subagent_tree(
@@ -885,7 +885,7 @@ class ChatOperationsRepository:
 
     async def _authorize_public_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_session: AgentSession,
         user_id: str,
@@ -918,7 +918,7 @@ class ChatOperationsRepository:
 
     async def _create_session_workspace_items(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -982,7 +982,7 @@ class ChatOperationsRepository:
 
     async def _enqueue_setup_actions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_session: AgentSession,
         workspace_items: list[NewSessionWorkspaceItem],
@@ -1055,7 +1055,7 @@ class ChatOperationsRepository:
 
     async def _create_session_projects(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1122,7 +1122,7 @@ class ChatOperationsRepository:
             )
             if updated is None:
                 return Failure(SessionNotFound())
-            await session.commit()
+            await session.write_session.commit()
             return Success(updated)
 
     async def list_archived_agent_sessions(
@@ -1235,7 +1235,7 @@ class ChatOperationsRepository:
                     payload=None,
                 ),
             )
-            await session.commit()
+            await session.write_session.commit()
             restored = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -1297,7 +1297,7 @@ class ChatOperationsRepository:
             )
             if updated is None:
                 return Failure(SessionNotFound())
-            await session.commit()
+            await session.write_session.commit()
             return Success(updated)
 
     async def list_sessions(
@@ -1647,7 +1647,7 @@ class ChatOperationsRepository:
                     payload=None,
                 ),
             )
-            await session.commit()
+            await session.write_session.commit()
             return Success(admission)
 
     async def prepare_team_session_creation(
@@ -1737,7 +1737,7 @@ class ChatOperationsRepository:
                 workspace_items=workspace_items,
                 user_id=user_id,
             )
-            await session.commit()
+            await session.write_session.commit()
         return Success(created)
 
     async def archive_agent_session(
@@ -1852,7 +1852,7 @@ class ChatOperationsRepository:
                     policy_revision=settings.revision,
                     now=archived_at,
                 )
-            await session.commit()
+            await session.write_session.commit()
             return Success(
                 ChatArchiveDatabaseResult(
                     root_session_id=session_id,

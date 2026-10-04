@@ -4,8 +4,6 @@ import dataclasses
 from collections.abc import Callable, Sequence
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.engine_tool_state import (
     AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME,
     AGENTS_TOOLKIT_NAMESPACE,
@@ -26,6 +24,7 @@ from azents.core.engine_tool_state import (
 )
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
@@ -49,12 +48,12 @@ class SessionExecutionOwnerLike(Protocol):
 class ToolWorkingSetStore:
     """Own completed deferred-tool working-set operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     repository: ToolkitStateRepository | None = None
 
     def with_session_manager(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> "ToolWorkingSetStore":
         """Bind operations to a different database authority."""
         return ToolWorkingSetStore(
@@ -69,7 +68,7 @@ class ToolWorkingSetStore:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
@@ -120,7 +119,7 @@ class ToolWorkingSetStore:
 
     async def clear_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         session_id: str,
     ) -> ToolWorkingSetState:
@@ -149,7 +148,7 @@ class ToolWorkingSetStore:
 
     async def _update_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         session_id: str,
         mutator: Callable[[ToolWorkingSetState], ToolWorkingSetState],
@@ -170,12 +169,12 @@ class ToolWorkingSetStore:
             raise RuntimeError("Tool working-set update did not run")
         return updated
 
-    def _handle(
+    def _handle[S: ReadSession](
         self,
-        session: AsyncSession,
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[ToolWorkingSetState]:
+    ) -> ToolkitStateHandle[ToolWorkingSetState, S]:
         """Create the typed handle for one Agent Session."""
         return ToolkitStateStore(
             session=session,
@@ -195,7 +194,7 @@ class ToolWorkingSetStore:
 class ToolkitAgentsAppendixDedupeStateStore:
     """Own completed AGENTS.md appendix dedupe operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     def for_execution(
         self,
@@ -240,11 +239,11 @@ class ToolkitAgentsAppendixDedupeStateStore:
             )
 
     @staticmethod
-    def _handle(
-        session: AsyncSession,
+    def _handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[AgentsAppendixDedupeState]:
+    ) -> ToolkitStateHandle[AgentsAppendixDedupeState, S]:
         """Create the typed AGENTS.md dedupe handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -261,7 +260,7 @@ class ToolkitAgentsAppendixDedupeStateStore:
 class ToolkitClaudeRulesAppendixDedupeStateStore:
     """Own completed Claude rules appendix dedupe operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     def for_execution(
         self,
@@ -325,11 +324,11 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
             )
 
     @staticmethod
-    def _handle(
-        session: AsyncSession,
+    def _handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[ClaudeRulesAppendixDedupeState]:
+    ) -> ToolkitStateHandle[ClaudeRulesAppendixDedupeState, S]:
         """Create the typed Claude rules dedupe handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -346,7 +345,7 @@ class ToolkitClaudeRulesAppendixDedupeStateStore:
 class TodoStateStore:
     """Own completed Todo state operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     def for_execution(
         self,
@@ -368,7 +367,7 @@ class TodoStateStore:
 
     async def load_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         session_id: str,
     ) -> TodoState:
@@ -396,11 +395,11 @@ class TodoStateStore:
             return state
 
     @staticmethod
-    def _handle(
-        session: AsyncSession,
+    def _handle[S: ReadSession](
+        session: S,
         agent_id: str,
         session_id: str,
-    ) -> ToolkitStateHandle[TodoState]:
+    ) -> ToolkitStateHandle[TodoState, S]:
         """Create the typed Todo state handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -417,7 +416,7 @@ class TodoStateStore:
 class McpToolSnapshotStore:
     """Own completed MCP tool snapshot operations."""
 
-    session_manager: SessionManager[AsyncSession] | None
+    session_manager: SessionManager[WriteSession] | None
     agent_id: str
     session_id: str
     toolkit_namespace: str
@@ -476,10 +475,10 @@ class McpToolSnapshotStore:
             and bool(self.session_id)
         )
 
-    def _handle(
+    def _handle[S: ReadSession](
         self,
-        session: AsyncSession,
-    ) -> ToolkitStateHandle[McpToolSnapshotState]:
+        session: S,
+    ) -> ToolkitStateHandle[McpToolSnapshotState, S]:
         """Create the typed MCP snapshot handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(
@@ -496,7 +495,7 @@ class McpToolSnapshotStore:
 class GitHubSelectedInstallationStore:
     """Own completed GitHub selected-installation operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     agent_id: str
     session_id: str
 
@@ -538,10 +537,10 @@ class GitHubSelectedInstallationStore:
                 GitHubSelectedInstallationState(installation_id=installation_id)
             )
 
-    def _handle(
+    def _handle[S: ReadSession](
         self,
-        session: AsyncSession,
-    ) -> ToolkitStateHandle[GitHubSelectedInstallationState]:
+        session: S,
+    ) -> ToolkitStateHandle[GitHubSelectedInstallationState, S]:
         """Create the typed selected-installation handle."""
         return ToolkitStateStore(session=session).handle(
             ToolkitStateIdentity(

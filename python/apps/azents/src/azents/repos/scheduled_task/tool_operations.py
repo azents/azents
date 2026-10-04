@@ -5,7 +5,6 @@ import datetime
 from typing import Literal
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -25,6 +24,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask, ScheduledTaskCreate
@@ -65,7 +65,7 @@ class _ScheduledTaskMutationTarget:
 class ScheduledTaskToolOperationRepository:
     """Own complete Scheduled Toolkit database transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     task_repository: ScheduledTaskRepository
     cycle_repository: ScheduledTaskCycleRepository
     mailbox_repository: MailboxRepository
@@ -236,7 +236,7 @@ class ScheduledTaskToolOperationRepository:
 
     async def _task_projection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -265,7 +265,7 @@ class ScheduledTaskToolOperationRepository:
 
     async def _lock_mutation_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -333,14 +333,14 @@ class ScheduledTaskToolOperationRepository:
 
     @staticmethod
     async def _validate_target(
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
         session_id: str,
         binding_id: str | None,
     ) -> None:
-        target = await session.scalar(
+        target = await session.read_session.scalar(
             sa.select(RDBAgentSession).where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.workspace_id == workspace_id,
@@ -354,7 +354,7 @@ class ScheduledTaskToolOperationRepository:
             )
         if binding_id is None:
             return
-        binding = await session.scalar(
+        binding = await session.read_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .join(
                 RDBExternalChannelResource,

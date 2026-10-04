@@ -6,7 +6,6 @@ import hashlib
 
 import sqlalchemy as sa
 from azents_runtime_control.runtime_stream_session import StreamProtocol
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -18,6 +17,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -52,7 +52,7 @@ class RuntimeWebGatewayAuthorityService:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         gateway_repository: RuntimeWebGatewayRepository,
         runtime_web_repository: RuntimeWebRepository,
         agent_repository: AgentRepository,
@@ -221,7 +221,7 @@ class RuntimeWebGatewayAuthorityService:
 
     async def _authorize_service(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         service: RuntimeWebServiceRecord,
         user_id: str,
@@ -252,8 +252,8 @@ class RuntimeWebGatewayAuthorityService:
         )
 
     @staticmethod
-    async def _database_now(session: AsyncSession) -> datetime.datetime:
-        now = await session.scalar(sa.select(sa.func.now()))
+    async def _database_now(session: ReadSession) -> datetime.datetime:
+        now = await session.read_session.scalar(sa.select(sa.func.now()))
         if not isinstance(now, datetime.datetime):
             raise RuntimeError("Database did not return current timestamp")
         return now

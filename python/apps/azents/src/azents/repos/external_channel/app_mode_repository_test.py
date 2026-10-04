@@ -55,6 +55,7 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.scheduled_task import RDBScheduledTask
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
@@ -97,7 +98,7 @@ def _at(minute: int) -> datetime.datetime:
     )
 
 
-async def _workspace(session: AsyncSession, handle: str) -> str:
+async def _workspace(session: WriteSession, handle: str) -> str:
     """Create one Workspace root for an isolated repository fixture."""
     result = await WorkspaceRepository().create(
         session,
@@ -109,7 +110,7 @@ async def _workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _agent(session: AsyncSession, workspace_id: str, slug: str) -> RDBAgent:
+async def _agent(session: WriteSession, workspace_id: str, slug: str) -> RDBAgent:
     """Create one active Agent with a valid model-selection reference."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -118,8 +119,8 @@ async def _agent(session: AsyncSession, workspace_id: str, slug: str) -> RDBAgen
         encrypted_credentials="encrypted",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -137,13 +138,13 @@ async def _agent(session: AsyncSession, workspace_id: str, slug: str) -> RDBAgen
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent
 
 
 async def _add_agent_workspace_runtime(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     agent_id: str,
@@ -154,8 +155,8 @@ async def _add_agent_workspace_runtime(
         agent_id=agent_id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
 
 
 def _connection_create(
@@ -210,7 +211,7 @@ def _route_create(
 
 
 async def _resource(
-    session: AsyncSession,
+    session: WriteSession,
     repo: ExternalChannelRepository,
     *,
     connection_id: str,
@@ -318,13 +319,14 @@ async def _cleanup_committed_workspace(
         """,
         "DELETE FROM workspaces WHERE id = :workspace_id",
     )
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(engine) as _raw_session:
+        session = ReadWriteSession(_raw_session)
         for statement in statements:
-            await session.execute(
+            await session.write_session.execute(
                 sa.text(statement),
                 {"workspace_id": workspace_id},
             )
-        await session.commit()
+        await session.write_session.commit()
 
 
 def test_interaction_projection_validation_exact_bounds_and_forbidden_keys() -> None:
@@ -388,7 +390,7 @@ def test_interaction_projection_validation_exact_bounds_and_forbidden_keys() -> 
 
 
 async def test_interaction_admission_is_idempotent_and_validates_principal_boundary(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Retries preserve the first projection and principals match the connection."""
     workspace_id = await _workspace(rdb_session, "interaction-boundary")
@@ -487,7 +489,7 @@ async def test_interaction_admission_is_idempotent_and_validates_principal_bound
 
 
 async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bindings(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A direct transactional Multi fixture proves declarative Phase 1 boundaries."""
     workspace_id = await _workspace(rdb_session, "multi-fixture")
@@ -505,8 +507,8 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(multi_connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(multi_connection)
+    await rdb_session.write_session.flush()
     first_route = await repo.create_agent_route(
         rdb_session,
         _route_create(
@@ -528,7 +530,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
         second_agent.id,
     }
     with pytest.raises(IntegrityError):
-        async with rdb_session.begin_nested():
+        async with rdb_session.write_session.begin_nested():
             await repo.create_agent_route(
                 rdb_session,
                 _route_create(
@@ -553,7 +555,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
     )
     assert default.route_id == first_route.id
     with pytest.raises(IntegrityError):
-        async with rdb_session.begin_nested():
+        async with rdb_session.write_session.begin_nested():
             await repo.create_channel_default(
                 rdb_session,
                 ExternalChannelChannelDefaultCreate(
@@ -609,7 +611,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 invalidation_reason="not-valid-at-create",
             ),
         )
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBExternalChannelChannelDefault(
             connection_id=multi_connection.id,
             provider_channel_id="C4",
@@ -621,7 +623,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             invalidation_reason="historical",
         )
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     active_after_history = await repo.create_channel_default(
         rdb_session,
         ExternalChannelChannelDefaultCreate(
@@ -722,7 +724,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
 
 
 async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Defaults require an owned, available Multi route and active local Agent."""
     workspace_id = await _workspace(rdb_session, "default-negative")
@@ -757,8 +759,8 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(multi)
-    await rdb_session.flush()
+    rdb_session.write_session.add(multi)
+    await rdb_session.write_session.flush()
     multi_route = await repo.create_agent_route(
         rdb_session,
         _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
@@ -770,8 +772,8 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(second_multi)
-    await rdb_session.flush()
+    rdb_session.write_session.add(second_multi)
+    await rdb_session.write_session.flush()
     foreign_connection_route = await repo.create_agent_route(
         rdb_session,
         _route_create(second_multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
@@ -788,7 +790,7 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
         )
     foreign_workspace_id = await _workspace(rdb_session, "default-foreign")
     foreign_agent = await _agent(rdb_session, foreign_workspace_id, "default-foreign")
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBExternalChannelAgentRoute(
             connection_id=multi.id,
             agent_id=foreign_agent.id,
@@ -800,8 +802,8 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
             catalog_removed_by_user_id=None,
         )
     )
-    await rdb_session.flush()
-    foreign_workspace_route = await rdb_session.scalar(
+    await rdb_session.write_session.flush()
+    foreign_workspace_route = await rdb_session.read_session.scalar(
         sa.select(RDBExternalChannelAgentRoute).where(
             RDBExternalChannelAgentRoute.connection_id == multi.id,
             RDBExternalChannelAgentRoute.agent_id == foreign_agent.id,
@@ -820,8 +822,8 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
         )
     mode_mismatch_agent = await _agent(rdb_session, workspace_id, "mode-mismatch")
     with pytest.raises(IntegrityError):
-        async with rdb_session.begin_nested():
-            rdb_session.add(
+        async with rdb_session.write_session.begin_nested():
+            rdb_session.write_session.add(
                 RDBExternalChannelAgentRoute(
                     connection_id=multi.id,
                     agent_id=mode_mismatch_agent.id,
@@ -833,8 +835,8 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
                     catalog_removed_by_user_id=None,
                 )
             )
-            await rdb_session.flush()
-            await rdb_session.execute(
+            await rdb_session.write_session.flush()
+            await rdb_session.write_session.execute(
                 sa.text(
                     "SET CONSTRAINTS "
                     "fk_external_channel_agent_routes_connection_app_mode IMMEDIATE"
@@ -854,7 +856,7 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
             ),
         )
     agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     with pytest.raises(ValueError, match="not eligible"):
         await repo.create_channel_default(
             rdb_session,
@@ -863,10 +865,12 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
             ),
         )
     agent.lifecycle_status = AgentLifecycleStatus.ACTIVE
-    route_rdb = await rdb_session.get(RDBExternalChannelAgentRoute, multi_route.id)
+    route_rdb = await rdb_session.read_session.get(
+        RDBExternalChannelAgentRoute, multi_route.id
+    )
     assert route_rdb is not None
     route_rdb.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     with pytest.raises(ValueError, match="not eligible"):
         await repo.create_channel_default(
             rdb_session,
@@ -877,7 +881,7 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
 
 
 async def test_provider_configuration_actor_must_match_connection_identity(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Provider-authored defaults and settings reject foreign provider principals."""
     workspace_id = await _workspace(rdb_session, "provider-actor-boundary")
@@ -900,8 +904,8 @@ async def test_provider_configuration_actor_must_match_connection_identity(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(multi)
-    await rdb_session.flush()
+    rdb_session.write_session.add(multi)
+    await rdb_session.write_session.flush()
     multi_route = await repo.create_agent_route(
         rdb_session,
         _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
@@ -1013,7 +1017,7 @@ async def test_provider_configuration_actor_must_match_connection_identity(
 
 
 async def test_setup_claim_selection_enforces_location_resource_identity(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Threads freeze the source Resource and Channel freezes its parent Resource."""
     workspace_id = await _workspace(rdb_session, "setup-location-resource")
@@ -1237,7 +1241,8 @@ async def test_binding_creation_serializes_on_resource_lock(
     workspace_id: str | None = None
     second_task: asyncio.Task[object] | None = None
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_setup:
+            setup = ReadWriteSession(_raw_setup)
             workspace_id = await _workspace(setup, f"binding-lock-{suffix}")
             agent = await _agent(setup, workspace_id, f"binding-lock-{suffix}")
             repo = ExternalChannelRepository()
@@ -1278,7 +1283,7 @@ async def test_binding_creation_serializes_on_resource_lock(
                     title=None,
                 ),
             )
-            await setup.commit()
+            await setup.write_session.commit()
 
         create = ExternalChannelBindingCreate(
             resource_id=resource.id,
@@ -1291,7 +1296,8 @@ async def test_binding_creation_serializes_on_resource_lock(
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as first_session:
+        ) as _raw_first_session:
+            first_session = ReadWriteSession(_raw_first_session)
             first = await repo.create_binding_idempotent(
                 first_session,
                 create,
@@ -1300,7 +1306,8 @@ async def test_binding_creation_serializes_on_resource_lock(
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as second_session:
+            ) as _raw_second_session:
+                second_session = ReadWriteSession(_raw_second_session)
                 second_started = asyncio.Event()
 
                 async def create_second_binding() -> ExternalChannelBinding:
@@ -1318,13 +1325,14 @@ async def test_binding_creation_serializes_on_resource_lock(
                         asyncio.shield(second_task),
                         timeout=0.1,
                     )
-                await first_session.commit()
+                await first_session.write_session.commit()
                 second = await asyncio.wait_for(second_task, timeout=5)
-                await second_session.commit()
+                await second_session.write_session.commit()
 
         assert second.id == first.id
-        async with AsyncSession(rdb_engine) as verification:
-            binding_count = await verification.scalar(
+        async with AsyncSession(rdb_engine) as _raw_verification:
+            verification = ReadWriteSession(_raw_verification)
+            binding_count = await verification.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBExternalChannelBinding)
                 .where(RDBExternalChannelBinding.resource_id == resource.id)
@@ -1351,7 +1359,8 @@ async def test_route_selection_observes_concurrent_agent_decommission(
     workspace_id: str | None = None
     selection_task: asyncio.Task[object] | None = None
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_setup:
+            setup = ReadWriteSession(_raw_setup)
             workspace_id = await _workspace(setup, f"route-fence-{suffix}")
             agent = await _agent(setup, workspace_id, f"route-fence-{suffix}")
             repo = ExternalChannelRepository()
@@ -1371,18 +1380,19 @@ async def test_route_selection_observes_concurrent_agent_decommission(
                     mode=ExternalChannelAppMode.SINGLE,
                 ),
             )
-            await setup.commit()
+            await setup.write_session.commit()
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
-        ) as decommission_session:
-            await decommission_session.execute(
+        ) as _raw_decommission_session:
+            decommission_session = ReadWriteSession(_raw_decommission_session)
+            await decommission_session.write_session.execute(
                 sa.update(RDBAgent)
                 .where(RDBAgent.id == agent.id)
                 .values(lifecycle_status=AgentLifecycleStatus.DECOMMISSIONING)
             )
-            await decommission_session.flush()
+            await decommission_session.write_session.flush()
 
             selection_started = asyncio.Event()
 
@@ -1391,7 +1401,8 @@ async def test_route_selection_observes_concurrent_agent_decommission(
                 async with AsyncSession(
                     rdb_engine,
                     expire_on_commit=False,
-                ) as routing_session:
+                ) as _raw_routing_session:
+                    routing_session = ReadWriteSession(_raw_routing_session)
                     locked_connection = await repo.lock_connection_for_routing(
                         routing_session,
                         connection_id=connection.id,
@@ -1401,7 +1412,7 @@ async def test_route_selection_observes_concurrent_agent_decommission(
                         routing_session,
                         route_id=route.id,
                     )
-                    await routing_session.commit()
+                    await routing_session.write_session.commit()
                     return selected
 
             selection_task = asyncio.create_task(select_route())
@@ -1411,7 +1422,7 @@ async def test_route_selection_observes_concurrent_agent_decommission(
                     asyncio.shield(selection_task),
                     timeout=0.1,
                 )
-            await decommission_session.commit()
+            await decommission_session.write_session.commit()
             selected = await asyncio.wait_for(selection_task, timeout=5)
 
         assert selected is None
@@ -1427,7 +1438,7 @@ async def test_route_selection_observes_concurrent_agent_decommission(
 
 
 async def test_resource_wide_binding_unique_index_rejects_second_route(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """The active-binding index is resource-wide and keeps terminal history valid."""
     workspace_id = await _workspace(rdb_session, "binding-unique")
@@ -1441,8 +1452,8 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(multi_connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(multi_connection)
+    await rdb_session.write_session.flush()
     first_route = await repo.create_agent_route(
         rdb_session,
         _route_create(
@@ -1498,14 +1509,14 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         agent_session_id=first_session.id,
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
-    rdb_session.add(first)
-    await rdb_session.flush()
+    rdb_session.write_session.add(first)
+    await rdb_session.write_session.flush()
 
     with pytest.raises(
         IntegrityError, match="ix_external_channel_bindings_resource_id"
     ):
-        async with rdb_session.begin_nested():
-            rdb_session.add(
+        async with rdb_session.write_session.begin_nested():
+            rdb_session.write_session.add(
                 RDBExternalChannelBinding(
                     resource_id=resource.id,
                     route_id=second_route.id,
@@ -1513,10 +1524,10 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
                     response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
                 )
             )
-            await rdb_session.flush()
+            await rdb_session.write_session.flush()
 
     first.disconnected_at = _at(30)
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     terminal_then_active = await repo.create_binding_idempotent(
         rdb_session,
         ExternalChannelBindingCreate(
@@ -1533,7 +1544,7 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
 
 
 async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A manager disconnect captures one leave control without durable retry."""
     workspace_id = await _workspace(rdb_session, "binding-leave-presence")
@@ -1547,8 +1558,8 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
             provider_tenant_id="presence-team",
         ).model_dump()
     )
-    rdb_session.add(connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(connection)
+    await rdb_session.write_session.flush()
     route = await repository.create_agent_route(
         rdb_session,
         _route_create(
@@ -1596,8 +1607,8 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
         agent_session_id=agent_session.id,
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
-    rdb_session.add(binding)
-    await rdb_session.flush()
+    rdb_session.write_session.add(binding)
+    await rdb_session.write_session.flush()
     cycle_id = "c" * 32
     task = await ScheduledTaskRepository().create(
         rdb_session,
@@ -1615,7 +1626,7 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
             timezone=None,
         ),
     )
-    task_row = await rdb_session.get(RDBScheduledTask, task.id)
+    task_row = await rdb_session.read_session.get(RDBScheduledTask, task.id)
     assert task_row is not None
     task_row.active_cycle_id = cycle_id
     task_row.active_scheduled_for = _at(10)
@@ -1683,7 +1694,7 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
     assert first is not None
     assert retry == ()
     assert binding.disconnect_reason == "manager_disconnected"
-    assert await rdb_session.get(RDBScheduledTask, task.id) is None
+    assert await rdb_session.read_session.get(RDBScheduledTask, task.id) is None
     assert (
         await cycle_repository.get(
             rdb_session,
@@ -1707,7 +1718,7 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
 
 
 async def test_session_archive_disconnects_binding_without_leave_presence_plan(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Archive terminalizes the binding without posting a leave notification."""
     workspace_id = await _workspace(rdb_session, "archive-without-presence")
@@ -1721,8 +1732,8 @@ async def test_session_archive_disconnects_binding_without_leave_presence_plan(
             provider_tenant_id="archive-team",
         ).model_dump()
     )
-    rdb_session.add(connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(connection)
+    await rdb_session.write_session.flush()
     route = await repository.create_agent_route(
         rdb_session,
         _route_create(
@@ -1770,8 +1781,8 @@ async def test_session_archive_disconnects_binding_without_leave_presence_plan(
         agent_session_id=agent_session.id,
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
-    rdb_session.add(binding)
-    await rdb_session.flush()
+    rdb_session.write_session.add(binding)
+    await rdb_session.write_session.flush()
 
     archived = await lifecycle.terminate_session_tree(
         rdb_session,
@@ -1787,7 +1798,7 @@ async def test_session_archive_disconnects_binding_without_leave_presence_plan(
 
 
 async def test_multi_channel_default_transition_terminalizes_only_parent_state(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Replace and clear terminalize parent participation without touching threads."""
     workspace_id = await _workspace(rdb_session, "default-parent-transition")
@@ -1808,8 +1819,8 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(connection)
+    await rdb_session.write_session.flush()
     first_route = await repository.create_agent_route(
         rdb_session,
         _route_create(
@@ -2021,11 +2032,11 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         configured_by_user_id=user.id,
         response_mode=ExternalChannelResponseMode.MENTION_ONLY,
     )
-    first_setting_after_web_mutation = await rdb_session.get(
+    first_setting_after_web_mutation = await rdb_session.read_session.get(
         RDBExternalChannelParticipationSetting,
         first_setting.id,
     )
-    first_parent_binding_after_web_mutation = await rdb_session.get(
+    first_parent_binding_after_web_mutation = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         first_parent_binding.id,
     )
@@ -2052,7 +2063,7 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
     assert first_setting_after_web_mutation.settings_generation == 2
-    thread_binding_after_web_mutation = await rdb_session.get(
+    thread_binding_after_web_mutation = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         thread_binding.id,
     )
@@ -2101,22 +2112,22 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert replaced.expired_interaction_count == 1
     assert replaced.disconnected_parent_binding_count == 1
     assert len(replaced.cleanup_plans) == 1
-    first_setting_rdb = await rdb_session.get(
+    first_setting_rdb = await rdb_session.read_session.get(
         RDBExternalChannelParticipationSetting,
         first_setting.id,
     )
-    first_claim_rdb = await rdb_session.get(
+    first_claim_rdb = await rdb_session.read_session.get(
         RDBExternalChannelSetupClaim, first_claim.id
     )
-    first_interaction_rdb = await rdb_session.get(
+    first_interaction_rdb = await rdb_session.read_session.get(
         RDBExternalChannelInteraction,
         first_interaction_result.interaction.id,
     )
-    first_parent_binding_rdb = await rdb_session.get(
+    first_parent_binding_rdb = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         first_parent_binding.id,
     )
-    thread_binding_rdb = await rdb_session.get(
+    thread_binding_rdb = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         thread_binding.id,
     )
@@ -2137,8 +2148,14 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert first_parent_binding_rdb.disconnect_reason == "selected_agent_replaced"
     assert thread_binding_rdb is not None
     assert thread_binding_rdb.disconnected_at is None
-    assert await rdb_session.get(RDBAgentSession, first_parent_session.id) is not None
-    assert await rdb_session.get(RDBAgentSession, thread_session.id) is not None
+    assert (
+        await rdb_session.read_session.get(RDBAgentSession, first_parent_session.id)
+        is not None
+    )
+    assert (
+        await rdb_session.read_session.get(RDBAgentSession, thread_session.id)
+        is not None
+    )
 
     await _add_agent_workspace_runtime(
         rdb_session,
@@ -2245,25 +2262,25 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         replaced.cleanup_plans[0].operation_key
         != cleared.cleanup_plans[0].operation_key
     )
-    second_setting_rdb = await rdb_session.get(
+    second_setting_rdb = await rdb_session.read_session.get(
         RDBExternalChannelParticipationSetting,
         second_setting.id,
     )
-    second_claim_rdb = await rdb_session.get(
+    second_claim_rdb = await rdb_session.read_session.get(
         RDBExternalChannelSetupClaim,
         second_claim.id,
     )
-    second_interaction_rdb = await rdb_session.get(
+    second_interaction_rdb = await rdb_session.read_session.get(
         RDBExternalChannelInteraction,
         second_interaction_result.interaction.id,
     )
-    second_parent_binding_rdb = await rdb_session.get(
+    second_parent_binding_rdb = await rdb_session.read_session.get(
         RDBExternalChannelBinding,
         second_parent_binding.id,
     )
     active_defaults = list(
         (
-            await rdb_session.scalars(
+            await rdb_session.read_session.scalars(
                 sa.select(RDBExternalChannelChannelDefault).where(
                     RDBExternalChannelChannelDefault.connection_id == connection.id,
                     RDBExternalChannelChannelDefault.provider_channel_id == "C-parent",
@@ -2287,7 +2304,10 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert second_parent_binding_rdb.disconnected_at == _at(30)
     assert second_parent_binding_rdb.disconnect_reason == "selected_agent_cleared"
     assert thread_binding_rdb.disconnected_at is None
-    assert await rdb_session.get(RDBAgentSession, second_parent_session.id) is not None
+    assert (
+        await rdb_session.read_session.get(RDBAgentSession, second_parent_session.id)
+        is not None
+    )
     assert active_defaults == []
     assert {
         replaced.cleanup_plans[0].target.binding_id,
@@ -2299,7 +2319,7 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
 
 
 async def test_multi_route_removal_captures_leave_presence_before_detach(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Route removal terminalizes participation and captures one leave control."""
     workspace_id = await _workspace(rdb_session, "route-leave-presence")
@@ -2319,8 +2339,8 @@ async def test_multi_route_removal_captures_leave_presence_before_detach(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(connection)
+    await rdb_session.write_session.flush()
     route = await repository.create_agent_route(
         rdb_session,
         _route_create(
@@ -2398,8 +2418,8 @@ async def test_multi_route_removal_captures_leave_presence_before_detach(
         agent_session_id=agent_session.id,
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
-    rdb_session.add(binding)
-    await rdb_session.flush()
+    rdb_session.write_session.add(binding)
+    await rdb_session.write_session.flush()
     principal = await repository.create_principal_idempotent(
         rdb_session,
         ExternalChannelPrincipalCreate(
@@ -2501,22 +2521,24 @@ async def test_multi_route_removal_captures_leave_presence_before_detach(
     assert impact.active_binding_count == 1
     assert impact.connected_parent_binding_count == 1
     assert len(removal.cleanup_plans) == 1
-    persisted_route = await rdb_session.get(RDBExternalChannelAgentRoute, route.id)
+    persisted_route = await rdb_session.read_session.get(
+        RDBExternalChannelAgentRoute, route.id
+    )
     assert persisted_route is not None
     assert persisted_route.agent_id is None
-    persisted_default = await rdb_session.get(
+    persisted_default = await rdb_session.read_session.get(
         RDBExternalChannelChannelDefault,
         channel_default.id,
     )
-    persisted_setting = await rdb_session.get(
+    persisted_setting = await rdb_session.read_session.get(
         RDBExternalChannelParticipationSetting,
         setting.id,
     )
-    persisted_claim = await rdb_session.get(
+    persisted_claim = await rdb_session.read_session.get(
         RDBExternalChannelSetupClaim,
         claim.id,
     )
-    persisted_interaction = await rdb_session.get(
+    persisted_interaction = await rdb_session.read_session.get(
         RDBExternalChannelInteraction,
         interaction_result.interaction.id,
     )
@@ -2546,7 +2568,7 @@ async def test_multi_route_removal_captures_leave_presence_before_detach(
 
 
 async def test_provider_uninstall_captures_one_leave_presence(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A repeated provider termination does not recreate a leave control."""
     workspace_id = await _workspace(rdb_session, "uninstall-leave-presence")
@@ -2607,8 +2629,8 @@ async def test_provider_uninstall_captures_one_leave_presence(
         agent_session_id=agent_session.id,
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
-    rdb_session.add(binding)
-    await rdb_session.flush()
+    rdb_session.write_session.add(binding)
+    await rdb_session.write_session.flush()
 
     first = await repository.terminate_connection_for_provider_event(
         rdb_session,
@@ -2647,7 +2669,7 @@ async def test_provider_uninstall_captures_one_leave_presence(
 
 
 async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Agent management exposes only its exact sole Single-App route."""
     workspace_id = await _workspace(rdb_session, "management-route-boundary")
@@ -2665,8 +2687,8 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(multi)
-    await rdb_session.flush()
+    rdb_session.write_session.add(multi)
+    await rdb_session.write_session.flush()
     await repo.create_agent_route(
         rdb_session,
         _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
@@ -2693,10 +2715,10 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
             mode=ExternalChannelAppMode.SINGLE,
         ),
     )
-    await rdb_session.execute(
+    await rdb_session.write_session.execute(
         sa.text("DROP INDEX uq_external_channel_agent_routes_single_connection")
     )
-    rdb_session.add(
+    rdb_session.write_session.add(
         RDBExternalChannelAgentRoute(
             connection_id=corrupt_single.id,
             agent_id=second_agent.id,
@@ -2708,7 +2730,7 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
             catalog_removed_by_user_id=None,
         )
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     assert (
         await management.list_connections(
@@ -2739,7 +2761,7 @@ async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
 
 
 async def test_workspace_multi_management_uses_provider_neutral_stable_pagination(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """One list page orders Slack and Discord Multi Apps before applying offset."""
     workspace_id = await _workspace(rdb_session, "management-multi-page")
@@ -2776,7 +2798,7 @@ async def test_workspace_multi_management_uses_provider_neutral_stable_paginatio
     ]
     connections: list[RDBExternalChannelConnection] = []
     for created_connection in created_connections:
-        connection = await rdb_session.get(
+        connection = await rdb_session.read_session.get(
             RDBExternalChannelConnection,
             created_connection.id,
         )
@@ -2785,7 +2807,7 @@ async def test_workspace_multi_management_uses_provider_neutral_stable_paginatio
     connections[0].created_at = _at(2)
     connections[1].created_at = _at(1)
     connections[2].created_at = _at(2)
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     expected = sorted(
         connections,
         key=lambda connection: (connection.created_at, connection.id),
@@ -2827,7 +2849,7 @@ async def test_workspace_multi_management_uses_provider_neutral_stable_paginatio
 
 
 async def test_disconnect_lookup_uses_detached_single_route_snapshot(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Only disconnect retries can resolve a detached disconnected Single App."""
     workspace_id = await _workspace(rdb_session, "disconnect-snapshot-lookup")
@@ -2851,11 +2873,11 @@ async def test_disconnect_lookup_uses_detached_single_route_snapshot(
             mode=ExternalChannelAppMode.SINGLE,
         ),
     )
-    connection = await rdb_session.get(
+    connection = await rdb_session.read_session.get(
         RDBExternalChannelConnection,
         created_connection.id,
     )
-    route = await rdb_session.get(
+    route = await rdb_session.read_session.get(
         RDBExternalChannelAgentRoute,
         created_route.id,
     )
@@ -2864,7 +2886,7 @@ async def test_disconnect_lookup_uses_detached_single_route_snapshot(
     connection.status = ExternalChannelConnectionStatus.DISCONNECTED
     route.agent_id = None
     route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     assert (
         await management.get_connection(
@@ -2898,7 +2920,7 @@ async def test_disconnect_lookup_uses_detached_single_route_snapshot(
 
 
 async def test_multi_management_handoff_requires_completed_unexpired_channel_scope(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Authenticated handoffs expose only completed live channel-bound state."""
     workspace_id = await _workspace(rdb_session, "multi-management-handoff")
@@ -2982,7 +3004,7 @@ async def test_multi_management_handoff_requires_completed_unexpired_channel_sco
 
 
 async def test_multi_disconnect_terminalizes_zero_route_connection(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A zero-route Multi App disconnect remains idempotent and credential-free."""
     workspace_id = await _workspace(rdb_session, "multi-zero-disconnect")
@@ -2995,8 +3017,8 @@ async def test_multi_disconnect_terminalizes_zero_route_connection(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(connection)
-    await rdb_session.flush()
+    rdb_session.write_session.add(connection)
+    await rdb_session.write_session.flush()
     lifecycle = ExternalChannelLifecycleRepository()
 
     first = await lifecycle.disconnect_multi_connection(
@@ -3020,7 +3042,7 @@ async def test_multi_disconnect_terminalizes_zero_route_connection(
 
 
 async def test_disconnect_releases_the_current_discord_app_claim(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A disconnected Discord history no longer reserves its Application."""
     workspace_id = await _workspace(rdb_session, "discord-claim-disconnect")
@@ -3038,9 +3060,9 @@ async def test_disconnect_releases_the_current_discord_app_claim(
         )
         .model_dump()
     )
-    rdb_session.add(connection)
-    await rdb_session.flush()
-    rdb_session.add(
+    rdb_session.write_session.add(connection)
+    await rdb_session.write_session.flush()
+    rdb_session.write_session.add(
         RDBExternalChannelAppClaim(
             provider=ExternalChannelProvider.DISCORD,
             provider_app_id="discord-claim-app",
@@ -3048,7 +3070,7 @@ async def test_disconnect_releases_the_current_discord_app_claim(
             claim_generation=1,
         )
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     lifecycle = ExternalChannelLifecycleRepository()
     disconnected = await lifecycle.disconnect_multi_connection(
@@ -3060,7 +3082,7 @@ async def test_disconnect_releases_the_current_discord_app_claim(
 
     assert disconnected is not None
     assert (
-        await rdb_session.scalar(
+        await rdb_session.read_session.scalar(
             sa.select(RDBExternalChannelAppClaim).where(
                 RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
                 RDBExternalChannelAppClaim.provider_app_id == "discord-claim-app",
@@ -3071,7 +3093,7 @@ async def test_disconnect_releases_the_current_discord_app_claim(
 
 
 async def test_agent_decommission_detaches_routes_before_agent_delete(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Agent cleanup preserves route provenance without blocking physical deletion."""
     workspace_id = await _workspace(rdb_session, "route-agent-decommission")
@@ -3095,8 +3117,8 @@ async def test_agent_decommission_detaches_routes_before_agent_delete(
         .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
         .model_dump()
     )
-    rdb_session.add(multi)
-    await rdb_session.flush()
+    rdb_session.write_session.add(multi)
+    await rdb_session.write_session.flush()
     single_route = await repo.create_agent_route(
         rdb_session,
         _route_create(single.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
@@ -3112,15 +3134,15 @@ async def test_agent_decommission_detaches_routes_before_agent_delete(
         now=_at(60),
     )
 
-    persisted_single_route = await rdb_session.get(
+    persisted_single_route = await rdb_session.read_session.get(
         RDBExternalChannelAgentRoute,
         single_route.id,
     )
-    persisted_multi_route = await rdb_session.get(
+    persisted_multi_route = await rdb_session.read_session.get(
         RDBExternalChannelAgentRoute,
         multi_route.id,
     )
-    persisted_single_connection = await rdb_session.get(
+    persisted_single_connection = await rdb_session.read_session.get(
         RDBExternalChannelConnection,
         single.id,
     )
@@ -3148,19 +3170,21 @@ async def test_agent_decommission_detaches_routes_before_agent_delete(
     )
     assert persisted_single_connection.encrypted_credentials is None
 
-    await rdb_session.delete(agent)
-    await rdb_session.flush()
+    await rdb_session.write_session.delete(agent)
+    await rdb_session.write_session.flush()
 
     assert (
-        await rdb_session.get(RDBExternalChannelAgentRoute, single_route.id)
+        await rdb_session.read_session.get(
+            RDBExternalChannelAgentRoute, single_route.id
+        )
     ) is persisted_single_route
     assert (
-        await rdb_session.get(RDBExternalChannelAgentRoute, multi_route.id)
+        await rdb_session.read_session.get(RDBExternalChannelAgentRoute, multi_route.id)
     ) is persisted_multi_route
 
 
 async def test_agent_decommission_repairs_legacy_disconnected_single_route(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Agent cleanup detaches a route left active by a historical disconnect."""
     workspace_id = await _workspace(rdb_session, "legacy-disconnected-single")
@@ -3179,7 +3203,7 @@ async def test_agent_decommission_repairs_legacy_disconnected_single_route(
         rdb_session,
         _route_create(connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
     )
-    connection_rdb = await rdb_session.get(
+    connection_rdb = await rdb_session.read_session.get(
         RDBExternalChannelConnection,
         connection.id,
     )
@@ -3188,7 +3212,7 @@ async def test_agent_decommission_repairs_legacy_disconnected_single_route(
     connection_rdb.encrypted_credentials = None
     connection_rdb.provider_tenant_id = None
     connection_rdb.disconnected_at = _at(50)
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     cleanup = await lifecycle.cleanup_decommissioned_agent(
         rdb_session,
@@ -3196,12 +3220,14 @@ async def test_agent_decommission_repairs_legacy_disconnected_single_route(
         now=_at(60),
     )
 
-    persisted_route = await rdb_session.get(RDBExternalChannelAgentRoute, route.id)
+    persisted_route = await rdb_session.read_session.get(
+        RDBExternalChannelAgentRoute, route.id
+    )
     assert cleanup.deleted_route_count == 0
     assert persisted_route is not None
     assert persisted_route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
     assert persisted_route.agent_id is None
     assert persisted_route.agent_id_snapshot == agent.id
 
-    await rdb_session.delete(agent)
-    await rdb_session.flush()
+    await rdb_session.write_session.delete(agent)
+    await rdb_session.write_session.flush()

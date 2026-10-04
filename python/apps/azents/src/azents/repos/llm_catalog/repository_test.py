@@ -8,7 +8,6 @@ import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import ApiKeySecrets
 from azents.core.crypto import CredentialCipher
@@ -29,6 +28,7 @@ from azents.core.model_capability_projection import CAPABILITY_PROJECTION_REVISI
 from azents.core.model_pricing import normalize_model_pricing
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import RDBLLMCatalog, RDBLLMCatalogEntry
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     ImageGenerationCatalogEntryCreate,
@@ -51,7 +51,7 @@ class _Fixture(NamedTuple):
 
 
 async def _integration(
-    session: AsyncSession, *, handle: str, provider: LLMProvider = LLMProvider.XAI
+    session: WriteSession, *, handle: str, provider: LLMProvider = LLMProvider.XAI
 ) -> _Fixture:
     workspaces = WorkspaceRepository()
     result = await workspaces.create(
@@ -127,7 +127,7 @@ def _image(
 
 
 async def _publish(
-    session: AsyncSession,
+    session: WriteSession,
     repository: LLMCatalogRepository,
     *,
     fixture: _Fixture,
@@ -163,7 +163,7 @@ async def _publish(
 
 
 async def test_current_upsert_preserves_ids_removes_absent_and_advances_refresh(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _integration(rdb_session, handle="catalog-current")
     repository = LLMCatalogRepository()
@@ -215,7 +215,7 @@ async def test_current_upsert_preserves_ids_removes_absent_and_advances_refresh(
     assert current.entry.updated_at == newer
     assert current.entry.display_name == "Updated literal"
     assert current.catalog.last_success_at == newer
-    count = await rdb_session.scalar(
+    count = await rdb_session.read_session.scalar(
         sa.select(sa.func.count())
         .select_from(RDBLLMCatalogEntry)
         .where(RDBLLMCatalogEntry.catalog_id == catalog.id)
@@ -227,7 +227,7 @@ async def test_current_upsert_preserves_ids_removes_absent_and_advances_refresh(
 
 
 async def test_failed_refresh_does_not_gate_current_conversation_selection(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _integration(rdb_session, handle="catalog-stale-readable")
     repository = LLMCatalogRepository()
@@ -279,7 +279,7 @@ async def test_failed_refresh_does_not_gate_current_conversation_selection(
 
 
 async def test_superseded_failure_does_not_mutate_new_work(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _integration(rdb_session, handle="catalog-work-ownership")
     repository = LLMCatalogRepository()
@@ -324,7 +324,7 @@ async def test_superseded_failure_does_not_mutate_new_work(
 
 
 async def test_visibility_workspace_and_literal_model_predicates_survive(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _integration(rdb_session, handle="catalog-selectable")
     repository = LLMCatalogRepository()
@@ -380,7 +380,7 @@ async def test_visibility_workspace_and_literal_model_predicates_survive(
 
 
 async def test_image_credential_change_invalidates_only_image_usability(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     fixture = await _integration(
         rdb_session, handle="catalog-image-authority", provider=LLMProvider.OPENAI
@@ -489,7 +489,7 @@ async def test_image_credential_change_invalidates_only_image_usability(
     ],
 )
 async def test_claim_reads_current_code_metadata_without_replacing_successful_data(
-    rdb_session: AsyncSession, version: CatalogProjectionVersion, stale: bool
+    rdb_session: WriteSession, version: CatalogProjectionVersion, stale: bool
 ) -> None:
     fixture = await _integration(
         rdb_session, handle="projection-version-claim", provider=LLMProvider.OPENAI
@@ -501,7 +501,7 @@ async def test_claim_reads_current_code_metadata_without_replacing_successful_da
         provider=LLMProvider.OPENAI,
         purpose=LLMCatalogPurpose.CONVERSATION,
     )
-    owner = await rdb_session.get(RDBLLMCatalog, catalog.id)
+    owner = await rdb_session.read_session.get(RDBLLMCatalog, catalog.id)
     assert owner is not None
     owner.last_success_at = _NOW
     owner.diagnostics = {
@@ -510,7 +510,7 @@ async def test_claim_reads_current_code_metadata_without_replacing_successful_da
             "resolver_revision": version.resolver_revision,
         }
     }
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
     assert repository.projection_version(owner) == version
     decision = await repository.begin_integration_sync(
         rdb_session,

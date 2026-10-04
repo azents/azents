@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     ActiveModelMetadataUnavailable,
@@ -19,6 +18,7 @@ from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_model_capabilities_data import (
     ActiveReadScope,
     CapturedActiveChoiceInputs,
@@ -35,7 +35,7 @@ class ActiveModelCapabilitiesRepository:
     """Capture local inputs without provider discovery or configuration writes."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     source_repository: Annotated[
@@ -44,7 +44,7 @@ class ActiveModelCapabilitiesRepository:
 
     async def prepare_read_scope_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         integration_ids: Sequence[str],
@@ -90,7 +90,7 @@ class ActiveModelCapabilitiesRepository:
 
     async def capture_exact_choices_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: Sequence[ConfiguredModelIdentity],
@@ -121,7 +121,7 @@ class ActiveModelCapabilitiesRepository:
 
     async def capture_current_entries_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         scope: ActiveReadScope,
         integration_id: str,
@@ -145,7 +145,7 @@ class ActiveModelCapabilitiesRepository:
 
     async def _capture_entries(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         scope: ActiveReadScope,
         identities: Sequence[ConfiguredModelIdentity],
@@ -319,7 +319,7 @@ class ActiveModelCapabilitiesRepository:
         )
 
     async def inputs_match_in_session(
-        self, session: AsyncSession, *, captured: CapturedActiveChoiceInputs
+        self, session: WriteSession, *, captured: CapturedActiveChoiceInputs
     ) -> bool:
         """Recheck current compiler input values and presence under the same locks."""
         current = await self.capture_exact_choices_in_session(

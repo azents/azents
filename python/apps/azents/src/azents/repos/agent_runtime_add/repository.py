@@ -3,9 +3,9 @@
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_runtime_add import RDBAgentRuntimeAddReceipt
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     AgentRuntimeAddReceipt,
@@ -19,13 +19,13 @@ class AgentRuntimeAddReceiptRepository:
 
     async def get_by_agent_idempotency_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         idempotency_key: str,
     ) -> AgentRuntimeAddReceipt | None:
         """Fetch one receipt by its Agent-scoped idempotency identity."""
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBAgentRuntimeAddReceipt).where(
                 RDBAgentRuntimeAddReceipt.agent_id == agent_id,
                 RDBAgentRuntimeAddReceipt.idempotency_key == idempotency_key,
@@ -35,11 +35,11 @@ class AgentRuntimeAddReceiptRepository:
 
     async def create_or_get(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentRuntimeAddReceiptCreate,
     ) -> AgentRuntimeAddReceiptCreateResult:
         """Create one receipt or return the concurrent idempotency winner."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBAgentRuntimeAddReceipt)
             .values(id=uuid7().hex, **create.model_dump())
             .on_conflict_do_nothing(
@@ -49,7 +49,7 @@ class AgentRuntimeAddReceiptRepository:
         )
         row = result.scalar_one_or_none()
         if row is not None:
-            await session.flush()
+            await session.write_session.flush()
             return AgentRuntimeAddReceiptCreateResult(
                 receipt=self._build(row),
                 created=True,

@@ -53,6 +53,7 @@ from azents.rdb.models.system_setting import (
     RDBSystemSettingCandidate,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.github_platform_system_setting.binding import (
     PlatformGitHubAppBindingRepository,
 )
@@ -83,7 +84,7 @@ def _accept(_config: BaseModel, _secrets: BaseModel) -> None:
 
 
 def _service(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     mode: SystemSettingActivationMode,
     query: SystemSettingRepository,
@@ -166,7 +167,7 @@ class _AuditFailure(SystemSettingRepository):
 
     async def append_audit_event(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: SystemSettingAuditEventCreate,
     ) -> StoredSystemSettingAuditEvent:
@@ -178,7 +179,7 @@ class _AuditFailure(SystemSettingRepository):
 
 @pytest.mark.parametrize("operation", ["prepare", "confirm", "cancel", "record"])
 async def test_every_expiry_error_follows_committed_ciphertext_deletion(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
@@ -254,7 +255,7 @@ async def test_every_expiry_error_follows_committed_ciphertext_deletion(
 
 @pytest.mark.parametrize("operation", ["mutate", "state"])
 async def test_expiry_cleanup_rolls_back_with_later_local_failure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
@@ -305,7 +306,7 @@ async def test_expiry_cleanup_rolls_back_with_later_local_failure(
     "mode", [SystemSettingActivationMode.DIRECT, SystemSettingActivationMode.VALIDATED]
 )
 async def test_mutation_current_candidate_and_audit_roll_back_together(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     mode: SystemSettingActivationMode,
 ) -> None:
     """A late audit failure cannot commit a current or candidate partial write."""
@@ -332,7 +333,7 @@ async def test_mutation_current_candidate_and_audit_roll_back_together(
 
 @pytest.mark.parametrize("operation", ["validation", "cancel", "health"])
 async def test_finalization_rolls_back_partial_rows_and_audit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
 ) -> None:
     """Validation+activation, cancel, and health writes share audit rollback."""
@@ -403,7 +404,7 @@ async def test_finalization_rolls_back_partial_rows_and_audit(
 
 
 async def test_validation_and_health_recheck_environment_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """External work cannot authorize a write after environment authority drifts."""
     environment: dict[str, str] = {}
@@ -445,7 +446,7 @@ async def test_validation_and_health_recheck_environment_generation(
 
 @pytest.mark.parametrize("operation", ["prepare", "confirm", "record"])
 async def test_finalization_rejects_changed_candidate_base_version(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
 ) -> None:
     """A changed current row invalidates the original candidate across all phases."""
@@ -509,7 +510,7 @@ async def test_finalization_rejects_changed_candidate_base_version(
 
 
 async def test_late_cipher_failure_rolls_back_expired_candidate_cleanup(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pure encryption remains inside the mutation's original rollback boundary."""
@@ -545,7 +546,7 @@ async def test_late_cipher_failure_rolls_back_expired_candidate_cleanup(
 
 
 async def test_secret_omit_null_clear_and_present_empty_remain_distinct(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Ownership extraction preserves null/omit behavior and explicit secret actions."""
     service = _service(
@@ -617,7 +618,7 @@ async def test_secret_omit_null_clear_and_present_empty_remain_distinct(
 
 
 async def test_generic_confirmation_authority_is_independent_of_github_policy(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Generic confirmation fences do not require GitHub payload models."""
     environment: dict[str, str] = {}
@@ -677,15 +678,15 @@ async def test_generic_confirmation_authority_is_independent_of_github_policy(
 
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 async def test_external_validation_failure_and_cancellation_leave_no_open_db(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: str,
 ) -> None:
     """A detached external validator runs once after preparation has completed."""
-    opened: list[AsyncSession] = []
-    active: list[AsyncSession] = []
+    opened: list[WriteSession] = []
+    active: list[WriteSession] = []
 
     @asynccontextmanager
-    async def tracked_manager() -> AsyncIterator[AsyncSession]:
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
         async with rdb_session_manager() as session:
             opened.append(session)
             active.append(session)
@@ -711,7 +712,7 @@ async def test_external_validation_failure_and_cancellation_leave_no_open_db(
         calls += 1
         assert snapshot.candidate.id == pending.candidate.id
         assert not active
-        assert all(not session.in_transaction() for session in opened)
+        assert all(not session.read_session.in_transaction() for session in opened)
         if failure == "cancel":
             raise asyncio.CancelledError()
         raise ValueError("External failure.")
@@ -743,7 +744,7 @@ async def test_section_lock_serializes_competing_mutations_with_version_fence(
             self.calls = 0
 
         async def acquire_section_lock(
-            self, session: AsyncSession, *, section: SystemSettingSection
+            self, session: WriteSession, *, section: SystemSettingSection
         ) -> None:
             self.calls += 1
             attempt = self.calls
@@ -755,9 +756,10 @@ async def test_section_lock_serializes_competing_mutations_with_version_fence(
                 await release_first.wait()
 
     @asynccontextmanager
-    async def independent_manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            async with session.begin():
+    async def independent_manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
+            async with session.write_session.begin():
                 yield session
 
     service = _service(
@@ -790,16 +792,16 @@ async def test_section_lock_serializes_competing_mutations_with_version_fence(
         release_first.set()
         await asyncio.gather(*tasks, return_exceptions=True)
         async with independent_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSystemSettingAuditEvent).where(
                     RDBSystemSettingAuditEvent.section == SECTION
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSystemSettingCandidate).where(
                     RDBSystemSettingCandidate.section == SECTION
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSystemSetting).where(RDBSystemSetting.section == SECTION)
             )

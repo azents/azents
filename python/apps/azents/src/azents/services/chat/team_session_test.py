@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.chat_data import (
@@ -45,6 +44,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
@@ -134,7 +134,7 @@ class _ScheduledCycleFixture(NamedTuple):
     run_id: str
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -147,14 +147,14 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     """Create User for tests."""
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
 async def _add_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     user_id: str,
@@ -173,7 +173,7 @@ async def _add_workspace_user(
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     slug: str,
     *,
@@ -187,8 +187,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -222,9 +222,9 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     runtime_repository = AgentRuntimeRepository()
     runtime = await runtime_repository.ensure_for_agent(session, agent.id)
     if workspace_path is not None:
@@ -240,7 +240,7 @@ async def _create_agent(
 
 
 async def _bind_session_working_folder(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     agent_id: str,
     session_id: str,
@@ -269,7 +269,7 @@ async def _bind_session_working_folder(
 
 
 async def _start_scheduled_cycle(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     workspace_id: str,
     agent_id: str,
@@ -296,8 +296,8 @@ async def _start_scheduled_cycle(
                 timezone=None,
             ),
         )
-        task_row = await session.get(RDBScheduledTask, task.id)
-        agent_session = await session.get(RDBAgentSession, session_id)
+        task_row = await session.read_session.get(RDBScheduledTask, task.id)
+        agent_session = await session.read_session.get(RDBAgentSession, session_id)
         assert task_row is not None
         assert agent_session is not None
         task_row.active_cycle_id = cycle_id
@@ -331,8 +331,8 @@ async def _start_scheduled_cycle(
             requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
-        session.add(run)
-        await session.flush()
+        session.write_session.add(run)
+        await session.write_session.flush()
         await cycle_repository.start(
             session,
             record=cycle,
@@ -340,7 +340,7 @@ async def _start_scheduled_cycle(
             started_at=now,
         )
         agent_session.run_state = AgentSessionRunState.RUNNING
-        await session.commit()
+        await session.write_session.commit()
         return _ScheduledCycleFixture(
             task_id=task.id,
             cycle_id=cycle_id,
@@ -391,7 +391,7 @@ class _SessionWorkingFolderBindingService(SessionWorkingFolderBindingService):
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         *,
         preflight_error: SessionWorkingFolderBindingError | None = None,
     ) -> None:
@@ -436,7 +436,7 @@ class _SessionWorkingFolderBindingService(SessionWorkingFolderBindingService):
 
 
 def _service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     session_git_worktree_repository: SessionGitWorktreeRepository | None = None,
     session_git_worktree_service: Any | None = None,  # noqa: ANN401
@@ -625,7 +625,7 @@ class _OwnedWorktreeRepository(SessionGitWorktreeRepository):
 
     async def exists_by_worktree_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         worktree_path: str,
     ) -> bool:
@@ -639,7 +639,7 @@ class _ArchiveCleanupService:
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         *,
         failure: Exception | None = None,
     ) -> None:
@@ -683,7 +683,7 @@ class _ReadyRuntimeRepository(AgentRuntimeRepository):
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentRuntime | None:
         """Return one ready Runtime without a fixture persistence dependency."""
@@ -781,8 +781,8 @@ class TestChatSessionTeamSessions:
 
     async def test_goal_mutations_use_typed_repository_operations(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Goal edit, pause, resume, and clear preserve Chat behavior."""
         workspace_id = await _create_workspace(rdb_session, "team-goal-mutations")
@@ -807,7 +807,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         goal_store = GoalStateStore(session_manager=rdb_session_manager)
         await goal_store.create(
             agent_id=agent_id,
@@ -861,8 +861,8 @@ class TestChatSessionTeamSessions:
 
     async def test_create_empty_team_session_without_workspace_path(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Managed root creation remains pending without Runner workspace evidence."""
         workspace_id = await _create_workspace(rdb_session, "team-empty-no-runtime")
@@ -881,7 +881,7 @@ class TestChatSessionTeamSessions:
             "team-empty-no-runtime",
             workspace_path=None,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
@@ -892,7 +892,7 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(result, Success)
         async with rdb_session_manager() as verify_session:
-            context = await verify_session.scalar(
+            context = await verify_session.read_session.scalar(
                 sa.select(RDBSessionAgentContext).where(
                     RDBSessionAgentContext.agent_id == agent_id,
                     RDBSessionAgentContext.root_session_agent_id.is_not(None),
@@ -907,8 +907,8 @@ class TestChatSessionTeamSessions:
 
     async def test_create_team_session_uses_explicit_projects(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """New team sessions receive exactly the submitted Project paths."""
         workspace_id = await _create_workspace(rdb_session, "team-session-projects")
@@ -928,7 +928,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
@@ -975,8 +975,8 @@ class TestChatSessionTeamSessions:
 
     async def test_new_session_project_defaults_use_stored_last_created_projects(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """New session Project defaults use stored last non-empty creation paths."""
         workspace_id = await _create_workspace(rdb_session, "team-session-defaults")
@@ -996,7 +996,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         empty_result = await _service(
             rdb_session_manager
@@ -1078,8 +1078,8 @@ class TestChatSessionTeamSessions:
 
     async def test_owned_worktree_project_is_not_saved_as_reusable_default(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Concrete owned worktrees remain session-only Projects."""
         workspace_id = await _create_workspace(
@@ -1110,7 +1110,7 @@ class TestChatSessionTeamSessions:
             agent_id=agent_id,
             paths=["/workspace/agent/previous-project"],
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         worktree_path = "/workspace/agent/.azents/worktrees/example/azents"
         service = _service(
@@ -1149,8 +1149,8 @@ class TestChatSessionTeamSessions:
 
     async def test_update_session_title_trims_and_clears_title(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Session title updates normalize whitespace and explicit null clears it."""
         workspace_id = await _create_workspace(rdb_session, "team-session-title")
@@ -1168,7 +1168,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         titled = await _service(rdb_session_manager).update_session_title(
             session_id=agent_session.id,
@@ -1190,7 +1190,7 @@ class TestChatSessionTeamSessions:
 
     async def test_initial_auto_title_only_applies_when_unset(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Initial automatic titles do not overwrite manual titles."""
         workspace_id = await _create_workspace(rdb_session, "team-session-auto-title")
@@ -1242,7 +1242,7 @@ class TestChatSessionTeamSessions:
 
     async def test_generated_auto_title_only_replaces_initial_auto_title(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """LLM-generated titles only replace the initial automatic title state."""
         workspace_id = await _create_workspace(rdb_session, "team-session-gen-title")
@@ -1294,7 +1294,7 @@ class TestChatSessionTeamSessions:
 
     async def test_generated_auto_title_uses_initial_prompt_boundary(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """LLM-generated titles can apply after later assistant activity."""
         workspace_id = await _create_workspace(rdb_session, "team-session-stale-title")
@@ -1358,8 +1358,8 @@ class TestChatSessionTeamSessions:
 
     async def test_update_session_title_rejects_empty_title(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Whitespace-only session titles are rejected instead of cleared."""
         workspace_id = await _create_workspace(rdb_session, "team-session-empty-title")
@@ -1379,7 +1379,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         result = await _service(rdb_session_manager).update_session_title(
             session_id=agent_session.id,
@@ -1394,8 +1394,8 @@ class TestChatSessionTeamSessions:
 
     async def test_list_agent_sessions_returns_primary_first(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Agent session list is active-only with team primary first."""
         workspace_id = await _create_workspace(rdb_session, "team-session-list")
@@ -1413,7 +1413,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -1438,8 +1438,8 @@ class TestChatSessionTeamSessions:
 
     async def test_session_reads_repair_stale_applied_model_profile(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Direct and list reads replace labels removed from Agent options."""
         workspace_id = await _create_workspace(rdb_session, "team-session-read-repair")
@@ -1464,7 +1464,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session.id)
             .values(
@@ -1473,7 +1473,7 @@ class TestChatSessionTeamSessions:
                 applied_enabled_execution_options=[],
             )
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         service = _service(rdb_session_manager)
         direct = await service.get_agent_session_with_unread_terminal_run(
@@ -1507,8 +1507,8 @@ class TestChatSessionTeamSessions:
 
     async def test_team_session_read_does_not_repair_private_user_session(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A Team reader cannot rewrite another User's private Session intent."""
         workspace_id = await _create_workspace(
@@ -1551,7 +1551,7 @@ class TestChatSessionTeamSessions:
                 associated_user_id=private_user_id,
             ),
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id.in_([team_session.id, private_session.id]))
             .values(
@@ -1560,7 +1560,7 @@ class TestChatSessionTeamSessions:
                 applied_enabled_execution_options=[],
             )
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         result = await _service(rdb_session_manager).get_agent_session(
             agent_id=agent_id,
@@ -1582,8 +1582,8 @@ class TestChatSessionTeamSessions:
 
     async def test_session_reads_preserve_valid_applied_model_profile(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Valid Agent labels do not rewrite Session profile intent."""
         workspace_id = await _create_workspace(
@@ -1610,7 +1610,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session.id)
             .values(
@@ -1620,7 +1620,7 @@ class TestChatSessionTeamSessions:
                 applied_profile_generation=7,
             )
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         result = await _service(rdb_session_manager).get_agent_session(
             agent_id=agent_id,
@@ -1638,8 +1638,8 @@ class TestChatSessionTeamSessions:
 
     async def test_team_session_reads_do_not_create_team_primary(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Session directory reads remain empty and side-effect free."""
         workspace_id = await _create_workspace(rdb_session, "team-session-read-only")
@@ -1658,7 +1658,7 @@ class TestChatSessionTeamSessions:
             "team-session-read-only-agent",
             workspace_path=None,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         service = _service(rdb_session_manager)
 
         listed = await service.list_agent_sessions(
@@ -1701,8 +1701,8 @@ class TestChatSessionTeamSessions:
 
     async def test_list_agent_sessions_projects_tree_auto_archive_deadline(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Automatic archive deadline uses the latest activity in the root tree."""
         workspace_id = await _create_workspace(
@@ -1723,7 +1723,7 @@ class TestChatSessionTeamSessions:
             workspace_id,
             "team-auto-archive-deadline-agent",
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -1748,17 +1748,17 @@ class TestChatSessionTeamSessions:
         )
         root_activity = datetime.datetime(2026, 7, 1, tzinfo=datetime.UTC)
         child_activity = datetime.datetime(2026, 7, 10, tzinfo=datetime.UTC)
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == root_session.id)
             .values(last_activity_at=root_activity)
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == child_agent.agent_session_id)
             .values(last_activity_at=child_activity)
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         list_result = await _service(
             rdb_session_manager
@@ -1781,12 +1781,12 @@ class TestChatSessionTeamSessions:
         )
         assert primary.auto_archive_after is None
 
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == root_session.id)
             .values(pinned=True)
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         pinned_list_result = await _service(
             rdb_session_manager
         ).list_agent_sessions_with_unread_terminal_run(
@@ -1803,8 +1803,8 @@ class TestChatSessionTeamSessions:
 
     async def test_list_agent_sessions_orders_non_primary_by_latest_user_input(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Non-primary sessions sort by user input recency after team primary."""
         workspace_id = await _create_workspace(
@@ -1828,7 +1828,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         first_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
@@ -1891,19 +1891,19 @@ class TestChatSessionTeamSessions:
                 },
             ),
         )
-        first_last_user_input_at = await rdb_session.scalar(
+        first_last_user_input_at = await rdb_session.read_session.scalar(
             sa.select(RDBAgentSession.last_user_input_at).where(
                 RDBAgentSession.id == first_session.id
             )
         )
-        second_last_user_input_at = await rdb_session.scalar(
+        second_last_user_input_at = await rdb_session.read_session.scalar(
             sa.select(RDBAgentSession.last_user_input_at).where(
                 RDBAgentSession.id == second_session.id
             )
         )
         assert first_last_user_input_at == old_user_event.created_at
         assert second_last_user_input_at == recent_user_event.created_at
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == first_session.id)
             .values(
@@ -1911,7 +1911,7 @@ class TestChatSessionTeamSessions:
                 updated_at=datetime.datetime(2026, 1, 5, tzinfo=datetime.UTC),
             )
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == second_session.id)
             .values(
@@ -1919,7 +1919,7 @@ class TestChatSessionTeamSessions:
                 updated_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC),
             )
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         list_result = await _service(rdb_session_manager).list_agent_sessions(
             agent_id=agent_id,
@@ -1935,8 +1935,8 @@ class TestChatSessionTeamSessions:
 
     async def test_archive_non_primary_session_removes_it_from_active_list(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Archiving a non-primary session hides it from active session lists."""
         workspace_id = await _create_workspace(rdb_session, "team-session-archive")
@@ -1954,7 +1954,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2008,7 +2008,7 @@ class TestChatSessionTeamSessions:
                 )
             )
             assert context is not None
-            context_row = await verify_session.get(
+            context_row = await verify_session.read_session.get(
                 RDBSessionAgentContext,
                 context.id,
             )
@@ -2072,8 +2072,8 @@ class TestChatSessionTeamSessions:
 
     async def test_archive_worktree_cleanup_failure_keeps_archive_successful(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Post-commit worktree cleanup failure cannot roll back archive."""
@@ -2100,7 +2100,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2162,8 +2162,8 @@ class TestChatSessionTeamSessions:
 
     async def test_archive_folder_cleanup_preflight_prevents_runtime_resolution(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A lost binding blocks Runtime resolution before archive folder I/O."""
         workspace_id = await _create_workspace(
@@ -2189,7 +2189,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2284,8 +2284,8 @@ class TestChatSessionTeamSessions:
     )
     async def test_archive_folder_cleanup_terminalizes_without_changing_success(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
         failure: RuntimeRunnerOperationFailedError | None,
         target_kind: Literal["directory", "file", "symlink", "missing"],
         expected_status: SessionWorkingFolderCleanupStatus,
@@ -2316,7 +2316,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2359,7 +2359,7 @@ class TestChatSessionTeamSessions:
                 )
             )
             assert context is not None
-            context_row = await verify_session.get(
+            context_row = await verify_session.read_session.get(
                 RDBSessionAgentContext,
                 context.id,
             )
@@ -2370,8 +2370,8 @@ class TestChatSessionTeamSessions:
 
     async def test_archive_team_primary_session_is_blocked(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Team-primary sessions cannot be archived."""
         workspace_id = await _create_workspace(rdb_session, "team-session-primary")
@@ -2389,7 +2389,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         archive_result = await _service(rdb_session_manager).archive_agent_session(
             agent_id=agent_id,
@@ -2402,8 +2402,8 @@ class TestChatSessionTeamSessions:
 
     async def test_pin_team_primary_session_is_blocked(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Team-primary sessions cannot be pinned for automatic archive."""
         workspace_id = await _create_workspace(rdb_session, "team-session-primary-pin")
@@ -2428,7 +2428,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
 
         pin_result = await _service(rdb_session_manager).set_session_pinned(
             agent_id=agent_id,
@@ -2442,8 +2442,8 @@ class TestChatSessionTeamSessions:
 
     async def test_archive_running_session_is_blocked(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Running sessions cannot be archived until stopped."""
         workspace_id = await _create_workspace(rdb_session, "team-session-running")
@@ -2459,7 +2459,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2468,10 +2468,12 @@ class TestChatSessionTeamSessions:
         )
         assert isinstance(create_result, Success)
         async with rdb_session_manager() as update_session:
-            rdb = await update_session.get(RDBAgentSession, create_result.value.id)
+            rdb = await update_session.read_session.get(
+                RDBAgentSession, create_result.value.id
+            )
             assert rdb is not None
             rdb.run_state = AgentSessionRunState.RUNNING
-            await update_session.commit()
+            await update_session.write_session.commit()
 
         archive_result = await _service(rdb_session_manager).archive_agent_session(
             agent_id=agent_id,
@@ -2484,8 +2486,8 @@ class TestChatSessionTeamSessions:
 
     async def test_archive_preserves_started_scheduled_run_without_stop(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A valid started Scheduled cycle may outlive Session archive."""
         workspace_id = await _create_workspace(
@@ -2511,7 +2513,7 @@ class TestChatSessionTeamSessions:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2534,15 +2536,17 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(archive_result, Success)
         async with rdb_session_manager() as verify_session:
-            archived = await verify_session.get(
+            archived = await verify_session.read_session.get(
                 RDBAgentSession,
                 create_result.value.id,
             )
             assert archived is not None
             assert archived.status is AgentSessionStatus.ARCHIVED
             assert archived.stop_request_id is None
-            assert await verify_session.get(RDBScheduledTask, task_id) is None
-            run = await verify_session.get(RDBAgentRun, run_id)
+            assert (
+                await verify_session.read_session.get(RDBScheduledTask, task_id) is None
+            )
+            run = await verify_session.read_session.get(RDBAgentRun, run_id)
             assert run is not None
             assert run.status is AgentRunStatus.RUNNING
             cycle = await ScheduledTaskCycleRepository(
@@ -2558,8 +2562,8 @@ class TestChatSessionTeamSessions:
 
     async def test_auto_archive_uses_current_agent_ttl(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Current Agent TTL changes determine existing Session eligibility."""
         workspace_id = await _create_workspace(rdb_session, "auto-archive-ttl")
@@ -2570,7 +2574,7 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "auto-archive-ttl")
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2580,13 +2584,15 @@ class TestChatSessionTeamSessions:
         assert isinstance(create_result, Success)
         stale_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=60)
         async with rdb_session_manager() as update_session:
-            agent = await update_session.get(RDBAgent, agent_id)
-            root = await update_session.get(RDBAgentSession, create_result.value.id)
+            agent = await update_session.read_session.get(RDBAgent, agent_id)
+            root = await update_session.read_session.get(
+                RDBAgentSession, create_result.value.id
+            )
             assert agent is not None
             assert root is not None
             agent.auto_archive_ttl_days = 90
             root.last_activity_at = stale_at
-            await update_session.commit()
+            await update_session.write_session.commit()
 
         service = _service(rdb_session_manager)
         await service.auto_archive_once()
@@ -2599,10 +2605,10 @@ class TestChatSessionTeamSessions:
         assert active.status is AgentSessionStatus.ACTIVE
 
         async with rdb_session_manager() as update_session:
-            agent = await update_session.get(RDBAgent, agent_id)
+            agent = await update_session.read_session.get(RDBAgent, agent_id)
             assert agent is not None
             agent.auto_archive_ttl_days = 30
-            await update_session.commit()
+            await update_session.write_session.commit()
 
         await service.auto_archive_once()
         async with rdb_session_manager() as verify_session:
@@ -2615,8 +2621,8 @@ class TestChatSessionTeamSessions:
 
     async def test_auto_archive_excludes_pinned_and_running_sessions(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Pins exclude candidates while running roots are rechecked and skipped."""
         workspace_id = await _create_workspace(rdb_session, "auto-archive-guards")
@@ -2641,7 +2647,7 @@ class TestChatSessionTeamSessions:
                 agent_id=agent_id,
             )
         ).session
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         service = _service(rdb_session_manager)
         pinned_result = await service.create_team_session(
             agent_id=agent_id,
@@ -2667,20 +2673,24 @@ class TestChatSessionTeamSessions:
         assert pin_result.value.pinned is True
         stale_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=31)
         async with rdb_session_manager() as update_session:
-            pinned = await update_session.get(RDBAgentSession, pinned_result.value.id)
-            running = await update_session.get(
+            pinned = await update_session.read_session.get(
+                RDBAgentSession, pinned_result.value.id
+            )
+            running = await update_session.read_session.get(
                 RDBAgentSession,
                 running_result.value.id,
             )
             assert pinned is not None
             assert running is not None
-            primary_rdb = await update_session.get(RDBAgentSession, primary.id)
+            primary_rdb = await update_session.read_session.get(
+                RDBAgentSession, primary.id
+            )
             assert primary_rdb is not None
             pinned.last_activity_at = stale_at
             running.last_activity_at = stale_at
             primary_rdb.last_activity_at = stale_at
             running.run_state = AgentSessionRunState.RUNNING
-            await update_session.commit()
+            await update_session.write_session.commit()
 
         await service.auto_archive_once()
         async with rdb_session_manager() as verify_session:
@@ -2706,8 +2716,8 @@ class TestChatSessionTeamSessions:
 
     async def test_auto_archive_uses_latest_activity_across_child_tree(
         self,
-        rdb_session: AsyncSession,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session: WriteSession,
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Recent child activity protects an otherwise stale root tree."""
         workspace_id = await _create_workspace(rdb_session, "auto-archive-tree")
@@ -2718,7 +2728,7 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         agent_id = await _create_agent(rdb_session, workspace_id, "auto-archive-tree")
-        await rdb_session.commit()
+        await rdb_session.write_session.commit()
         create_result = await _service(rdb_session_manager).create_team_session(
             agent_id=agent_id,
             user_id=user_id,
@@ -2742,8 +2752,10 @@ class TestChatSessionTeamSessions:
                 title=None,
                 last_task_message=None,
             )
-            root = await update_session.get(RDBAgentSession, create_result.value.id)
-            child_session = await update_session.get(
+            root = await update_session.read_session.get(
+                RDBAgentSession, create_result.value.id
+            )
+            child_session = await update_session.read_session.get(
                 RDBAgentSession,
                 child.agent_session_id,
             )
@@ -2751,7 +2763,7 @@ class TestChatSessionTeamSessions:
             assert child_session is not None
             root.last_activity_at = stale_at
             child_session.last_activity_at = datetime.datetime.now(datetime.UTC)
-            await update_session.commit()
+            await update_session.write_session.commit()
 
         await _service(rdb_session_manager).auto_archive_once()
         async with rdb_session_manager() as verify_session:

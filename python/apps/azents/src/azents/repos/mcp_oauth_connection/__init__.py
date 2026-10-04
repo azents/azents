@@ -5,11 +5,11 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.rdb.models.toolkit import RDBMCPOAuthConnection
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import MCPOAuthConnection, MCPOAuthConnectionSummary
 
@@ -24,7 +24,7 @@ class MCPOAuthConnectionRepository:
         self._cipher = cipher
 
     async def get_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnection | None:
         """Fetch an OAuth connection by Toolkit ID.
 
@@ -32,7 +32,7 @@ class MCPOAuthConnectionRepository:
         :param toolkit_id: Toolkit ID
         :return: Decrypted OAuth connection or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBMCPOAuthConnection).where(
                 RDBMCPOAuthConnection.toolkit_id == toolkit_id
             )
@@ -43,7 +43,7 @@ class MCPOAuthConnectionRepository:
         return self._build(rdb)
 
     async def get_by_toolkit_id_for_update(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: WriteSession, toolkit_id: str
     ) -> MCPOAuthConnection | None:
         """Fetch an OAuth connection by Toolkit ID with row lock.
 
@@ -51,7 +51,7 @@ class MCPOAuthConnectionRepository:
         :param toolkit_id: Toolkit ID
         :return: Decrypted OAuth connection or None
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBMCPOAuthConnection)
             .where(RDBMCPOAuthConnection.toolkit_id == toolkit_id)
             .with_for_update()
@@ -62,7 +62,7 @@ class MCPOAuthConnectionRepository:
         return self._build(rdb)
 
     async def get_summary_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnectionSummary | None:
         """Fetch a public connection summary by Toolkit ID.
 
@@ -70,7 +70,7 @@ class MCPOAuthConnectionRepository:
         :param toolkit_id: Toolkit ID
         :return: Public OAuth connection summary or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBMCPOAuthConnection.status,
                 RDBMCPOAuthConnection.issuer,
@@ -92,7 +92,7 @@ class MCPOAuthConnectionRepository:
 
     async def upsert_connected(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         toolkit_id: str,
         issuer: str | None,
@@ -181,18 +181,18 @@ class MCPOAuthConnectionRepository:
             )
             .returning(RDBMCPOAuthConnection)
         )
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         return self._build(result.scalar_one())
 
     async def list_summaries_by_toolkit_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         toolkit_ids: list[str],
     ) -> dict[str, MCPOAuthConnectionSummary]:
         """Fetch public OAuth summaries keyed by Toolkit ID."""
         if not toolkit_ids:
             return {}
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBMCPOAuthConnection.toolkit_id,
                 RDBMCPOAuthConnection.status,
@@ -215,7 +215,7 @@ class MCPOAuthConnectionRepository:
 
     async def update_tokens(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         toolkit_id: str,
         access_token: str,
@@ -245,21 +245,21 @@ class MCPOAuthConnectionRepository:
             .values(**values)
             .returning(RDBMCPOAuthConnection)
         )
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def mark_reconnect_required(
-        self, session: AsyncSession, *, toolkit_id: str
+        self, session: WriteSession, *, toolkit_id: str
     ) -> None:
         """Mark an OAuth connection as requiring reconnection.
 
         :param session: Database session
         :param toolkit_id: Toolkit ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBMCPOAuthConnection)
             .where(RDBMCPOAuthConnection.toolkit_id == toolkit_id)
             .values(
@@ -269,14 +269,14 @@ class MCPOAuthConnectionRepository:
         )
 
     async def delete_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: WriteSession, toolkit_id: str
     ) -> None:
         """Delete an OAuth connection by Toolkit ID.
 
         :param session: Database session
         :param toolkit_id: Toolkit ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBMCPOAuthConnection).where(
                 RDBMCPOAuthConnection.toolkit_id == toolkit_id
             )

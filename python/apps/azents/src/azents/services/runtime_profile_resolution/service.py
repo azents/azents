@@ -8,7 +8,6 @@ from typing import Annotated, Any
 from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -32,6 +31,7 @@ from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContr
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -83,7 +83,7 @@ class RuntimeProfileResolutionService:
     """Resolve and attach one exact Agent Runtime Profile selection."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     runtime_repository: Annotated[
@@ -102,7 +102,7 @@ class RuntimeProfileResolutionService:
 
     async def prepare_explicit_selection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         profile_id: str,
@@ -160,7 +160,7 @@ class RuntimeProfileResolutionService:
 
     async def attach_prepared_selection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         runtime: AgentRuntime,
@@ -374,7 +374,7 @@ class RuntimeProfileResolutionService:
 
     async def _prepare_resolution(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_selection_version: int,
         workspace_id: str,

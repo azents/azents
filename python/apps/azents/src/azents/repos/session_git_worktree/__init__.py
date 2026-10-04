@@ -3,11 +3,11 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import SessionGitWorktreeStatus
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import SessionGitWorktree, SessionGitWorktreeCreate
 
@@ -17,7 +17,7 @@ class SessionGitWorktreeRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: SessionGitWorktreeCreate,
     ) -> SessionGitWorktree:
         """Create a worktree allocation row."""
@@ -43,14 +43,14 @@ class SessionGitWorktreeRepository:
             session_agent_context_project_id=create.session_workspace_project_id,
         )
         rdb.id = create.id
-        session.add(rdb)
-        await session.flush()
-        await session.refresh(rdb)
+        session.write_session.add(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def get_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> SessionGitWorktree | None:
@@ -59,7 +59,7 @@ class SessionGitWorktreeRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree)
             .where(
                 RDBSessionAgentContextGitWorktree.session_agent_context_id == context_id
@@ -77,7 +77,7 @@ class SessionGitWorktreeRepository:
 
     async def get_by_id_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         worktree_id: str,
         session_id: str,
@@ -87,7 +87,7 @@ class SessionGitWorktreeRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree).where(
                 RDBSessionAgentContextGitWorktree.id == worktree_id,
                 RDBSessionAgentContextGitWorktree.session_agent_context_id
@@ -101,12 +101,12 @@ class SessionGitWorktreeRepository:
 
     async def get_by_action_execution_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         action_execution_id: str,
     ) -> SessionGitWorktree | None:
         """Fetch one worktree allocation by action execution identity."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree).where(
                 RDBSessionAgentContextGitWorktree.action_execution_id
                 == action_execution_id,
@@ -119,7 +119,7 @@ class SessionGitWorktreeRepository:
 
     async def lock_by_id_for_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         session_id: str,
@@ -129,7 +129,7 @@ class SessionGitWorktreeRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree)
             .where(
                 RDBSessionAgentContextGitWorktree.id == worktree_id,
@@ -145,12 +145,12 @@ class SessionGitWorktreeRepository:
 
     async def exists_by_worktree_path(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         worktree_path: str,
     ) -> bool:
         """Return whether Azents owns an allocation for the worktree path."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree.id)
             .where(RDBSessionAgentContextGitWorktree.worktree_path == worktree_path)
             .limit(1)
@@ -159,7 +159,7 @@ class SessionGitWorktreeRepository:
 
     async def list_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[SessionGitWorktree]:
@@ -168,7 +168,7 @@ class SessionGitWorktreeRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree)
             .where(
                 RDBSessionAgentContextGitWorktree.session_agent_context_id == context_id
@@ -182,7 +182,7 @@ class SessionGitWorktreeRepository:
 
     async def lock_by_session_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> list[SessionGitWorktree]:
@@ -191,7 +191,7 @@ class SessionGitWorktreeRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree)
             .where(
                 RDBSessionAgentContextGitWorktree.session_agent_context_id == context_id
@@ -206,13 +206,13 @@ class SessionGitWorktreeRepository:
 
     async def worktree_path_exists(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         worktree_path: str,
         excluding_id: str,
     ) -> bool:
         """Return whether another allocation owns the exact worktree path."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree.id).where(
                 RDBSessionAgentContextGitWorktree.id != excluding_id,
                 RDBSessionAgentContextGitWorktree.worktree_path == worktree_path,
@@ -224,13 +224,13 @@ class SessionGitWorktreeRepository:
 
     async def branch_name_exists(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         branch_name: str,
         excluding_id: str,
     ) -> bool:
         """Return whether another allocation owns the exact branch name."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgentContextGitWorktree.id).where(
                 RDBSessionAgentContextGitWorktree.id != excluding_id,
                 RDBSessionAgentContextGitWorktree.branch_name == branch_name,
@@ -240,60 +240,66 @@ class SessionGitWorktreeRepository:
 
     async def update_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         worktree_path: str,
         branch_name: str,
     ) -> SessionGitWorktree:
         """Update pending allocation target names after collision suffixing."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.worktree_path = worktree_path
         rdb.branch_name = branch_name
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_pending_for_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
     ) -> SessionGitWorktree:
         """Reset a failed allocation so initialization can be retried."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.status = SessionGitWorktreeStatus.PENDING
         rdb.failure_summary = None
         rdb.cleanup_summary = None
         rdb.failed_at = None
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_creating(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
     ) -> SessionGitWorktree:
         """Mark allocation as actively creating."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.status = SessionGitWorktreeStatus.CREATING
         rdb.failure_summary = None
         rdb.failed_at = None
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_ready(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         base_commit: str,
@@ -302,7 +308,9 @@ class SessionGitWorktreeRepository:
         ready_at: datetime.datetime,
     ) -> SessionGitWorktree:
         """Mark allocation ready after runner worktree creation."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.status = SessionGitWorktreeStatus.READY
@@ -311,109 +319,119 @@ class SessionGitWorktreeRepository:
         rdb.branch_name = branch_name
         rdb.failure_summary = None
         rdb.ready_at = ready_at
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def link_workspace_project(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         session_workspace_project_id: str,
     ) -> SessionGitWorktree:
         """Link allocation to its registered SessionAgentContextProject row."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.session_agent_context_project_id = session_workspace_project_id
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_failed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         failure_summary: str,
         failed_at: datetime.datetime,
     ) -> SessionGitWorktree:
         """Mark allocation failed."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.status = SessionGitWorktreeStatus.FAILED
         rdb.failure_summary = failure_summary
         rdb.failed_at = failed_at
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_cleanup_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
     ) -> SessionGitWorktree:
         """Mark allocation cleanup requested."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         if rdb.status is not SessionGitWorktreeStatus.CLEANED:
             rdb.status = SessionGitWorktreeStatus.CLEANUP_PENDING
             rdb.cleanup_summary = None
             rdb.cleaned_at = None
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_cleaned(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         cleanup_summary: str,
         cleaned_at: datetime.datetime,
     ) -> SessionGitWorktree:
         """Mark allocation cleanup completed."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.status = SessionGitWorktreeStatus.CLEANED
         rdb.cleanup_summary = cleanup_summary
         rdb.cleaned_at = cleaned_at
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def mark_cleanup_failed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         worktree_id: str,
         cleanup_summary: str,
         failed_at: datetime.datetime,
     ) -> SessionGitWorktree:
         """Mark allocation cleanup failed."""
-        rdb = await session.get(RDBSessionAgentContextGitWorktree, worktree_id)
+        rdb = await session.write_session.get(
+            RDBSessionAgentContextGitWorktree, worktree_id
+        )
         if rdb is None:
             raise RuntimeError("SessionGitWorktree row is missing")
         rdb.status = SessionGitWorktreeStatus.CLEANUP_FAILED
         rdb.cleanup_summary = cleanup_summary
         rdb.failed_at = failed_at
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build(rdb)
 
     async def _get_context_id_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> str:
         """Fetch SessionAgentContext ID for an AgentSession."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgent.context_id).where(
                 RDBSessionAgent.agent_session_id == session_id,
             )
@@ -425,12 +443,12 @@ class SessionGitWorktreeRepository:
 
     async def _get_session_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> str:
         """Fetch SessionAgent ID for an AgentSession."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSessionAgent.id).where(
                 RDBSessionAgent.agent_session_id == session_id,
             )

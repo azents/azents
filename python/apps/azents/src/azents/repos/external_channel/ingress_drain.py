@@ -6,7 +6,6 @@ from typing import Annotated, Literal, assert_never
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
@@ -39,6 +38,7 @@ from azents.core.external_channel_progress import checking_progress
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
@@ -107,7 +107,7 @@ class ExternalChannelIngressDrainRepository:
     """Own short lease scopes and each complete queue/mailbox/position transaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     repository: Annotated[
         ExternalChannelRepository, Depends(ExternalChannelRepository.create)
@@ -146,7 +146,7 @@ class ExternalChannelIngressDrainRepository:
                 now=now,
                 lease_expires_at=lease_expires_at,
             )
-            await session.commit()
+            await session.write_session.commit()
             return claim
 
     async def claim_due_batch(
@@ -165,7 +165,7 @@ class ExternalChannelIngressDrainRepository:
                 lease_generation=lease_generation,
                 now=now,
             )
-            await session.commit()
+            await session.write_session.commit()
             return batch
 
     async def get_position(
@@ -175,7 +175,7 @@ class ExternalChannelIngressDrainRepository:
             position = await self.repository.get_conversation_position(
                 session, position_id=position_id
             )
-            await session.commit()
+            await session.write_session.commit()
             return position
 
     async def record_preparation_failure(
@@ -196,7 +196,7 @@ class ExternalChannelIngressDrainRepository:
                 now=datetime.datetime.now(datetime.UTC),
             )
             if locked is None:
-                await session.rollback()
+                await session.write_session.rollback()
                 return False
             if exhausted:
                 await self.queue_repository.delete_owner(session, owner=locked)
@@ -207,7 +207,7 @@ class ExternalChannelIngressDrainRepository:
                     owner=locked,
                     next_attempt_at=next_attempt_at,
                 )
-            await session.commit()
+            await session.write_session.commit()
             return True
 
     async def complete_owner(
@@ -226,7 +226,7 @@ class ExternalChannelIngressDrainRepository:
                 connection_id=owner.connection_id,
             )
             if connection is None:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise ExternalChannelConversationProvisioningError(
                     category="ownership_stale",
                     retryable=False,
@@ -239,14 +239,14 @@ class ExternalChannelIngressDrainRepository:
                 now=now,
             )
             if locked is None:
-                await session.rollback()
+                await session.write_session.rollback()
                 return None
             first_item = await self.queue_repository.lock_first_authoritative_item(
                 session,
                 owner_id=locked.id,
             )
             if first_item is None:
-                await session.rollback()
+                await session.write_session.rollback()
                 return None
             completion = await self.provisioning_repository.complete_in_session(
                 session,
@@ -262,7 +262,7 @@ class ExternalChannelIngressDrainRepository:
                 session_id=completion.binding.agent_session_id,
                 initial_title_eligible=completion.session_created,
             )
-            await session.commit()
+            await session.write_session.commit()
         return completion
 
     async def finalize_batch(
@@ -291,7 +291,7 @@ class ExternalChannelIngressDrainRepository:
                 now=now,
             )
             if locked is None:
-                await session.rollback()
+                await session.write_session.rollback()
                 return IngressBatchFinalization.uncommitted(stale=False)
             drain, items = locked
             positions = {}
@@ -308,7 +308,7 @@ class ExternalChannelIngressDrainRepository:
                         owner=drain,
                         items=items,
                     )
-                    await session.commit()
+                    await session.write_session.commit()
                     return IngressBatchFinalization.uncommitted(stale=True)
                 positions[position_id] = position
             initial_cursors = {
@@ -324,7 +324,7 @@ class ExternalChannelIngressDrainRepository:
                     owner=drain,
                     items=items,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return IngressBatchFinalization.uncommitted(stale=True)
 
             invalid_positions: set[str] = set()
@@ -628,7 +628,7 @@ class ExternalChannelIngressDrainRepository:
                     )
                 )
                 if not advanced:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     await self._reset_claim(batch)
                     return IngressBatchFinalization.uncommitted(stale=True)
             if created_trigger is not None:
@@ -639,7 +639,7 @@ class ExternalChannelIngressDrainRepository:
                     )
                 )
                 if admitted_session is None:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     await self._reset_claim(batch)
                     return IngressBatchFinalization.uncommitted(stale=True)
                 wake = IngressWakeIntent(
@@ -656,7 +656,7 @@ class ExternalChannelIngressDrainRepository:
                 owner=drain,
                 deleted_items=delete_items,
             )
-            await session.commit()
+            await session.write_session.commit()
         return IngressBatchFinalization(
             stale=False,
             committed=True,
@@ -683,7 +683,7 @@ class ExternalChannelIngressDrainRepository:
                     owner=owner,
                     items=items,
                 )
-            await session.commit()
+            await session.write_session.commit()
 
     async def release_lease(
         self,
@@ -700,11 +700,11 @@ class ExternalChannelIngressDrainRepository:
                 lease_owner=lease_owner,
                 lease_generation=lease_generation,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _ownership_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         item: ExternalChannelIngressItem,
         batch: ExternalChannelIngressBatch,
@@ -766,7 +766,7 @@ class ExternalChannelIngressDrainRepository:
 async def _authority_current(
     *,
     repository: ExternalChannelRepository,
-    session: AsyncSession,
+    session: ReadSession,
     connection: ExternalChannelConnection,
     authority_kind: ExternalChannelIngressAuthorityKind,
     ingress_profile: ExternalChannelIngressProfile,

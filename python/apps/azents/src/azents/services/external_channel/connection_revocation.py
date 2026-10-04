@@ -5,12 +5,12 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelConnectionStatus
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -23,7 +23,7 @@ class ExternalChannelConnectionRevocationService:
     """Commit a signed Slack revocation before provider acknowledgement."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -63,7 +63,7 @@ class ExternalChannelConnectionRevocationService:
                     )
                 )
                 if captured_plans is None:
-                    await session.commit()
+                    await session.write_session.commit()
                     return False
                 cleanup_plans = captured_plans
                 purged = (
@@ -88,9 +88,9 @@ class ExternalChannelConnectionRevocationService:
                     required_socket_lease_owner=required_socket_lease_owner,
                 )
                 if not changed:
-                    await session.commit()
+                    await session.write_session.commit()
                     return False
-            await session.commit()
+            await session.write_session.commit()
         for plan in cleanup_plans:
             await self.action_service.execute_terminal_control(plan)
         return True

@@ -7,7 +7,6 @@ from typing import Generic, Literal, TypeVar
 
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
@@ -20,6 +19,7 @@ from azents.core.external_channel_progress import (
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import RDBExternalChannelBinding
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.toolkit_state import (
     ToolkitStateConflictError,
     ToolkitStateRepository,
@@ -124,7 +124,7 @@ class ExternalChannelWorkStateStore:
 
     async def load(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -154,7 +154,7 @@ class ExternalChannelWorkStateStore:
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -219,7 +219,7 @@ class ExternalChannelWorkStateStore:
 
     async def update_existing(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -280,14 +280,14 @@ class ExternalChannelWorkStateStore:
 
     async def list_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
     ) -> dict[str, ChannelWorkState]:
         """Load every binding Work state for one AgentSession."""
         rows = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBToolkitState)
                 .where(
                     RDBToolkitState.agent_id == agent_id,
@@ -315,7 +315,7 @@ class ExternalChannelWorkStateStore:
 
     async def list_for_sessions(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> list[ChannelWorkState]:
@@ -323,7 +323,7 @@ class ExternalChannelWorkStateStore:
         if not session_ids:
             return []
         rows = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBToolkitState)
                 .where(
                     RDBToolkitState.session_id.in_(session_ids),
@@ -347,14 +347,14 @@ class ExternalChannelWorkStateStore:
 
     async def delete_for_sessions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> int:
         """Delete External Channel Work state for a Session tree."""
         if not session_ids:
             return 0
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBToolkitState)
             .where(
                 RDBToolkitState.session_id.in_(session_ids),
@@ -368,14 +368,14 @@ class ExternalChannelWorkStateStore:
 
     async def _validate_binding_ownership(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
         binding_id: str,
     ) -> None:
         """Require the requested Toolkit State identity to match its binding."""
-        owned_binding_id = await session.scalar(
+        owned_binding_id = await session.read_session.scalar(
             sa.select(RDBExternalChannelBinding.id)
             .join(
                 RDBAgentSession,

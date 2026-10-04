@@ -69,6 +69,7 @@ from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContextGitWorktree,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
@@ -178,9 +179,9 @@ _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
 
 
 @asynccontextmanager
-async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager_double() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    yield AsyncSession()
+    yield ReadWriteSession(AsyncSession())
 
 
 class _ReadonlyAgentSessionRepository(AgentSessionRepository):
@@ -188,7 +189,7 @@ class _ReadonlyAgentSessionRepository(AgentSessionRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         """Return a subagent session before other collaborators are touched."""
@@ -254,13 +255,14 @@ class _RuntimeRepository(AgentRuntimeRepository):
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentRuntime | None:
         """Return a ready runtime."""
         repository = AgentRuntimeRepository()
         runtime = await repository.get_by_agent_id(session, agent_id)
         if runtime is None:
+            assert isinstance(session, ReadWriteSession)
             runtime = await repository.ensure_for_agent(session, agent_id)
         return runtime.model_copy(
             update={
@@ -272,7 +274,7 @@ class _RuntimeRepository(AgentRuntimeRepository):
 
     async def ensure_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
         *,
         default_runtime_provider_id: str | None = None,
@@ -289,7 +291,7 @@ class _UnavailableRuntimeRepository(_RuntimeRepository):
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> AgentRuntime | None:
         """Return a Runtime whose Runner cannot accept cleanup."""
@@ -305,7 +307,7 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         runtime_repository: AgentRuntimeRepository,
     ) -> None:
         self.session_manager = session_manager
@@ -726,7 +728,7 @@ class _FailingCatalogRepository(AgentProjectCatalogRepository):
 
     async def upsert_entry(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         path: str,
@@ -741,7 +743,7 @@ class _FailingProjectRemovalRepository(SessionWorkspaceProjectRepository):
 
     async def delete_project(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         project_id: str,
         *,
         session_id: str,
@@ -783,7 +785,7 @@ class _TrackingSkillStateStore(SkillStateStore):
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> None:
         super().__init__(session_manager=session_manager)
         self.invalidated: list[tuple[str, str, str, str]] = []
@@ -838,7 +840,7 @@ class _AgentContextFixture(NamedTuple):
 
 
 async def _create_agent_context(
-    session: AsyncSession, slug: str
+    session: WriteSession, slug: str
 ) -> _AgentContextFixture:
     """Create workspace, user, and agent fixtures."""
     workspace = await WorkspaceRepository().create(
@@ -869,8 +871,8 @@ async def _create_agent_context(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace_id,
         name=f"Worktree {slug}",
@@ -903,10 +905,12 @@ async def _create_agent_context(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=1))
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(
+        RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=1)
+    )
+    await session.write_session.flush()
     runtime_repository = AgentRuntimeRepository()
     runtime = await runtime_repository.ensure_for_agent(session, agent.id)
     await runtime_repository.record_runner_state(
@@ -923,7 +927,7 @@ async def _create_agent_context(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     runner: _RunnerOperations,
     *,
     catalog_repository: AgentProjectCatalogRepository | None = None,
@@ -973,7 +977,7 @@ def _service(
 
 
 def _project_operations_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     project_repository: SessionWorkspaceProjectRepository | None = None,
 ) -> SessionWorkspaceProjectOperationsRepository:
@@ -998,7 +1002,7 @@ def _project_operations_repository(
 
 
 def _input_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     worktree_service: SessionGitWorktreeService,
 ) -> AgentSessionInputService:
     """Build AgentSessionInputService for setup action enqueue tests."""
@@ -1046,7 +1050,7 @@ def _input_service(
 
 
 def _mailbox_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> MailboxService:
     """Build the production MailboxService with test collaborators."""
     return MailboxService(
@@ -1070,7 +1074,7 @@ def _mailbox_service(
 
 
 async def _promote_oldest_mailbox_item(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     session_id: str,
     active_run_id: str | None,
@@ -1098,7 +1102,7 @@ async def _promote_oldest_mailbox_item(
 
 
 async def _execute_first_setup_action(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     worktree_service: SessionGitWorktreeService,
     *,
     agent_id: str,
@@ -1222,7 +1226,7 @@ class _ReadyWorktreeSessionFixture(NamedTuple):
 
 
 async def _create_ready_worktree_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     slug: str,
     runner: _RunnerOperations,
@@ -1283,7 +1287,7 @@ class _AgentCreateSessionFixture:
 
 
 async def _create_agent_worktree_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     slug: str,
     runner: _RunnerOperations,
@@ -1381,7 +1385,7 @@ class _PromotedCreateAction(NamedTuple):
 
 
 async def _admit_and_promote_agent_create(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     fixture: _AgentCreateSessionFixture,
     *,
     client_tool_call_id: str,
@@ -1420,7 +1424,7 @@ class _ManagedWorktreeFixture(NamedTuple):
 
 
 async def _create_agent_managed_worktree(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     fixture: _AgentCreateSessionFixture,
     *,
     client_tool_call_id: str,
@@ -1477,7 +1481,7 @@ class _PromotedRemoveAction(NamedTuple):
 
 
 async def _admit_and_promote_agent_remove(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     fixture: _AgentCreateSessionFixture,
     *,
     worktree_path: str,
@@ -1512,7 +1516,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_admission_is_idempotent_and_payload_stable(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """One client tool call identity owns one exact durable request."""
         fixture = await _create_agent_worktree_session(
@@ -1578,7 +1582,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_admission_rejects_takeover_after_external_preparation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A takeover before the admission transaction cannot enqueue an action."""
@@ -1643,7 +1647,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_admission_rejects_ordinary_project(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Removal admission never accepts an ordinary current Project."""
         fixture = await _create_agent_worktree_session(
@@ -1674,7 +1678,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_admission_is_idempotent_and_payload_stable(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """One removal client call identity owns one exact durable request."""
         fixture = await _create_agent_worktree_session(
@@ -1738,7 +1742,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_clean_checkout_preserves_branch_and_context(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Clean removal deletes checkout Project state but not its Git branch."""
         runner = _RunnerOperations()
@@ -1851,7 +1855,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_dirty_nonforce_preserves_registration(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Dirty non-force removal fails with retry guidance and no mutation."""
         runner = _RunnerOperations()
@@ -1920,7 +1924,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_force_discards_dirty_checkout_only(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Explicit force discards dirty checkout content while preserving branch."""
         runner = _RunnerOperations()
@@ -1979,7 +1983,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_project_failure_records_confirmed_checkout_removal(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Project failure preserves checkout-removal recovery evidence."""
         runner = _RunnerOperations()
@@ -2026,7 +2030,7 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=fixture.session_id,
             )
-            claim = await session.scalar(
+            claim = await session.read_session.scalar(
                 sa.select(RDBGitWorktreePathClaim).where(
                     RDBGitWorktreePathClaim.action_execution_id == execution.id
                 )
@@ -2050,7 +2054,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_skill_failure_preserves_cleaned_allocation(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Skill failure does not relabel confirmed checkout removal as failed."""
         runner = _RunnerOperations()
@@ -2102,7 +2106,7 @@ class TestSessionGitWorktreeService:
                 session,
                 session_id=fixture.session_id,
             )
-            claim = await session.scalar(
+            claim = await session.read_session.scalar(
                 sa.select(RDBGitWorktreePathClaim).where(
                     RDBGitWorktreePathClaim.action_execution_id == execution.id
                 )
@@ -2127,7 +2131,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_ambiguous_inspection_preserves_registration(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Ambiguous Runner identity never mutates Project or allocation state."""
         runner = _RunnerOperations()
@@ -2183,7 +2187,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_remove_claim_contention_preserves_target(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A second removal cannot bypass the first action-owned path claim."""
         runner = _RunnerOperations()
@@ -2265,7 +2269,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_admission_rejects_unregistered_project_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Admission never enqueues a path outside the current Project set."""
         fixture = await _create_agent_worktree_session(
@@ -2296,7 +2300,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_uses_selected_head_and_repository_anchor(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Linked worktree creation defaults to selected HEAD on the shared anchor."""
         fixture = await _create_agent_worktree_session(
@@ -2400,7 +2404,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_failure_does_not_register_generated_project(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner failure retains allocation evidence without a generated Project."""
         fixture = await _create_agent_worktree_session(
@@ -2455,7 +2459,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_catalog_failure_compensates_generated_project(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Catalog failure removes Project registration before terminal failure."""
         fixture = await _create_agent_worktree_session(
@@ -2496,7 +2500,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_skill_failure_compensates_generated_project(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Skill refresh failure removes Project and Catalog registration."""
         skill_store = _FailingSkillStateStore(session_manager=rdb_session_manager)
@@ -2545,7 +2549,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_fails_before_git_when_skill_store_disappears(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Execution drift cannot continue without mandatory Skill projection."""
         fixture = await _create_agent_worktree_session(
@@ -2595,7 +2599,7 @@ class TestSessionGitWorktreeService:
     )
     async def test_agent_create_branch_collision_respects_branch_authority(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         branch_name: str | None,
         expected_create_attempts: int,
         expected_status: str,
@@ -2652,7 +2656,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_keeps_distinct_repository_leaves_unsuffixed(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A later worktree keeps its base leaf when only the branch collides."""
         runner = _RunnerOperations()
@@ -2699,7 +2703,7 @@ class TestSessionGitWorktreeService:
     )
     async def test_agent_create_advances_past_db_and_runner_collisions(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         failure: str,
         expected_path_suffix: str,
         expected_branch_suffix: str,
@@ -2739,7 +2743,7 @@ class TestSessionGitWorktreeService:
 
     async def test_agent_create_reuses_lowest_cleaned_path_suffix(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A removed checkout releases its directory suffix but preserves its branch."""
         runner = _RunnerOperations()
@@ -2817,7 +2821,7 @@ class TestSessionGitWorktreeService:
     )
     async def test_bridge_cancellation_handoff_is_replay_idempotent(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         predecessor_run_id: str | None,
         expected_predecessor_run_id: str,
     ) -> None:
@@ -2924,7 +2928,7 @@ class TestSessionGitWorktreeService:
 
     async def test_action_owner_fence_rejects_stale_logs_and_allows_recovery(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A new owner may conservatively cancel old work, but old writes stop."""
         async with rdb_session_manager() as session:
@@ -3015,7 +3019,7 @@ class TestSessionGitWorktreeService:
 
     async def test_create_session_working_folder_uses_stored_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Setup materializes the exact path stored on the Session context."""
         async with rdb_session_manager() as session:
@@ -3093,7 +3097,7 @@ class TestSessionGitWorktreeService:
 
     async def test_create_session_working_folder_failure_is_terminal_and_nonblocking(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner failure records bounded evidence without invalidating context."""
         async with rdb_session_manager() as session:
@@ -3162,7 +3166,7 @@ class TestSessionGitWorktreeService:
 
     async def test_create_session_working_folder_cancellation_is_nonblocking(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner cancellation becomes bounded terminal setup failure."""
         async with rdb_session_manager() as session:
@@ -3230,7 +3234,7 @@ class TestSessionGitWorktreeService:
 
     async def test_create_session_working_folder_rejects_invalid_stored_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Stored path validation prevents an out-of-root Runner operation."""
         async with rdb_session_manager() as session:
@@ -3253,7 +3257,9 @@ class TestSessionGitWorktreeService:
                 agent_session.id,
             )
             assert root_agent is not None
-            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            context = await session.read_session.get(
+                RDBSessionAgentContext, root_agent.context_id
+            )
             assert context is not None
             context.working_folder_path = "/workspace/agent/not-managed"
             context.working_folder_binding_state = (
@@ -3310,7 +3316,7 @@ class TestSessionGitWorktreeService:
 
     async def test_git_worktree_action_rejects_invalid_stored_folder_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Git allocation does not use a stored path outside the managed root."""
         async with rdb_session_manager() as session:
@@ -3333,7 +3339,9 @@ class TestSessionGitWorktreeService:
                 agent_session.id,
             )
             assert root_agent is not None
-            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            context = await session.read_session.get(
+                RDBSessionAgentContext, root_agent.context_id
+            )
             assert context is not None
             context.working_folder_path = "/workspace/agent/not-managed"
             context.working_folder_binding_state = (
@@ -3400,7 +3408,7 @@ class TestSessionGitWorktreeService:
 
     async def test_run_git_worktree_action_registers_project_and_catalog(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """create_git_worktree TurnAction execution creates a Project boundary."""
         async with rdb_session_manager() as session:
@@ -3494,7 +3502,7 @@ class TestSessionGitWorktreeService:
 
     async def test_setup_action_advances_runner_branch_after_db_path_collision(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Setup action preserves the DB-selected path while retrying its branch."""
         async with rdb_session_manager() as session:
@@ -3589,7 +3597,7 @@ class TestSessionGitWorktreeService:
 
     async def test_orphan_cleanup_logs_candidate_failure_and_terminal_summary(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Orphan cleanup emits Loki-searchable structured operational logs."""
@@ -3692,7 +3700,7 @@ class TestSessionGitWorktreeService:
 
     async def test_running_action_handover_cancels_without_reexecution(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Handover snapshots uncertain work without repeating its side effect."""
@@ -3813,7 +3821,7 @@ class TestSessionGitWorktreeService:
     )
     async def test_task_cancellation_hands_live_action_to_durable_snapshot(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         monkeypatch: pytest.MonkeyPatch,
         cancel_message: str,
         expected_summary: str,
@@ -3899,7 +3907,7 @@ class TestSessionGitWorktreeService:
 
     async def test_preview_git_refs_lists_source_project_refs(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Git ref preview validates access and calls the Runtime Runner."""
         async with rdb_session_manager() as session:
@@ -3930,7 +3938,7 @@ class TestSessionGitWorktreeService:
 
     async def test_valid_first_message_worktree_registers_project_and_catalog(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Valid worktree action creates Project and catalog rows."""
         async with rdb_session_manager() as session:
@@ -3994,7 +4002,7 @@ class TestSessionGitWorktreeService:
 
     async def test_invalid_ref_fails_action_and_keeps_input_pending(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runner invalid ref failure leaves the action failed and input pending."""
         async with rdb_session_manager() as session:
@@ -4062,7 +4070,7 @@ class TestSessionGitWorktreeService:
 
     async def test_branch_collision_suffixes_final_branch(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Branch collision retries with an independently suffixed branch name."""
         async with rdb_session_manager() as session:
@@ -4113,7 +4121,7 @@ class TestSessionGitWorktreeService:
 
     async def test_path_collision_suffixes_final_worktree_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Path collision retries with an independently suffixed path leaf."""
         async with rdb_session_manager() as session:
@@ -4164,7 +4172,7 @@ class TestSessionGitWorktreeService:
 
     async def test_catalog_upsert_failure_blocks_initialization(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Catalog upsert failure marks the action execution failed."""
         async with rdb_session_manager() as session:
@@ -4230,7 +4238,7 @@ class TestSessionGitWorktreeService:
 
     async def test_status_refresh_warning_does_not_block_ready(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Non-blocking status refresh warning keeps action execution completed."""
         async with rdb_session_manager() as session:
@@ -4302,7 +4310,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_cleanup_request_only_marks_pending(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Archive-time cleanup request does not run Git cleanup inline."""
         runner = _RunnerOperations()
@@ -4328,7 +4336,7 @@ class TestSessionGitWorktreeService:
 
     async def test_cleanup_removes_worktree_branch_and_catalog(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Cleanup removes Git resources and deletes the catalog entry."""
         runner = _RunnerOperations()
@@ -4384,7 +4392,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_root_tree_cleanup_records_unavailable_runner(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Unavailable Runner state is recorded without raising to archive."""
@@ -4438,7 +4446,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_root_tree_cleanup_continues_after_unexpected_failure(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """One unexpected allocation failure does not skip the next allocation."""
@@ -4555,7 +4563,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_root_tree_cleanup_accepts_already_absent_target(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Archive cleanup treats confirmed worktree absence as terminal."""
         runner = _RunnerOperations()
@@ -4591,7 +4599,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_cleanup_skips_legacy_parent_for_canonical_path(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Canonical worktree cleanup never removes the legacy worktree parent."""
         runner = _RunnerOperations()
@@ -4632,7 +4640,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_cleanup_rejects_invalid_canonical_context_before_runner_io(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """A malformed context cannot authorize external Git cleanup."""
         runner = _RunnerOperations()
@@ -4659,7 +4667,9 @@ class TestSessionGitWorktreeService:
             )
             assert allocation is not None
             assert root_agent is not None
-            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            context = await session.read_session.get(
+                RDBSessionAgentContext, root_agent.context_id
+            )
             assert context is not None
             context.working_folder_path = "/workspace/agent/external"
             await allocation_repository.update_target(
@@ -4690,7 +4700,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_cleanup_rejects_pending_context_before_runner_io(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Archive cleanup never promotes or uses a pending historical context."""
         runner = _RunnerOperations()
@@ -4714,7 +4724,9 @@ class TestSessionGitWorktreeService:
                 session_id,
             )
             assert root_agent is not None
-            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            context = await session.read_session.get(
+                RDBSessionAgentContext, root_agent.context_id
+            )
             assert context is not None
             context.working_folder_binding_state = (
                 SessionWorkingFolderBindingState.PENDING
@@ -4743,7 +4755,7 @@ class TestSessionGitWorktreeService:
 
     async def test_archive_cleanup_keeps_legacy_parent_cleanup(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Recorded legacy paths retain legacy parent cleanup behavior."""
         runner = _RunnerOperations()
@@ -4804,7 +4816,7 @@ class TestSessionGitWorktreeService:
 
     async def test_manual_cleanup_rejects_ordinary_project_target(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Project-targeted cleanup cannot delete ordinary Project rows."""
         runner = _RunnerOperations()
@@ -4840,7 +4852,7 @@ class TestSessionGitWorktreeService:
 
     async def test_cleanup_failure_marks_failed_without_raising(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Cleanup failures are recorded without blocking callers."""
         runner = _RunnerOperations(cleanup_failures=["worktree remove failed"])
@@ -4887,7 +4899,7 @@ class TestSessionGitWorktreeService:
 
     async def test_cleanup_records_bounded_ambiguous_ownership_failure(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Ambiguous existing targets retain a stable content-free failure."""
         runner = _RunnerOperations(
@@ -4931,7 +4943,7 @@ class TestSessionGitWorktreeService:
 
     async def test_manual_cleanup_retry_succeeds_after_failure(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Manual cleanup retry can recover a previously failed cleanup."""
         runner = _RunnerOperations(cleanup_failures=["first cleanup failed"])
@@ -4980,7 +4992,7 @@ class TestSessionGitWorktreeService:
 
     async def test_cleanup_rejects_path_without_matching_ownership_boundary(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Cleanup never deletes a path outside the recorded Azents root boundary."""
         runner = _RunnerOperations()
@@ -5000,10 +5012,12 @@ class TestSessionGitWorktreeService:
                 session_id=session_id,
             )
             assert allocation is not None
-            row = await session.get(RDBSessionAgentContextGitWorktree, allocation.id)
+            row = await session.read_session.get(
+                RDBSessionAgentContextGitWorktree, allocation.id
+            )
             assert row is not None
             row.worktree_path = "/workspace/agent/user-owned/repo"
-            await session.flush()
+            await session.write_session.flush()
             await worktree_service.mark_cleanup_pending_for_session(
                 session,
                 session_id=session_id,
@@ -5026,14 +5040,14 @@ class TestSessionGitWorktreeService:
 
 
 def _active_profile_repository(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ActiveProfileAdmissionRepository:
     """Keep these lifecycle-only fixtures scoped to their declared option contract."""
     del manager
     repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
 
     async def validate(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         profile: RequestedInferenceProfile,

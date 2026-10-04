@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.user import UserRepository as UserRepo
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -26,7 +27,7 @@ from .data import (
 )
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(session: WriteSession) -> str:
     """Create Workspace for tests and return internal ID."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -39,7 +40,7 @@ async def _create_workspace(session: AsyncSession) -> str:
 
 
 async def _create_user(
-    session: AsyncSession, email: str = "user-test@example.com"
+    session: WriteSession, email: str = "user-test@example.com"
 ) -> str:
     """Create User for tests and return user_id."""
     repo = UserRepo()
@@ -48,14 +49,14 @@ async def _create_user(
 
 
 async def _cleanup_committed_membership_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str | None,
     user_id: str | None,
 ) -> None:
     """Remove the committed fixture used by the membership lock test."""
     if workspace_id is not None:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
         )
     if user_id is not None:
@@ -81,7 +82,8 @@ class TestWorkspaceUserRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as setup_session:
+            ) as _raw_setup_session:
+                setup_session = ReadWriteSession(_raw_setup_session)
                 workspace = await WorkspaceRepository().create(
                     setup_session,
                     WorkspaceCreate(
@@ -109,22 +111,24 @@ class TestWorkspaceUserRepository:
                     ),
                 )
                 assert isinstance(membership, Success)
-                await setup_session.commit()
+                await setup_session.write_session.commit()
 
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as delete_session:
+            ) as _raw_delete_session:
+                delete_session = ReadWriteSession(_raw_delete_session)
                 await repo.delete(delete_session, membership.value.id)
-                delete_pid = await delete_session.scalar(
+                delete_pid = await delete_session.read_session.scalar(
                     sa.text("SELECT pg_backend_pid()")
                 )
                 assert isinstance(delete_pid, int)
                 async with AsyncSession(
                     rdb_engine,
                     expire_on_commit=False,
-                ) as admission_session:
-                    admission_pid = await admission_session.scalar(
+                ) as _raw_admission_session:
+                    admission_session = ReadWriteSession(_raw_admission_session)
+                    admission_pid = await admission_session.read_session.scalar(
                         sa.text("SELECT pg_backend_pid()")
                     )
                     assert isinstance(admission_pid, int)
@@ -140,9 +144,10 @@ class TestWorkspaceUserRepository:
                     admission_task = asyncio.create_task(lock_membership())
                     try:
                         async with asyncio.timeout(5):
-                            async with AsyncSession(rdb_engine) as observer:
+                            async with AsyncSession(rdb_engine) as _raw_observer:
+                                observer = ReadWriteSession(_raw_observer)
                                 while True:
-                                    blockers = await observer.scalar(
+                                    blockers = await observer.read_session.scalar(
                                         sa.text("SELECT pg_blocking_pids(:pid)"),
                                         {"pid": admission_pid},
                                     )
@@ -150,9 +155,9 @@ class TestWorkspaceUserRepository:
                                         break
                                     assert not admission_task.done()
                         assert not admission_task.done()
-                        await delete_session.commit()
+                        await delete_session.write_session.commit()
                         admitted = await asyncio.wait_for(admission_task, timeout=5)
-                        await admission_session.commit()
+                        await admission_session.write_session.commit()
                     finally:
                         if not admission_task.done():
                             admission_task.cancel()
@@ -164,15 +169,16 @@ class TestWorkspaceUserRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as cleanup_session:
+            ) as _raw_cleanup_session:
+                cleanup_session = ReadWriteSession(_raw_cleanup_session)
                 await _cleanup_committed_membership_fixture(
                     cleanup_session,
                     workspace_id=workspace_id,
                     user_id=user_id,
                 )
-                await cleanup_session.commit()
+                await cleanup_session.write_session.commit()
 
-    async def test_create(self, rdb_session: AsyncSession) -> None:
+    async def test_create(self, rdb_session: WriteSession) -> None:
         """Create WorkspaceUser."""
         # Given: create Workspace + User
         workspace_id = await _create_workspace(rdb_session)
@@ -202,7 +208,7 @@ class TestWorkspaceUserRepository:
         assert user.updated_at
 
     async def test_create_duplicate_membership_returns_conflict(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Duplicate Workspace membership maps the exact unique constraint."""
         workspace_id = await _create_workspace(rdb_session)
@@ -227,7 +233,7 @@ class TestWorkspaceUserRepository:
         assert result.error.user_id == created_user_id
 
     async def test_create_with_conflict_user_not_found(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Admin creation maps a missing global User before deferred FK commit."""
         workspace_id = await _create_workspace(rdb_session)
@@ -247,7 +253,7 @@ class TestWorkspaceUserRepository:
         assert isinstance(result.error, UserNotFound)
         assert result.error.user_id == "missing-user"
 
-    async def test_create_workspace_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_create_workspace_not_found(self, rdb_session: WriteSession) -> None:
         """Creating WorkspaceUser in nonexistent Workspace returns NotFound."""
         # Given: nonexistent workspace_id
         created_user_id = await _create_user(
@@ -271,7 +277,7 @@ class TestWorkspaceUserRepository:
         assert isinstance(result.error, WorkspaceNotFound)
         assert result.error.workspace_id == "nonexistent"
 
-    async def test_get(self, rdb_session: AsyncSession) -> None:
+    async def test_get(self, rdb_session: WriteSession) -> None:
         """Fetch WorkspaceUser by ID."""
         # Given: WorkspaceUser create
         workspace_id = await _create_workspace(rdb_session)
@@ -297,7 +303,7 @@ class TestWorkspaceUserRepository:
         assert user.id == user_id
         assert user.name == "fetch user"
 
-    async def test_get_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent ID."""
         # Given: nonexistent ID
         repo = WorkspaceUserRepository()
@@ -308,7 +314,7 @@ class TestWorkspaceUserRepository:
         # Then: None
         assert user is None
 
-    async def test_list_by_workspace(self, rdb_session: AsyncSession) -> None:
+    async def test_list_by_workspace(self, rdb_session: WriteSession) -> None:
         """Fetch WorkspaceUser list in Workspace."""
         # Given: Workspace multiple user create
         workspace_id = await _create_workspace(rdb_session)
@@ -340,7 +346,7 @@ class TestWorkspaceUserRepository:
         # Then: two users exist
         assert len(user_list.items) == 2
 
-    async def test_update(self, rdb_session: AsyncSession) -> None:
+    async def test_update(self, rdb_session: WriteSession) -> None:
         """WorkspaceUser Update."""
         # Given: WorkspaceUser create
         workspace_id = await _create_workspace(rdb_session)
@@ -369,7 +375,7 @@ class TestWorkspaceUserRepository:
         assert isinstance(result, Success)
         assert result.value.name == "After update"
 
-    async def test_update_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_update_not_found(self, rdb_session: WriteSession) -> None:
         """nonexistent WorkspaceUser when updating return NotFound."""
         # Given: nonexistent ID
         repo = WorkspaceUserRepository()
@@ -383,7 +389,7 @@ class TestWorkspaceUserRepository:
         assert isinstance(result, Failure)
         assert isinstance(result.error, NotFound)
 
-    async def test_update_empty(self, rdb_session: AsyncSession) -> None:
+    async def test_update_empty(self, rdb_session: WriteSession) -> None:
         """empty update data when existing data as-is return."""
         # Given: WorkspaceUser create
         workspace_id = await _create_workspace(rdb_session)
@@ -410,7 +416,7 @@ class TestWorkspaceUserRepository:
         assert isinstance(result, Success)
         assert result.value.name == "empty update"
 
-    async def test_delete(self, rdb_session: AsyncSession) -> None:
+    async def test_delete(self, rdb_session: WriteSession) -> None:
         """WorkspaceUser Delete."""
         # Given: WorkspaceUser create
         workspace_id = await _create_workspace(rdb_session)

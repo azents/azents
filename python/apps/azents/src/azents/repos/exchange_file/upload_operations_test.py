@@ -27,6 +27,7 @@ from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -57,7 +58,7 @@ _CLEANUP_AFTER = _EXPIRY + datetime.timedelta(minutes=5)
 @dataclass(frozen=True)
 class _Harness:
     repository: ExchangeFileOperationRepository
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     workspace_id: str
     agent_id: str
     user_id: str
@@ -65,7 +66,7 @@ class _Harness:
 
 
 async def _harness(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> _Harness:
     """Create a real Workspace membership and Agent without Runtime dependencies."""
     tag = uuid4().hex
@@ -104,8 +105,8 @@ async def _harness(
             main_model_label="default",
             lightweight_model_label="lightweight",
         )
-        session.add(agent)
-        await session.flush()
+        session.write_session.add(agent)
+        await session.write_session.flush()
         agent_id = agent.id
     return _Harness(
         repository=ExchangeFileOperationRepository(
@@ -231,7 +232,7 @@ def test_operation_schema_preserves_cleanup_without_owner_foreign_keys() -> None
 
 
 async def test_prepare_binds_manifest_and_reserves_only_internal_ids(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -246,9 +247,14 @@ async def test_prepare_binds_manifest_and_reserves_only_internal_ids(
         == 3
     )
     async with rdb_session_manager() as session:
-        row = await session.get(RDBExchangeUploadOperation, operation.upload_id)
+        row = await session.read_session.get(
+            RDBExchangeUploadOperation, operation.upload_id
+        )
         assert row is not None and row.publication_id == operation.publication_id
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
     with pytest.raises(ValueError, match="SHA-256"):
         replace(operation, expected_sha256="A" * 64)
     with pytest.raises(ValueError, match="timezone-aware"):
@@ -256,7 +262,7 @@ async def test_prepare_binds_manifest_and_reserves_only_internal_ids(
 
 
 async def test_claim_denies_other_uploader_and_revoked_current_membership(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -270,7 +276,7 @@ async def test_claim_denies_other_uploader_and_revoked_current_membership(
     )
     assert denied == Failure(ExchangeUploadError.ACCESS_DENIED)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == harness.workspace_id,
                 RDBWorkspaceUser.user_id == harness.user_id,
@@ -288,7 +294,7 @@ async def test_claim_denies_other_uploader_and_revoked_current_membership(
 
 
 async def test_prepare_authorizes_membership_and_rejects_invalid_manifest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     invalid = await harness.repository.prepare_agent_upload_operation(
@@ -304,7 +310,7 @@ async def test_prepare_authorizes_membership_and_rejects_invalid_manifest(
     )
     assert invalid == Failure(ExchangeUploadError.INVALID_REQUEST)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == harness.workspace_id,
                 RDBWorkspaceUser.user_id == harness.user_id,
@@ -324,7 +330,7 @@ async def test_prepare_authorizes_membership_and_rejects_invalid_manifest(
     assert denied == Failure(ExchangeUploadError.ACCESS_DENIED)
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBExchangeUploadOperation)
                 .where(RDBExchangeUploadOperation.agent_id == harness.agent_id)
@@ -334,7 +340,7 @@ async def test_prepare_authorizes_membership_and_rejects_invalid_manifest(
 
 
 async def test_agent_workspace_scope_cannot_change_after_prepare(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -354,7 +360,7 @@ async def test_agent_workspace_scope_cannot_change_after_prepare(
                 role=WorkspaceUserRole.MEMBER,
             ),
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == harness.agent_id)
             .values(workspace_id=new_workspace_id)
@@ -369,12 +375,14 @@ async def test_agent_workspace_scope_cannot_change_after_prepare(
     )
     assert denied == Failure(ExchangeUploadError.ACCESS_DENIED)
     async with rdb_session_manager() as session:
-        row = await session.get(RDBExchangeUploadOperation, operation.upload_id)
+        row = await session.read_session.get(
+            RDBExchangeUploadOperation, operation.upload_id
+        )
         assert row is not None and row.workspace_id == harness.workspace_id
 
 
 async def test_claim_expiry_busy_and_replaced_token_fence_publication(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -421,7 +429,10 @@ async def test_claim_expiry_busy_and_replaced_token_fence_publication(
     )
     assert expired == Failure(ExchangeUploadError.EXPIRED)
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
 
 
 @pytest.mark.parametrize(
@@ -439,7 +450,7 @@ async def test_claim_expiry_busy_and_replaced_token_fence_publication(
     ),
 )
 async def test_finalize_rejects_mismatched_source_manifest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     changes: dict[str, object],
 ) -> None:
     harness = await _harness(rdb_session_manager)
@@ -457,11 +468,14 @@ async def test_finalize_rejects_mismatched_source_manifest(
     )
     assert result == Failure(ExchangeUploadError.MANIFEST_MISMATCH)
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
 
 
 async def test_finalize_reauthorizes_and_retries_same_exact_publication(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -489,7 +503,7 @@ async def test_finalize_reauthorizes_and_retries_same_exact_publication(
     assert isinstance(replay, Success) and replay.value.id == first.value.id
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBExchangeFile)
                 .where(
@@ -500,7 +514,7 @@ async def test_finalize_reauthorizes_and_retries_same_exact_publication(
             )
             == 2
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == harness.workspace_id,
                 RDBWorkspaceUser.user_id == harness.user_id,
@@ -518,7 +532,7 @@ async def test_finalize_reauthorizes_and_retries_same_exact_publication(
 
 
 async def test_finalize_rejects_unreserved_preview_identity(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -542,18 +556,24 @@ async def test_finalize_rejects_unreserved_preview_identity(
     )
     assert denied == Failure(ExchangeUploadError.MANIFEST_MISMATCH)
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
-        assert await session.get(RDBExchangeFile, operation.preview_file_id) is None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.preview_file_id)
+            is None
+        )
 
 
 async def test_finalize_denies_revocation_between_claim_and_commit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
     await _claim(harness, operation, claim_id="claim", now=_NOW)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == harness.workspace_id,
                 RDBWorkspaceUser.user_id == harness.user_id,
@@ -569,11 +589,14 @@ async def test_finalize_denies_revocation_between_claim_and_commit(
     )
     assert denied == Failure(ExchangeUploadError.ACCESS_DENIED)
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
 
 
 async def test_authenticated_publication_load_never_recreates_a_missing_file(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -608,7 +631,7 @@ async def test_authenticated_publication_load_never_recreates_a_missing_file(
         now=_EXPIRY,
     ) == Failure(ExchangeUploadError.ACCESS_DENIED)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBExchangeFile).where(
                 RDBExchangeFile.id == operation.publication_id
             )
@@ -631,7 +654,7 @@ async def test_authenticated_publication_load_never_recreates_a_missing_file(
 
 
 async def test_release_exact_live_claim_allows_retry_but_fences_old_token(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     now = datetime.datetime.now(datetime.UTC)
@@ -675,7 +698,7 @@ async def test_release_exact_live_claim_allows_retry_but_fences_old_token(
 
 
 async def test_cleanup_claim_fences_delayed_finalizer_even_with_stale_sampled_clock(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -709,11 +732,14 @@ async def test_cleanup_claim_fences_delayed_finalizer_even_with_stale_sampled_cl
     )
     assert result == Failure(ExchangeUploadError.FENCED)
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
 
 
 async def test_preview_failure_rolls_back_family_and_operation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     harness = await _harness(rdb_session_manager)
@@ -739,14 +765,22 @@ async def test_preview_failure_rolls_back_family_and_operation(
             batch=_batch(operation, preview=True),
         )
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is None
-        assert await session.get(RDBExchangeFile, operation.preview_file_id) is None
-        row = await session.get(RDBExchangeUploadOperation, operation.upload_id)
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is None
+        )
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.preview_file_id)
+            is None
+        )
+        row = await session.read_session.get(
+            RDBExchangeUploadOperation, operation.upload_id
+        )
         assert row is not None and row.state is ExchangeUploadState.PENDING
 
 
 async def test_cleanup_is_due_bounded_and_survives_product_owner_deletion(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -760,13 +794,15 @@ async def test_cleanup_is_due_bounded_and_survives_product_owner_deletion(
         == ()
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgent).where(RDBAgent.id == harness.agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == harness.workspace_id)
         )
-        await session.execute(sa.delete(RDBUser).where(RDBUser.id == harness.user_id))
+        await session.write_session.execute(
+            sa.delete(RDBUser).where(RDBUser.id == harness.user_id)
+        )
     claimed = await harness.repository.claim_due_agent_upload_cleanup(
         now=_CLEANUP_AFTER,
         claim_id="cleanup",
@@ -797,7 +833,7 @@ async def test_cleanup_is_due_bounded_and_survives_product_owner_deletion(
 
 
 async def test_finalized_cleanup_keeps_published_family_and_fences_old_cleanup_owner(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     harness = await _harness(rdb_session_manager)
     operation = await _prepare(harness)
@@ -841,13 +877,19 @@ async def test_finalized_cleanup_keeps_published_family_and_fences_old_cleanup_o
         upload_id=operation.upload_id, claim_id="new-cleanup"
     )
     async with rdb_session_manager() as session:
-        assert await session.get(RDBExchangeFile, operation.publication_id) is not None
-        assert await session.get(RDBExchangeFile, operation.preview_file_id) is not None
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.publication_id)
+            is not None
+        )
+        assert (
+            await session.read_session.get(RDBExchangeFile, operation.preview_file_id)
+            is not None
+        )
 
 
 @pytest.mark.parametrize("finalized", [False, True])
 async def test_completed_cleanup_reclaims_late_residue_after_one_hour(
-    rdb_session_manager: SessionManager[AsyncSession], finalized: bool
+    rdb_session_manager: SessionManager[WriteSession], finalized: bool
 ) -> None:
     """Retained manifests authorize repeat cleanup, not renewed upload authority."""
     harness = await _harness(rdb_session_manager)
@@ -877,7 +919,9 @@ async def test_completed_cleanup_reclaims_late_residue_after_one_hour(
     )
     after_finish = datetime.datetime.now(datetime.UTC)
     async with rdb_session_manager() as session:
-        row = await session.get(RDBExchangeUploadOperation, operation.upload_id)
+        row = await session.read_session.get(
+            RDBExchangeUploadOperation, operation.upload_id
+        )
         assert row is not None
         first_completed_at = row.cleanup_completed_at
         next_due = row.cleanup_after
@@ -929,7 +973,9 @@ async def test_completed_cleanup_reclaims_late_residue_after_one_hour(
         upload_id=operation.upload_id, claim_id="late-residue-cleanup"
     )
     async with rdb_session_manager() as session:
-        row = await session.get(RDBExchangeUploadOperation, operation.upload_id)
+        row = await session.read_session.get(
+            RDBExchangeUploadOperation, operation.upload_id
+        )
         assert row is not None and row.cleanup_completed_at is not None
         assert before_second_finish <= row.cleanup_completed_at <= after_second_finish
         assert row.cleanup_completed_at >= first_completed_at
@@ -939,7 +985,7 @@ async def test_completed_cleanup_reclaims_late_residue_after_one_hour(
         assert row.cleanup_claim_id is None
         assert row.cleanup_lease_until is None
         for file_id in (operation.publication_id, operation.preview_file_id):
-            file = await session.get(RDBExchangeFile, file_id)
+            file = await session.read_session.get(RDBExchangeFile, file_id)
             if finalized:
                 assert file is not None
                 assert file.blob_deleted_at is None
@@ -962,7 +1008,7 @@ async def test_completed_cleanup_reclaims_late_residue_after_one_hour(
 
 
 async def test_recurring_cleanup_moves_finished_rows_behind_other_due_operations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The bounded oldest-deadline scan advances past each completed row."""
     harness = await _harness(rdb_session_manager)
@@ -998,13 +1044,14 @@ async def test_concurrent_finalize_and_cleanup_claims_have_one_exact_winner(
     """Separate PostgreSQL connections prove locking, not an in-process guard."""
 
     @asynccontextmanager
-    async def sessions() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def sessions() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
-                await session.commit()
+                await session.write_session.commit()
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
 
     harness = await _harness(sessions)
@@ -1058,29 +1105,29 @@ async def test_concurrent_finalize_and_cleanup_claims_have_one_exact_winner(
         assert sum(len(result) for result in cleanup_results) == 1
     finally:
         async with sessions() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBExchangeFile).where(
                     RDBExchangeFile.workspace_id == harness.workspace_id,
                     RDBExchangeFile.id == operation.preview_file_id,
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBExchangeFile).where(
                     RDBExchangeFile.id == operation.publication_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBExchangeUploadOperation).where(
                     RDBExchangeUploadOperation.id == operation.upload_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgent).where(RDBAgent.id == harness.agent_id)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBWorkspace).where(RDBWorkspace.id == harness.workspace_id)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBUser).where(
                     RDBUser.id.in_([harness.user_id, harness.other_user_id])
                 )

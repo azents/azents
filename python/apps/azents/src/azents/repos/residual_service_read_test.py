@@ -9,6 +9,7 @@ from azcommon.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionStatus
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -29,11 +30,12 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 
 async def test_residual_reads_close_their_sessions_before_returning() -> None:
     """Workspace and Discord snapshots return after their transactions close."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         transaction_active = True
         try:
@@ -45,7 +47,7 @@ async def test_residual_reads_close_their_sessions_before_returning() -> None:
     external_channel_repository = AsyncMock(spec=ExternalChannelRepository)
 
     async def get_agent(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         agent_id: str,
     ) -> None:
         assert transaction_active
@@ -54,7 +56,7 @@ async def test_residual_reads_close_their_sessions_before_returning() -> None:
         return None
 
     async def get_interaction(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         interaction_id: str,
     ) -> None:
@@ -90,11 +92,12 @@ async def test_residual_reads_close_their_sessions_before_returning() -> None:
 
 async def test_residual_mutation_and_idle_read_finish_before_returning() -> None:
     """Discord mutation and idle eligibility own their transaction lifetimes."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         transaction_active = True
         try:
@@ -116,7 +119,7 @@ async def test_residual_mutation_and_idle_read_finish_before_returning() -> None
         callback_selector_hash="hash",
     )
     assert prepared
-    session.commit.assert_awaited_once()
+    _raw_session.commit.assert_awaited_once()
     assert not transaction_active
 
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)

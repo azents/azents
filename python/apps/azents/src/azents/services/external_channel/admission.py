@@ -8,11 +8,11 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelInteractionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
@@ -49,7 +49,7 @@ class ExternalChannelAdmissionService:
     """Commit durable provider-event admission before acknowledging the provider."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -91,7 +91,7 @@ class ExternalChannelAdmissionService:
                 session,
                 create.model_copy(update={"principal_id": persisted_principal.id}),
             )
-            await session.commit()
+            await session.write_session.commit()
             return admission
 
     async def begin_interaction_provider_mutation(
@@ -116,7 +116,7 @@ class ExternalChannelAdmissionService:
                     error_kind="interaction_expired",
                     error_summary="Slack interaction expired before processing.",
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return (
                     None
                     if expired is None
@@ -141,7 +141,7 @@ class ExternalChannelAdmissionService:
                         ),
                         transitioned_at=now,
                     )
-                    await session.commit()
+                    await session.write_session.commit()
                     return (
                         None
                         if abandoned is None
@@ -162,7 +162,7 @@ class ExternalChannelAdmissionService:
                 error_summary=None,
                 transitioned_at=now,
             )
-            await session.commit()
+            await session.write_session.commit()
             return (
                 None
                 if processing is None
@@ -189,7 +189,7 @@ class ExternalChannelAdmissionService:
                 error_kind=error_kind,
                 error_summary=error_summary,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def run_interaction_provider_mutation(
         self,

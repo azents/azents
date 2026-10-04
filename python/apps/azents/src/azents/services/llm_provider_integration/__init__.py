@@ -5,7 +5,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import PROVIDER_SECRET_TYPES, PROVIDERS_WITH_CONFIG
 from azents.core.crypto import CredentialCipher
@@ -14,6 +13,7 @@ from azents.core.enums import LLMCatalogPurpose, LLMProvider
 from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
@@ -90,7 +90,7 @@ class LLMProviderIntegrationService:
     repository: Annotated[LLMProviderIntegrationRepository, Depends(_get_repo)]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def create(

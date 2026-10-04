@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 import pytest
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     AgentModelSelection,
@@ -26,6 +25,7 @@ from azents.rdb.models.model_candidate_chain_cutover import (
 )
 from azents.rdb.models.workspace_model_settings import RDBWorkspaceModelSettings
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_model_settings.data import (
@@ -41,18 +41,18 @@ from azents.repos.workspace_model_settings.operations import (
 class ObservedDefaultsManager:
     """Track completed real Workspace scopes for operation and normalizer tests."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.resolved: list[bool] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Resolve the underlying scope before marking the operation complete."""
         assert not self.active
         self.active = True
-        current: AsyncSession | None = None
+        current: WriteSession | None = None
         try:
             async with self.manager() as session:
                 current = session
@@ -61,13 +61,15 @@ class ObservedDefaultsManager:
         finally:
             self.active = False
             if current is not None:
-                self.resolved.append(not current.in_transaction())
+                self.resolved.append(not current.write_session.in_transaction())
 
     def assert_closed(self) -> None:
         """Assert that a typed catalog/image collaborator sees no Workspace scope."""
         assert not self.active
         assert all(self.resolved)
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,16 +80,16 @@ class MarkerState:
     written_at: datetime.datetime | None
 
 
-async def marker_state(session: AsyncSession) -> MarkerState:
+async def marker_state(session: WriteSession) -> MarkerState:
     """Read the real marker without retaining its ORM row across boundaries."""
-    row = await session.get(RDBModelCandidateChainCutover, 1)
+    row = await session.read_session.get(RDBModelCandidateChainCutover, 1)
     return MarkerState(
         exists=row is not None,
         written_at=None if row is None else row.new_format_written_at,
     )
 
 
-async def create_workspace(manager: SessionManager[AsyncSession], handle: str) -> str:
+async def create_workspace(manager: SessionManager[WriteSession], handle: str) -> str:
     """Create a real Workspace for the settings foreign key."""
     async with manager() as session:
         result = await WorkspaceRepository().create(
@@ -180,7 +182,7 @@ class _FailAfterWriteRepository(WorkspaceModelSettingsRepository):
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         update: WorkspaceModelSettingsUpdate,
     ) -> Result[WorkspaceModelSettings, DefaultModelCannotBeCleared]:
@@ -201,7 +203,7 @@ class _PauseAfterWriteRepository(WorkspaceModelSettingsRepository):
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         update: WorkspaceModelSettingsUpdate,
     ) -> Result[WorkspaceModelSettings, DefaultModelCannotBeCleared]:
@@ -213,7 +215,7 @@ class _PauseAfterWriteRepository(WorkspaceModelSettingsRepository):
 
 
 async def test_current_read_does_not_create_but_get_creates_empty_row(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Current and get-or-create keep their distinct side effects and close."""
     id = await create_workspace(rdb_session_manager, "defaults-empty-operation")
@@ -234,12 +236,12 @@ async def test_current_read_does_not_create_but_get_creates_empty_row(
     assert manager.resolved == [True, True, True]
     manager.assert_closed()
     async with rdb_session_manager() as session:
-        assert await session.get(RDBWorkspaceModelSettings, id) is not None
+        assert await session.read_session.get(RDBWorkspaceModelSettings, id) is not None
         assert await marker_state(session) == before
 
 
 async def test_complete_update_persists_exact_snapshot_fields_and_marker(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Canonical settings and marker resolve in the same write operation."""
     id = await create_workspace(rdb_session_manager, "defaults-complete-operation")
@@ -253,7 +255,7 @@ async def test_complete_update_persists_exact_snapshot_fields_and_marker(
     manager.assert_closed()
     assert manager.resolved == [True]
     async with rdb_session_manager() as session:
-        row = await session.get(RDBWorkspaceModelSettings, id)
+        row = await session.read_session.get(RDBWorkspaceModelSettings, id)
         assert row is not None
         main = update["default_model_selection"]
         lightweight = update["default_lightweight_model_selection"]
@@ -275,7 +277,7 @@ async def test_complete_update_persists_exact_snapshot_fields_and_marker(
     "field", ["default_model_selection", "default_selectable_model_options"]
 )
 async def test_configured_defaults_cannot_clear_and_failure_leaves_snapshot_unchanged(
-    rdb_session_manager: SessionManager[AsyncSession], field: str
+    rdb_session_manager: SessionManager[WriteSession], field: str
 ) -> None:
     """The existing narrow clear guard retains settings and downgrade state."""
     id = await create_workspace(rdb_session_manager, f"defaults-guard-{field}")
@@ -300,7 +302,7 @@ async def test_configured_defaults_cannot_clear_and_failure_leaves_snapshot_unch
 
 
 async def test_marker_first_constraint_failure_rolls_back_marker_and_empty_settings(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A settings constraint failure after marker SQL commits neither write."""
     id = await create_workspace(rdb_session_manager, "defaults-marker-first-failure")
@@ -322,7 +324,7 @@ async def test_marker_first_constraint_failure_rolls_back_marker_and_empty_setti
 
 
 async def test_failure_after_both_writes_rolls_back_existing_settings_and_marker(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A late exception abandons real settings and marker changes together."""
     id = await create_workspace(rdb_session_manager, "defaults-late-write-failure")
@@ -350,7 +352,7 @@ async def test_failure_after_both_writes_rolls_back_existing_settings_and_marker
 
 
 async def test_cancellation_after_both_writes_propagates_and_rolls_back(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Cancellation at an observed database boundary leaves no committed work."""
     id = await create_workspace(rdb_session_manager, "defaults-cancelled-write")
@@ -374,5 +376,5 @@ async def test_cancellation_after_both_writes_propagates_and_rolls_back(
     manager.assert_closed()
     assert manager.resolved == [True]
     async with rdb_session_manager() as session:
-        assert await session.get(RDBWorkspaceModelSettings, id) is None
+        assert await session.read_session.get(RDBWorkspaceModelSettings, id) is None
         assert await marker_state(session) == before

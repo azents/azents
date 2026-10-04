@@ -1,7 +1,6 @@
 """Platform GitHub App System Settings binding repository."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.github_system_setting_data import (
     PlatformGitHubAppInstallationImpact,
@@ -9,6 +8,7 @@ from azents.core.github_system_setting_data import (
 )
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
 from azents.rdb.models.toolkit import RDBToolkitConfig
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.toolkit import effective_agent_toolkit_relation
 
 
@@ -24,17 +24,17 @@ class PlatformGitHubAppSystemSettingRepository:
 
     async def get_installation_impact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         app_id: str,
     ) -> PlatformGitHubAppInstallationImpact:
         """Return installations bound to one App identity."""
-        affected_user_count = await session.scalar(
+        affected_user_count = await session.read_session.scalar(
             sa.select(sa.func.count(sa.distinct(RDBGithubUserInstallation.user_id)))
             .select_from(RDBGithubUserInstallation)
             .where(RDBGithubUserInstallation.platform_app_id == app_id)
         )
-        affected_installation_count = await session.scalar(
+        affected_installation_count = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBGithubUserInstallation)
             .where(RDBGithubUserInstallation.platform_app_id == app_id)
@@ -46,18 +46,18 @@ class PlatformGitHubAppSystemSettingRepository:
 
     async def get_current_binding_installation_impact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         effective_app_id: str,
     ) -> PlatformGitHubAppInstallationImpact:
         """Return installations bound to a different App identity."""
         affected_filter = RDBGithubUserInstallation.platform_app_id != effective_app_id
-        affected_user_count = await session.scalar(
+        affected_user_count = await session.read_session.scalar(
             sa.select(sa.func.count(sa.distinct(RDBGithubUserInstallation.user_id)))
             .select_from(RDBGithubUserInstallation)
             .where(affected_filter)
         )
-        affected_installation_count = await session.scalar(
+        affected_installation_count = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBGithubUserInstallation)
             .where(affected_filter)
@@ -69,10 +69,10 @@ class PlatformGitHubAppSystemSettingRepository:
 
     async def list_platform_toolkit_credentials(
         self,
-        session: AsyncSession,
+        session: ReadSession,
     ) -> list[PlatformGitHubAppToolkitCredential]:
         """Return encrypted credentials for Platform GitHub Toolkits."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(
                 RDBToolkitConfig.id,
                 RDBToolkitConfig.encrypted_credentials,
@@ -92,7 +92,7 @@ class PlatformGitHubAppSystemSettingRepository:
 
     async def count_agents_for_toolkits(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         toolkit_ids: set[str],
     ) -> int:
@@ -100,7 +100,7 @@ class PlatformGitHubAppSystemSettingRepository:
         if not toolkit_ids:
             return 0
         relation = effective_agent_toolkit_relation(enabled_only=True)
-        count = await session.scalar(
+        count = await session.read_session.scalar(
             sa.select(sa.func.count(sa.distinct(relation.c.agent_id))).where(
                 relation.c.toolkit_id.in_(toolkit_ids)
             )
@@ -109,13 +109,13 @@ class PlatformGitHubAppSystemSettingRepository:
 
     async def update_platform_toolkit_credentials(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         toolkit_id: str,
         encrypted_credentials: str,
     ) -> None:
         """Replace one Platform Toolkit credential ciphertext."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBToolkitConfig)
             .where(RDBToolkitConfig.id == toolkit_id)
             .values(encrypted_credentials=encrypted_credentials)

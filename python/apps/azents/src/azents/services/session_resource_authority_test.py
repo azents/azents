@@ -20,6 +20,7 @@ from azents.core.session_resource_authority import (
     accepts_execution_authority,
     accepts_execution_owner,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.session_resource_authority import (
@@ -131,7 +132,7 @@ async def _authorize(
         roots=roots,
         members=members,
     )
-    session: AsyncSession = AsyncMock(spec=AsyncSession)
+    session: WriteSession = AsyncMock(spec=AsyncSession)
     return await authorize_public_session_resource(
         session,
         agent_session=agent_session,
@@ -312,7 +313,7 @@ class TestPublicSessionResourceAuthority:
         chat = ChatOperationsRepository.__new__(ChatOperationsRepository)
         chat.agent_session_repository = agent_sessions
         chat.workspace_user_repository = workspace_users
-        session: AsyncSession = AsyncMock(spec=AsyncSession)
+        session: WriteSession = AsyncMock(spec=AsyncSession)
 
         result = await chat._authorize_public_session(
             session,

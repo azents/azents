@@ -3,8 +3,6 @@
 import dataclasses
 from collections.abc import Sequence
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunStatus, EventKind
 from azents.engine.events.types import (
     AgentRunState,
@@ -13,6 +11,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.io.user_input import RunUserMessage
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_event_contracts import (
@@ -34,7 +33,7 @@ class EngineRunPreparation:
 class EngineEventOperationRepository:
     """Own completed Event Engine transcript and Run operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: AgentRunCreateRepository
     agent_session_repository: AgentSessionRepository
     session_head_repository: SessionHeadRepository
@@ -124,7 +123,7 @@ class EngineEventOperationRepository:
 
     async def _ensure_agent_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> None:
         """Ensure the AgentSession exists before event processing."""
@@ -137,7 +136,7 @@ class EngineEventOperationRepository:
 
     async def _append_user_messages(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         user_messages: Sequence[RunUserMessage],
     ) -> list[Event]:

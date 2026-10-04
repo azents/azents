@@ -1,13 +1,13 @@
 """GithubUserInstallationRepository tests."""
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.github_installation import (
     GitHubInstallationSnapshot,
     decode_github_installations,
 )
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 
@@ -17,7 +17,7 @@ _PLATFORM_APP_ID = "123"
 
 
 async def _create_user(
-    session: AsyncSession, email: str = "gh-install@example.com"
+    session: WriteSession, email: str = "gh-install@example.com"
 ) -> str:
     """Create User for tests and return user_id."""
     repo = UserRepository()
@@ -44,7 +44,7 @@ def _make_installation(
 class TestGithubUserInstallationRepository:
     """GithubUserInstallationRepository tests."""
 
-    async def test_sync_insert(self, rdb_session: AsyncSession) -> None:
+    async def test_sync_insert(self, rdb_session: WriteSession) -> None:
         """INSERT new installation."""
         user_id = await _create_user(rdb_session)
         repo = GithubUserInstallationRepository()
@@ -57,7 +57,7 @@ class TestGithubUserInstallationRepository:
         )
 
         # Then: id should be stored normally as NOT NULL
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
@@ -70,7 +70,7 @@ class TestGithubUserInstallationRepository:
         assert row.account_login == "my-org"
         assert row.account_type == "Organization"
 
-    async def test_sync_upsert(self, rdb_session: AsyncSession) -> None:
+    async def test_sync_upsert(self, rdb_session: WriteSession) -> None:
         """UPDATE when synchronizing same installation again."""
         user_id = await _create_user(rdb_session, email="gh-upsert@example.com")
         repo = GithubUserInstallationRepository()
@@ -82,7 +82,7 @@ class TestGithubUserInstallationRepository:
             _PLATFORM_APP_ID,
             [_make_installation(2001, login="old-name")],
         )
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
@@ -99,8 +99,8 @@ class TestGithubUserInstallationRepository:
         )
 
         # Then: id is kept and account_login is updated
-        rdb_session.expire_all()
-        result = await rdb_session.execute(
+        rdb_session.write_session.expire_all()
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
@@ -110,7 +110,7 @@ class TestGithubUserInstallationRepository:
         assert updated_row.account_login == "new-name"
 
     async def test_sync_deletes_removed_installations(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Delete installation absent from API result."""
         user_id = await _create_user(rdb_session, email="gh-delete@example.com")
@@ -136,7 +136,7 @@ class TestGithubUserInstallationRepository:
         )
 
         # Then: org-b is deleted
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
@@ -145,7 +145,7 @@ class TestGithubUserInstallationRepository:
         assert len(rows) == 1
         assert rows[0].installation_id == 3001
 
-    async def test_sync_empty_deletes_all(self, rdb_session: AsyncSession) -> None:
+    async def test_sync_empty_deletes_all(self, rdb_session: WriteSession) -> None:
         """Synchronizing empty list deletes all installations."""
         user_id = await _create_user(rdb_session, email="gh-empty@example.com")
         repo = GithubUserInstallationRepository()
@@ -162,14 +162,14 @@ class TestGithubUserInstallationRepository:
         await repo.sync(rdb_session, user_id, _PLATFORM_APP_ID, [])
 
         # Then: all deleted
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
         )
         assert result.scalars().all() == []
 
-    async def test_sync_multiple_installations(self, rdb_session: AsyncSession) -> None:
+    async def test_sync_multiple_installations(self, rdb_session: WriteSession) -> None:
         """Synchronize multiple installations at once."""
         user_id = await _create_user(rdb_session, email="gh-multi@example.com")
         repo = GithubUserInstallationRepository()
@@ -186,7 +186,7 @@ class TestGithubUserInstallationRepository:
         )
 
         # Then: all three saved with NOT NULL id
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
@@ -197,7 +197,7 @@ class TestGithubUserInstallationRepository:
             assert row.id is not None
             assert len(row.id) == 32
 
-    async def test_sync_skips_invalid_entries(self, rdb_session: AsyncSession) -> None:
+    async def test_sync_skips_invalid_entries(self, rdb_session: WriteSession) -> None:
         """Skip malformed installation."""
         user_id = await _create_user(rdb_session, email="gh-invalid@example.com")
         repo = GithubUserInstallationRepository()
@@ -220,7 +220,7 @@ class TestGithubUserInstallationRepository:
         )
 
         # Then: save only one valid item
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )
@@ -229,7 +229,7 @@ class TestGithubUserInstallationRepository:
         assert len(rows) == 1
         assert rows[0].installation_id == 6003
 
-    async def test_has_access(self, rdb_session: AsyncSession) -> None:
+    async def test_has_access(self, rdb_session: WriteSession) -> None:
         """Check accessible installation."""
         user_id = await _create_user(rdb_session, email="gh-access@example.com")
         repo = GithubUserInstallationRepository()
@@ -248,7 +248,7 @@ class TestGithubUserInstallationRepository:
             await repo.has_access(rdb_session, user_id, _PLATFORM_APP_ID, 9999) is False
         )
 
-    async def test_has_access_different_user(self, rdb_session: AsyncSession) -> None:
+    async def test_has_access_different_user(self, rdb_session: WriteSession) -> None:
         """Cannot access installation of another user."""
         user_a = await _create_user(rdb_session, email="gh-a@example.com")
         user_b = await _create_user(rdb_session, email="gh-b@example.com")
@@ -270,7 +270,7 @@ class TestGithubUserInstallationRepository:
 
     async def test_sync_scopes_rows_to_platform_app(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """The same installation may be synchronized by different Apps."""
         user_id = await _create_user(rdb_session, email="gh-app-scope@example.com")
@@ -290,7 +290,7 @@ class TestGithubUserInstallationRepository:
         )
         await repo.sync(rdb_session, user_id, "111", [])
 
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             select(RDBGithubUserInstallation).where(
                 RDBGithubUserInstallation.user_id == user_id,
             )

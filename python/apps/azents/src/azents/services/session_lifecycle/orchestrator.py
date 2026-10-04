@@ -4,8 +4,6 @@ import dataclasses
 import datetime
 from collections.abc import Awaitable, Callable
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import ArchivedSessionPurgeParticipantPhase
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
@@ -15,6 +13,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionPolicy,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.archived_session_retention import (
     ArchivedSessionPurgeParticipantSnapshotInvalid,
     ArchivedSessionRetentionRepository,
@@ -88,7 +87,7 @@ class SessionLifecycleOrchestrator:
 
     async def materialize_claimed_purge_participants(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         retention_repository: ArchivedSessionRetentionRepository,
         purge_job_id: str,
@@ -225,7 +224,7 @@ class SessionLifecycleOrchestrator:
     async def run_purge_phase(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         retention_repository: ArchivedSessionRetentionRepository,
         context: SessionLifecyclePurgeContext,
         phase: ArchivedSessionPurgeParticipantPhase,

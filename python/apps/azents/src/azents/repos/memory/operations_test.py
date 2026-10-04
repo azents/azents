@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionKind, AgentSessionProductMode
 from azents.core.memory_scope import MemoryScope
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemoryCreate, MemorySummary
@@ -17,11 +18,12 @@ from azents.repos.memory.operations import MemoryOperationRepository
 
 async def test_memory_operations_close_transactions_before_returning() -> None:
     """Memory results return only after their repository transaction closes."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     transaction_active = False
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal transaction_active
         assert not transaction_active
         transaction_active = True
@@ -35,7 +37,7 @@ async def test_memory_operations_close_transactions_before_returning() -> None:
     summary = MemorySummary(name="rule", type="feedback", description="Use tests")
 
     async def list_summaries(
-        current_session: AsyncSession,
+        current_session: WriteSession,
         *,
         agent_id: str,
         user_id: str | None,

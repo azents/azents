@@ -4,12 +4,12 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.github_credentials import GitHubSecretsAppPlatform
 from azents.core.github_system_setting_data import PlatformGitHubAppToolkitBindingImpact
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.github_platform_system_setting.repository import (
     PlatformGitHubAppSystemSettingRepository,
 )
@@ -27,7 +27,7 @@ class PlatformGitHubAppBindingRepository:
 
     async def inspect_toolkits_bound_to(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         app_id: str,
     ) -> PlatformGitHubAppToolkitBindingImpact:
@@ -43,7 +43,7 @@ class PlatformGitHubAppBindingRepository:
 
     async def inspect_toolkits_mismatched_with(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         effective_app_id: str,
     ) -> PlatformGitHubAppToolkitBindingImpact:

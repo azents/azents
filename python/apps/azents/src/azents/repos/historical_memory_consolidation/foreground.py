@@ -1,7 +1,6 @@
 """Exact immutable-revision reads under independent foreground authority."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionProductMode
 from azents.core.historical_memory_consolidation import (
@@ -18,6 +17,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationRevisionDependency,
     RDBConsolidationUnit,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityBusyError,
     ConsolidationAuthorityError,
@@ -50,7 +50,7 @@ def foreground_unit(
 
 
 async def read_foreground_revision(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     consumer: MemorySnapshotConsumer,
     scope: ConsolidationScope,
@@ -60,12 +60,12 @@ async def read_foreground_revision(
     key = foreground_unit(consumer, scope)
     if key is None or (selected is not None and selected.unit != key):
         return None
-    await session.execute(
+    await session.write_session.execute(
         sa.select(sa.func.set_config("statement_timeout", "2000", True))
     )
     try:
         grant = await lock_unit_authority(session, key)
-        unit = await session.scalar(
+        unit = await session.write_session.scalar(
             sa.select(RDBConsolidationUnit).where(unit_predicate(key))
         )
         if unit is None or (selected is not None and selected.unit_id != unit.id):
@@ -77,7 +77,7 @@ async def read_foreground_revision(
             return None
         # Collection uses SKIP LOCKED; a snapshot holds these immutable bytes
         # until its reference commits in the same database transaction.
-        revision = await session.scalar(
+        revision = await session.write_session.scalar(
             sa.select(RDBConsolidationRevision)
             .where(
                 RDBConsolidationRevision.id == revision_id,

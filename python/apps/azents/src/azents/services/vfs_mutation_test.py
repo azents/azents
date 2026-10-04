@@ -4,11 +4,10 @@ import dataclasses
 import re
 from collections.abc import Sequence
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
 from azents.core.vfs import VfsLocation
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.services.file_storage import GrepResult, TextReadResult
 from azents.services.historical_memory.draft_vfs import ConsolidationDraftVfsBackend
 from azents.services.vfs_mutation import (
@@ -102,7 +101,7 @@ class _SingleFileWriter:
 
 
 async def test_single_file_writer_is_complete_without_patch_members(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await bind_consolidation_test_vfs(rdb_session_manager)
     backend = _SingleFileWriter(binding.draft)

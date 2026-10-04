@@ -4,10 +4,10 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.session_execution import SessionExecutionRepository
 from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 
@@ -17,7 +17,7 @@ class WorkerSessionSnapshotOperationRepository:
     """Own the existing canonical read after the separate ownership claim."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     session_execution_repository: Annotated[
         SessionExecutionRepository, Depends(SessionExecutionRepository)

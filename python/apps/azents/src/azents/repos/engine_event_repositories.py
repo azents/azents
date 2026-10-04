@@ -4,11 +4,11 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
@@ -52,7 +52,7 @@ from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 
 def get_engine_tool_working_set_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> ToolWorkingSetStore:
     """Wire the completed deferred-tool store at the repository boundary."""
@@ -79,7 +79,7 @@ class EngineEventRepositoryFactory:
     """Build completed repositories without handing Engine a session factory."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     run_repository: Annotated[EngineRunRepository, Depends(AgentRunRepository)]
     agent_session_repository: Annotated[

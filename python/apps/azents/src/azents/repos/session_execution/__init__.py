@@ -1,7 +1,6 @@
 """Postgres projection for canonical Session execution authority."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -21,6 +20,7 @@ from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 
 from .data import CanonicalExecutionSnapshot, PendingCommandSnapshot
@@ -39,20 +39,20 @@ class SessionExecutionRepository:
 
     async def load_canonical_snapshot(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         owner_generation: int,
     ) -> CanonicalExecutionSnapshot:
         """Load and validate execution authority and non-mailbox work state."""
-        agent_session = await session.scalar(
+        agent_session = await session.read_session.scalar(
             sa.select(RDBAgentSession).where(RDBAgentSession.id == session_id)
         )
         if agent_session is None:
             raise CanonicalExecutionSnapshotError("AgentSession not found")
         if agent_session.run_state is not AgentSessionRunState.RUNNING:
             raise CanonicalExecutionSnapshotError("AgentSession is not running")
-        oldest_input = await session.scalar(
+        oldest_input = await session.read_session.scalar(
             sa.select(RDBMailboxItem)
             .where(RDBMailboxItem.session_id == session_id)
             .order_by(
@@ -77,7 +77,7 @@ class SessionExecutionRepository:
                 "Session owner generation is stale"
             )
 
-        agent = await session.get(RDBAgent, agent_session.agent_id)
+        agent = await session.read_session.get(RDBAgent, agent_session.agent_id)
         if agent is None:
             raise CanonicalExecutionSnapshotError("Session Agent not found")
         if agent.workspace_id != agent_session.workspace_id:
@@ -91,18 +91,22 @@ class SessionExecutionRepository:
         )
         if not lifecycle_allows_execution or not agent.enabled:
             raise CanonicalExecutionSnapshotError("Session Agent is not active")
-        workspace = await session.get(RDBWorkspace, agent_session.workspace_id)
+        workspace = await session.read_session.get(
+            RDBWorkspace, agent_session.workspace_id
+        )
         if workspace is None:
             raise CanonicalExecutionSnapshotError("Session Workspace not found")
 
-        current = await session.scalar(
+        current = await session.read_session.scalar(
             sa.select(RDBSessionAgent).where(
                 RDBSessionAgent.agent_session_id == session_id
             )
         )
         if current is None:
             raise CanonicalExecutionSnapshotError("SessionAgent tree node not found")
-        root = await session.get(RDBSessionAgent, current.root_session_agent_id)
+        root = await session.read_session.get(
+            RDBSessionAgent, current.root_session_agent_id
+        )
         if root is None:
             raise CanonicalExecutionSnapshotError("Root SessionAgent not found")
         if (
@@ -117,7 +121,9 @@ class SessionExecutionRepository:
             raise CanonicalExecutionSnapshotError(
                 "SessionAgent context lineage is invalid"
             )
-        context = await session.get(RDBSessionAgentContext, current.context_id)
+        context = await session.read_session.get(
+            RDBSessionAgentContext, current.context_id
+        )
         if context is None:
             raise CanonicalExecutionSnapshotError("SessionAgentContext not found")
         if (
@@ -128,7 +134,9 @@ class SessionExecutionRepository:
             raise CanonicalExecutionSnapshotError(
                 "SessionAgentContext authority mismatch"
             )
-        root_session = await session.get(RDBAgentSession, root.agent_session_id)
+        root_session = await session.read_session.get(
+            RDBAgentSession, root.agent_session_id
+        )
         if root_session is None or (
             root_session.status is not AgentSessionStatus.ACTIVE
             and not (
@@ -150,7 +158,7 @@ class SessionExecutionRepository:
         pending_command = self._pending_command(agent_session)
         recoverable_runs = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBAgentRun)
                     .where(
                         RDBAgentRun.session_id == session_id,
@@ -167,7 +175,9 @@ class SessionExecutionRepository:
         recoverable_run = recoverable_runs[0] if recoverable_runs else None
         pending_idle_run_id = agent_session.pending_idle_continuation_run_id
         if pending_idle_run_id is not None:
-            pending_idle_run = await session.get(RDBAgentRun, pending_idle_run_id)
+            pending_idle_run = await session.read_session.get(
+                RDBAgentRun, pending_idle_run_id
+            )
             if (
                 pending_idle_run is None
                 or pending_idle_run.session_id != session_id
@@ -200,7 +210,7 @@ class SessionExecutionRepository:
 
     async def _archived_scheduled_continuation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_session: RDBAgentSession,
         oldest_input: RDBMailboxItem | None,
@@ -216,7 +226,7 @@ class SessionExecutionRepository:
         payload = ScheduledTaskContinuationMailboxPayload.model_validate(
             oldest_input.payload
         )
-        cycle_row = await session.scalar(
+        cycle_row = await session.read_session.scalar(
             sa.select(RDBToolkitState).where(
                 RDBToolkitState.agent_id == agent_session.agent_id,
                 RDBToolkitState.session_id == agent_session.id,
@@ -287,7 +297,7 @@ class SessionExecutionRepository:
 
     async def _validate_parent_lineage(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         current: RDBSessionAgent,
         root: RDBSessionAgent,
     ) -> None:
@@ -304,7 +314,7 @@ class SessionExecutionRepository:
                 raise CanonicalExecutionSnapshotError(
                     "SessionAgent parent lineage is cyclic"
                 )
-            parent = await session.get(RDBSessionAgent, parent_id)
+            parent = await session.read_session.get(RDBSessionAgent, parent_id)
             if (
                 parent is None
                 or parent.root_session_agent_id != root.id

@@ -29,6 +29,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -47,7 +48,7 @@ from azents.testing.model_selection import (
 )
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create one Workspace for a root Session creation test."""
     repository = WorkspaceRepository()
     result = await repository.create(
@@ -61,7 +62,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     slug: str,
@@ -78,8 +79,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Root Session creation test agent",
@@ -113,11 +114,13 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
-    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=revision))
-    await session.flush()
-    session.add_all(
+    session.write_session.add(agent)
+    await session.write_session.flush()
+    session.write_session.add(
+        RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=revision)
+    )
+    await session.write_session.flush()
+    session.write_session.add_all(
         [
             RDBAgentAutomaticProjectItem(
                 agent_id=agent.id,
@@ -127,7 +130,7 @@ async def _create_agent(
             for position, path in enumerate(policy_paths)
         ]
     )
-    await session.flush()
+    await session.write_session.flush()
     if runtime_capability is AgentRuntimeCapability.MANAGED:
         runtime_repository = AgentRuntimeRepository()
         runtime = await runtime_repository.ensure_for_agent(session, agent.id)
@@ -158,7 +161,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_runtime_free_explicit_empty_root_session_is_allowed(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An explicit empty intent does not require Runtime capability."""
         workspace_id = await _create_workspace(rdb_session, "root-none-empty")
@@ -188,7 +191,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_runtime_free_empty_default_root_session_is_allowed(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An empty automatic policy does not require managed Runtime."""
         workspace_id = await _create_workspace(rdb_session, "root-none-default")
@@ -218,7 +221,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_runtime_free_nonempty_default_root_session_is_rejected(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A non-empty automatic policy requires managed Runtime."""
         workspace_id = await _create_workspace(rdb_session, "root-none-default-path")
@@ -247,7 +250,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_empty_explicit_intent_does_not_require_runtime_state(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Creating a Project-free root Session does not resolve Runtime state."""
         workspace_id = await _create_workspace(rdb_session, "root-empty-runtime")
@@ -277,7 +280,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_prevalidated_explicit_paths_never_merge_policy(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Prevalidated explicit paths win over defaults, including empty intent."""
         workspace_id = await _create_workspace(rdb_session, "root-explicit")
@@ -359,7 +362,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_team_primary_snapshots_policy_only_for_creation_winner(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """New primary receives policy Projects while reuse remains unchanged."""
         workspace_id = await _create_workspace(rdb_session, "root-primary")
@@ -381,12 +384,12 @@ class TestRootAgentSessionCreationRepository:
             workspace_id=workspace_id,
             agent_id=agent_id,
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.delete(RDBAgentAutomaticProjectItem).where(
                 RDBAgentAutomaticProjectItem.agent_id == agent_id
             )
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.delete(RDBAgentAutomaticProjectSetting).where(
                 RDBAgentAutomaticProjectSetting.agent_id == agent_id
             )
@@ -442,7 +445,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_team_primary_preserves_empty_policy(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An empty automatic policy preserves the empty-Project behavior."""
         workspace_id = await _create_workspace(rdb_session, "root-primary-empty")
@@ -473,7 +476,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_runtime_free_team_primary_preserves_empty_policy(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Runtime-free team primary creation accepts an empty policy."""
         workspace_id = await _create_workspace(
@@ -501,7 +504,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_runtime_free_team_primary_rejects_nonempty_policy_before_create(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Runtime-free team primary rejects Runtime-dependent defaults atomically."""
         workspace_id = await _create_workspace(
@@ -540,7 +543,10 @@ class TestRootAgentSessionCreationRepository:
         """A race loser reuses the winner's durable Project snapshot."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id = await _create_workspace(
                 setup_session,
                 f"root-primary-race-{suffix}",
@@ -555,11 +561,16 @@ class TestRootAgentSessionCreationRepository:
                 ],
                 revision=5,
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         service = _service()
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as first_session:
-            first_pid = await first_session.scalar(sa.text("SELECT pg_backend_pid()"))
+        async with AsyncSession(
+            rdb_engine, expire_on_commit=False
+        ) as _raw_first_session:
+            first_session = ReadWriteSession(_raw_first_session)
+            first_pid = await first_session.read_session.scalar(
+                sa.text("SELECT pg_backend_pid()")
+            )
             assert isinstance(first_pid, int)
             first = await service.ensure_team_primary(
                 first_session,
@@ -569,8 +580,9 @@ class TestRootAgentSessionCreationRepository:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
-            ) as second_session:
-                second_pid = await second_session.scalar(
+            ) as _raw_second_session:
+                second_session = ReadWriteSession(_raw_second_session)
+                second_pid = await second_session.read_session.scalar(
                     sa.text("SELECT pg_backend_pid()")
                 )
                 assert isinstance(second_pid, int)
@@ -586,9 +598,10 @@ class TestRootAgentSessionCreationRepository:
                 second_task = asyncio.create_task(ensure_second_primary())
                 try:
                     async with asyncio.timeout(5):
-                        async with AsyncSession(rdb_engine) as observer:
+                        async with AsyncSession(rdb_engine) as _raw_observer:
+                            observer = ReadWriteSession(_raw_observer)
                             while True:
-                                blockers = await observer.scalar(
+                                blockers = await observer.read_session.scalar(
                                     sa.text("SELECT pg_blocking_pids(:pid)"),
                                     {"pid": second_pid},
                                 )
@@ -596,9 +609,9 @@ class TestRootAgentSessionCreationRepository:
                                     break
                                 assert not second_task.done()
                     assert not second_task.done()
-                    await first_session.commit()
+                    await first_session.write_session.commit()
                     second = await asyncio.wait_for(second_task, timeout=5)
-                    await second_session.commit()
+                    await second_session.write_session.commit()
                 finally:
                     if not second_task.done():
                         second_task.cancel()
@@ -616,7 +629,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_missing_policy_rolls_back_new_team_primary(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A missing invariant policy row cannot silently become an empty policy."""
         workspace_id = await _create_workspace(rdb_session, "root-policy-missing")
@@ -627,7 +640,7 @@ class TestRootAgentSessionCreationRepository:
             policy_paths=[],
             revision=1,
         )
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.delete(RDBAgentAutomaticProjectSetting).where(
                 RDBAgentAutomaticProjectSetting.agent_id == agent_id
             )
@@ -637,7 +650,7 @@ class TestRootAgentSessionCreationRepository:
             RuntimeError,
             match="Agent automatic Project policy is missing",
         ):
-            async with rdb_session.begin_nested():
+            async with rdb_session.write_session.begin_nested():
                 await _service().ensure_team_primary(
                     rdb_session,
                     workspace_id=workspace_id,
@@ -654,7 +667,7 @@ class TestRootAgentSessionCreationRepository:
 
     async def test_root_creation_rolls_back_session_context_and_projects(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Caller rollback removes the complete root Session initialization unit."""
         workspace_id = await _create_workspace(rdb_session, "root-rollback")
@@ -668,7 +681,7 @@ class TestRootAgentSessionCreationRepository:
         service = _service()
 
         with pytest.raises(RuntimeError, match="rollback"):
-            async with rdb_session.begin_nested():
+            async with rdb_session.write_session.begin_nested():
                 await service.create_root_session(
                     rdb_session,
                     create=AgentSessionCreate(

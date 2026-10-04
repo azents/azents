@@ -7,7 +7,6 @@ from typing import Annotated
 
 from fastapi import Depends
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
@@ -33,6 +32,7 @@ from azents.engine.events.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -72,7 +72,7 @@ class MailboxRuntimeOperations:
     """Own runtime Mailbox transaction lifetimes and Scheduled admission atomicity."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     agent_session_repository: Annotated[
@@ -93,7 +93,7 @@ class MailboxRuntimeOperations:
     ]
 
     async def _first_promotable_in_session(
-        self, session: AsyncSession, session_id: str
+        self, session: ReadSession, session_id: str
     ) -> MailboxItem | None:
         pending = await self.mailbox_item_repository.list_for_flush(
             session, session_id, limit=1
@@ -234,7 +234,7 @@ class MailboxRuntimeOperations:
                 await self.mailbox_item_repository.delete_claimed_by_ids(
                     session, session_id, [buffer.id]
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return ScheduledMailboxDatabaseAdmission(
                     run=None, buffer=None, cycle=None, events=[], stale=True
                 )
@@ -264,13 +264,13 @@ class MailboxRuntimeOperations:
             )
             if deleted != 1:
                 raise RuntimeError("Scheduled Task mailbox admission lost its FIFO row")
-            await session.commit()
+            await session.write_session.commit()
             return ScheduledMailboxDatabaseAdmission(
                 run=run, buffer=buffer, cycle=cycle, events=inserted, stale=False
             )
 
     async def append_events_in_session(
-        self, session: AsyncSession, session_id: str, events: Sequence[EventCreate]
+        self, session: WriteSession, session_id: str, events: Sequence[EventCreate]
     ) -> list[Event]:
         """Append a prepared batch, advancing projections once for actual inserts."""
         inserted: list[Event] = []

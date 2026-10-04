@@ -12,6 +12,7 @@ from support import image_generation_openai_proxy as proxy
 from support.image_generation_openai_proxy import _inference_profile_source_payload
 
 _MODELS = ("gpt-5.5", "gpt-5.5-mini", "gpt-6-astra", "gpt-5.6-sol")
+_PLAIN_TITLE_MODEL = "gpt-5.5-title-plain"
 _FULL_EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 _RATES = {
     "input_cost_per_token": Decimal("0.000001"),
@@ -28,11 +29,15 @@ def test_catalog_source_is_exact_openai_model_data_not_a_provider_program() -> N
     restored = json.loads(serialized)
 
     assert restored == payload
-    assert tuple(restored) == _MODELS
+    assert tuple(restored) == (*_MODELS, _PLAIN_TITLE_MODEL)
     for identifier, model in restored.items():
         assert "/" not in identifier
         assert model["litellm_provider"] == "openai"
-        assert model["display_name"] == identifier
+        assert model["display_name"] == (
+            "Plain Title Deterministic"
+            if identifier == _PLAIN_TITLE_MODEL
+            else identifier
+        )
         assert model["mode"] == "responses"
         assert model["supported_endpoints"] == ["/v1/responses"]
         assert model["max_input_tokens"] == 128_000
@@ -42,7 +47,7 @@ def test_catalog_source_is_exact_openai_model_data_not_a_provider_program() -> N
         assert model["supports_pdf_input"] is True
         assert model["supports_function_calling"] is True
         assert model["supports_parallel_function_calling"] is True
-        assert model["supports_response_schema"] is True
+        assert model["supports_response_schema"] is (identifier != _PLAIN_TITLE_MODEL)
         assert {
             "id",
             "models",
@@ -82,7 +87,7 @@ for variant in ("baseline", "refreshed", "missing-model"):
         pass
     else:
         raise AssertionError("Source control must be frozen.")
-    assert len(source(control.variant)) == (3 if variant == "missing-model" else 4)
+    assert len(source(control.variant)) == (4 if variant == "missing-model" else 5)
 print("stdlib-only proxy import and source controls verified")
 """
     result = subprocess.run(
@@ -163,7 +168,7 @@ def test_refreshed_source_changes_only_exact_gpt55_effort_and_token_rates() -> N
     }
 
     assert refreshed == {**baseline, "gpt-5.5": expected}
-    assert tuple(refreshed) == _MODELS
+    assert tuple(refreshed) == (*_MODELS, _PLAIN_TITLE_MODEL)
     assert _inference_profile_source_payload("baseline") == baseline
     # The served-default stream uses one input token and one output token.
     restored = json.loads(json.dumps(refreshed), parse_float=Decimal)
@@ -187,7 +192,7 @@ def test_missing_model_source_keeps_other_exact_records_unchanged() -> None:
         for identifier, model in baseline.items()
         if identifier != "gpt-5.5"
     }
-    assert tuple(missing) == _MODELS[1:]
+    assert tuple(missing) == (*_MODELS[1:], _PLAIN_TITLE_MODEL)
 
 
 class _SourceControlHandler(proxy._Handler):

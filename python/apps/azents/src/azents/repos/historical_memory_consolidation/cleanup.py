@@ -4,7 +4,6 @@ import datetime
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionProductMode, AgentSessionStatus
 from azents.core.historical_memory_consolidation import (
@@ -27,6 +26,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     consolidation_session,
     database_now,
@@ -95,7 +95,7 @@ def _denied_draft_dependency(
 class ConsolidationCleanupRepository:
     """System cleanup only deletes private data; it never grants model authority."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def collect_revisions(self, *, limit: int) -> int:
         """Delete only non-current bytes with no retained automatic reference."""
@@ -123,11 +123,11 @@ class ConsolidationCleanupRepository:
             .exists()
         )
         async with consolidation_session(self.session_manager) as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
             candidates = list(
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(revision)
                     .where(~current, ~referenced)
                     .order_by(revision.id)
@@ -138,7 +138,7 @@ class ConsolidationCleanupRepository:
             # Recheck in a fresh READ COMMITTED statement after locking bytes.
             # A snapshot reference may have committed just before this lock.
             removable = set(
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(revision.id).where(
                         revision.id.in_([row.id for row in candidates]),
                         ~current,
@@ -148,7 +148,7 @@ class ConsolidationCleanupRepository:
             )
             for row in candidates:
                 if row.id in removable:
-                    await session.delete(row)
+                    await session.write_session.delete(row)
         return len(removable)
 
     async def sweep(self, *, limit: int) -> ConsolidationCleanupSummary:
@@ -201,7 +201,7 @@ class ConsolidationCleanupRepository:
                 .exists()
             )
             candidates = list(
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(unit)
                     .where(
                         sa.or_(unit.lease_until.is_(None), unit.lease_until <= now),
@@ -226,7 +226,7 @@ class ConsolidationCleanupRepository:
                 if current.lease_until is not None and current.lease_until > checked_at:
                     continue
                 if current.active_attempt_id is not None:
-                    attempt = await session.get(
+                    attempt = await session.write_session.get(
                         RDBConsolidationAttempt, current.active_attempt_id
                     )
                     if (
@@ -240,8 +240,8 @@ class ConsolidationCleanupRepository:
                     current.owner_token = None
                     current.lease_until = None
                     owners_expired += 1
-                await session.flush()
-                draft = await session.scalar(
+                await session.write_session.flush()
+                draft = await session.write_session.scalar(
                     sa.select(RDBConsolidationDraft)
                     .where(
                         RDBConsolidationDraft.unit_id == current.id,
@@ -255,7 +255,7 @@ class ConsolidationCleanupRepository:
                     .join(unit, unit.id == RDBConsolidationDraft.unit_id)
                 )
                 if draft is not None:
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.update(RDBConsolidationWork)
                         .where(
                             RDBConsolidationWork.considered_draft_id == draft.id,
@@ -271,8 +271,8 @@ class ConsolidationCleanupRepository:
                             presented_attempt_id=None,
                         )
                     )
-                    await session.delete(draft)
-                    latest = await session.scalar(
+                    await session.write_session.delete(draft)
+                    latest = await session.write_session.scalar(
                         sa.select(RDBConsolidationAttempt.state)
                         .where(RDBConsolidationAttempt.unit_id == current.id)
                         .order_by(RDBConsolidationAttempt.owner_generation.desc())
@@ -285,12 +285,12 @@ class ConsolidationCleanupRepository:
                     RDBConsolidationAttempt.unit_id == current.id,
                     RDBConsolidationAttempt.state != ConsolidationAttemptState.RUNNING,
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBConsolidationMutationReceipt).where(
                         RDBConsolidationMutationReceipt.attempt_id.in_(old_attempts)
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBConsolidationEvidence).where(
                         RDBConsolidationEvidence.attempt_id.in_(old_attempts)
                     )

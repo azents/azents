@@ -4,8 +4,6 @@ import dataclasses
 import datetime
 from collections.abc import Sequence
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunPhase
 from azents.engine.events.tool_results import cancelled_tool_result
 from azents.engine.events.types import (
@@ -15,6 +13,7 @@ from azents.engine.events.types import (
     OutputTextPart,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.engine_event_contracts import (
     RunStateRepository,
     SessionHeadRepository,
@@ -39,7 +38,7 @@ class PreparedEngineModelInput:
 class EngineModelInputOperationRepository:
     """Own atomic transcript repair, phase, and availability preparation."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: RunStateRepository
     transcript_repository: TranscriptRepository
     session_head_repository: SessionHeadRepository | None
@@ -93,7 +92,7 @@ class EngineModelInputOperationRepository:
 
     async def _repair_tool_results(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,

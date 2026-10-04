@@ -10,7 +10,6 @@ from typing import Annotated, AsyncContextManager, Protocol
 from azcommon.infra.s3.service import S3Service
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionStopSignal
@@ -28,6 +27,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
 )
 from azents.rdb.deps import get_session_manager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.agent_decommission.data import AgentDecommissionJob
@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 class AgentDecommissionSessionManager(Protocol):
     """Open a caller-owned database transaction for decommission work."""
 
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
+    def __call__(self) -> AsyncContextManager[WriteSession]:
         """Return one asynchronous database-session context."""
         ...
 
@@ -153,7 +153,7 @@ class AgentDecommissionRepositoryProtocol(Protocol):
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -164,7 +164,7 @@ class AgentDecommissionRepositoryProtocol(Protocol):
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -176,7 +176,7 @@ class AgentDecommissionRepositoryProtocol(Protocol):
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -194,7 +194,7 @@ class AgentDecommissionAgentSessionRepositoryProtocol(Protocol):
 
     async def list_root_trees_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
     ) -> Sequence[AgentDecommissionRootSession]:
@@ -203,7 +203,7 @@ class AgentDecommissionAgentSessionRepositoryProtocol(Protocol):
 
     async def lock_root_tree_sessions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
     ) -> Sequence[AgentDecommissionRootSession]:
@@ -212,7 +212,7 @@ class AgentDecommissionAgentSessionRepositoryProtocol(Protocol):
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         stop_request_id: str,
@@ -223,7 +223,7 @@ class AgentDecommissionAgentSessionRepositoryProtocol(Protocol):
 
     async def archive_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         session_ids: Sequence[str],
@@ -241,7 +241,7 @@ class AgentDecommissionRunRepositoryProtocol(Protocol):
 
     async def has_active_for_session_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> bool:
@@ -254,14 +254,14 @@ class AgentDecommissionRetentionRepositoryProtocol(Protocol):
 
     async def lock_settings(
         self,
-        session: AsyncSession,
+        session: WriteSession,
     ) -> AgentDecommissionRetentionSettings:
         """Lock and return the active retention policy."""
         ...
 
     async def schedule_purge_job(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         eligible_at: datetime.datetime,
@@ -291,7 +291,7 @@ class AgentDecommissionExternalChannelLifecycleProtocol(Protocol):
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ExternalChannelArchiveTermination | None:
@@ -300,7 +300,7 @@ class AgentDecommissionExternalChannelLifecycleProtocol(Protocol):
 
     async def cleanup_decommissioned_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         now: datetime.datetime,
@@ -310,7 +310,7 @@ class AgentDecommissionExternalChannelLifecycleProtocol(Protocol):
 
     async def purge_decommissioned_provider_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         connection_ids: Sequence[str],
     ) -> int:
         """Purge provider state after cleanup targets are captured."""
@@ -329,7 +329,7 @@ class AgentDecommissionScheduledTaskLifecycleProtocol(Protocol):
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -339,7 +339,7 @@ class AgentDecommissionScheduledTaskLifecycleProtocol(Protocol):
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ScheduledTaskLifecycleCleanup | None:
@@ -360,7 +360,7 @@ class AgentDecommissionAgentRepositoryProtocol(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> AgentDecommissionAgent | None:
         """Fetch the decommissioning Agent's avatar projection."""
@@ -372,7 +372,7 @@ class AgentDecommissionExchangeFileRepositoryProtocol(Protocol):
 
     async def expire_unbound_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         expired_at: datetime.datetime,
@@ -382,7 +382,7 @@ class AgentDecommissionExchangeFileRepositoryProtocol(Protocol):
 
     async def list_unbound_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
     ) -> Sequence[AgentDecommissionExchangeFile]:
@@ -391,7 +391,7 @@ class AgentDecommissionExchangeFileRepositoryProtocol(Protocol):
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         file_id: str,
         blob_deleted_at: datetime.datetime,
@@ -401,7 +401,7 @@ class AgentDecommissionExchangeFileRepositoryProtocol(Protocol):
 
     async def delete_unbound_expired_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
     ) -> int:
@@ -414,7 +414,7 @@ class AgentDecommissionRuntimeRepositoryProtocol(Protocol):
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> AgentDecommissionRuntime | None:
         """Fetch the Runtime currently owned by an Agent."""
@@ -422,7 +422,7 @@ class AgentDecommissionRuntimeRepositoryProtocol(Protocol):
 
     async def get_terminal_delete_acknowledged(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentDecommissionRuntime | None:
         """Return a Runtime only after terminal deletion acknowledgement."""
@@ -772,7 +772,7 @@ class AgentDecommissionService:
                 )
                 if not owned:
                     raise RuntimeError("Agent decommission lease was lost")
-                await session.commit()
+                await session.write_session.commit()
                 archived = True
 
         if archived:
@@ -834,7 +834,7 @@ class AgentDecommissionService:
             )
             if not owned:
                 raise RuntimeError("Agent decommission lease was lost")
-            await session.commit()
+            await session.write_session.commit()
 
         await self.external_channel_lifecycle_service.consume_archive_cleanup(
             external_cleanup_plans

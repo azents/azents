@@ -3,10 +3,10 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -19,7 +19,7 @@ from azents.repos.toolkit_state.engine import ToolkitClaudeRulesAppendixDedupeSt
 
 def get_worker_claude_rules_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> ToolkitClaudeRulesAppendixDedupeStateStore:
     """Create the completed state store without exporting its session factory."""
@@ -30,7 +30,7 @@ def get_worker_claude_rules_store(
 
 def get_worker_subagent_operations(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
     agent_session_repository: Annotated[

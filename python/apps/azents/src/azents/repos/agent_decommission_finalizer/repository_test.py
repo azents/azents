@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.agent_decommission_finalizer import (
     AgentDecommissionFinalizerRepository,
     _terminal_delete_pending,
@@ -37,7 +38,7 @@ async def test_finalizer_rejects_remaining_external_channel_route() -> None:
     ):
         repository = AgentDecommissionFinalizerRepository()
         await repository._require_absent_lifecycle_roots(
-            session,
+            ReadWriteSession(session),
             agent_id="agent-1",
         )
 
@@ -50,7 +51,7 @@ async def test_finalizer_does_not_treat_workspace_connection_as_agent_root() -> 
 
     repository = AgentDecommissionFinalizerRepository()
     await repository._require_absent_lifecycle_roots(
-        session,
+        ReadWriteSession(session),
         agent_id="agent-1",
     )
 

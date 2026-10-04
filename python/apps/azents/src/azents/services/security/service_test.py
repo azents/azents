@@ -4,7 +4,6 @@ import datetime
 from unittest.mock import AsyncMock, create_autospec
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 from types_aiobotocore_ses.client import SESClient
 
 from azents.core.config import (
@@ -17,6 +16,7 @@ from azents.core.config import (
 from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.credential_read_operations import CredentialReadOperationRepository
 from azents.repos.email_verification import EmailVerificationRepository
 from azents.repos.email_verification_operation import (
@@ -81,7 +81,7 @@ def _make_email_service(*, configured: bool) -> EmailService:
 
 
 def _make_service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     email_configured: bool,
 ) -> SecurityService:
@@ -120,7 +120,7 @@ class TestSecurityServiceCredentialMethods:
 
     async def test_get_auth_methods_marks_email_invalid_without_smtp(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Verified email is marked invalid when SMTP is disabled."""
         async with rdb_session_manager() as session:
@@ -145,7 +145,7 @@ class TestSecurityServiceCredentialMethods:
 
     async def test_remove_password_rejects_last_valid_credential(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject deletion of password that is last valid credential."""
         service = _make_service(rdb_session_manager, email_configured=False)
@@ -170,7 +170,7 @@ class TestSecurityServiceCredentialMethods:
 
     async def test_remove_password_allows_when_email_is_valid(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Allow password deletion when verified email is valid credential."""
         service = _make_service(rdb_session_manager, email_configured=True)

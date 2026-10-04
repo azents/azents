@@ -21,6 +21,7 @@ from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.model_catalog_identity import catalog_source_keys
 from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_operation import ModelOperationKind, build_model_operation
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.historical_memory import HistoricalMemoryPreparationAdmission
@@ -43,10 +44,11 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
     inputs_current: bool,
 ) -> None:
     """Candidate selection and source capture commit in one DB-only transaction."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     source = HistoricalMemoryDueSource(
@@ -113,7 +115,7 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
     build = Mock(wraps=build_model_operation)
 
     async def select(
-        _session: AsyncSession, *, operation: object, **_kwargs: object
+        _session: WriteSession, *, operation: object, **_kwargs: object
     ) -> SimpleNamespace:
         return SimpleNamespace(operation=operation)
 
@@ -145,7 +147,7 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
     if not reuse and not inputs_current:
         assert result is None
         historical.persist_preparation_operation_in_session.assert_not_awaited()
-        session.commit.assert_not_awaited()
+        _raw_session.commit.assert_not_awaited()
         return
     assert result is prepared
     agent_repository.lock_by_id.assert_awaited_once_with(session, "a" * 32)
@@ -174,7 +176,7 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
         attempted_at=_NOW,
         operation=operation,
     )
-    session.commit.assert_awaited_once()
+    _raw_session.commit.assert_awaited_once()
 
 
 def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
@@ -182,7 +184,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
     repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
 
     async def capture(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: tuple[ConfiguredModelIdentity, ...],

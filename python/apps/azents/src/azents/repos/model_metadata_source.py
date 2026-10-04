@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.model_catalog_identity import CatalogIdentityError, catalog_source_keys
 from azents.core.model_catalog_source import (
@@ -25,6 +24,7 @@ from azents.rdb.models.model_metadata_source import (
     RDBModelMetadataSource,
     RDBModelMetadataSourceModel,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.llm_catalog.data import LLMCatalogSyncStatus
 from azents.repos.model_catalog_sync_state import (
     current_sync_status,
@@ -48,11 +48,11 @@ class ModelMetadataSourceRepository:
     """Persist only current normalized facts; publication callers own transactions."""
 
     async def ensure_authority(
-        self, session: AsyncSession, *, source_key: str
+        self, session: WriteSession, *, source_key: str
     ) -> RDBModelMetadataSource:
         if source_key != CATALOG_SOURCE_KEY:
             raise ValueError("Only the current data-only source can own publication.")
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBModelMetadataSource)
             .values(
                 source_key=source_key,
@@ -64,15 +64,15 @@ class ModelMetadataSourceRepository:
         )
         owner = result.scalar_one_or_none()
         if owner is None:
-            owner = await session.get(RDBModelMetadataSource, source_key)
+            owner = await session.write_session.get(RDBModelMetadataSource, source_key)
         if owner is None:
             raise RuntimeError("Current source authority upsert failed.")
         return owner
 
     async def lock_authority(
-        self, session: AsyncSession, *, source_key: str, shared: bool = False
+        self, session: WriteSession, *, source_key: str, shared: bool = False
     ) -> RDBModelMetadataSource | None:
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBModelMetadataSource)
             .where(RDBModelMetadataSource.source_key == source_key)
             .with_for_update(read=shared)
@@ -81,7 +81,7 @@ class ModelMetadataSourceRepository:
         return result.scalar_one_or_none()
 
     async def begin_sync(
-        self, session: AsyncSession, *, source_key: str, started_at: datetime.datetime
+        self, session: WriteSession, *, source_key: str, started_at: datetime.datetime
     ) -> str:
         await self.ensure_authority(session, source_key=source_key)
         owner = await self.lock_authority(session, source_key=source_key)
@@ -90,11 +90,11 @@ class ModelMetadataSourceRepository:
         token = start_sync(
             owner, work_token=None, started_at=started_at, diagnostics=None
         )
-        await session.flush()
+        await session.write_session.flush()
         return token
 
     async def get_current(
-        self, session: AsyncSession, *, source_key: str
+        self, session: WriteSession, *, source_key: str
     ) -> ModelMetadataSource | None:
         """Maintenance-only complete view; owner lock makes all rows coherent."""
         owner = await self.lock_authority(session, source_key=source_key, shared=True)
@@ -103,7 +103,7 @@ class ModelMetadataSourceRepository:
         self._validate_owner(owner)
         if owner.source_url is None or owner.producer_name is None:
             raise ValueError("Published source provenance is incomplete.")
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBModelMetadataSourceModel)
             .where(RDBModelMetadataSourceModel.source_key == source_key)
             .order_by(
@@ -138,7 +138,7 @@ class ModelMetadataSourceRepository:
         )
 
     async def get_projection_metadata(
-        self, session: AsyncSession, *, source_key: str
+        self, session: WriteSession, *, source_key: str
     ) -> SourceProjectionMetadata | None:
         owner = await self.lock_authority(session, source_key=source_key, shared=True)
         if owner is None or owner.last_success_at is None:
@@ -151,12 +151,12 @@ class ModelMetadataSourceRepository:
         )
 
     async def get_models(
-        self, session: AsyncSession, *, source_key: str, keys: Sequence[tuple[str, str]]
+        self, session: ReadSession, *, source_key: str, keys: Sequence[tuple[str, str]]
     ) -> dict[tuple[str, str], CurrentSourceModel]:
         """Read only exact adopted namespace/key pairs, including missing keys."""
         if not keys:
             return {}
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBModelMetadataSourceModel)
             .where(
                 RDBModelMetadataSourceModel.source_key == source_key,
@@ -174,7 +174,7 @@ class ModelMetadataSourceRepository:
 
     async def projection_inputs_match(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         expected_metadata: SourceProjectionMetadata | None,
         expectations: Sequence[SourceModelExpectation],
@@ -200,7 +200,7 @@ class ModelMetadataSourceRepository:
 
     async def replace_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         owner: RDBModelMetadataSource,
         work_token: str,
@@ -235,7 +235,7 @@ class ModelMetadataSourceRepository:
                     "Prepared source identity or pricing provenance disagrees."
                 )
             keys.add(key)
-        existing_result = await session.execute(
+        existing_result = await session.write_session.execute(
             sa.select(
                 RDBModelMetadataSourceModel.provider,
                 RDBModelMetadataSourceModel.source_model_key,
@@ -261,7 +261,7 @@ class ModelMetadataSourceRepository:
                     for row in rows
                 ]
             )
-            await session.execute(
+            await session.write_session.execute(
                 statement.on_conflict_do_update(
                     index_elements=["source_key", "provider", "source_model_key"],
                     set_={
@@ -272,7 +272,7 @@ class ModelMetadataSourceRepository:
                 )
             )
         for start in range(0, len(obsolete), _ROW_BATCH_SIZE):
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBModelMetadataSourceModel).where(
                     RDBModelMetadataSourceModel.source_key == owner.source_key,
                     sa.tuple_(
@@ -297,11 +297,11 @@ class ModelMetadataSourceRepository:
             hidden_count=0,
             diagnostics=diagnostics,
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def fail_sync(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_key: str,
         work_token: str,
@@ -323,17 +323,17 @@ class ModelMetadataSourceRepository:
             action_hint=action_hint,
             diagnostics=diagnostics,
         )
-        await session.flush()
+        await session.write_session.flush()
         return changed
 
     async def get_sync_status(
-        self, session: AsyncSession, *, source_key: str
+        self, session: WriteSession, *, source_key: str
     ) -> LLMCatalogSyncStatus | None:
         owner = await self.lock_authority(session, source_key=source_key, shared=True)
         return None if owner is None else current_sync_status(owner)
 
     async def capture_for_context(
-        self, session: AsyncSession, *, requests: Sequence[ContextModelRequest]
+        self, session: WriteSession, *, requests: Sequence[ContextModelRequest]
     ) -> CapturedContextSource:
         """Project only requested maxima; never load model payloads or price rules."""
         if not requests:
@@ -366,7 +366,7 @@ class ModelMetadataSourceRepository:
         }
         maxima: dict[tuple[str, str], int | None] = {}
         if keys:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.select(
                     RDBModelMetadataSourceModel.provider,
                     RDBModelMetadataSourceModel.source_model_key,

@@ -4,7 +4,6 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     CapturedStoredChoice,
@@ -29,6 +28,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationAttempt
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -57,11 +57,11 @@ from azents.testing.model_selection import (
 
 
 async def _principal(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ConsolidationJobPrincipal:
     corpus = await seed_consolidation_corpus(manager)
     async with manager() as session:
-        agent = await session.get(RDBAgent, corpus.team.agent_id)
+        agent = await session.write_session.get(RDBAgent, corpus.team.agent_id)
         assert agent is not None
         integration = RDBLLMProviderIntegration(
             workspace_id=corpus.team.workspace_id,
@@ -70,8 +70,8 @@ async def _principal(
             encrypted_credentials="synthetic-unused",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         main = make_test_model_selection_dict(model_identifier="main-not-permitted")
         primary = make_test_model_selection_dict(
             integration_id=integration.id, model_identifier="lightweight-first"
@@ -103,7 +103,7 @@ async def _principal(
 
 
 def _repository(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ConsolidationModelOperationRepository:
     return ConsolidationModelOperationRepository(
         manager,
@@ -137,7 +137,7 @@ def _failure(
 
 
 async def test_begin_freezes_only_lightweight_and_replays_without_foreground_claim(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     active_metadata = _active_metadata_repository(structured_output=True)
@@ -170,7 +170,9 @@ async def test_begin_freezes_only_lightweight_and_replays_without_foreground_cla
     active_metadata.capture_exact_choices_in_session.assert_not_awaited()
     active_metadata.inputs_match_in_session.assert_not_awaited()
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert attempt is not None
         assert (
             ModelOperationSnapshot.model_validate(attempt.model_operation_state)
@@ -180,7 +182,9 @@ async def test_begin_freezes_only_lightweight_and_replays_without_foreground_cla
             session, principal.unit.agent_id
         )
         assert persisted_agent is not None
-        persisted_row = await session.get(RDBAgent, principal.unit.agent_id)
+        persisted_row = await session.read_session.get(
+            RDBAgent, principal.unit.agent_id
+        )
         assert persisted_row is not None
         assert (
             persisted_row.lightweight_model_selection["normalized_capabilities"][
@@ -196,7 +200,7 @@ async def test_begin_freezes_only_lightweight_and_replays_without_foreground_cla
 
 
 async def test_begin_metadata_drift_does_not_persist_a_new_operation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The existing consolidation owner fence precedes execution-state writes."""
     principal = await _principal(rdb_session_manager)
@@ -211,13 +215,15 @@ async def test_begin_metadata_drift_does_not_persist_a_new_operation(
     with pytest.raises(ConsolidationAuthorityError, match="metadata changed"):
         await repository.begin(principal)
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert attempt is not None
         assert attempt.model_operation_state is None
 
 
 async def test_quota_only_advances_exact_route_and_persists_exhaustion(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     active_metadata = _active_metadata_repository(structured_output=True)
@@ -263,7 +269,9 @@ async def test_quota_only_advances_exact_route_and_persists_exhaustion(
         is None
     )
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert attempt is not None
         exhausted = ModelOperationSnapshot.model_validate(attempt.model_operation_state)
         assert exhausted.terminal_reason is not None
@@ -284,7 +292,7 @@ async def test_quota_only_advances_exact_route_and_persists_exhaustion(
     ],
 )
 async def test_nonquota_cannot_advance_or_change_health(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     category: ModelProviderFailureCategory,
 ) -> None:
     principal = await _principal(rdb_session_manager)
@@ -298,12 +306,12 @@ async def test_nonquota_cannot_advance_or_change_health(
 
 
 async def test_unavailable_chain_is_durably_exhausted_without_background_probe(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     health = ModelCandidateHealthRepository(rdb_session_manager)
     async with rdb_session_manager() as session:
-        agent = await session.get(RDBAgent, principal.unit.agent_id)
+        agent = await session.read_session.get(RDBAgent, principal.unit.agent_id)
         assert agent is not None
         integration_id = agent.lightweight_model_selection[
             "llm_provider_integration_id"
@@ -320,7 +328,9 @@ async def test_unavailable_chain_is_durably_exhausted_without_background_probe(
     with pytest.raises(ModelOperationChainExhaustedError):
         await _repository(rdb_session_manager).begin(principal)
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert attempt is not None
         operation = ModelOperationSnapshot.model_validate(attempt.model_operation_state)
         assert operation.terminal_reason is not None
@@ -332,7 +342,7 @@ async def test_unavailable_chain_is_durably_exhausted_without_background_probe(
 
 
 async def test_success_settles_operation_inside_owner_fenced_database_boundary(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
     repository = _repository(rdb_session_manager)
@@ -343,7 +353,9 @@ async def test_success_settles_operation_inside_owner_fenced_database_boundary(
         )
         await require_commit_owner(job.session, job.owner)
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
         assert attempt is not None
         settled = ModelOperationSnapshot.model_validate(attempt.model_operation_state)
         assert settled.operation_id == operation.operation_id
@@ -357,7 +369,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
     repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
 
     async def capture(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: tuple[ConfiguredModelIdentity, ...],

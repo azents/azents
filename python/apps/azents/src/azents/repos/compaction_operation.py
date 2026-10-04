@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated, Protocol
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind
 from azents.core.model_operation import ModelOperationKind
@@ -15,6 +14,7 @@ from azents.engine.events.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -30,7 +30,7 @@ class CompactionTranscriptRepository(Protocol):
 
     async def append(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EventCreate,
     ) -> Event:
         """Append one durable Event."""
@@ -51,7 +51,7 @@ class CompactionSessionRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> CompactionSessionState | None:
         """Return Session state with a model-input head."""
@@ -59,7 +59,7 @@ class CompactionSessionRepository(Protocol):
 
     async def lock_compaction_plan_if_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         expected_head_event_id: str | None,
@@ -70,7 +70,7 @@ class CompactionSessionRepository(Protocol):
 
     async def move_model_input_head(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         event_id: str,
     ) -> object:
@@ -83,7 +83,7 @@ class CompactionModelOperationRepository(Protocol):
 
     async def complete_success_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         completion: ModelOperationCompletion,
     ) -> None:
         """Settle one successful model operation."""
@@ -110,7 +110,7 @@ class CompactionCommitContext:
 
 def _tool_working_set_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ],
 ) -> ToolWorkingSetStore:
@@ -123,7 +123,7 @@ class CompactionOperationRepository:
     """Own compaction planning and atomic finalization transactions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     transcript_repository: Annotated[
@@ -145,7 +145,7 @@ class CompactionOperationRepository:
 
     def with_session_manager(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> "CompactionOperationRepository":
         """Bind completed operations to one execution authority."""
         return dataclasses.replace(

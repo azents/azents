@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
@@ -15,6 +14,7 @@ from azents.core.enums import (
 from azents.core.terminal_result import terminal_result_content
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -25,7 +25,7 @@ class SubagentTerminalResultRepository:
     """Own candidate snapshots and each atomic repair delivery transaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     agent_session_repository: Annotated[

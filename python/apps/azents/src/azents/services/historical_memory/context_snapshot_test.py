@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.enums import EventKind
@@ -17,6 +16,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.authority import (
@@ -37,7 +37,7 @@ from azents.testing.consolidated_context import publish_context_overview
 from azents.testing.consolidation import ConsolidationCorpus, seed_consolidation_corpus
 
 
-def _service(manager: SessionManager[AsyncSession]) -> MemoryContextSnapshotService:
+def _service(manager: SessionManager[WriteSession]) -> MemoryContextSnapshotService:
     return MemoryContextSnapshotService(
         MemoryContextSnapshotRepository(
             HistoricalMemoryRepository(manager),
@@ -58,7 +58,7 @@ def _markdown(corpus: ConsolidationCorpus, text: str) -> str:
 
 
 async def _change(
-    manager: SessionManager[AsyncSession], corpus: ConsolidationCorpus
+    manager: SessionManager[WriteSession], corpus: ConsolidationCorpus
 ) -> None:
     now = datetime.datetime.now(datetime.UTC)
     result = await HistoricalMemoryRepository(manager).publish_completed(
@@ -75,10 +75,10 @@ async def _change(
 
 
 async def _state(
-    manager: SessionManager[AsyncSession], session_id: str
+    manager: SessionManager[WriteSession], session_id: str
 ) -> RDBToolkitState:
     async with manager() as session:
-        row = await session.scalar(
+        row = await session.read_session.scalar(
             sa.select(RDBToolkitState).where(
                 RDBToolkitState.session_id == session_id,
                 RDBToolkitState.toolkit_namespace == "memory",
@@ -90,7 +90,7 @@ async def _state(
 
 
 async def test_ordinary_turn_retains_exact_old_bytes_then_next_run_selects_latest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -145,7 +145,7 @@ async def test_ordinary_turn_retains_exact_old_bytes_then_next_run_selects_lates
 
 @pytest.mark.parametrize("observe_old_selection", [False, True])
 async def test_identical_clean_revision_after_denial_changes_native_binding(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     observe_old_selection: bool,
 ) -> None:
     """Unobserved revoke/restore cannot revive old opaque state by equal bytes."""
@@ -208,7 +208,7 @@ async def test_identical_clean_revision_after_denial_changes_native_binding(
 
 
 async def test_empty_current_outcome_does_not_rewrite_still_authorized_old_snapshot(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -235,7 +235,7 @@ async def test_empty_current_outcome_does_not_rewrite_still_authorized_old_snaps
 
 
 async def test_source_denial_restore_suppresses_whole_selected_team_but_keeps_saved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -278,7 +278,7 @@ async def test_source_denial_restore_suppresses_whole_selected_team_but_keeps_sa
 
 @pytest.mark.parametrize("foreign", [False, True])
 async def test_uncommitted_or_foreign_compaction_cannot_reselect(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     foreign: bool,
 ) -> None:
     manager = rdb_session_manager
@@ -288,7 +288,7 @@ async def test_uncommitted_or_foreign_compaction_cannot_reselect(
         session_id=corpus.team_source, after_compaction=False
     )
     async with manager() as session:
-        row = await session.get(RDBAgentSession, corpus.team_source)
+        row = await session.read_session.get(RDBAgentSession, corpus.team_source)
         assert row is not None
         if foreign:
             event = RDBEvent(
@@ -296,8 +296,8 @@ async def test_uncommitted_or_foreign_compaction_cannot_reselect(
                 kind=EventKind.COMPACTION_SUMMARY,
                 payload={"compaction_id": "foreign", "content": "Synthetic"},
             )
-            session.add(event)
-            await session.flush()
+            session.write_session.add(event)
+            await session.write_session.flush()
             row.model_input_head_event_id = event.id
         else:
             row.model_input_head_event_id = uuid7().hex
@@ -308,7 +308,7 @@ async def test_uncommitted_or_foreign_compaction_cannot_reselect(
 
 
 async def test_compaction_rebinds_identical_content_and_preserves_creation_time(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -334,9 +334,9 @@ async def test_compaction_rebinds_identical_content_and_preserves_creation_time(
                 compaction_id="synthetic", content="Unrelated topic"
             ).model_dump(mode="json"),
         )
-        session.add(event)
-        await session.flush()
-        root = await session.get(RDBAgentSession, corpus.team_source)
+        session.write_session.add(event)
+        await session.write_session.flush()
+        root = await session.read_session.get(RDBAgentSession, corpus.team_source)
         assert root is not None
         root.model_input_head_event_id = event.id
     assert await service.refresh_snapshot(
@@ -351,7 +351,7 @@ async def test_compaction_rebinds_identical_content_and_preserves_creation_time(
 
 
 async def test_invalid_snapshots_only_refresh_at_explicit_boundary(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -362,7 +362,7 @@ async def test_invalid_snapshots_only_refresh_at_explicit_boundary(
     )
     for version, payload in [(1, {}), (2, {"kind": "old"}), (99, {})]:
         async with manager() as session:
-            row = await session.get(
+            row = await session.read_session.get(
                 RDBToolkitState, (await _state(manager, corpus.team_source)).id
             )
             assert row is not None
@@ -377,7 +377,7 @@ async def test_invalid_snapshots_only_refresh_at_explicit_boundary(
 
 
 async def test_refresh_cas_conflict_and_memory_disablement_do_not_claim_preparation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -390,7 +390,7 @@ async def test_refresh_cas_conflict_and_memory_disablement_do_not_claim_preparat
         session_id=corpus.team_source, after_compaction=False
     )
     async with manager() as session:
-        agent = await session.get(RDBAgent, corpus.team.agent_id)
+        agent = await session.read_session.get(RDBAgent, corpus.team.agent_id)
         assert agent is not None
         agent.memory_enabled = False
     assert not await service.refresh_snapshot(
@@ -403,7 +403,7 @@ async def test_refresh_cas_conflict_and_memory_disablement_do_not_claim_preparat
     "failure", [ConsolidationAuthorityBusyError, ConsolidationDeadlineError]
 )
 async def test_unconfirmed_authority_omits_context_without_failing_conversation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: type[ConsolidationAuthorityBusyError] | type[ConsolidationDeadlineError],
 ) -> None:
     repository = AsyncMock(spec=MemoryContextSnapshotRepository)

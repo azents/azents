@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ScheduledTaskScheduleType
 from azents.rdb.models.scheduled_task import RDBScheduledTask
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 
@@ -165,7 +166,7 @@ class TestScheduledTaskRepository:
         """Create persists the complete M1 definition shape."""
         session = _CreateSession()
         task = await ScheduledTaskRepository().create(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             ScheduledTaskCreate(
                 workspace_id="w" * 32,
                 agent_id="a" * 32,
@@ -196,7 +197,7 @@ class TestScheduledTaskRepository:
         task = _rdb_task()
         session = _ScalarSession(task)
         result = await ScheduledTaskRepository().get_by_id(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             task.id,
         )
 
@@ -210,7 +211,7 @@ class TestScheduledTaskRepository:
         task = _rdb_task()
         session = _ScalarSession(task)
         result = await ScheduledTaskRepository().lock_by_id(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             task.id,
         )
 
@@ -227,7 +228,7 @@ class TestScheduledTaskRepository:
         task.lease_until = _dt(5)
         session = _ScalarSession(task)
         result = await ScheduledTaskRepository().lock_claimed_by_id(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             task_id=task.id,
             lease_owner="scheduler-1",
             lease_token=_dt(5),
@@ -246,7 +247,7 @@ class TestScheduledTaskRepository:
         rows = [_rdb_task("a" * 32), _rdb_task("b" * 32)]
         session = _ListSession(rows)
         result = await ScheduledTaskRepository().list_by_session_id(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             "s" * 32,
         )
 
@@ -286,7 +287,7 @@ class TestScheduledTaskRepository:
         session = _ClaimSession(row)
 
         claimed = await ScheduledTaskRepository().claim_due(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             now=_dt(1),
             lease_owner="scheduler-1",
             lease_until=_dt(5),
@@ -302,7 +303,7 @@ class TestScheduledTaskRepository:
         """Exact deletion reports whether one row was removed."""
         session = _DeleteSession(rowcount=1)
         assert await ScheduledTaskRepository().delete_by_id(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             "a" * 32,
         )
         assert "WHERE scheduled_tasks.id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'" in _sql(
@@ -314,7 +315,7 @@ class TestScheduledTaskRepository:
         """Exact deletion reports a missing row without treating it as success."""
         session = _DeleteSession(rowcount=0)
         assert not await ScheduledTaskRepository().delete_by_id(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             "a" * 32,
         )
         assert session.flushed is True
@@ -326,7 +327,7 @@ class TestScheduledTaskRepository:
         session = _DeleteSession(rowcount=1)
 
         assert await ScheduledTaskRepository().delete_completed_once(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             task_id="t" * 32,
             cycle_id="c" * 32,
         )
@@ -346,7 +347,7 @@ class TestScheduledTaskRepository:
         session = _DeleteSession(rowcount=1)
 
         assert await ScheduledTaskRepository().release_completed_recurring(
-            cast(AsyncSession, session),
+            ReadWriteSession(cast(AsyncSession, session)),
             task_id="t" * 32,
             cycle_id="c" * 32,
         )

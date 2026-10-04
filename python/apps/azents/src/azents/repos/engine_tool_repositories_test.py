@@ -7,13 +7,15 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    async with AsyncSession() as session:
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    async with AsyncSession() as _raw_session:
+        session = ReadWriteSession(_raw_session)
         yield session
 
 

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import ToolkitScopeType
 from azents.core.toolkit_errors import DuplicateAgentToolkit, DuplicateScope
 from azents.rdb.models.toolkit import RDBAgentToolkit, RDBToolkitScope
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitScopeRepository
 from azents.repos.toolkit.data import AgentToolkitCreate, ToolkitScopeCreate
 
@@ -43,7 +44,7 @@ async def test_duplicate_scope_uses_declared_constraint_and_rolls_back() -> None
     assert list(constraint.columns.keys()) == ["toolkit_id", "scope_type", "scope_id"]
     async with _DuplicateSession(constraint) as session:
         result = await ToolkitScopeRepository().create(
-            session,
+            ReadWriteSession(session),
             ToolkitScopeCreate(
                 toolkit_id="toolkit-1",
                 scope_type=ToolkitScopeType.WORKSPACE,
@@ -65,7 +66,7 @@ async def test_duplicate_attachment_uses_declared_constraint_and_rolls_back() ->
     assert list(constraint.columns.keys()) == ["agent_id", "toolkit_id"]
     async with _DuplicateSession(constraint) as session:
         result = await AgentToolkitRepository().create(
-            session,
+            ReadWriteSession(session),
             AgentToolkitCreate(
                 agent_id="agent-1", toolkit_id="toolkit-1", toolkit_type="mcp"
             ),

@@ -3,7 +3,6 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.runtime_web import (
     RDBRuntimeWebAuthBinding,
@@ -15,6 +14,7 @@ from azents.rdb.models.runtime_web import (
 )
 from azents.rdb.models.session import RDBSession
 from azents.rdb.models.user import RDBUser
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebAuthBinding,
     RuntimeWebBrokerBinding,
@@ -32,12 +32,12 @@ class RuntimeWebGatewayRepository:
 
     async def synchronize_configuration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         desired: RuntimeWebDesiredConfiguration,
     ) -> None:
         """Install the current configuration and invalidate stale browser auth."""
-        configuration = await session.scalar(
+        configuration = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthConfiguration)
             .where(RDBRuntimeWebAuthConfiguration.id == 1)
             .with_for_update()
@@ -48,8 +48,8 @@ class RuntimeWebGatewayRepository:
                 mode=desired.mode,
                 fingerprint=desired.fingerprint,
             )
-            session.add(configuration)
-            await session.flush()
+            session.write_session.add(configuration)
+            await session.write_session.flush()
             return
         security_changed = (
             desired.fingerprint != configuration.fingerprint
@@ -60,18 +60,18 @@ class RuntimeWebGatewayRepository:
         configuration.mode = desired.mode
         configuration.fingerprint = desired.fingerprint
         if security_changed:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeWebGatewayIdentity)
                 .where(RDBRuntimeWebGatewayIdentity.revoked_at.is_(None))
                 .values(revoked_at=sa.func.now())
             )
-            await session.execute(sa.delete(RDBRuntimeWebAuthTicket))
-            await session.execute(sa.delete(RDBRuntimeWebAuthBinding))
-        await session.flush()
+            await session.write_session.execute(sa.delete(RDBRuntimeWebAuthTicket))
+            await session.write_session.execute(sa.delete(RDBRuntimeWebAuthBinding))
+        await session.write_session.flush()
 
     async def create_identity(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         secret_hash: str,
         user_id: str,
@@ -99,19 +99,19 @@ class RuntimeWebGatewayRepository:
             issued_at=issued_at,
             expires_at=expires_at,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._identity(rdb)
 
     async def authenticate_identity(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         secret_hash: str,
         now: datetime.datetime,
     ) -> RuntimeWebGatewayIdentity | None:
         """Validate identity, auth Session, mode, and deadlines."""
-        row = await session.execute(
+        row = await session.read_session.execute(
             sa.select(RDBRuntimeWebGatewayIdentity, RDBSession, RDBUser)
             .join(
                 RDBSession,
@@ -132,7 +132,9 @@ class RuntimeWebGatewayRepository:
         if matched is None:
             return None
         identity, _auth_session, _user = matched._t
-        configuration = await session.get(RDBRuntimeWebAuthConfiguration, 1)
+        configuration = await session.read_session.get(
+            RDBRuntimeWebAuthConfiguration, 1
+        )
         if (
             configuration is None
             or not configuration.enabled
@@ -143,7 +145,7 @@ class RuntimeWebGatewayRepository:
 
     async def identity_authority_current(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         identity_id: str,
         user_id: str,
@@ -151,7 +153,7 @@ class RuntimeWebGatewayRepository:
         now: datetime.datetime,
     ) -> bool:
         """Revalidate an admitted identity without retaining its opaque secret."""
-        current = await session.scalar(
+        current = await session.read_session.scalar(
             sa.select(sa.literal(True))
             .select_from(RDBRuntimeWebGatewayIdentity)
             .join(
@@ -182,7 +184,7 @@ class RuntimeWebGatewayRepository:
 
     async def revoke_identity(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         secret_hash: str,
         user_id: str,
@@ -190,7 +192,7 @@ class RuntimeWebGatewayRepository:
         revoked_at: datetime.datetime,
     ) -> bool:
         """Revoke the exact opaque identity when present."""
-        identity_id = await session.scalar(
+        identity_id = await session.write_session.scalar(
             sa.update(RDBRuntimeWebGatewayIdentity)
             .where(
                 RDBRuntimeWebGatewayIdentity.secret_hash == secret_hash,
@@ -205,7 +207,7 @@ class RuntimeWebGatewayRepository:
 
     async def create_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         initiation_id: str,
         main_binding_hash: str,
@@ -228,7 +230,7 @@ class RuntimeWebGatewayRepository:
             auth_session_id=auth_session_id,
             now=now,
         )
-        service = await session.get(RDBRuntimeWebService, service_id)
+        service = await session.write_session.get(RDBRuntimeWebService, service_id)
         if service is None:
             raise RuntimeWebRepositoryConflict("Runtime Web service not found")
         rdb = RDBRuntimeWebAuthBinding(
@@ -239,8 +241,8 @@ class RuntimeWebGatewayRepository:
             service_id=service_id,
             expires_at=expires_at,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return RuntimeWebIssuedBinding(
             binding=self._binding(rdb),
             main_binding_secret=main_binding_secret,
@@ -248,7 +250,7 @@ class RuntimeWebGatewayRepository:
 
     async def bind_broker(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         initiation_id: str,
         broker_binding_hash: str,
@@ -256,7 +258,7 @@ class RuntimeWebGatewayRepository:
         now: datetime.datetime,
     ) -> RuntimeWebBrokerBinding:
         """Attach one broker-host binding secret exactly once."""
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthBinding)
             .where(RDBRuntimeWebAuthBinding.initiation_id == initiation_id)
             .with_for_update()
@@ -269,7 +271,7 @@ class RuntimeWebGatewayRepository:
         ):
             raise RuntimeWebRepositoryConflict("Runtime Web binding is unavailable")
         binding.broker_binding_hash = broker_binding_hash
-        await session.flush()
+        await session.write_session.flush()
         return RuntimeWebBrokerBinding(
             binding=self._binding(binding),
             broker_binding_secret=broker_binding_secret,
@@ -277,7 +279,7 @@ class RuntimeWebGatewayRepository:
 
     async def mark_broker_bound(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         initiation_id: str,
         main_binding_hash: str,
@@ -286,7 +288,7 @@ class RuntimeWebGatewayRepository:
         now: datetime.datetime,
     ) -> RuntimeWebAuthBinding:
         """Accept the exact broker callback under Main-origin proof."""
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthBinding)
             .where(
                 RDBRuntimeWebAuthBinding.initiation_id == initiation_id,
@@ -305,12 +307,12 @@ class RuntimeWebGatewayRepository:
             raise RuntimeWebRepositoryConflict("Runtime Web binding is unavailable")
         if binding.broker_bound_at is None:
             binding.broker_bound_at = now
-            await session.flush()
+            await session.write_session.flush()
         return self._binding(binding)
 
     async def issue_ticket(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         initiation_id: str,
         main_binding_hash: str,
@@ -323,7 +325,7 @@ class RuntimeWebGatewayRepository:
     ) -> RuntimeWebIssuedTicket:
         """Issue one ticket only after the broker callback completed."""
         await self._locked_enabled_configuration(session)
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthBinding)
             .where(
                 RDBRuntimeWebAuthBinding.initiation_id == initiation_id,
@@ -356,8 +358,8 @@ class RuntimeWebGatewayRepository:
             issued_at=issued_at,
             expires_at=expires_at,
         )
-        session.add(ticket)
-        await session.flush()
+        session.write_session.add(ticket)
+        await session.write_session.flush()
         return RuntimeWebIssuedTicket(
             ticket_secret=ticket_secret,
             service_id=binding.service_id,
@@ -366,7 +368,7 @@ class RuntimeWebGatewayRepository:
 
     async def redeem_ticket(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         ticket_hash: str,
         broker_binding_hash: str,
@@ -377,14 +379,14 @@ class RuntimeWebGatewayRepository:
     ) -> RuntimeWebRedeemedIdentity:
         """Atomically consume a broker-bound ticket and create the identity."""
         configuration = await self._locked_enabled_configuration(session)
-        ticket = await session.scalar(
+        ticket = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthTicket)
             .where(RDBRuntimeWebAuthTicket.secret_hash == ticket_hash)
             .with_for_update()
         )
         if ticket is None:
             raise RuntimeWebRepositoryConflict("Runtime Web ticket is unavailable")
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthBinding)
             .where(
                 RDBRuntimeWebAuthBinding.id == ticket.binding_id,
@@ -418,10 +420,10 @@ class RuntimeWebGatewayRepository:
             issued_at=now,
             expires_at=identity_expires_at,
         )
-        session.add(identity)
+        session.write_session.add(identity)
         ticket.consumed_at = now
         binding.settled_at = now
-        await session.flush()
+        await session.write_session.flush()
         return RuntimeWebRedeemedIdentity(
             secret=identity_secret,
             expires_at=identity_expires_at,
@@ -430,12 +432,12 @@ class RuntimeWebGatewayRepository:
 
     async def get_service_by_hostname(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         hostname_key: str,
     ) -> RDBRuntimeWebService | None:
         """Resolve the permanent random service host label."""
-        return await session.scalar(
+        return await session.read_session.scalar(
             sa.select(RDBRuntimeWebService).where(
                 RDBRuntimeWebService.hostname_key == hostname_key
             )
@@ -443,18 +445,18 @@ class RuntimeWebGatewayRepository:
 
     async def get_service_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         service_id: str,
     ) -> RDBRuntimeWebService | None:
         """Resolve one stable service by its opaque identifier."""
-        return await session.get(RDBRuntimeWebService, service_id)
+        return await session.read_session.get(RDBRuntimeWebService, service_id)
 
     async def _locked_enabled_configuration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
     ) -> RDBRuntimeWebAuthConfiguration:
-        configuration = await session.scalar(
+        configuration = await session.write_session.scalar(
             sa.select(RDBRuntimeWebAuthConfiguration)
             .where(RDBRuntimeWebAuthConfiguration.id == 1)
             .with_for_update()
@@ -467,13 +469,13 @@ class RuntimeWebGatewayRepository:
 
     async def _require_active_auth_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         user_id: str,
         auth_session_id: str,
         now: datetime.datetime,
     ) -> None:
-        active = await session.scalar(
+        active = await session.read_session.scalar(
             sa.select(sa.literal(True))
             .select_from(RDBSession)
             .join(RDBUser, RDBUser.id == RDBSession.user_id)

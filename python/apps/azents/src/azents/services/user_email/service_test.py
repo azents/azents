@@ -1,10 +1,10 @@
 """UserEmail service projections and errors after completed database operations."""
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.user_email import DuplicateEmail, UserEmailCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.user_email import UserEmailRepository
@@ -15,7 +15,7 @@ from azents.services.user_email.data import UserEmailOutput
 
 
 async def test_service_projects_after_resolution_and_preserves_conflict_missing_results(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Email response conversion is session-free across all five service operations."""
     async with rdb_session_manager() as session:

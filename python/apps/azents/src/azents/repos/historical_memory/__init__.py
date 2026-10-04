@@ -8,7 +8,6 @@ import sqlalchemy as sa
 from azcommon.types import JSONValue
 from fastapi import Depends
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionKind,
@@ -35,6 +34,7 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory_consolidation.enrollment import (
     enroll_source_in_session,
 )
@@ -55,7 +55,7 @@ class HistoricalMemoryRepository:
     def __init__(
         self,
         session_manager: Annotated[
-            SessionManager[AsyncSession],
+            SessionManager[WriteSession],
             Depends(get_session_manager),
         ],
     ) -> None:
@@ -64,13 +64,13 @@ class HistoricalMemoryRepository:
 
     async def get_snapshot_consumer_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> MemorySnapshotConsumer | None:
         """Return one currently authorized Memory-enabled root consumer."""
         locked = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBAgentSession.id,
                     RDBAgentSession.agent_id,
@@ -127,12 +127,12 @@ class HistoricalMemoryRepository:
                 inactive_before=inactive_before,
                 limit=limit,
             )
-            await session.commit()
+            await session.write_session.commit()
             return admitted
 
     async def admit_eligible_sources_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str | None,
         now: datetime.datetime,
@@ -171,10 +171,10 @@ class HistoricalMemoryRepository:
         )
         if agent_id is not None:
             candidates = candidates.where(RDBAgentSession.agent_id == agent_id)
-        source_ids = list((await session.execute(candidates)).scalars())
+        source_ids = list((await session.write_session.execute(candidates)).scalars())
         if not source_ids:
             return []
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBHistoricalMemorySource)
             .values(
                 [
@@ -190,7 +190,7 @@ class HistoricalMemoryRepository:
             )
             .returning(RDBHistoricalMemorySource.source_session_id)
         )
-        await session.flush()
+        await session.write_session.flush()
         return list(result.scalars())
 
     async def get(self, source_session_id: str) -> HistoricalMemorySource | None:
@@ -200,21 +200,23 @@ class HistoricalMemoryRepository:
 
     async def get_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         source_session_id: str,
     ) -> HistoricalMemorySource | None:
         """Return one source record inside a caller-owned transaction."""
-        row = await session.get(RDBHistoricalMemorySource, source_session_id)
+        row = await session.read_session.get(
+            RDBHistoricalMemorySource, source_session_id
+        )
         return None if row is None else self._build(row)
 
     async def lock_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         source_session_id: str,
     ) -> HistoricalMemorySource | None:
         """Lock and return one source record."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBHistoricalMemorySource)
                 .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
                 .with_for_update()
@@ -258,7 +260,7 @@ class HistoricalMemoryRepository:
 
     async def list_due_agent_ids_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         inactive_before: datetime.datetime,
@@ -310,11 +312,11 @@ class HistoricalMemoryRepository:
             .order_by(due_at, RDBAgentSession.agent_id)
             .limit(limit)
         )
-        return list((await session.execute(statement)).scalars())
+        return list((await session.read_session.execute(statement)).scalars())
 
     async def list_due_for_agent_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         now: datetime.datetime,
@@ -378,7 +380,7 @@ class HistoricalMemoryRepository:
             )
             .limit(limit)
         )
-        rows = (await session.execute(statement)).all()
+        rows = (await session.read_session.execute(statement)).all()
         return [
             HistoricalMemoryDueSource(
                 source_session_id=source.source_session_id,
@@ -406,7 +408,7 @@ class HistoricalMemoryRepository:
 
     async def lock_preparation_admission_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_session_id: str,
         attempted_at: datetime.datetime,
@@ -414,7 +416,7 @@ class HistoricalMemoryRepository:
     ) -> HistoricalMemoryPreparationAdmission | None:
         """Lock Historical then Session authority and capture the source boundary."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBHistoricalMemorySource)
                 .where(
                     RDBHistoricalMemorySource.source_session_id == source_session_id,
@@ -429,7 +431,7 @@ class HistoricalMemoryRepository:
         if row is None:
             return None
         source = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(RDBAgentSession)
                 .where(
                     RDBAgentSession.id == source_session_id,
@@ -449,7 +451,7 @@ class HistoricalMemoryRepository:
             and source.last_activity_at <= row.completed_source_activity_at
         ):
             return None
-        source_tail_event_id = await session.scalar(
+        source_tail_event_id = await session.write_session.scalar(
             sa.select(sa.func.max(RDBEvent.id)).where(
                 RDBEvent.session_id == source_session_id,
                 RDBEvent.reverted.is_(False),
@@ -478,7 +480,7 @@ class HistoricalMemoryRepository:
 
     async def lock_preparation_membership_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         admission: HistoricalMemoryPreparationAdmission,
     ) -> bool:
         """Lock current User membership after the Agent lock is held."""
@@ -489,7 +491,7 @@ class HistoricalMemoryRepository:
             or admission.associated_user_id is None
         ):
             return False
-        membership_id = await session.scalar(
+        membership_id = await session.write_session.scalar(
             sa.select(RDBWorkspaceUser.id)
             .where(
                 RDBWorkspaceUser.workspace_id == admission.source.workspace_id,
@@ -501,14 +503,14 @@ class HistoricalMemoryRepository:
 
     async def persist_preparation_operation_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         admission: HistoricalMemoryPreparationAdmission,
         *,
         attempted_at: datetime.datetime,
         operation: ModelOperationSnapshot,
     ) -> HistoricalMemoryDueSource:
         """Persist the selected operation while all admission locks remain held."""
-        row = await session.get(
+        row = await session.write_session.get(
             RDBHistoricalMemorySource,
             admission.source.source_session_id,
         )
@@ -516,7 +518,7 @@ class HistoricalMemoryRepository:
             raise RuntimeError("Locked Historical Memory source disappeared.")
         row.last_attempt_at = attempted_at
         row.model_operation_state = self._operation_json(operation)
-        await session.flush()
+        await session.write_session.flush()
         return admission.source.model_copy(update={"model_operation_state": operation})
 
     async def record_failure(
@@ -532,19 +534,19 @@ class HistoricalMemoryRepository:
                 source_session_id=source_session_id,
                 failure=failure,
             )
-            await session.commit()
+            await session.write_session.commit()
             return record
 
     async def record_failure_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_session_id: str,
         failure: HistoricalMemoryFailure,
     ) -> HistoricalMemorySource | None:
         """Persist failure progress inside a caller-owned transaction."""
         row = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBHistoricalMemorySource)
                 .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
                 .values(
@@ -559,7 +561,7 @@ class HistoricalMemoryRepository:
                 .returning(RDBHistoricalMemorySource)
             )
         ).scalar_one_or_none()
-        await session.flush()
+        await session.write_session.flush()
         return None if row is None else self._build(row)
 
     async def publish_completed(
@@ -575,19 +577,19 @@ class HistoricalMemoryRepository:
                 source_session_id=source_session_id,
                 completion=completion,
             )
-            await session.commit()
+            await session.write_session.commit()
             return record
 
     async def publish_completed_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_session_id: str,
         completion: HistoricalMemoryCompletion,
     ) -> HistoricalMemorySource | None:
         """Publish one completed result inside a caller-owned transaction."""
         locked = (
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(
                     RDBHistoricalMemorySource,
                     RDBAgentSession,
@@ -637,13 +639,13 @@ class HistoricalMemoryRepository:
             root=source,
             kind=ConsolidationWorkKind.PREPARED,
         )
-        await session.flush()
-        await session.refresh(row)
+        await session.write_session.flush()
+        await session.write_session.refresh(row)
         return self._build(row)
 
     @staticmethod
     async def _lock_associated_user_membership(
-        session: AsyncSession,
+        session: WriteSession,
         source: RDBAgentSession | MemorySnapshotConsumer,
     ) -> bool:
         """Lock the current User-source membership authority when required."""
@@ -654,7 +656,7 @@ class HistoricalMemoryRepository:
             or source.associated_user_id is None
         ):
             return False
-        membership_id = await session.scalar(
+        membership_id = await session.write_session.scalar(
             sa.select(RDBWorkspaceUser.id)
             .where(
                 RDBWorkspaceUser.workspace_id == source.workspace_id,

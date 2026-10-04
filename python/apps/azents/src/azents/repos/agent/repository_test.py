@@ -18,6 +18,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.services.uploads.schema import (
     StoredImage,
     StoredImageFile,
@@ -88,8 +89,9 @@ def _avatar(key: str) -> StoredImage:
 
 async def test_create_uses_enabled_tool_search_default() -> None:
     """Map the repository create default instead of relying on the DB default."""
-    session = AsyncMock(spec=AsyncSession)
-    session.flush.side_effect = _StopAfterWrite
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
+    _raw_session.flush.side_effect = _StopAfterWrite
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().create(
@@ -97,15 +99,16 @@ async def test_create_uses_enabled_tool_search_default() -> None:
             _agent_create(),
         )
 
-    rdb_agent = session.add.call_args.args[0]
+    rdb_agent = _raw_session.add.call_args.args[0]
     assert isinstance(rdb_agent, RDBAgent)
     assert rdb_agent.tool_search_enabled is True
 
 
 async def test_create_maps_explicit_tool_search_opt_out_to_rdb_agent() -> None:
     """Map an explicit Tool Search opt-out to the persisted Agent row."""
-    session = AsyncMock(spec=AsyncSession)
-    session.flush.side_effect = _StopAfterWrite
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
+    _raw_session.flush.side_effect = _StopAfterWrite
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().create(
@@ -113,15 +116,16 @@ async def test_create_maps_explicit_tool_search_opt_out_to_rdb_agent() -> None:
             _agent_create(tool_search_enabled=False),
         )
 
-    rdb_agent = session.add.call_args.args[0]
+    rdb_agent = _raw_session.add.call_args.args[0]
     assert isinstance(rdb_agent, RDBAgent)
     assert rdb_agent.tool_search_enabled is False
 
 
 async def test_create_adds_initial_empty_automatic_project_policy() -> None:
     """Persist revision-one policy settings after inserting the Agent row."""
-    session = AsyncMock(spec=AsyncSession)
-    session.flush.side_effect = [None, _StopAfterWrite]
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
+    _raw_session.flush.side_effect = [None, _StopAfterWrite]
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().create(
@@ -129,17 +133,18 @@ async def test_create_adds_initial_empty_automatic_project_policy() -> None:
             _agent_create(),
         )
 
-    policy_setting = session.add.call_args_list[1].args[0]
+    policy_setting = _raw_session.add.call_args_list[1].args[0]
     assert isinstance(policy_setting, RDBAgentAutomaticProjectSetting)
-    assert policy_setting.agent_id == session.add.call_args_list[0].args[0].id
+    assert policy_setting.agent_id == _raw_session.add.call_args_list[0].args[0].id
     assert policy_setting.revision == 1
     assert policy_setting.updated_by_workspace_user_id is None
 
 
 async def test_create_does_not_add_legacy_execution_setting() -> None:
     """Do not reactivate the legacy execution-policy selection path."""
-    session = AsyncMock(spec=AsyncSession)
-    session.flush.side_effect = [None, _StopAfterWrite]
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
+    _raw_session.flush.side_effect = [None, _StopAfterWrite]
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().create(
@@ -147,13 +152,14 @@ async def test_create_does_not_add_legacy_execution_setting() -> None:
             _agent_create(),
         )
 
-    assert len(session.add.call_args_list) == 2
+    assert len(_raw_session.add.call_args_list) == 2
 
 
 async def test_update_maps_tool_search_enabled_to_update_statement() -> None:
     """Map an explicit update value into the persisted Agent row."""
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.side_effect = _StopAfterWrite
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
+    _raw_session.execute.side_effect = _StopAfterWrite
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().update_by_id(
@@ -162,14 +168,15 @@ async def test_update_maps_tool_search_enabled_to_update_statement() -> None:
             AgentUpdate(tool_search_enabled=False),
         )
 
-    statement = session.execute.call_args.args[0]
+    statement = _raw_session.execute.call_args.args[0]
     assert statement.compile().params["tool_search_enabled"] is False
 
 
 async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
     """Map the capability transition and optimistic version into SQL."""
-    session = AsyncMock(spec=AsyncSession)
-    session.execute.side_effect = _StopAfterWrite
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
+    _raw_session.execute.side_effect = _StopAfterWrite
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().compare_and_set_runtime_capability(
@@ -182,7 +189,7 @@ async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
             runtime_profile_id=None,
         )
 
-    statement = session.execute.call_args.args[0]
+    statement = _raw_session.execute.call_args.args[0]
     params = statement.compile().params
     assert params["runtime_capability_1"] is AgentRuntimeCapability.MANAGED
     assert params["runtime_capability_version_1"] == 1
@@ -195,7 +202,8 @@ async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
 
 async def test_update_avatar_locks_agent_and_enqueues_prior_snapshot() -> None:
     """Avatar mutation takes an exclusive row lock before snapshotting state."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     old_avatar = _avatar("public/avatar/agent-1/large/old.webp")
     new_avatar = _avatar("public/avatar/agent-1/large/new.webp")
     row = RDBAgent(
@@ -215,16 +223,16 @@ async def test_update_avatar_locks_agent_and_enqueues_prior_snapshot() -> None:
     )
     result = Mock()
     result.scalar_one_or_none.return_value = row
-    session.execute.return_value = result
-    session.flush.side_effect = _StopAfterWrite
+    _raw_session.execute.return_value = result
+    _raw_session.flush.side_effect = _StopAfterWrite
 
     with pytest.raises(_StopAfterWrite):
         await AgentRepository().update_avatar(session, row.id, new_avatar)
 
-    statement = session.execute.call_args.args[0]
+    statement = _raw_session.execute.call_args.args[0]
     sql = str(statement.compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE" in sql
-    cleanup_job = session.add.call_args.args[0]
+    cleanup_job = _raw_session.add.call_args.args[0]
     assert isinstance(cleanup_job, RDBAgentAvatarCleanupJob)
     assert cleanup_job.agent_id == row.id
     assert cleanup_job.avatar == old_avatar.model_dump(mode="json")

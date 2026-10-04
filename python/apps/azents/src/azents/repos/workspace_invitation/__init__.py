@@ -2,10 +2,10 @@
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import InvitationStatus
 from azents.rdb.models.workspace_invitation import RDBWorkspaceInvitation
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     NotFound,
@@ -19,7 +19,7 @@ class WorkspaceInvitationRepository:
     """WorkspaceInvitation CRUD repository."""
 
     async def create_or_reinvite(
-        self, session: AsyncSession, create: WorkspaceInvitationCreate
+        self, session: WriteSession, create: WorkspaceInvitationCreate
     ) -> WorkspaceInvitation:
         """Create or re-invite invitation.
 
@@ -41,8 +41,8 @@ class WorkspaceInvitationRepository:
             existing_rdb.status = InvitationStatus.PENDING
             existing_rdb.role = create.role
             existing_rdb.invited_by = create.invited_by
-            await session.flush()
-            await session.refresh(existing_rdb)
+            await session.write_session.flush()
+            await session.write_session.refresh(existing_rdb)
             return self._build(existing_rdb)
 
         rdb_invitation = RDBWorkspaceInvitation(
@@ -51,12 +51,12 @@ class WorkspaceInvitationRepository:
             role=create.role,
             invited_by=create.invited_by,
         )
-        session.add(rdb_invitation)
-        await session.flush()
+        session.write_session.add(rdb_invitation)
+        await session.write_session.flush()
         return self._build(rdb_invitation)
 
     async def get(
-        self, session: AsyncSession, invitation_id: str
+        self, session: ReadSession, invitation_id: str
     ) -> WorkspaceInvitation | None:
         """Fetch invitation by ID.
 
@@ -64,13 +64,13 @@ class WorkspaceInvitationRepository:
         :param invitation_id: Invitation ID
         :return: Invitation or None
         """
-        rdb = await session.get(RDBWorkspaceInvitation, invitation_id)
+        rdb = await session.read_session.get(RDBWorkspaceInvitation, invitation_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def list_by_workspace(
-        self, session: AsyncSession, workspace_id: str
+        self, session: ReadSession, workspace_id: str
     ) -> WorkspaceInvitationList:
         """Fetch all invitations in workspace.
 
@@ -78,7 +78,7 @@ class WorkspaceInvitationRepository:
         :param workspace_id: Workspace ID
         :return: Invitation list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBWorkspaceInvitation)
             .where(RDBWorkspaceInvitation.workspace_id == workspace_id)
             .order_by(RDBWorkspaceInvitation.created_at.desc())
@@ -87,7 +87,7 @@ class WorkspaceInvitationRepository:
         return WorkspaceInvitationList(items=[self._build(r) for r in items])
 
     async def list_pending_by_emails(
-        self, session: AsyncSession, emails: list[str]
+        self, session: ReadSession, emails: list[str]
     ) -> WorkspaceInvitationList:
         """Fetch pending invitations by email list.
 
@@ -98,7 +98,7 @@ class WorkspaceInvitationRepository:
         if not emails:
             return WorkspaceInvitationList(items=[])
 
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBWorkspaceInvitation)
             .where(
                 RDBWorkspaceInvitation.email.in_(emails),
@@ -110,7 +110,7 @@ class WorkspaceInvitationRepository:
         return WorkspaceInvitationList(items=[self._build(r) for r in items])
 
     async def update_status(
-        self, session: AsyncSession, invitation_id: str, status: InvitationStatus
+        self, session: WriteSession, invitation_id: str, status: InvitationStatus
     ) -> Result[WorkspaceInvitation, NotFound]:
         """Change invitation status.
 
@@ -119,7 +119,7 @@ class WorkspaceInvitationRepository:
         :param status: Status to change
         :return: Changed invitation or error
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBWorkspaceInvitation)
             .where(RDBWorkspaceInvitation.id == invitation_id)
             .values(status=status)
@@ -130,23 +130,23 @@ class WorkspaceInvitationRepository:
             return Failure(NotFound(invitation_id=invitation_id))
         return Success(self._build(rdb))
 
-    async def delete(self, session: AsyncSession, invitation_id: str) -> None:
+    async def delete(self, session: WriteSession, invitation_id: str) -> None:
         """Delete invitation.
 
         :param session: Database session
         :param invitation_id: Invitation ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceInvitation).where(
                 RDBWorkspaceInvitation.id == invitation_id
             )
         )
 
     async def _get_rdb_by_workspace_and_email(
-        self, session: AsyncSession, workspace_id: str, email: str
+        self, session: ReadSession, workspace_id: str, email: str
     ) -> RDBWorkspaceInvitation | None:
         """Fetch RDB model by workspace + email."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBWorkspaceInvitation).where(
                 RDBWorkspaceInvitation.workspace_id == workspace_id,
                 RDBWorkspaceInvitation.email == email,

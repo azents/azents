@@ -5,7 +5,6 @@ import datetime
 
 from azcommon.datetime import tznow
 from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuditEventType,
@@ -17,6 +16,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderAuditEventCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
@@ -59,7 +59,7 @@ _TERMINAL = frozenset(
 class RuntimeProviderEnrollmentService:
     """Issue, exchange, and verify Provider-bound enrollment credentials."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     repository: RuntimeProviderControlRepository
     provider_repository: RuntimeProviderRepository
     binding_repository: RuntimeProviderAuthBindingRepository
@@ -346,7 +346,7 @@ class RuntimeProviderEnrollmentService:
 
     async def validate_connection_authority_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         validated_at: datetime.datetime,
@@ -390,7 +390,7 @@ class RuntimeProviderEnrollmentService:
 
     async def create_connection_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         connection_id: str,

@@ -29,6 +29,7 @@ from azents.engine.events.types import (
     validate_event_payload,
 )
 from azents.engine.run.failure import FailedRunRetryState
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.engine_event_mutation import EngineEventMutationRepository
@@ -98,12 +99,12 @@ class RecordingSessionManager:
         self.failure_point = failure_point
         self.failure = failure
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.commits = 0
         self.rollbacks = 0
         self.order: list[str] = []
 
-    def check(self, session: AsyncSession, operation: str) -> None:
+    def check(self, session: ReadSession, operation: str) -> None:
         """Record a narrow DB operation in its caller's one active session."""
         assert self.active
         assert session is self.sessions[-1]
@@ -116,11 +117,11 @@ class RecordingSessionManager:
             raise self.failure
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Commit on clean exit and abort every member on late failure."""
         assert not self.active
         before = copy.deepcopy(self.state)
-        session = AsyncSession()
+        session = ReadWriteSession(AsyncSession())
         self.sessions.append(session)
         self.active = True
         try:
@@ -140,7 +141,7 @@ class RecordingSessionManager:
             raise
         finally:
             self.active = False
-            await session.close()
+            await session.read_session.close()
 
 
 class RecordingRunRepository(AgentRunRepository):
@@ -150,7 +151,7 @@ class RecordingRunRepository(AgentRunRepository):
         self.manager = manager
 
     async def get_by_id(
-        self, session: AsyncSession, run_id: str
+        self, session: ReadSession, run_id: str
     ) -> AgentRunState | None:
         """Read current authoritative Run state."""
         assert run_id == RUN_ID
@@ -158,7 +159,7 @@ class RecordingRunRepository(AgentRunRepository):
         return self.manager.state.run
 
     async def lock_by_id(
-        self, session: AsyncSession, run_id: str
+        self, session: ReadSession, run_id: str
     ) -> AgentRunState | None:
         """Record the existing result-append-before-Run-lock order."""
         self.manager.check(session, "lock_run")
@@ -166,7 +167,7 @@ class RecordingRunRepository(AgentRunRepository):
 
     async def update_retry_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         retry_state: FailedRunRetryState | None,
     ) -> AgentRunState:
@@ -182,7 +183,7 @@ class RecordingRunRepository(AgentRunRepository):
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -208,7 +209,7 @@ class RecordingRunRepository(AgentRunRepository):
 
     async def mark_terminal(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -237,7 +238,7 @@ class RecordingRunRepository(AgentRunRepository):
 
     async def mark_parent_result_suppressed(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         run_id: str,
         finalized_at: datetime.datetime,
@@ -266,7 +267,7 @@ class RecordingTranscriptRepository(EventTranscriptRepository):
     def __init__(self, manager: RecordingSessionManager) -> None:
         self.manager = manager
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: ReadSession, create: EventCreate) -> Event:
         """Append inside one atomic group and support deterministic duplicates."""
         self.manager.check(session, f"append:{create.kind.value}")
         if create.external_id is not None:
@@ -300,7 +301,7 @@ class RecordingTranscriptRepository(EventTranscriptRepository):
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
@@ -325,7 +326,7 @@ class RecordingMetadataRepository:
 
     async def persist_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         authority: FileResourceAuthority,
         generated_images: Sequence[ProviderOutputFileMetadata],
@@ -349,7 +350,7 @@ class RecordingPromptRepository:
 
     async def replace(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         system_prompt: SystemPromptAnalysisPayload,
@@ -360,7 +361,7 @@ class RecordingPromptRepository:
         self.manager.state.prompt = system_prompt
         self.manager.fail("snapshot")
 
-    async def delete(self, session: AsyncSession, *, session_id: str) -> None:
+    async def delete(self, session: ReadSession, *, session_id: str) -> None:
         """Delete stale analysis when the prepared model call has none."""
         assert session_id == SESSION_ID
         self.manager.check(session, "snapshot_delete")
@@ -376,7 +377,7 @@ class RecordingCompletionRepository:
 
     async def complete_success_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         completion: ModelOperationCompletion,
     ) -> None:
         """Record foreground completion without an injected application callback."""
@@ -393,7 +394,7 @@ class RecordingTerminalRepository(TerminalRunFinalizationRepository):
 
     async def lock_run_finalization(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         run_id: str,
     ) -> None:
@@ -404,7 +405,7 @@ class RecordingTerminalRepository(TerminalRunFinalizationRepository):
 
     async def finalize_run_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
@@ -425,7 +426,7 @@ class RecordingPinRepository:
     def __init__(self, manager: RecordingSessionManager) -> None:
         self.manager = manager
 
-    async def release_run(self, session: AsyncSession, *, run_id: str) -> None:
+    async def release_run(self, session: ReadSession, *, run_id: str) -> None:
         """Release only this Run's pins inside the terminal atomic group."""
         self.manager.check(session, "pins")
         self.manager.state.released_pins.append(run_id)

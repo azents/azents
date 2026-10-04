@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import SessionWorkingFolderContext
 from azents.core.enums import (
@@ -14,6 +13,7 @@ from azents.core.enums import (
 from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -35,7 +35,7 @@ class SessionWorkingFolderBindingRepository:
         Depends(AgentSessionRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def require_bindable_context(
@@ -88,7 +88,7 @@ class SessionWorkingFolderBindingRepository:
 
     async def require_context_state_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -123,7 +123,7 @@ class SessionWorkingFolderBindingRepository:
 
     async def resolve_authority_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -144,7 +144,7 @@ class SessionWorkingFolderBindingRepository:
 
     async def resolve_locked_authority_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         session_id: str,
@@ -210,7 +210,7 @@ class SessionWorkingFolderBindingRepository:
 
     async def _bind_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         context: SessionWorkingFolderContext,
         agent_id: str,

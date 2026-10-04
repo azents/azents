@@ -5,7 +5,6 @@ from typing import NamedTuple
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -21,6 +20,7 @@ from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory.settings import (
     HistoricalMemorySettingsRepository,
@@ -39,7 +39,7 @@ _NOW = datetime.datetime(2026, 10, 1, 12, 0, tzinfo=datetime.UTC)
 
 
 async def _create_source(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     agent_id: str,
@@ -61,7 +61,7 @@ async def _create_source(
             title=f"{slug} title",
         ),
     )
-    source_row = await session.get(RDBAgentSession, source.id)
+    source_row = await session.read_session.get(RDBAgentSession, source.id)
     assert source_row is not None
     source_row.last_activity_at = activity_at
     historical = RDBHistoricalMemorySource(
@@ -73,8 +73,8 @@ async def _create_source(
     historical.prepared_at = prepared_at
     historical.source_title_snapshot = f"{slug} snapshot"
     historical.summary = summary
-    session.add(historical)
-    await session.flush()
+    session.write_session.add(historical)
+    await session.write_session.flush()
     return source.id
 
 
@@ -88,12 +88,12 @@ class _SettingsFixture(NamedTuple):
 
 
 async def _fixture(
-    session: AsyncSession,
+    session: WriteSession,
 ) -> _SettingsFixture:
     """Create one Memory-disabled Agent and two current members."""
     workspace = RDBWorkspace(name="Historical settings", handle="historical-settings")
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict()
     agent = RDBAgent(
         workspace_id=workspace.id,
@@ -108,11 +108,11 @@ async def _fixture(
         lightweight_model_label="lightweight",
         memory_enabled=False,
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(workspace_id=workspace.id, agent_id=agent.id)
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
+    session.write_session.add(runtime)
     first_user = await UserRepository().create(
         session,
         UserCreate(email="historical-settings-1@example.test"),
@@ -122,7 +122,7 @@ async def _fixture(
         UserCreate(email="historical-settings-2@example.test"),
     )
     for user, name in ((first_user, "First"), (second_user, "Second")):
-        session.add(
+        session.write_session.add(
             RDBWorkspaceUser(
                 workspace_id=workspace.id,
                 user_id=user.id,
@@ -130,7 +130,7 @@ async def _fixture(
                 role=WorkspaceUserRole.MEMBER,
             )
         )
-    await session.flush()
+    await session.write_session.flush()
     return _SettingsFixture(
         workspace_id=workspace.id,
         agent_id=agent.id,
@@ -140,7 +140,7 @@ async def _fixture(
 
 
 async def test_settings_list_is_scope_search_cursor_and_enablement_independent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Settings remain visible while disabled and paginate by the stable key."""
     async with rdb_session_manager() as session:
@@ -200,7 +200,7 @@ async def test_settings_list_is_scope_search_cursor_and_enablement_independent(
             prepared_at=_NOW - datetime.timedelta(hours=1),
             summary="Other user secret",
         )
-        await session.commit()
+        await session.write_session.commit()
 
     repository = HistoricalMemorySettingsRepository(session_manager=rdb_session_manager)
     first = await repository.list(
@@ -249,7 +249,7 @@ async def test_settings_list_is_scope_search_cursor_and_enablement_independent(
 
 
 async def test_settings_filters_lifecycle_membership_and_exact_detail(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Archived and membership-denied sources are non-enumerating."""
     async with rdb_session_manager() as session:
@@ -276,10 +276,10 @@ async def test_settings_filters_lifecycle_membership_and_exact_detail(
             prepared_at=_NOW - datetime.timedelta(hours=2),
             summary="Archived history",
         )
-        archived_row = await session.get(RDBAgentSession, archived)
+        archived_row = await session.read_session.get(RDBAgentSession, archived)
         assert archived_row is not None
         archived_row.status = AgentSessionStatus.ARCHIVED
-        await session.commit()
+        await session.write_session.commit()
 
     repository = HistoricalMemorySettingsRepository(session_manager=rdb_session_manager)
     record = await repository.get(
@@ -299,13 +299,13 @@ async def test_settings_filters_lifecycle_membership_and_exact_detail(
     assert hidden is None
 
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == workspace_id,
                 RDBWorkspaceUser.user_id == user_id,
             )
         )
-        await session.commit()
+        await session.write_session.commit()
     assert (
         await repository.get(
             workspace_id=workspace_id,
@@ -319,7 +319,7 @@ async def test_settings_filters_lifecycle_membership_and_exact_detail(
 
 @pytest.mark.parametrize("cursor", ["not-a-cursor", "\ud55c\uae00", "\U0001f680"])
 async def test_settings_rejects_malformed_cursor(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cursor: str,
 ) -> None:
     """Opaque cursor validation fails before executing a settings query."""
