@@ -41,7 +41,6 @@ from azents.services.signup_token import SignupTokenService
 from azents.services.signup_token.data import (
     PreviewSignupTokenInput,
     RedeemSignupTokenInput,
-    SignupEmailDeliveryUnavailable,
     WeakSignupPassword,
 )
 from azents.utils.fastapi.route import RouteMounter
@@ -136,19 +135,8 @@ async def request_signup_email(
     request_body: RequestSignupEmailRequest,
 ) -> RequestSignupEmailResponse:
     """Send a signup link by email."""
-    result = await signup_token_service.create_email_delivery_token(request_body.email)
-    if result.success:
-        return RequestSignupEmailResponse(sent=True)
-    else:
-        error = result.error
-        match error:
-            case SignupEmailDeliveryUnavailable():
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Signup email delivery is not configured.",
-                )
-            case _:
-                assert_never(error)
+    await signup_token_service.create_email_delivery_token(request_body.email)
+    return RequestSignupEmailResponse(sent=True)
 
 
 @router.post("/signup-tokens/preview")

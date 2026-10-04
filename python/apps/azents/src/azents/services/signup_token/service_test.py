@@ -3,6 +3,7 @@
 import datetime
 from unittest.mock import AsyncMock, create_autospec
 
+import pytest
 from azcommon.logging import RuntimeEnvironment
 from azcommon.result import Failure, Success
 from types_aiobotocore_ses.client import SESClient
@@ -35,6 +36,7 @@ from azents.services.signup_token.data import (
     CreateSignupTokenInput,
     RedeemSignupTokenInput,
     SignupEmailDeliveryUnavailable,
+    SignupTokenWithPlaintextOutput,
     WeakSignupPassword,
 )
 
@@ -415,7 +417,7 @@ class TestSignupTokenService:
 
         result = await service.create_email_delivery_token("mail@example.com")
 
-        assert isinstance(result, Success)
+        assert isinstance(result, SignupTokenWithPlaintextOutput)
         email_service.send_signup_token.assert_awaited_once()
         await_args = email_service.send_signup_token.await_args
         assert await_args is not None
@@ -427,10 +429,8 @@ class TestSignupTokenService:
         self,
         rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
-        """Return delivery unavailable when email service is not configured."""
+        """Raise delivery unavailable when email service is not configured."""
         service = _make_service(rdb_session_manager)
 
-        result = await service.create_email_delivery_token("mail@example.com")
-
-        assert isinstance(result, Failure)
-        assert isinstance(result.error, SignupEmailDeliveryUnavailable)
+        with pytest.raises(SignupEmailDeliveryUnavailable, match="not configured"):
+            await service.create_email_delivery_token("mail@example.com")

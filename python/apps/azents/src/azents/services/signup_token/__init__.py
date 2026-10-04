@@ -232,14 +232,17 @@ class SignupTokenService:
     async def create_email_delivery_token(
         self,
         email: str,
-    ) -> Result[SignupTokenWithPlaintextOutput, SignupEmailDeliveryUnavailable]:
+    ) -> SignupTokenWithPlaintextOutput:
         """Create and send signup token for email delivery.
 
         :param email: Email to fix to token
-        :return: Created token or delivery unavailable
+        :return: Created token after accepted delivery
+        :raises SignupEmailDeliveryUnavailable: Email delivery is unavailable
         """
         if not self.email_service.configured:
-            return Failure(SignupEmailDeliveryUnavailable())
+            raise SignupEmailDeliveryUnavailable(
+                "Signup email delivery is not configured."
+            )
 
         created = await self.create(
             CreateSignupTokenInput(
@@ -257,8 +260,10 @@ class SignupTokenService:
             expire_hours=self.auth_config.signup_token.default_expire_hours,
         )
         if not sent:
-            return Failure(SignupEmailDeliveryUnavailable())
-        return Success(created)
+            raise SignupEmailDeliveryUnavailable(
+                "Signup email delivery did not complete."
+            )
+        return created
 
     async def create_manual_token_for_email(
         self,

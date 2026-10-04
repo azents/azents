@@ -103,8 +103,5 @@ class WeakSignupPassword:
     message: str
 
 
-@dataclasses.dataclass(frozen=True)
-class SignupEmailDeliveryUnavailable:
-    """Signup email delivery unavailable."""
-
-    pass
+class SignupEmailDeliveryUnavailable(RuntimeError):
+    """Email signup cannot complete because delivery is unavailable."""
