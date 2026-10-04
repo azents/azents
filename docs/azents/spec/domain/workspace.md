@@ -72,6 +72,10 @@ code_paths:
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/core/session_git_worktree_results.py
+  - python/apps/azents/src/azents/repos/session_git_worktree/**
+  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
+  - python/apps/azents/src/azents/services/session_working_folder_binding*
   - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/runtime_profile_workspace/**
@@ -157,7 +161,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-10-05
-spec_version: 94
+spec_version: 95
 ---
 
 # Workspace & Membership
@@ -308,6 +312,30 @@ Workspace without that membership retains `403`. Detached membership data suppli
 the existing HTTP context and local role/permission projection after the database
 operation finishes. System-administrator assignment still grants no implicit
 Workspace access.
+
+### Session Worktree Database Ownership
+
+Session Git worktree admission, allocation, Project linking, path claims,
+action progress/result writes, cleanup settlement, and terminal handoff execute
+as completed database-only repository operations. Their existing atomic groups
+remain separate: a repository does not retain a transaction across Runner,
+Runtime resolution, Git, filesystem, Skill invalidation, or projection callbacks.
+Independent Session, allocation, and action observations use read-only scopes.
+
+Critical dependent mutations fence the exact Session owner generation in the
+same transaction as their writes. Binding validation composes with allocation,
+Project linking, and catalog mutations within that operation; it is not an
+independently committed service bridge. Runtime/path coordination and exact path
+claim locks retain their order inside the mutation group. A stale execution
+owner or binding cannot commit dependent state.
+
+Terminal handoff atomically appends the durable action snapshot, creates the
+idempotent bridge continuation and input wakeup when applicable, and deletes the
+live action row. Failure or cancellation rolls the group back; replay returns
+the existing durable event and requires retained continuation authority.
+External callbacks run only after the operation finishes. Archive cleanup
+likewise finishes its database claim/preparation or settlement before external
+checkout removal and Skill effects.
 
 ### Agent Workspace Runtime State
 
@@ -1038,6 +1066,11 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-10-05 (spec_version=95)** — Moved Session worktree atomic groups and
+  working-folder final validation into completed repository operations, retaining
+  exact-owner mutation fences, read-only observations, Runtime/path coordination,
+  terminal continuation atomicity, and post-commit external effects.
 
 - **2026-10-05 (spec_version=94)** — Completed Agent Project Catalog read-only
   snapshots and atomic candidate/status operations before service presentation
