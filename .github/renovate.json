@@ -17,7 +17,7 @@
   ],
   "timezone": "Asia/Seoul",
   "schedule": [
-    "before 6am"
+    "before 3am"
   ],
   "automerge": false,
   "vulnerabilityAlerts": {
@@ -157,7 +157,7 @@
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": [
-      "before 5am on monday"
+      "before 2am on monday"
     ]
   }
 }
