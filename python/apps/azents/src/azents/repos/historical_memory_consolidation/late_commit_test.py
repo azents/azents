@@ -39,6 +39,7 @@ from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
 from azents.testing.consolidation import (
+    consolidation_deadline,
     create_consolidation_source,
     seed_consolidation_corpus,
 )
@@ -100,7 +101,7 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
             await session.write_session.flush()
         assert templates[0].sequence < templates[1].sequence
         owners = ConsolidationOwnershipRepository(manager)
-        claim = await owners.claim(corpus.team)
+        claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
         assert claim is not None
         work = ConsolidationWorkRepository(manager)
         page = await work.page(claim.principal, after_sequence=None, limit=50)
@@ -160,7 +161,7 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
             assert late.sequence < page.pass_upper_sequence
             assert late.state is ConsolidationWorkState.PENDING
             assert late.presented_attempt_id is late.published_revision_id is None
-        next_claim = await owners.claim(corpus.team)
+        next_claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
         assert next_claim is not None
         next_page = await work.page(next_claim.principal, after_sequence=None, limit=50)
         assert {entry.work_id for entry in next_page.entries} == {templates[0].id}

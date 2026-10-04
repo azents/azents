@@ -20,6 +20,9 @@ from azents.repos.historical_memory_consolidation.discovery import (
 from azents.services.historical_memory.constants import (
     HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
 )
+from azents.services.historical_memory.execution_policy import (
+    HistoricalMemoryExecutionPolicyService,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,12 +42,19 @@ class HistoricalMemoryConsolidationDiscoveryService:
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
     job_runtime: Annotated[JobRuntime, Depends(get_job_runtime)]
+    execution_settings: Annotated[
+        HistoricalMemoryExecutionPolicyService,
+        Depends(HistoricalMemoryExecutionPolicyService),
+    ]
 
     async def dispatch_pending(self, *, agent_id: str | None) -> int:
         keys = await ConsolidationDiscoveryRepository(self.session_manager).list_due(
             agent_id=agent_id, limit=25
         )
-        deadline = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=10)
+        policy = await self.execution_settings.resolve()
+        deadline = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+            seconds=policy.timeout_seconds
+        )
         for key in keys:
             scope_owner = (
                 "team" if key.associated_user_id is None else key.associated_user_id
@@ -54,7 +64,10 @@ class HistoricalMemoryConsolidationDiscoveryService:
                     handler_key=HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
                     execution_key=f"historical-consolidation:{key.workspace_id}:{key.agent_id}:{key.scope.value}:{scope_owner}",
                     deadline=deadline,
-                    payload={"unit": key.model_dump(mode="json")},
+                    payload={
+                        "unit": key.model_dump(mode="json"),
+                        "execution_policy": policy.model_dump(mode="json"),
+                    },
                 )
             )
         return len(keys)

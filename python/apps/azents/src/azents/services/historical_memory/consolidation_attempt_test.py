@@ -16,7 +16,9 @@ from azents.core.active_model_capabilities import (
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.config import Config
 from azents.core.enums import LLMProvider
+from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
 from azents.core.historical_memory_consolidation import ConsolidationUnitKey
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.core.model_catalog_identity import catalog_source_keys
 from azents.core.model_catalog_source import decode_catalog_source
 from azents.engine.events.openai_responses import OpenAIResponsesWebSocketConnection
@@ -61,7 +63,10 @@ from azents.services.historical_memory.consolidation_host import (
     ConsolidationIterationHost,
 )
 from azents.services.model_metadata import ModelMetadataService
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -199,9 +204,12 @@ async def _harness(
     original_claim = ConsolidationOwnershipRepository.claim
 
     async def capture_claim(
-        self: ConsolidationOwnershipRepository, key: ConsolidationUnitKey
+        self: ConsolidationOwnershipRepository,
+        key: ConsolidationUnitKey,
+        *,
+        deadline: datetime.datetime,
     ) -> ConsolidationClaim | None:
-        claim = await original_claim(self, key)
+        claim = await original_claim(self, key, deadline=deadline)
         if claim is not None:
             if deadline_seconds is not None:
                 claim = dataclasses.replace(
@@ -231,6 +239,7 @@ async def _harness(
 
     async def quota_host(self: ConsolidationIterationHost) -> object:
         hosts.append(self)
+        self.started_turns += 1
         selection = self.model.selection
         await self.close()
         raise ModelProviderFailure(
@@ -302,7 +311,13 @@ async def test_claim_heartbeat_remains_active_during_setup_and_quota_handoff(
     harness = await _harness(
         rdb_session_manager, monkeypatch, block_at=block_at, deadline_seconds=None
     )
-    task = asyncio.create_task(harness.service.run_unit(harness.key))
+    task = asyncio.create_task(
+        harness.service.run_unit(
+            harness.key,
+            execution_policy=HistoricalMemoryExecutionConfig(),
+            deadline=consolidation_deadline(),
+        )
+    )
     try:
         async with asyncio.timeout(5):
             await harness.block.started.wait()
@@ -346,7 +361,13 @@ async def test_renewal_authority_loss_quiesces_setup_or_handoff_without_late_wor
     harness = await _harness(
         rdb_session_manager, monkeypatch, block_at=block_at, deadline_seconds=None
     )
-    task = asyncio.create_task(harness.service.run_unit(harness.key))
+    task = asyncio.create_task(
+        harness.service.run_unit(
+            harness.key,
+            execution_policy=HistoricalMemoryExecutionConfig(),
+            deadline=consolidation_deadline(),
+        )
+    )
     async with asyncio.timeout(5):
         await harness.block.started.wait()
         assert await harness.clock.requests.get() == 30
@@ -374,13 +395,96 @@ async def test_absolute_claim_deadline_cancels_blocked_setup_or_handoff(
     harness = await _harness(
         rdb_session_manager, monkeypatch, block_at=block_at, deadline_seconds=1.0
     )
-    task = asyncio.create_task(harness.service.run_unit(harness.key))
+    task = asyncio.create_task(
+        harness.service.run_unit(
+            harness.key,
+            execution_policy=HistoricalMemoryExecutionConfig(),
+            deadline=consolidation_deadline(),
+        )
+    )
     async with asyncio.timeout(5):
         await harness.block.started.wait()
         with pytest.raises(TimeoutError):
             await task
     assert harness.block.stopped.is_set()
     await _assert_no_dispatch_or_publication(rdb_session_manager, harness)
+
+
+async def test_max_turns_is_claim_scoped_across_quota_candidate_handoff(
+    rdb_session_manager: SessionManager[WriteSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness = await _harness(
+        rdb_session_manager, monkeypatch, block_at=2, deadline_seconds=None
+    )
+    with pytest.raises(ConsolidationTurnLimitExceeded):
+        await harness.service.run_unit(
+            harness.key,
+            execution_policy=HistoricalMemoryExecutionConfig(
+                max_turns=1, timeout_seconds=600
+            ),
+            deadline=consolidation_deadline(),
+        )
+    assert len(harness.hosts) == 1
+    assert not harness.block.started.is_set()
+    async with rdb_session_manager() as session:
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, harness.claims[0].principal.attempt_id
+        )
+        assert attempt is not None
+        assert attempt.failure_code is None
+        assert attempt.finished_at is not None
+        assert attempt.completed_revision_id is None
+    assert all(client.closed for client in harness.clients)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("Internal private input"),
+        TimeoutError("Internal deadline"),
+        ConsolidationAuthorityError("Internal ownership"),
+        ConsolidationTurnLimitExceeded("Internal cutoff"),
+    ],
+)
+def test_internal_faults_do_not_become_persisted_user_codes(error: Exception) -> None:
+    assert jobs.consolidation_failure_code(error) is None
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        category
+        for category in ModelProviderFailureCategory
+        if category is not ModelProviderFailureCategory.UNKNOWN
+    ],
+)
+def test_only_actionable_provider_failures_retain_safe_codes(
+    category: ModelProviderFailureCategory,
+) -> None:
+    failure = ModelProviderFailure(
+        operation="historical_memory",
+        category=category,
+        retryability=ModelProviderFailureRetryability.USER_ACTION_REQUIRED,
+        provider_message=None,
+        status_code=None,
+        provider_code=None,
+        provider_error_type=None,
+        provider_error_param=None,
+        retry_hint_seconds=None,
+        provider="openai",
+        integration="i" * 32,
+        model="synthetic",
+    )
+    actionable = category in {
+        ModelProviderFailureCategory.AUTHENTICATION,
+        ModelProviderFailureCategory.PERMISSION,
+        ModelProviderFailureCategory.QUOTA_OR_BILLING,
+        ModelProviderFailureCategory.MODEL_UNAVAILABLE,
+    }
+    assert jobs.consolidation_failure_code(failure) == (
+        failure.failure_code if actionable else None
+    )
 
 
 def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:

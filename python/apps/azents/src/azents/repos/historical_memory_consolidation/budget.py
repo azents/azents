@@ -1,15 +1,10 @@
-"""Fenced physical-dispatch/tool admission and idempotent scalar usage accounting."""
+"""Fenced observational dispatch/tool journals and idempotent scalar usage."""
 
 from dataclasses import dataclass
 
 import sqlalchemy as sa
 
 from azents.core.historical_memory_budget import (
-    CONSOLIDATION_INPUT_TOKEN_LIMIT,
-    CONSOLIDATION_MODEL_REQUEST_LIMIT,
-    CONSOLIDATION_OUTPUT_TOKEN_LIMIT,
-    CONSOLIDATION_TOOL_CALL_LIMIT,
-    ConsolidationBudgetExceeded,
     ConsolidationDispatchReservation,
     ConsolidationUsage,
 )
@@ -32,14 +27,6 @@ from azents.repos.historical_memory_consolidation.drafts import (
 )
 
 
-@dataclass(frozen=True)
-class ConsolidationRemainingBudget:
-    model_requests: int
-    input_tokens: int
-    output_tokens: int
-    tool_calls: int
-
-
 async def check_input_influence(
     session: WriteSession,
     principal: ConsolidationJobPrincipal,
@@ -56,29 +43,15 @@ async def check_input_influence(
 
 
 @dataclass(frozen=True)
-class ConsolidationBudgetRepository:
-    """Reservations commit before physical SDK I/O; unknown usage stays reserved."""
+class ConsolidationExecutionRepository:
+    """Journal physical execution without granting budget authority to counters."""
 
     session_manager: SessionManager[WriteSession]
 
-    async def remaining(
-        self, principal: ConsolidationJobPrincipal
-    ) -> ConsolidationRemainingBudget:
+    async def authorize(self, principal: ConsolidationJobPrincipal) -> None:
         async with consolidation_job_session(self.session_manager, principal) as job:
             await check_input_influence(job.session, principal, job.owner)
-            attempt = job.owner.attempt
-            if attempt.failure_code == "token_budget_exceeded":
-                raise ConsolidationBudgetExceeded(
-                    "Consolidation token budget is exhausted."
-                )
-            result = ConsolidationRemainingBudget(
-                max(0, CONSOLIDATION_MODEL_REQUEST_LIMIT - attempt.model_requests),
-                max(0, CONSOLIDATION_INPUT_TOKEN_LIMIT - attempt.input_tokens),
-                max(0, CONSOLIDATION_OUTPUT_TOKEN_LIMIT - attempt.output_tokens),
-                max(0, CONSOLIDATION_TOOL_CALL_LIMIT - attempt.tool_calls),
-            )
             await require_commit_owner(job.session, job.owner)
-        return result
 
     async def reserve_model(
         self,
@@ -86,10 +59,14 @@ class ConsolidationBudgetRepository:
         *,
         dispatch_id: str,
         input_tokens: int,
-        output_tokens: int,
+        output_tokens: int | None,
     ) -> ConsolidationDispatchReservation:
-        if len(dispatch_id) != 32 or input_tokens < 0 or output_tokens < 1:
-            raise ValueError("Consolidation model reservation is invalid.")
+        if (
+            len(dispatch_id) != 32
+            or input_tokens < 0
+            or (output_tokens is not None and output_tokens < 1)
+        ):
+            raise ValueError("Consolidation model request observation is invalid.")
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
             await check_input_influence(session, principal, owner)
@@ -102,38 +79,27 @@ class ConsolidationBudgetRepository:
                     or previous.reserved_output_tokens != output_tokens
                 ):
                     raise ConsolidationDraftConflict(
-                        "Consolidation dispatch reservation conflicts."
+                        "Consolidation dispatch observation conflicts."
                     )
                 result = ConsolidationDispatchReservation(
                     dispatch_id, previous.request_number, input_tokens, output_tokens
                 )
             else:
-                attempt = owner.attempt
-                if (
-                    attempt.failure_code == "token_budget_exceeded"
-                    or attempt.model_requests >= CONSOLIDATION_MODEL_REQUEST_LIMIT
-                    or attempt.input_tokens + input_tokens
-                    > CONSOLIDATION_INPUT_TOKEN_LIMIT
-                    or attempt.output_tokens + output_tokens
-                    > CONSOLIDATION_OUTPUT_TOKEN_LIMIT
-                ):
-                    raise ConsolidationBudgetExceeded(
-                        "Consolidation model budget is exhausted."
-                    )
-                attempt.model_requests += 1
-                attempt.input_tokens += input_tokens
-                attempt.output_tokens += output_tokens
+                owner.attempt.model_requests += 1
                 session.write_session.add(
                     RDBConsolidationModelDispatch(
                         attempt_id=principal.attempt_id,
                         dispatch_id=dispatch_id,
-                        request_number=attempt.model_requests,
+                        request_number=owner.attempt.model_requests,
                         reserved_input_tokens=input_tokens,
                         reserved_output_tokens=output_tokens,
                     )
                 )
                 result = ConsolidationDispatchReservation(
-                    dispatch_id, attempt.model_requests, input_tokens, output_tokens
+                    dispatch_id,
+                    owner.attempt.model_requests,
+                    input_tokens,
+                    output_tokens,
                 )
             await require_commit_owner(session, owner)
         return result
@@ -144,8 +110,8 @@ class ConsolidationBudgetRepository:
         *,
         dispatch_id: str,
         usage: ConsolidationUsage | None,
-    ) -> bool:
-        """Return an over-budget signal after durable accounting, not a rollback."""
+    ) -> None:
+        """Retain unknown per-dispatch usage; sum only reported actual tokens."""
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
             row = await session.write_session.get(
@@ -153,7 +119,7 @@ class ConsolidationBudgetRepository:
             )
             if row is None:
                 raise ConsolidationDraftConflict(
-                    "Consolidation dispatch reservation is absent."
+                    "Consolidation dispatch observation is absent."
                 )
             previous_usage = (
                 None
@@ -167,36 +133,18 @@ class ConsolidationBudgetRepository:
                     )
             else:
                 if usage is not None:
-                    owner.attempt.input_tokens += (
-                        usage.prompt_tokens - row.reserved_input_tokens
-                    )
-                    owner.attempt.output_tokens += (
-                        usage.completion_tokens - row.reserved_output_tokens
-                    )
+                    owner.attempt.input_tokens += usage.prompt_tokens
+                    owner.attempt.output_tokens += usage.completion_tokens
                     row.usage_json = usage.model_dump(mode="json")
                 row.usage_recorded = True
-            exceeded = (
-                owner.attempt.input_tokens > CONSOLIDATION_INPUT_TOKEN_LIMIT
-                or owner.attempt.output_tokens > CONSOLIDATION_OUTPUT_TOKEN_LIMIT
-            )
-            if exceeded:
-                owner.attempt.failure_code = "token_budget_exceeded"
             await require_commit_owner(session, owner)
-        return exceeded
 
     async def reserve_tools(
         self, principal: ConsolidationJobPrincipal, *, count: int
     ) -> None:
         if count < 1:
-            raise ValueError("Consolidation tool reservation must be positive.")
+            raise ValueError("Consolidation tool count must be positive.")
         async with consolidation_job_session(self.session_manager, principal) as job:
             await check_input_influence(job.session, principal, job.owner)
-            if (
-                job.owner.attempt.failure_code == "token_budget_exceeded"
-                or job.owner.attempt.tool_calls + count > CONSOLIDATION_TOOL_CALL_LIMIT
-            ):
-                raise ConsolidationBudgetExceeded(
-                    "Consolidation tool budget is exhausted."
-                )
             job.owner.attempt.tool_calls += count
             await require_commit_owner(job.session, job.owner)

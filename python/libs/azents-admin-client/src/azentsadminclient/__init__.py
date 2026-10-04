@@ -69,6 +69,8 @@ __all__ = [
     "FileLifecycleSettingsUpdateResponse",
     "HTTPValidationError",
     "HealthStatus",
+    "HistoricalMemoryExecutionDetailResponse",
+    "HistoricalMemoryExecutionPatchRequest",
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
@@ -253,6 +255,8 @@ from azentsadminclient.models.file_lifecycle_settings_update_request import File
 from azentsadminclient.models.file_lifecycle_settings_update_response import FileLifecycleSettingsUpdateResponse as FileLifecycleSettingsUpdateResponse
 from azentsadminclient.models.http_validation_error import HTTPValidationError as HTTPValidationError
 from azentsadminclient.models.health_status import HealthStatus as HealthStatus
+from azentsadminclient.models.historical_memory_execution_detail_response import HistoricalMemoryExecutionDetailResponse as HistoricalMemoryExecutionDetailResponse
+from azentsadminclient.models.historical_memory_execution_patch_request import HistoricalMemoryExecutionPatchRequest as HistoricalMemoryExecutionPatchRequest
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentsadminclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus

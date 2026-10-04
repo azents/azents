@@ -33,6 +33,7 @@ from azents.repos.historical_memory_consolidation.recovery import (
 from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
+from azents.testing.consolidation import consolidation_deadline
 
 CONTEXT_FIXTURE_TIME = datetime.datetime(2026, 10, 3, tzinfo=datetime.UTC)
 
@@ -77,7 +78,9 @@ async def publish_context_overview(
     markdown: str,
 ) -> str:
     """Publish through real evidence, draft, exact coverage and ownership fences."""
-    claim = await ConsolidationOwnershipRepository(manager).claim(key)
+    claim = await ConsolidationOwnershipRepository(manager).claim(
+        key, deadline=consolidation_deadline()
+    )
     assert claim is not None
     principal = claim.principal
     await ConsolidationRecoveryRepository(manager).prepare(principal)

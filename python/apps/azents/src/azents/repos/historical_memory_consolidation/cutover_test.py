@@ -54,7 +54,10 @@ from azents.services.historical_memory.context_snapshot import (
 )
 from azents.services.historical_memory.cutover import MemoryHandoverService
 from azents.testing.consolidated_context import publish_context_overview
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 def _service(manager: SessionManager[WriteSession]) -> MemoryContextSnapshotService:
@@ -249,7 +252,9 @@ async def test_explicit_rollback_and_reactivation_preserve_root_child_runs_and_s
             summary="Pending current source",
         ),
     )
-    claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
+    claim = await ConsolidationOwnershipRepository(manager).claim(
+        corpus.team, deadline=consolidation_deadline()
+    )
     assert claim is not None
     await ConsolidationDraftRepository(manager).observe(
         claim.principal, path="summary.md"

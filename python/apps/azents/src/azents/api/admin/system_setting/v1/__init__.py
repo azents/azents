@@ -37,6 +37,8 @@ from .data import (
     ExternalAccountOAuthSecretActionRequest,
     ExternalChannelFilesDetailResponse,
     ExternalChannelFilesPatchRequest,
+    HistoricalMemoryExecutionDetailResponse,
+    HistoricalMemoryExecutionPatchRequest,
     PlatformGitHubAppConfirmRequest,
     PlatformGitHubAppDetailResponse,
     PlatformGitHubAppPatchRequest,
@@ -231,6 +233,66 @@ async def patch_external_channel_files_setting(
     except SystemSettingVersionConflict as error:
         _raise_system_setting_error(error)
     return ExternalChannelFilesDetailResponse.from_domain(result.resolved)
+
+
+@router.get("/sections/historical-memory-execution")
+async def get_historical_memory_execution_setting(
+    service: Annotated[SystemSettingsService, Depends()],
+) -> HistoricalMemoryExecutionDetailResponse:
+    resolved = await service.resolve(SystemSettingSection.HISTORICAL_MEMORY_EXECUTION)
+    return HistoricalMemoryExecutionDetailResponse.from_domain(resolved)
+
+
+@router.patch(
+    "/sections/historical-memory-execution",
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": SystemSettingVersionConflictResponse,
+            "description": "The expected System Settings version is stale.",
+        }
+    },
+)
+async def patch_historical_memory_execution_setting(
+    request: HistoricalMemoryExecutionPatchRequest,
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[SystemSettingsService, Depends()],
+) -> HistoricalMemoryExecutionDetailResponse:
+    config_patch: dict[str, object] = {}
+    if "max_turns" in request:
+        config_patch["max_turns"] = request["max_turns"]
+    if "timeout_seconds" in request:
+        config_patch["timeout_seconds"] = request["timeout_seconds"]
+    if not config_patch:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "empty_system_setting_patch",
+                "message": (
+                    "At least one Historical Memory execution setting is required."
+                ),
+            },
+        )
+    try:
+        result = await service.mutate(
+            SystemSettingMutation(
+                section=SystemSettingSection.HISTORICAL_MEMORY_EXECUTION,
+                expected_version=request["expected_version"],
+                config_patch=config_patch,
+                secret_actions={},
+                actor_user_id=system_admin.user_id,
+            )
+        )
+    except ValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "invalid_system_setting_payload",
+                "message": "The Historical Memory execution settings are invalid.",
+            },
+        ) from error
+    except SystemSettingVersionConflict as error:
+        _raise_system_setting_error(error)
+    return HistoricalMemoryExecutionDetailResponse.from_domain(result.resolved)
 
 
 @router.get("/sections/external-account-oauth/{provider}")

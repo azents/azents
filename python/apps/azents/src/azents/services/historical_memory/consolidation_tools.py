@@ -5,7 +5,10 @@ from collections.abc import Sequence
 from types import MappingProxyType
 
 from azents.core.agent import AgentModelSelection
-from azents.engine.events.output_parts import iter_output_parts
+from azents.engine.events.output_parts import (
+    enforce_tool_output_text_hard_cap,
+    iter_output_parts,
+)
 from azents.engine.events.tool_invocation import PreparedClientToolInvocation
 from azents.engine.events.tools import (
     ToolCatalog,
@@ -62,11 +65,6 @@ from azents.services.vfs_mutation import (
 )
 from azents.services.vfs_read import VfsReadBackendRegistry, VfsReadRouter
 
-_RESULT_CAP = 12000
-_RESULT_TRUNCATION = (
-    "\n[Result truncated; continue with narrower search or the next read/page.]"
-)
-
 
 @dataclasses.dataclass(frozen=True)
 class ConsolidationAdmittedTool:
@@ -101,19 +99,12 @@ class ConsolidationAdmittedTool:
                 raise RuntimeError("Internal tools must return bounded text only.")
             texts.append(part.text)
         text = "\n".join(texts)
-        encoded = text.encode("utf-8")
-        if len(encoded) > _RESULT_CAP:
-            note = _RESULT_TRUNCATION.encode()
-            text = (
-                encoded[: _RESULT_CAP - len(note)].decode("utf-8", errors="ignore")
-                + _RESULT_TRUNCATION
-            )
         return ClientToolResultPayload(
             call_id=result.call_id,
             name=result.name,
             wire_dialect=result.wire_dialect,
             status=result.status,
-            output=[OutputTextPart(text=text)],
+            output=enforce_tool_output_text_hard_cap([OutputTextPart(text=text)]),
             metadata=dict(result.metadata),
         )
 

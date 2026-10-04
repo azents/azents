@@ -30,6 +30,11 @@ from azents.testing.model_selection import (
 CONSOLIDATION_FIXTURE_TIME = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
 
 
+def consolidation_deadline() -> datetime.datetime:
+    """Provide an explicit disposable-test attempt deadline."""
+    return datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=10)
+
+
 @dataclass(frozen=True)
 class ConsolidationCorpus:
     """Synthetic source identities, not a fabricated internal execution Session."""

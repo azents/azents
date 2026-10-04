@@ -42,6 +42,7 @@ from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
 from azents.testing.consolidation import (
+    consolidation_deadline,
     create_consolidation_source,
     seed_consolidation_corpus,
 )
@@ -68,7 +69,9 @@ async def _ready(
                 summary="Another permitted source",
                 title="Pending continuation",
             )
-    claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
+    claim = await ConsolidationOwnershipRepository(manager).claim(
+        corpus.team, deadline=consolidation_deadline()
+    )
     assert claim is not None
     page = await ConsolidationWorkRepository(manager).page(
         claim.principal, after_sequence=None, limit=50

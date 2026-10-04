@@ -1,4 +1,4 @@
-"""Physical request journals observe committed internal budgets, not loop turns."""
+"""Physical request journals observe dispatches without memory-only cutoffs."""
 
 import datetime
 from typing import Literal
@@ -6,7 +6,6 @@ from typing import Literal
 import httpx2
 import pytest
 
-from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
 from azents.engine.events.types import ModelCostProvenance, TokenUsagePayload
 from azents.engine.model_stream import (
@@ -24,7 +23,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationBudgetRepository,
+    ConsolidationExecutionRepository,
 )
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
@@ -36,14 +35,19 @@ from azents.services.historical_memory.consolidation_dispatch import (
     ConsolidationDispatchAdmission,
     scalar_consolidation_usage,
 )
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 async def _principal(
     manager: SessionManager[WriteSession],
 ) -> ConsolidationJobPrincipal:
     corpus = await seed_consolidation_corpus(manager)
-    claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
+    claim = await ConsolidationOwnershipRepository(manager).claim(
+        corpus.team, deadline=consolidation_deadline()
+    )
     assert claim is not None
     await ConsolidationDraftRepository(manager).observe(
         claim.principal, path="summary.md"
@@ -102,7 +106,7 @@ async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
-    repository = ConsolidationBudgetRepository(rdb_session_manager)
+    repository = ConsolidationExecutionRepository(rdb_session_manager)
     admission = ConsolidationDispatchAdmission(principal, repository, 100, 100)
     journal: list[int] = []
 
@@ -136,7 +140,12 @@ async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
             await client.post("https://synthetic.invalid/responses")
     await admission.settle(_usage())
     assert journal == [1, 2]
-    assert (await repository.remaining(principal)).input_tokens == 250000 - 100 - 20
+    async with rdb_session_manager() as session:
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
+        assert attempt is not None
+        assert attempt.input_tokens == 20 and attempt.output_tokens == 5
     for index, reservation in enumerate(admission.reservations):
         async with rdb_session_manager() as session:
             row = await session.read_session.get(
@@ -151,12 +160,12 @@ async def test_http_proxy_journal_sees_committed_reservation_before_every_send(
                 assert "sensitive" not in str(row.usage_json)
 
 
-async def test_physical_budget_refusal_blocks_the_proxy_and_remains_nonprovider(
+async def test_physical_retry_has_no_memory_only_output_budget(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
-    repository = ConsolidationBudgetRepository(rdb_session_manager)
-    admission = ConsolidationDispatchAdmission(principal, repository, 1, 16000)
+    repository = ConsolidationExecutionRepository(rdb_session_manager)
+    admission = ConsolidationDispatchAdmission(principal, repository, 1, None)
     await admission.admit()
     sent = False
 
@@ -178,31 +187,35 @@ async def test_physical_budget_refusal_blocks_the_proxy_and_remains_nonprovider(
             delegate=httpx2.MockTransport(proxy), state=state
         )
     ) as client:
-        with pytest.raises(ModelDispatchAdmissionError) as error:
-            await client.post("https://synthetic.invalid/responses")
-    assert error.value.reason == "budget" and not sent
+        await client.post("https://synthetic.invalid/responses")
+    assert sent
     await admission.settle(None)
-    assert len(admission.reservations) == 1
+    assert len(admission.reservations) == 2
+    assert all(item.output_tokens is None for item in admission.reservations)
     with pytest.raises(ModelDispatchAdmissionError, match="admission"):
         await admission.admit()
 
 
-async def test_actual_usage_excess_is_durable_and_cannot_become_normal_completion(
+async def test_large_actual_usage_is_durable_without_refusing_completion(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     principal = await _principal(rdb_session_manager)
-    repository = ConsolidationBudgetRepository(rdb_session_manager)
+    repository = ConsolidationExecutionRepository(rdb_session_manager)
     admission = ConsolidationDispatchAdmission(principal, repository, 1, 1)
     await admission.admit()
-    with pytest.raises(ConsolidationBudgetExceeded):
-        await admission.settle(
-            TokenUsagePayload(
-                prompt_tokens=250001,
-                completion_tokens=16001,
-                total_tokens=266002,
-                raw={},
-            )
+    await admission.settle(
+        TokenUsagePayload(
+            prompt_tokens=250001,
+            completion_tokens=16001,
+            total_tokens=266002,
+            raw={},
         )
+    )
     assert admission.settled
-    with pytest.raises(ConsolidationBudgetExceeded):
-        await repository.remaining(principal)
+    async with rdb_session_manager() as session:
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, principal.attempt_id
+        )
+        assert attempt is not None
+        assert attempt.input_tokens == 250001 and attempt.output_tokens == 16001
+    await repository.authorize(principal)

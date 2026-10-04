@@ -48,6 +48,8 @@ azentsadminclient/docs/FileLifecycleSettingsUpdateResponse.md
 azentsadminclient/docs/HTTPValidationError.md
 azentsadminclient/docs/HealthStatus.md
 azentsadminclient/docs/HealthV1Api.md
+azentsadminclient/docs/HistoricalMemoryExecutionDetailResponse.md
+azentsadminclient/docs/HistoricalMemoryExecutionPatchRequest.md
 azentsadminclient/docs/InvitationListResponse.md
 azentsadminclient/docs/InvitationResponse.md
 azentsadminclient/docs/InvitationStatus.md
@@ -214,6 +216,8 @@ azentsadminclient/models/file_lifecycle_settings_response.py
 azentsadminclient/models/file_lifecycle_settings_update_request.py
 azentsadminclient/models/file_lifecycle_settings_update_response.py
 azentsadminclient/models/health_status.py
+azentsadminclient/models/historical_memory_execution_detail_response.py
+azentsadminclient/models/historical_memory_execution_patch_request.py
 azentsadminclient/models/http_validation_error.py
 azentsadminclient/models/invitation_list_response.py
 azentsadminclient/models/invitation_response.py
@@ -374,6 +378,8 @@ azentsadminclient/test/test_file_lifecycle_settings_update_request.py
 azentsadminclient/test/test_file_lifecycle_settings_update_response.py
 azentsadminclient/test/test_health_status.py
 azentsadminclient/test/test_health_v1_api.py
+azentsadminclient/test/test_historical_memory_execution_detail_response.py
+azentsadminclient/test/test_historical_memory_execution_patch_request.py
 azentsadminclient/test/test_http_validation_error.py
 azentsadminclient/test/test_invitation_list_response.py
 azentsadminclient/test/test_invitation_response.py

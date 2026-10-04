@@ -12,7 +12,15 @@ from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
+from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
+from azentsadminclient.models.historical_memory_execution_patch_request import (
+    HistoricalMemoryExecutionPatchRequest,
+)
+from azentsadminclient.models.system_setting_version_conflict_response import (
+    SystemSettingVersionConflictResponse,
+)
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.invitation_v1_api import InvitationV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -649,3 +657,146 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
     assert {row.source_session_id for row in _settings(server, setup, "user")} == {
         personal
     }
+
+
+def test_historical_execution_policy_roundtrip_and_custom_consolidation(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    openai_proxy_url: str,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Custom system policy permits file rounds and retains null/version semantics."""
+    settings_api = SystemSettingsV1Api(admin_api_client)
+    initial = settings_api.system_settings_v1_get_historical_memory_execution_setting()
+    assert initial.section == "historical_memory_execution"
+    assert initial.schema_version == 1
+
+    def restore_policy() -> None:
+        current = (
+            settings_api.system_settings_v1_get_historical_memory_execution_setting()
+        )
+        restored = (
+            settings_api.system_settings_v1_patch_historical_memory_execution_setting(
+                HistoricalMemoryExecutionPatchRequest(
+                    expected_version=current.admin_version,
+                    max_turns=initial.max_turns,
+                    timeout_seconds=initial.timeout_seconds,
+                )
+            )
+        )
+        assert restored.max_turns == initial.max_turns
+        assert restored.timeout_seconds == initial.timeout_seconds
+
+    request.addfinalizer(restore_policy)
+    configured = (
+        settings_api.system_settings_v1_patch_historical_memory_execution_setting(
+            HistoricalMemoryExecutionPatchRequest(
+                expected_version=initial.admin_version,
+                max_turns=50,
+                timeout_seconds=900,
+            )
+        )
+    )
+    assert configured.admin_version == initial.admin_version + 1
+    assert configured.max_turns == 50
+    assert configured.timeout_seconds == 900
+    assert (
+        settings_api.system_settings_v1_get_historical_memory_execution_setting()
+        == configured
+    )
+
+    token = admin_api_client.configuration.access_token
+    assert isinstance(token, str)
+    stale_response = requests.patch(
+        f"{azents_admin_server_url}/system-setting/v1/sections/historical-memory-execution",
+        headers=_headers(token),
+        json={"expected_version": initial.admin_version, "max_turns": 2},
+        timeout=10,
+    )
+    assert stale_response.status_code == 409
+    stale = SystemSettingVersionConflictResponse.model_validate(stale_response.json())
+    assert stale.detail.code == "stale_system_setting_version"
+    assert stale.detail.current_version == configured.admin_version
+    assert (
+        settings_api.system_settings_v1_get_historical_memory_execution_setting()
+        == configured
+    )
+
+    setup = _setup(public_api_client, admin_api_client, azents_public_server_url)
+    marker = f"AGENTIC_TEAM_{unique()}_V1"
+    _create_session(
+        azents_public_server_url,
+        setup,
+        scope="team",
+        message=(
+            f"Historical Memory E2E source: {marker}; "
+            "corrected blue, rollout unverified."
+        ),
+    )
+    sampled = _sample(
+        azents_admin_server_url,
+        setup,
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=7),
+        consolidate=True,
+    )
+    assert sampled.prepared == 1 and sampled.failed == 0, sampled
+    assert sampled.consolidation_due == 1, sampled
+    assert sampled.consolidation_published == 1, sampled
+    assert sampled.consolidation_failed == 0, sampled
+    groups: dict[str, list[ConsolidationProxyRequestObservation]] = {}
+    for item in _journal(openai_proxy_url):
+        if item.fixture_consolidation_chain is not None:
+            groups.setdefault(item.fixture_consolidation_chain, []).append(item)
+    matching = [
+        group
+        for group in groups.values()
+        if marker in group[-1].model_dump_json(exclude_unset=True)
+    ]
+    assert len(matching) == 1
+    # This journey proves a finite custom policy accepts ordinary multi-round work.
+    # Exact turn exhaustion and deadline enforcement have narrower backend coverage.
+    assert 10 <= len(matching[0]) <= 50
+    consumer = _create_session(
+        azents_public_server_url,
+        setup,
+        scope="team",
+        message=f"Historical Memory E2E continue {unique()}",
+    )
+    assert marker in _inspect(
+        azents_public_server_url,
+        setup,
+        consumer,
+        operation="read",
+        path="azents://memory/consolidated/team/summary.md",
+    )
+
+    cleared = settings_api.system_settings_v1_patch_historical_memory_execution_setting(
+        HistoricalMemoryExecutionPatchRequest(
+            expected_version=configured.admin_version,
+            max_turns=None,
+        )
+    )
+    assert cleared.admin_version == configured.admin_version + 1
+    assert cleared.max_turns is None
+    assert cleared.timeout_seconds == 900
+    assert (
+        settings_api.system_settings_v1_get_historical_memory_execution_setting()
+        == cleared
+    )
+    timeout_only = (
+        settings_api.system_settings_v1_patch_historical_memory_execution_setting(
+            HistoricalMemoryExecutionPatchRequest(
+                expected_version=cleared.admin_version,
+                timeout_seconds=901,
+            )
+        )
+    )
+    assert timeout_only.admin_version == cleared.admin_version + 1
+    assert timeout_only.max_turns is None
+    assert timeout_only.timeout_seconds == 901
+    assert (
+        settings_api.system_settings_v1_get_historical_memory_execution_setting()
+        == timeout_only
+    )

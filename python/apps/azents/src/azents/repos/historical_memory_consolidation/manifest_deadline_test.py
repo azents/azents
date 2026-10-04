@@ -46,6 +46,7 @@ from azents.repos.historical_memory_consolidation.sources import (
     ConsolidationSourceRepository,
 )
 from azents.testing.consolidation import (
+    consolidation_deadline,
     create_consolidation_source,
     seed_consolidation_corpus,
 )
@@ -59,7 +60,7 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     drafts = ConsolidationDraftRepository(rdb_session_manager)
@@ -182,7 +183,9 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
 
     corpus = await seed_consolidation_corpus(manager)
     try:
-        claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
+        claim = await ConsolidationOwnershipRepository(manager).claim(
+            corpus.team, deadline=consolidation_deadline()
+        )
         assert claim is not None
         await ConsolidationSourceRepository(manager).read(
             claim.principal,

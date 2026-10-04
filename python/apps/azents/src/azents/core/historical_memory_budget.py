@@ -1,4 +1,4 @@
-"""Approved consolidation limits and content-free provider usage evidence."""
+"""Content-free execution observations and shared-core turn cutoff."""
 
 import dataclasses
 import datetime
@@ -6,14 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-CONSOLIDATION_MODEL_REQUEST_LIMIT = 32
-CONSOLIDATION_TOOL_CALL_LIMIT = 96
-CONSOLIDATION_INPUT_TOKEN_LIMIT = 250_000
-CONSOLIDATION_OUTPUT_TOKEN_LIMIT = 16_000
 
-
-class ConsolidationBudgetExceeded(ValueError):
-    """A hard attempt boundary stops admission, never successful publication."""
+class ConsolidationTurnLimitExceeded(RuntimeError):
+    """The configured turn cutoff stops execution without publishing."""
 
 
 class ConsolidationUsage(BaseModel):
@@ -41,4 +36,4 @@ class ConsolidationDispatchReservation:
     dispatch_id: str
     request_number: int
     input_tokens: int
-    output_tokens: int
+    output_tokens: int | None

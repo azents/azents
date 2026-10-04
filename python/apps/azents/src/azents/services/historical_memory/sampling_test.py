@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from azents.core.historical_memory_publication import ConsolidationOutputError
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.publication import (
@@ -18,12 +19,21 @@ from azents.services.historical_memory.discovery import (
     HistoricalMemoryAdmissionSample,
     HistoricalMemoryDiscoveryService,
 )
+from azents.services.historical_memory.execution_policy import (
+    HistoricalMemoryExecutionPolicyService,
+)
 from azents.services.historical_memory.preparation import (
     HistoricalMemoryPreparationService,
     HistoricalMemoryPreparationSummary,
 )
 from azents.services.historical_memory.sampling import HistoricalMemorySamplingService
 from azents.testing.consolidation import seed_consolidation_corpus
+
+
+def _execution_settings() -> HistoricalMemoryExecutionPolicyService:
+    service = AsyncMock(spec=HistoricalMemoryExecutionPolicyService)
+    service.resolve.return_value = HistoricalMemoryExecutionConfig()
+    return service
 
 
 async def test_stage1_sampler_shares_aware_time_but_preserves_real_attempt_deadline(
@@ -39,7 +49,11 @@ async def test_stage1_sampler_shares_aware_time_but_preserves_real_attempt_deadl
     )
     consolidation = AsyncMock(spec=HistoricalMemoryConsolidationService)
     service = HistoricalMemorySamplingService(
-        rdb_session_manager, discovery, preparation, consolidation
+        rdb_session_manager,
+        discovery,
+        preparation,
+        consolidation,
+        _execution_settings(),
     )
     now = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
     real_before = datetime.datetime.now(datetime.UTC)
@@ -71,7 +85,11 @@ async def test_not_due_stage1_does_not_skip_pending_consolidation_or_invent_succ
         None,
     ]
     service = HistoricalMemorySamplingService(
-        rdb_session_manager, discovery, preparation, consolidation
+        rdb_session_manager,
+        discovery,
+        preparation,
+        consolidation,
+        _execution_settings(),
     )
     report = await service.sample_agent(
         agent_id=corpus.team.agent_id,
@@ -103,7 +121,11 @@ async def test_known_validation_failure_is_counted_but_unexpected_errors_propaga
         None,
     ]
     service = HistoricalMemorySamplingService(
-        rdb_session_manager, discovery, preparation, consolidation
+        rdb_session_manager,
+        discovery,
+        preparation,
+        consolidation,
+        _execution_settings(),
     )
     report = await service.sample_agent(
         agent_id=corpus.team.agent_id,

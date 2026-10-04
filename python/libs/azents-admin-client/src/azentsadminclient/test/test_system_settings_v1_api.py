@@ -68,6 +68,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """
         pass
 
+    def test_system_settings_v1_get_historical_memory_execution_setting(self) -> None:
+        """Test case for system_settings_v1_get_historical_memory_execution_setting
+
+        Get Historical Memory Execution Setting
+        """
+        pass
+
     def test_system_settings_v1_get_platform_github_app_setting(self) -> None:
         """Test case for system_settings_v1_get_platform_github_app_setting
 
@@ -100,6 +107,13 @@ class TestSystemSettingsV1Api(unittest.TestCase):
         """Test case for system_settings_v1_patch_external_channel_files_setting
 
         Patch External Channel Files Setting
+        """
+        pass
+
+    def test_system_settings_v1_patch_historical_memory_execution_setting(self) -> None:
+        """Test case for system_settings_v1_patch_historical_memory_execution_setting
+
+        Patch Historical Memory Execution Setting
         """
         pass
 

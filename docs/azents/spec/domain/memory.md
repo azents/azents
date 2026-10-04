@@ -13,6 +13,7 @@ code_paths:
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
+  - python/apps/azents/src/azents/core/historical_memory_system_setting.py
   - python/apps/azents/src/azents/core/memory_scope.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
@@ -59,6 +60,7 @@ code_paths:
   - python/apps/azents/src/azents/cli/memory_handover.py
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/job_runtime/registry.py
+  - python/apps/azents/src/azents/job_runtime/local.py
   - python/apps/azents/src/azents/api/public/agent/v1/__init__.py
   - python/apps/azents/src/azents/api/public/agent/v1/data.py
   - typescript/apps/azents-web/src/features/agents/AgentMemorySettingsPage.tsx
@@ -72,7 +74,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-04
-spec_version: 14
+spec_version: 15
 ---
 
 # Memory
@@ -261,15 +263,33 @@ late responses cannot commit. Finite-pass bounds survive productive slices;
 newer or late-committed unseen work remains pending. Publication acknowledgement
 loss inspects the durable outcome rather than publishing twice.
 
-An attempt has an absolute ten-minute deadline, at most 32 physical model
-dispatches (including transport retries), 96 dispatched tool calls, 250,000
-cumulative input tokens and 16,000 output tokens. Preflight reservations and
-available actual usage are recorded; unavailable usage is not fabricated as
-zero or represented as an exact billing ceiling. Requests checkpoint before
-exceeding 70% of the resolved model input window. Only quota failures advance the
-Lightweight chain; other failures do not change health or use Main fallback.
-Drafts allow at most 16 files/256 KiB; text results are bounded to 12,000 bytes
-and inventories admit at most 50 rows per page (some adapters use narrower pages).
+The `historical_memory_execution` System Settings Section supplies the only
+additional execution cutoffs: nullable `max_turns` (unlimited by default) and
+positive `timeout_seconds` (600 by default). Dispatch snapshots one policy and
+absolute deadline into the Job Runtime request; the durable claim and supervisor
+use that same deadline. Logical turns use the shared iteration core and remain
+claim-scoped across quota candidate handoff. Physical retries and tool calls
+are observations, not turns.
+
+Input/output requests use the selected model settings and shared provider/tool
+contracts. There are no memory-only cumulative token, dispatch, tool-count,
+input-window percentage or private draft file/byte/receipt capacity cutoffs.
+Requested output tokens may be unspecified. Physical dispatches and available
+actual scalar usage are recorded idempotently; unavailable usage remains unknown,
+not fabricated as zero or an exact billing ceiling. Generic text reads honor
+caller bounds. Source/work inventory pages still batch database retrieval and
+provide continuation routes. The independent 10,000-byte publication contract,
+complete manifests and atomic publication remain unchanged.
+
+Only quota failures advance the Lightweight chain; other failures do not change
+health or use Main fallback. Persisted attempt `failure_code` is restricted to
+safe authentication, permission, quota/billing and selected-model availability
+categories. Internal faults, database/authority failures, timeouts and automatic
+cutoffs settle retry state without a user-facing code. Registered Job Runtime
+terminal failures emit one sanitized ERROR traceback with content-free execution
+identity; provider bodies, credentials, memory content and hidden reasoning are
+excluded. Migration `a332f5e0f329` removes obsolete capacity checks, permits
+unspecified output observations and clears prior nonactionable attempt codes.
 
 Five-minute rediscovery recovers due work; productive slices requeue without a
 failure delay. Failure/no-progress backoff starts at one minute and caps at six

@@ -36,7 +36,7 @@ class ConsolidationCoverage(BaseModel):
     """One bounded publication slice; the finite corpus itself has no size cap."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    dispositions: tuple[ConsolidationWorkDisposition, ...] = Field(max_length=50)
+    dispositions: tuple[ConsolidationWorkDisposition, ...]
 
     @model_validator(mode="after")
     def unique_work(self) -> "ConsolidationCoverage":
@@ -105,12 +105,12 @@ def validate_consolidation_overview(
 ) -> ValidatedConsolidationOverview:
     """Validate sections and every managed locator, then bound the whole envelope."""
     try:
-        size = len(markdown.encode("utf-8"))
+        markdown.encode("utf-8")
     except UnicodeEncodeError:
         raise ConsolidationOutputError(
             "Consolidation Markdown must be UTF-8."
         ) from None
-    if "\x00" in markdown or size > 262144:
+    if "\x00" in markdown:
         raise ConsolidationOutputError("Consolidation Markdown payload is invalid.")
     lines = markdown.splitlines()
     context_positions = [

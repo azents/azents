@@ -73,8 +73,8 @@ class DraftMutationResult(BaseModel):
 
     draft_revision_id: str = Field(min_length=32, max_length=32)
     changed_paths: tuple[str, ...]
-    file_count: int = Field(ge=0, le=16)
-    byte_count: int = Field(ge=0, le=262144)
+    file_count: int = Field(ge=0)
+    byte_count: int = Field(ge=0)
 
 
 def require_draft_path(path: str) -> None:
@@ -334,8 +334,8 @@ class ConsolidationDraftRepository:
             character not in "0123456789abcdef" for character in request_digest
         ):
             raise ValueError("Private mutation request digest is invalid.")
-        if not changes or len(changes) > 16:
-            raise ValueError("Private mutation batch must contain 1-16 files.")
+        if not changes:
+            raise ValueError("Private mutation batch must contain files.")
         paths = [change.path for change in changes]
         if len(set(paths)) != len(paths):
             raise ValueError("Private mutation batch repeats a file path.")
@@ -363,15 +363,6 @@ class ConsolidationDraftRepository:
                 or owner.attempt.observation_epoch != expected_observation_epoch
             ):
                 raise ConsolidationDraftConflict("Draft read evidence is stale.")
-            count = await session.write_session.scalar(
-                sa.select(sa.func.count())
-                .select_from(RDBConsolidationMutationReceipt)
-                .where(
-                    RDBConsolidationMutationReceipt.attempt_id == principal.attempt_id
-                )
-            )
-            if count is None or count >= 96:
-                raise ValueError("Private mutation receipt budget is exhausted.")
             files = {
                 file.path: file
                 for file in await session.write_session.scalars(
@@ -395,8 +386,6 @@ class ConsolidationDraftRepository:
             byte_count = sum(
                 len(content.encode("utf-8")) for content in projected.values()
             )
-            if len(projected) > 16 or byte_count > 262144:
-                raise ValueError("Private draft payload budget is exceeded.")
             made_progress = projected != {
                 path: file.content for path, file in files.items()
             }

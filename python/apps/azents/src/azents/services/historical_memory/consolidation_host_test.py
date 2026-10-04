@@ -12,12 +12,13 @@ from sqlalchemy.exc import OperationalError
 
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import EventKind
-from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
+from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
 from azents.core.historical_memory_publication import (
     ConsolidationOutputError,
     ValidatedConsolidationOverview,
 )
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.core.llm_catalog import (
     ModelCapabilities,
     ModelParameterCapabilities,
@@ -47,7 +48,7 @@ from azents.rdb.models.historical_memory_consolidation import RDBConsolidationRe
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationBudgetRepository,
+    ConsolidationExecutionRepository,
 )
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
@@ -78,7 +79,10 @@ from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
 )
 from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 from azents.testing.model_selection import make_test_model_selection
 
 
@@ -130,7 +134,7 @@ class _ScriptedModel:
         catalog: ToolCatalog,
         *,
         system_prompt: str,
-        output_tokens: int,
+        output_tokens: int | None,
     ) -> PreparedConsolidationRequest:
         self.names.update(catalog.tools)
         self.feedback = [
@@ -298,7 +302,9 @@ async def _host(
 ) -> ConsolidationIterationHost:
     corpus = await seed_consolidation_corpus(manager)
     ownership = ConsolidationOwnershipRepository(manager)
-    claim = await ownership.claim(corpus.personal if personal else corpus.team)
+    claim = await ownership.claim(
+        corpus.personal if personal else corpus.team, deadline=consolidation_deadline()
+    )
     assert claim is not None
     await ConsolidationRecoveryRepository(manager).prepare(claim.principal)
     work = ConsolidationWorkRepository(manager)
@@ -322,10 +328,11 @@ async def _host(
         claim,
         model,
         tools,
-        ConsolidationBudgetRepository(manager),
+        ConsolidationExecutionRepository(manager),
         ownership,
         work,
         ConsolidationPublicationRepository(manager),
+        HistoricalMemoryExecutionConfig(),
     )
 
 
@@ -395,7 +402,7 @@ async def test_normal_final_response_without_valid_files_is_not_success(
     )
 
 
-async def test_input_checkpoint_stops_before_any_physical_request_or_publication(
+async def test_input_above_old_seventy_percent_checkpoint_does_not_stop_execution(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(
@@ -405,13 +412,52 @@ async def test_input_checkpoint_stops_before_any_physical_request_or_publication
         invalid_final=False,
         hard_input=True,
     )
-    with pytest.raises(ConsolidationBudgetExceeded, match="checkpoint"):
+    outcome = await host.run()
+    model = host.model
+    assert isinstance(model, _ScriptedModel) and model.turn > 0 and model.closed
+    assert (
+        await host.publication_repository.inspect_outcome(host.claim.principal)
+        == outcome
+    )
+
+
+async def test_configured_maximum_turns_uses_shared_core_without_publication(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    host = await _host(
+        rdb_session_manager,
+        personal=False,
+        empty=False,
+        invalid_final=False,
+        hard_input=False,
+    )
+    host.execution_policy = HistoricalMemoryExecutionConfig(max_turns=2)
+    with pytest.raises(ConsolidationTurnLimitExceeded, match="turn limit"):
         await host.run()
     model = host.model
-    assert isinstance(model, _ScriptedModel) and model.turn == 0 and model.closed
+    assert isinstance(model, _ScriptedModel) and model.turn == 2 and model.closed
     assert (
-        await host.budget_repository.remaining(host.claim.principal)
-    ).model_requests == 32
+        await host.publication_repository.inspect_outcome(host.claim.principal) is None
+    )
+
+
+async def test_candidate_host_uses_only_claim_remaining_logical_turns(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    host = await _host(
+        rdb_session_manager,
+        personal=False,
+        empty=False,
+        invalid_final=False,
+        hard_input=False,
+    )
+    host.execution_policy = HistoricalMemoryExecutionConfig(max_turns=5)
+    host.prior_turns = 4
+    with pytest.raises(ConsolidationTurnLimitExceeded):
+        await host.run()
+    model = host.model
+    assert isinstance(model, _ScriptedModel) and model.turn == 1
+    assert host.started_turns == 1 and host.closed
     assert (
         await host.publication_repository.inspect_outcome(host.claim.principal) is None
     )

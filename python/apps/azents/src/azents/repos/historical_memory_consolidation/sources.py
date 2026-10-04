@@ -216,7 +216,7 @@ class ConsolidationSourceRepository:
         max_bytes: int,
     ) -> ConsolidationSourceRead:
         """Read bounded exact current evidence, including meaningful empty summaries."""
-        if offset < 0 or not 4 <= max_bytes <= 12000:
+        if offset < 0 or max_bytes < 4:
             raise ValueError("Consolidation source read bounds are invalid.")
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner

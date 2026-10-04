@@ -8,7 +8,6 @@ from typing import Protocol
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import LLMProvider
-from azents.core.historical_memory_budget import CONSOLIDATION_OUTPUT_TOKEN_LIMIT
 from azents.core.model_pricing import capture_model_pricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.model_messages import TransientModelMessage
@@ -48,7 +47,7 @@ class PreparedConsolidationRequest:
 
     request: OpenAIResponsesRequest | PydanticAIRequest
     input_tokens: int
-    output_tokens: int
+    output_tokens: int | None
 
 
 class ConsolidationModelPort(Protocol):
@@ -59,7 +58,7 @@ class ConsolidationModelPort(Protocol):
     @property
     def effective_input_tokens(self) -> int: ...
     @property
-    def max_output_tokens(self) -> int: ...
+    def max_output_tokens(self) -> int | None: ...
 
     def prepare(
         self,
@@ -67,7 +66,7 @@ class ConsolidationModelPort(Protocol):
         catalog: ToolCatalog,
         *,
         system_prompt: str,
-        output_tokens: int,
+        output_tokens: int | None,
     ) -> PreparedConsolidationRequest: ...
 
     async def invoke(
@@ -92,19 +91,9 @@ class ConsolidationProviderModel:
     watchdog: ModelStreamWatchdog
 
     @property
-    def max_output_tokens(self) -> int:
-        # Reserve a bounded share per turn so an unknown-usage failed dispatch
-        # does not consume the entire cumulative attempt allowance. The Agent
-        # can author the independently bounded document through multiple edits.
-        values = [CONSOLIDATION_OUTPUT_TOKEN_LIMIT // 4]
-        if self.settings.max_output_tokens is not None:
-            values.append(self.settings.max_output_tokens)
-        maximum = (
-            self.selection.normalized_capabilities.context_window.max_output_tokens
-        )
-        if maximum is not None:
-            values.append(maximum)
-        return min(values)
+    def max_output_tokens(self) -> int | None:
+        """Use the selected model setting just like foreground execution."""
+        return self.settings.max_output_tokens
 
     def prepare(
         self,
@@ -112,7 +101,7 @@ class ConsolidationProviderModel:
         catalog: ToolCatalog,
         *,
         system_prompt: str,
-        output_tokens: int,
+        output_tokens: int | None,
     ) -> PreparedConsolidationRequest:
         selection = self.selection
         if not selection.normalized_capabilities.tool_calling.supported:

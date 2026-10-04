@@ -5,7 +5,6 @@ import dataclasses
 from uuid6 import uuid7
 
 from azents.core.historical_memory_budget import (
-    ConsolidationBudgetExceeded,
     ConsolidationDispatchReservation,
     ConsolidationUsage,
 )
@@ -20,7 +19,7 @@ from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
 )
 from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationBudgetRepository,
+    ConsolidationExecutionRepository,
 )
 
 
@@ -56,9 +55,9 @@ class ConsolidationDispatchAdmission:
     """Every callback creates a fresh reservation; no transaction spans SDK I/O."""
 
     principal: ConsolidationJobPrincipal
-    repository: ConsolidationBudgetRepository
+    repository: ConsolidationExecutionRepository
     input_tokens: int
-    output_tokens: int
+    output_tokens: int | None
     reservations: list[ConsolidationDispatchReservation] = dataclasses.field(
         init=False, default_factory=list
     )
@@ -74,8 +73,6 @@ class ConsolidationDispatchAdmission:
                 input_tokens=self.input_tokens,
                 output_tokens=self.output_tokens,
             )
-        except ConsolidationBudgetExceeded as error:
-            raise ModelDispatchAdmissionError("budget") from error
         except ConsolidationAuthorityError as error:
             raise ModelDispatchAdmissionError("ownership") from error
         self.reservations.append(reservation)
@@ -118,14 +115,9 @@ class ConsolidationDispatchAdmission:
                 if index == len(self.reservations) - 1
                 else None
             )
-            exceeded = await self.repository.record_usage(
+            await self.repository.record_usage(
                 self.principal,
                 dispatch_id=reservation.dispatch_id,
                 usage=known,
             )
-            if exceeded:
-                self.settled = True
-                raise ConsolidationBudgetExceeded(
-                    "Consolidation token budget is exhausted."
-                )
         self.settled = True

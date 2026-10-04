@@ -28,7 +28,10 @@ from azents.repos.historical_memory_consolidation.recovery import (
 from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 async def test_three_failed_attempts_warn_and_back_off_without_acknowledging_work(
@@ -39,7 +42,7 @@ async def test_three_failed_attempts_warn_and_back_off_without_acknowledging_wor
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
     caplog.set_level(logging.WARNING)
     for index in range(3):
-        claim = await owners.claim(corpus.team)
+        claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
         assert claim is not None
         await owners.fail(
             claim.principal, failure_code="synthetic_failure", cancelled=False
@@ -79,7 +82,7 @@ async def test_discovery_coalesces_exact_units_and_honors_owner_retry_and_eligib
         corpus.personal,
     }
     ownership = ConsolidationOwnershipRepository(rdb_session_manager)
-    claim = await ownership.claim(corpus.team)
+    claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     assert await repository.list_due(agent_id=corpus.team.agent_id, limit=25) == (
         corpus.personal,
@@ -132,7 +135,7 @@ async def test_denied_source_metadata_retires_without_model_coverage_acknowledge
             session, corpus.team_source, ended_at=datetime.datetime.now(datetime.UTC)
         )
     ownership = ConsolidationOwnershipRepository(rdb_session_manager)
-    claim = await ownership.claim(corpus.team)
+    claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     await ConsolidationRecoveryRepository(rdb_session_manager).prepare(claim.principal)
     work = ConsolidationWorkRepository(rdb_session_manager)

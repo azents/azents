@@ -294,8 +294,7 @@ class RDBConsolidationDraft(RDBModel):
         "unit_id", name="uq_historical_consolidation_drafts_unit"
     )
     CK_LIMITS = sa.CheckConstraint(
-        "file_count >= 0 AND file_count <= 16 "
-        "AND byte_count >= 0 AND byte_count <= 262144",
+        "file_count >= 0 AND byte_count >= 0",
         name="ck_historical_consolidation_drafts_limits",
     )
     IX_PROGRESS = sa.Index(
@@ -332,10 +331,6 @@ class RDBConsolidationDraftFile(RDBModel):
     """Current UTF-8 bytes only, with non-reused revisions on replacement."""
 
     __tablename__ = "historical_consolidation_draft_files"
-    CK_SIZE = sa.CheckConstraint(
-        "octet_length(content) <= 262144",
-        name="ck_historical_consolidation_draft_files_size",
-    )
     draft_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("historical_consolidation_drafts.id", ondelete="CASCADE"),
@@ -344,7 +339,6 @@ class RDBConsolidationDraftFile(RDBModel):
     path: Mapped[str] = mapped_column(sa.String(512), primary_key=True)
     revision_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     content: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    __table_args__ = (CK_SIZE,)
 
 
 class RDBConsolidationEvidence(RDBModel):
@@ -498,9 +492,8 @@ class RDBConsolidationModelDispatch(RDBModel):
         name="uq_historical_consolidation_model_dispatches_number",
     )
     CK_BUDGET = sa.CheckConstraint(
-        "request_number >= 1 AND request_number <= 32 AND "
-        "reserved_input_tokens >= 0 AND reserved_input_tokens <= 250000 AND "
-        "reserved_output_tokens >= 1 AND reserved_output_tokens <= 16000",
+        "request_number >= 1 AND reserved_input_tokens >= 0 AND "
+        "(reserved_output_tokens IS NULL OR reserved_output_tokens >= 1)",
         name="ck_historical_consolidation_model_dispatches_budget",
     )
     attempt_id: Mapped[str] = mapped_column(
@@ -511,7 +504,9 @@ class RDBConsolidationModelDispatch(RDBModel):
     dispatch_id: Mapped[str] = mapped_column(sa.String(32), primary_key=True)
     request_number: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     reserved_input_tokens: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
-    reserved_output_tokens: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    reserved_output_tokens: Mapped[int | None] = mapped_column(
+        sa.BigInteger, nullable=True
+    )
     usage_recorded: Mapped[bool] = mapped_column(
         sa.Boolean, init=False, nullable=False, server_default=sa.text("false")
     )

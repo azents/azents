@@ -14,6 +14,7 @@ from azents.core.historical_memory_publication import (
     ConsolidationWorkDisposition,
     validate_consolidation_overview,
 )
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.job_runtime.types import JobExecutionContext, JobRequest
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationUnit
 from azents.rdb.session import SessionManager
@@ -47,7 +48,10 @@ from azents.services.historical_memory.consolidation_job import (
 from azents.services.historical_memory.constants import (
     HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
 )
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 class _Clock:
@@ -94,7 +98,7 @@ class _PausedHost:
 async def _host(manager: SessionManager[WriteSession]) -> _PausedHost:
     corpus = await seed_consolidation_corpus(manager)
     ownership = ConsolidationOwnershipRepository(manager)
-    claim = await ownership.claim(corpus.team)
+    claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     return _PausedHost(claim, ownership, ConsolidationPublicationRepository(manager))
 
@@ -302,11 +306,23 @@ async def test_handler_requests_productive_pending_continuation_after_publicatio
             execution_key="synthetic-unit",
             deadline=datetime.datetime.now(datetime.UTC)
             + datetime.timedelta(minutes=10),
-            payload={"unit": corpus.team.model_dump(mode="json")},
+            payload={
+                "unit": corpus.team.model_dump(mode="json"),
+                "execution_policy": {
+                    "max_turns": 7,
+                    "timeout_seconds": 900,
+                },
+            },
         ),
         container=_Container(service, discovery),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
     result = await execute_historical_memory_consolidation_job(context)
     assert result == {"published_revision_id": "a" * 32, "coalesced": False}
-    service.run_unit.assert_awaited_once_with(corpus.team)
+    service.run_unit.assert_awaited_once_with(
+        corpus.team,
+        execution_policy=HistoricalMemoryExecutionConfig(
+            max_turns=7, timeout_seconds=900
+        ),
+        deadline=context.request.deadline,
+    )
     discovery.dispatch_pending.assert_awaited_once_with(agent_id=corpus.team.agent_id)

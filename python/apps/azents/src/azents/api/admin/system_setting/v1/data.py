@@ -22,6 +22,7 @@ from azents.core.github_system_setting_data import (
     PlatformGitHubAppHealthState,
     PlatformGitHubAppInventoryItem,
 )
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.core.system_setting import (
     ResolvedSystemSetting,
     SystemSettingAuditEventType,
@@ -99,6 +100,37 @@ class ExternalChannelFilesDetailResponse(BaseModel):
             admin_version=resolved.admin_version,
             outbound_max_file_bytes=config.outbound_max_file_bytes,
             outbound_max_action_bytes=config.outbound_max_action_bytes,
+        )
+
+
+class HistoricalMemoryExecutionPatchRequest(TypedDict, total=False, closed=True):
+    """Optimistic update of the system-owned memory execution cutoffs."""
+
+    expected_version: Required[Annotated[int, Field(ge=0)]]
+    max_turns: Annotated[int | None, Field(ge=1, strict=True)]
+    timeout_seconds: Annotated[int, Field(ge=1, strict=True)]
+
+
+class HistoricalMemoryExecutionDetailResponse(BaseModel):
+    """Effective memory execution cutoffs with the admin mutation version."""
+
+    section: str
+    schema_version: int
+    admin_version: int
+    max_turns: int | None
+    timeout_seconds: int
+
+    @classmethod
+    def from_domain(cls, resolved: ResolvedSystemSetting) -> Self:
+        config = resolved.config
+        if not isinstance(config, HistoricalMemoryExecutionConfig):
+            raise TypeError("Unexpected Historical Memory execution config model.")
+        return cls(
+            section=resolved.section.value,
+            schema_version=resolved.schema_version,
+            admin_version=resolved.admin_version,
+            max_turns=config.max_turns,
+            timeout_seconds=config.timeout_seconds,
         )
 
 

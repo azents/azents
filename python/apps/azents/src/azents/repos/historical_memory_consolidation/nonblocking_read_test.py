@@ -54,7 +54,11 @@ from azents.repos.message import MessageRepository
 from azents.repos.session_lifecycle_finalizer import SessionLifecycleFinalizerRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.testing.consolidated_context import publish_context_overview
-from azents.testing.consolidation import ConsolidationCorpus, seed_consolidation_corpus
+from azents.testing.consolidation import (
+    ConsolidationCorpus,
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 @asynccontextmanager
@@ -218,7 +222,9 @@ async def test_receipt_producer_reads_source_without_source_read_lock(
 ) -> None:
     writes = create_read_write_session_manager(rdb_engine)
     async with _committed_corpus(rdb_engine) as corpus:
-        claim = await ConsolidationOwnershipRepository(writes).claim(corpus.team)
+        claim = await ConsolidationOwnershipRepository(writes).claim(
+            corpus.team, deadline=consolidation_deadline()
+        )
         assert claim is not None
         async with AsyncSession(rdb_engine) as writer:
             source = await writer.scalar(

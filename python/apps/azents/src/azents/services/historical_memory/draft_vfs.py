@@ -55,13 +55,7 @@ from azents.services.vfs_text import (
 )
 
 _DRAFT_MOUNT = "memory-draft"
-_TEXT_CONTENT_BYTES = 11000  # Reserve framing within the 12k tool-result limit.
-_PATCH_LIMITS = ApplyPatchLimits(
-    max_operations=16,
-    max_path_bytes=512,
-    max_file_bytes=262144,
-    max_aggregate_bytes=262144,
-)
+_PATCH_LIMITS = ApplyPatchLimits()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -217,11 +211,7 @@ class ConsolidationDraftVfsBackend:
         )
         if observed.content is None:
             raise VfsReadError("not_found", "VFS file is absent.")
-        text = (
-            observed.content[offset : offset + limit]
-            .encode("utf-8")[:_TEXT_CONTENT_BYTES]
-            .decode("utf-8", errors="ignore")
-        )
+        text = observed.content[offset : offset + limit]
         end = offset + len(text)
         return TextReadResult(text, offset, end, end < len(observed.content))
 

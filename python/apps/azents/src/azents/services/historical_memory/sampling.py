@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import datetime
+import logging
 from typing import Annotated
 
 from fastapi import Depends
@@ -18,10 +19,16 @@ from azents.services.historical_memory.consolidation_job import (
     HistoricalMemoryConsolidationService,
 )
 from azents.services.historical_memory.discovery import HistoricalMemoryDiscoveryService
+from azents.services.historical_memory.execution_policy import (
+    HistoricalMemoryExecutionPolicyService,
+)
 from azents.services.historical_memory.preparation import (
     HistoricalMemoryPreparationService,
     HistoricalMemoryPreparationSummary,
 )
+from azents.utils.logging import sanitized_exception_info
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +64,10 @@ class HistoricalMemorySamplingService:
         HistoricalMemoryConsolidationService,
         Depends(HistoricalMemoryConsolidationService),
     ]
+    execution_settings: Annotated[
+        HistoricalMemoryExecutionPolicyService,
+        Depends(HistoricalMemoryExecutionPolicyService),
+    ]
 
     async def sample_agent(
         self,
@@ -65,7 +76,7 @@ class HistoricalMemorySamplingService:
         now: datetime.datetime,
         consolidate: bool,
     ) -> HistoricalMemorySamplingReport:
-        """Sample Stage 1 time only; leases/budgets/attempts use real DB ownership."""
+        """Sample Stage 1 time only; leases and attempts use real DB ownership."""
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("Historical sampling requires an aware timestamp.")
         now = now.astimezone(datetime.UTC)
@@ -82,23 +93,41 @@ class HistoricalMemorySamplingService:
                     deadline=datetime.datetime.now(datetime.UTC)
                     + datetime.timedelta(seconds=110),
                 )
-            if consolidate:
-                keys = await ConsolidationDiscoveryRepository(
-                    self.session_manager
-                ).list_due(agent_id=agent_id, limit=25)
-                due = len(keys)
-                for key in keys:
-                    try:
-                        outcome = await self.consolidation.run_unit(key)
-                    except ConsolidationOutputError:
-                        # Host-authored validation is a domain failed-attempt result,
-                        # not a successful publication or an unexpected-error skip.
-                        failed += 1
+        if consolidate:
+            policy = await self.execution_settings.resolve()
+            keys = await ConsolidationDiscoveryRepository(
+                self.session_manager
+            ).list_due(agent_id=agent_id, limit=25)
+            due = len(keys)
+            for key in keys:
+                try:
+                    outcome = await self.consolidation.run_unit(
+                        key,
+                        execution_policy=policy,
+                        deadline=datetime.datetime.now(datetime.UTC)
+                        + datetime.timedelta(seconds=policy.timeout_seconds),
+                    )
+                except ConsolidationOutputError as error:
+                    logger.error(
+                        "Sampled Historical Memory consolidation failed validation",
+                        extra={
+                            "agent_id": agent_id,
+                            "failure_kind": type(error).__name__,
+                        },
+                        exc_info=sanitized_exception_info(
+                            error,
+                            message=(
+                                "Sampled Historical Memory consolidation "
+                                "failed validation"
+                            ),
+                        ),
+                    )
+                    failed += 1
+                else:
+                    if outcome is None:
+                        unclaimed += 1
                     else:
-                        if outcome is None:
-                            unclaimed += 1
-                        else:
-                            published += 1
+                        published += 1
         return HistoricalMemorySamplingReport(
             now,
             admission.admitted,

@@ -36,6 +36,7 @@ from azents.repos.historical_memory_consolidation.work import (
     work_predicate,
 )
 from azents.testing.consolidation import (
+    consolidation_deadline,
     create_consolidation_source,
     seed_consolidation_corpus,
 )
@@ -64,7 +65,7 @@ async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
     late_id: str | None = None
     sizes: list[int] = []
     for index in range(4):
-        claim = await owners.claim(corpus.team)
+        claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
         assert claim is not None
         await ConsolidationRecoveryRepository(manager).prepare(claim.principal)
         page = await work.page(claim.principal, after_sequence=None, limit=2)
@@ -159,7 +160,7 @@ async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
             assert unit.pass_upper_sequence == (None if index == 3 else upper)
     assert sizes == [2, 2, 2, 1]
     assert len(covered) == 7
-    next_claim = await owners.claim(corpus.team)
+    next_claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert next_claim is not None
     next_page = await work.page(next_claim.principal, after_sequence=None, limit=2)
     assert {entry.work_id for entry in next_page.entries} == {late_id}

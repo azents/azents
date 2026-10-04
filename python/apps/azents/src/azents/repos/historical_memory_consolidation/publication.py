@@ -9,7 +9,6 @@ from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
 from uuid6 import uuid7
 
-from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
 from azents.core.historical_memory_consolidation import (
     ConsolidationAttemptState,
     ConsolidationJobPrincipal,
@@ -231,10 +230,6 @@ class ConsolidationPublicationRepository:
     ) -> ConsolidationPublicationOutcome:
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
-            if owner.attempt.failure_code == "token_budget_exceeded":
-                raise ConsolidationBudgetExceeded(
-                    "Consolidation hard budget cannot produce publication."
-                )
             draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(
                     RDBConsolidationDraft.unit_id == owner.unit.id
