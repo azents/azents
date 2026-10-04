@@ -23,6 +23,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_provider.py
   - python/apps/azents/src/azents/core/external_channel_provider_effect.py
+  - python/apps/azents/src/azents/core/external_channel_effect_intent.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
@@ -62,7 +63,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 66
+spec_version: 67
 ---
 
 # External Channel Delivery and Channel Work
@@ -178,6 +179,18 @@ before each effect, then settle its outcome through native projection CAS.
 Awaiting-input settlement and Discord delivery-channel retention also complete
 inside repository-owned scopes. Provider, Runtime, and file I/O begin only after
 each scope closes; the service receives no live database handles.
+
+Effect operations decode the current payload's consumed application metadata into
+an immutable intent before authority, settlement, and presentation decisions. The
+intent carries Work identity/revision/part, access/setup identity, retained message
+identity, Tracker kind/host, and presence state; opaque provider extensions remain
+available only to the provider adapter. Decoding occurs at the operation boundary,
+not target construction, so permitted payload assembly cannot leave cached stale
+metadata. An omitted part keeps the historical zero default; explicit null or a
+non-integer part remains ineligible for settlement, and existing integer/boolean
+and string predicates are preserved. Reply planning carries validated conversation
+scope alongside each provider payload, and Discord target retention decodes its
+consumed provider/delivery identity before a reuse or mutation decision.
 
 For an Agent execution, effect admission observes the exact PostgreSQL Session
 owner generation without a root-tree lock. An observed stale Worker cannot begin
