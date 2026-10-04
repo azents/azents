@@ -1,6 +1,7 @@
 ---
 title: "Operation-Scoped Execution and Lifecycle Requirements"
 created: 2026-10-05
+implemented: 2026-10-05
 tags: [backend, concurrency, execution, lifecycle]
 document_role: primary
 document_type: requirements

@@ -77,7 +77,13 @@ Focused suites overlap and are not summed: Core 461 and follow-up 120; hierarchy
 
 One earlier full run was interrupted at 51% when the existing Runtime Runner container exited with code 1 and restarted. It has no recoverable test exit result and is not counted as passed. Kubernetes observation was read-only; no live restart, apply, deletion, deployment or merge was performed. A later complete run exposed one composition-fake mismatch, corrected only in the harness before the clean final run.
 
-**Delivery gate:** required E2E and CI on the PR's delivered commit are checked separately. This local audit does not claim an unrun CI result; Requirements and primary Design remain unimplemented until that acceptance gate is satisfied.
+**Delivery gate:** implementation commit
+`8976c17153f2c9b32d8c2e463d33d4ed8bbaf13d` passed all required CI/E2E in
+[run 37223595508](https://github.com/azents/azents/actions/runs/37223595508)
+on 2026-10-05 KST. CodeQL reported no new alerts in the changed code. The
+Requirements/primary Design completion date is recorded only after this
+acceptance evidence. The metadata-only completion commit is checked separately
+before final delivery; it changes no production source or operation register.
 
 ## Audit Method and Integrity
 
