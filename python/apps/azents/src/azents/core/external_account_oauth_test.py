@@ -3,6 +3,7 @@
 import traceback
 
 import pytest
+from slack_sdk.errors import SlackClientError
 
 import azents.core.external_account_oauth as oauth
 from azents.core.config import Config
@@ -184,21 +185,22 @@ async def test_discord_adapter_uses_client_token_for_user_info(
 @pytest.mark.asyncio
 async def test_provider_exception_traceback_does_not_retain_raw_secret(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Sanitized adapter errors do not chain provider response material."""
+    """Expected SDK failures render a sanitized traceback without provider material."""
 
     class FailingSlackClient:
         def __init__(self, **_: object) -> None:
             pass
 
         async def openid_connect_token(self, **_: object) -> object:
-            raise RuntimeError("provider-body-secret")
+            raise SlackClientError("provider-body-secret")
 
     monkeypatch.setattr(oauth, "AsyncWebClient", FailingSlackClient)
     with pytest.raises(
         ExternalAccountOAuthProviderError,
         match="slack_identity_exchange_failed",
-    ):
+    ) as caught:
         await SlackIdentityOAuthAdapter().exchange_identity(
             client_id="client",
             client_secret="secret",
@@ -206,7 +208,43 @@ async def test_provider_exception_traceback_does_not_retain_raw_secret(
             redirect_uri="https://azents.example/callback",
             code_verifier=None,
         )
-    assert "provider-body-secret" not in traceback.format_exc()
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert "slack_identity_exchange_failed" in rendered
+    assert "provider-body-secret" not in rendered
+    assert caught.value.__cause__ is None
+    assert caught.value.__suppress_context__ is True
+    assert "provider-body-secret" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure", [RuntimeError("unexpected defect"), TypeError("invalid collaborator")]
+)
+async def test_unexpected_adapter_errors_remain_observable(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+) -> None:
+    """Programming failures propagate unchanged rather than as provider rejection."""
+
+    class DefectiveSlackClient:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def openid_connect_token(self, **_: object) -> object:
+            raise failure
+
+    monkeypatch.setattr(oauth, "AsyncWebClient", DefectiveSlackClient)
+    with pytest.raises(type(failure)) as caught:
+        await SlackIdentityOAuthAdapter().exchange_identity(
+            client_id="client",
+            client_secret="secret",
+            code="code",
+            redirect_uri="https://azents.example/callback",
+            code_verifier=None,
+        )
+    assert caught.value is failure
+    assert not isinstance(caught.value, ExternalAccountOAuthProviderError)
+    assert str(failure) in "".join(traceback.format_exception(caught.value))
 
 
 def test_slack_identity_keeps_team_scope() -> None:

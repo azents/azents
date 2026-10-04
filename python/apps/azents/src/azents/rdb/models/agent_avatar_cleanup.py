@@ -19,7 +19,7 @@ class RDBAgentAvatarCleanupJob(RDBModel):
     __tablename__ = "agent_avatar_cleanup_jobs"
 
     IX_NEXT_ATTEMPT_LEASE_UNTIL = sa.Index(
-        "ix_agent_avatar_cleanup_jobs_next_attempt_lease_until",
+        "ix_agent_avatar_cleanup_jobs_next_attempt_at_lease_until",
         "next_attempt_at",
         "lease_until",
     )

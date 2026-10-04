@@ -23,6 +23,7 @@ from azents.api.public.toolkit.v1.oauth import (
 from azents.core.auth.deps import WorkspaceMember
 from azents.core.config import Config
 from azents.core.enums import WorkspaceUserRole
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.mcp_discovery import OAuthServerMetadata
 from azents.core.oauth2 import (
     create_agent_github_platform_oauth_state,
@@ -189,16 +190,15 @@ async def test_agent_github_callback_syncs_through_authorized_service(
             app_id_source=SystemSettingFieldSource.ADMIN,
         )
     )
-    installations = [
-        {
-            "id": 42,
-            "account": {
-                "login": "azents",
-                "type": "Organization",
-                "avatar_url": "https://example.test/avatar.png",
-            },
-        }
-    ]
+    installations = (
+        GitHubInstallationSnapshot(
+            installation_id=42,
+            app_id=None,
+            account_login="azents",
+            account_type="Organization",
+            account_avatar_url="https://example.test/avatar.png",
+        ),
+    )
     monkeypatch.setattr(
         oauth_module,
         "exchange_oauth_code",

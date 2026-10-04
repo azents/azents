@@ -11,7 +11,7 @@ from azcommon.infra.s3.service import S3Service
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import ModelFileStatus
 from azents.core.s3.deps import get_s3_service
@@ -195,7 +195,7 @@ class FileLifecycleCleanupService:
                 await self.avatar_handler.delete_files(
                     job.avatar,
                     self.s3_service,
-                    self.config.workspace_s3.bucket,
+                    require_workspace_s3_bucket(self.config.workspace_s3),
                 )
             except asyncio.CancelledError:
                 raise
@@ -409,7 +409,7 @@ class FileLifecycleCleanupService:
                 pending_attempts += 1
             try:
                 await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=artifact.storage_key,
                 )
             except asyncio.CancelledError:
@@ -436,7 +436,7 @@ class FileLifecycleCleanupService:
                 pending_attempts += 1
             try:
                 await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=file.object_key,
                 )
             except asyncio.CancelledError:
@@ -460,7 +460,7 @@ class FileLifecycleCleanupService:
                 pending_attempts += 1
             try:
                 await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=model_file.storage_key,
                 )
             except asyncio.CancelledError:

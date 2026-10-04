@@ -9,7 +9,7 @@ from azents.engine.run.retry_policy import FailedRunRetryPolicy
 class AgentWorkerConfig:
     """Configuration values referenced directly by AgentWorker."""
 
-    web_url: str
+    web_url: str | None
     oauth_secret_key: str
     mcp_proxy_url: str | None
     openai_responses_websocket_enabled: bool

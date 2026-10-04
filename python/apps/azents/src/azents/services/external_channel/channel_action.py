@@ -1898,7 +1898,7 @@ def _discord_agent_content(target: ProviderTarget, text: str) -> str:
 def _session_presence_context(
     target: ProviderTarget,
     *,
-    web_url: str,
+    web_url: str | None,
 ) -> _SessionPresenceContext | None:
     """Resolve one presence control without trusting persisted display content."""
     match target.request_payload.get("presence_state"):
@@ -1921,7 +1921,7 @@ def _session_presence_context(
 def _session_navigation_context(
     target: ProviderTarget,
     *,
-    web_url: str,
+    web_url: str | None,
 ) -> _SessionNavigationContext | None:
     """Resolve one current Session URL without trusting persisted display content."""
     if (
@@ -2004,7 +2004,7 @@ def _discord_tracker_components(
 def _scheduled_task_edit_url(
     target: ProviderTarget,
     *,
-    web_url: str,
+    web_url: str | None,
     task_id: str,
 ) -> str | None:
     """Resolve one exact Scheduled Task Web editor from current target authority."""

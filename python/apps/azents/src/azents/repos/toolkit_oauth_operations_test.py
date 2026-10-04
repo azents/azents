@@ -2,7 +2,7 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -30,6 +30,10 @@ from azents.core.auth.roles import get_permissions_for_role
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
+from azents.core.github_installation import (
+    GitHubInstallationSnapshot,
+    decode_github_installations,
+)
 from azents.core.mcp_discovery import OAuthServerMetadata
 from azents.core.oauth2 import (
     OAuthTokenResponse,
@@ -142,7 +146,7 @@ class OAuthFault:
         self.reached = asyncio.Event()
         self.release = asyncio.Event()
         self.trace: list[tuple[str, AsyncSession]] = []
-        self.installation_inputs: list[list[dict[str, object]]] = []
+        self.installation_inputs: list[tuple[GitHubInstallationSnapshot, ...]] = []
         self.sql_trace: list[str] = []
         self.sql_stage: str | None = None
         self.sql_cancel = False
@@ -269,9 +273,9 @@ class OAuthInstallations(GithubUserInstallationRepository):
         session: AsyncSession,
         user_id: str,
         platform_app_id: str,
-        installations: list[dict[str, object]],
+        installations: Sequence[GitHubInstallationSnapshot],
     ) -> None:
-        self.fault.installation_inputs.append(installations)
+        self.fault.installation_inputs.append(tuple(installations))
         await super().sync(session, user_id, platform_app_id, installations)
         await self.fault.point("sync", session)
 
@@ -1218,13 +1222,17 @@ async def test_installation_order_duplicates_avatar_and_user_app_isolation(
             session,
             fixture.subject.requester.user_id,
             "app-other",
-            [{"id": 1, "account": {"login": "other-app", "type": "User"}}],
+            decode_github_installations(
+                [{"id": 1, "account": {"login": "other-app", "type": "User"}}]
+            ),
         )
         await raw.sync(
             session,
             fixture.subject.other_user_id,
             "app-main",
-            [{"id": 1, "account": {"login": "other-user", "type": "Organization"}}],
+            decode_github_installations(
+                [{"id": 1, "account": {"login": "other-user", "type": "Organization"}}]
+            ),
         )
     records = (
         installation(2, login="first", avatar=""),
@@ -1245,17 +1253,16 @@ async def test_installation_order_duplicates_avatar_and_user_app_isolation(
         "sync",
     ]
     assert len({id(session) for _, session in fixture.fault.trace}) == 1
-    assert fixture.fault.installation_inputs[-1] == [
-        {
-            "id": r.installation_id,
-            "account": {
-                "login": r.account_login,
-                "type": r.account_type,
-                "avatar_url": r.account_avatar_url,
-            },
-        }
+    assert fixture.fault.installation_inputs[-1] == tuple(
+        GitHubInstallationSnapshot(
+            installation_id=r.installation_id,
+            app_id=None,
+            account_login=r.account_login,
+            account_type=r.account_type,
+            account_avatar_url=r.account_avatar_url,
+        )
         for r in records
-    ]
+    )
     rows = await installation_rows(fixture)
     own = [
         r
@@ -1295,17 +1302,21 @@ async def test_empty_or_decoded_all_invalid_installations_prune_exact_user_app(
             session,
             fixture.subject.requester.user_id,
             "app-other",
-            [{"id": 2, "account": {"login": "keep", "type": "User"}}],
+            decode_github_installations(
+                [{"id": 2, "account": {"login": "keep", "type": "User"}}]
+            ),
         )
     records = (
         ()
         if source == "empty"
         else oauth_helpers.decode_installations(
-            [
-                {"id": "wrong", "account": {}},
-                {"id": 1, "account": None},
-                {"id": 2, "account": {"login": None, "type": "User"}},
-            ]
+            decode_github_installations(
+                [
+                    {"id": "wrong", "account": {}},
+                    {"id": 1, "account": None},
+                    {"id": 2, "account": {"login": None, "type": "User"}},
+                ]
+            )
         )
     )
     assert records == ()
@@ -1338,7 +1349,7 @@ async def test_original_avatar_persistence_projection_distinction_survives_actua
             "account": {"login": "valid-avatar", "type": "User", "avatar_url": ""},
         },
     ]
-    records = oauth_helpers.decode_installations(raw)
+    records = oauth_helpers.decode_installations(decode_github_installations(raw))
     assert [r.account_avatar_url for r in records] == ["", "", ""]
     assert await fixture.repository.sync_installations(
         requester=fixture.subject.requester,
@@ -1346,7 +1357,10 @@ async def test_original_avatar_persistence_projection_distinction_survives_actua
         installations=records,
     ) == Success(None)
     assert [r["installation_id"] for r in await installation_rows(fixture)] == [1, 2, 3]
-    assert [r.id for r in oauth_helpers.project_installations(raw)] == [3]
+    assert [
+        r.id
+        for r in oauth_helpers.project_installations(decode_github_installations(raw))
+    ] == [3]
     fixture.scope.assert_closed()
 
 
@@ -1590,20 +1604,25 @@ def install_service_external_gap(
         calls.append("github_exchange")
         return "synthetic-temporary-github-token"
 
-    async def github_list(*args: object) -> list[dict[str, object]]:
+    async def github_list(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
         del args
         await gap()
-        return [
-            {
-                "id": 2,
-                "account": {"login": "stored-default-avatar", "type": "Organization"},
-            },
-            {
-                "id": 3,
-                "account": {"login": "projected", "type": "User", "avatar_url": ""},
-            },
-            {"id": "invalid", "account": None},
-        ]
+        return decode_github_installations(
+            [
+                {
+                    "id": 2,
+                    "account": {
+                        "login": "stored-default-avatar",
+                        "type": "Organization",
+                    },
+                },
+                {
+                    "id": 3,
+                    "account": {"login": "projected", "type": "User", "avatar_url": ""},
+                },
+                {"id": "invalid", "account": None},
+            ]
+        )
 
     async def revoke(*args: object) -> None:
         del args

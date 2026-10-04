@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker, SessionStopSignal
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import (
     AgentSessionRunState,
@@ -821,7 +821,7 @@ class ArchivedSessionPurgeService:
             ):
                 continue
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=item.storage_key,
             )
             async with self.session_manager() as session:
@@ -837,7 +837,7 @@ class ArchivedSessionPurgeService:
             ):
                 continue
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=item.storage_key,
             )
             async with self.session_manager() as session:
@@ -853,7 +853,7 @@ class ArchivedSessionPurgeService:
             ):
                 continue
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=item.object_key,
             )
             async with self.session_manager() as session:

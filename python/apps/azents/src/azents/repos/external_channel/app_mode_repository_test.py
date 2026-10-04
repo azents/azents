@@ -1502,7 +1502,7 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
     await rdb_session.flush()
 
     with pytest.raises(
-        IntegrityError, match="uq_external_channel_bindings_connected_resource"
+        IntegrityError, match="ix_external_channel_bindings_resource_id"
     ):
         async with rdb_session.begin_nested():
             rdb_session.add(

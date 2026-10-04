@@ -1,11 +1,18 @@
 """Provider identity OAuth contracts and adapters."""
 
+import asyncio
 import datetime
+import json
 import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+from aiohttp import ClientError
+from authlib.integrations.base_client.errors import OAuthError
 from authlib.integrations.httpx_client import AsyncOAuth2Client
+from authlib.oauth2.rfc6749.errors import OAuth2Error
+from slack_sdk.errors import SlackClientError
 from slack_sdk.web.async_client import AsyncWebClient
 
 from azents.core.config import Config
@@ -188,7 +195,9 @@ class SlackIdentityOAuthAdapter:
             return _slack_identity(user_response.data)
         except ExternalAccountOAuthProviderError:
             raise
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except SlackClientError, ClientError, TimeoutError:
             raise ExternalAccountOAuthProviderError(
                 "slack_identity_exchange_failed"
             ) from None
@@ -251,7 +260,9 @@ class DiscordIdentityOAuthAdapter:
             return _discord_identity(payload)
         except ExternalAccountOAuthProviderError:
             raise
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except OAuthError, OAuth2Error, httpx.HTTPError, json.JSONDecodeError:
             raise ExternalAccountOAuthProviderError(
                 "discord_identity_exchange_failed"
             ) from None

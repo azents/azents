@@ -1,6 +1,7 @@
 """Completed database-only Agent Toolkit authority and OAuth operations."""
 
 import dataclasses
+from collections.abc import Sequence
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
@@ -8,6 +9,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.toolkit_errors import NotFound
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
@@ -296,7 +298,7 @@ class AgentToolkitOperationsRepository:
         user_id: str,
         role: WorkspaceUserRole,
         platform_app_id: str,
-        installations: list[dict[str, object]],
+        installations: Sequence[GitHubInstallationSnapshot],
     ) -> Result[None, AgentWorkspaceMismatch | AgentManagementDenied]:
         """Synchronize GitHub installations after current Agent authorization."""
         async with self.session_manager() as session:

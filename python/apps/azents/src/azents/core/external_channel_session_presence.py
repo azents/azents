@@ -3,16 +3,23 @@
 from typing import Literal, assert_never
 from urllib.parse import quote, urlencode, urlparse, urlunparse
 
+from azents.core.external_channel_labels import (
+    ExternalChannelResourceLabels,
+    decode_external_channel_resource_labels,
+)
+
 ExternalChannelSessionPresenceState = Literal["joined", "left"]
 
 
 def build_external_channel_session_url(
-    web_url: str,
+    web_url: str | None,
     workspace_handle: str,
     agent_id: str,
     session_id: str,
 ) -> str | None:
     """Build the canonical Azents Web route for one Agent Session."""
+    if web_url is None:
+        return None
     parsed = urlparse(web_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
@@ -24,7 +31,7 @@ def build_external_channel_session_url(
 
 
 def build_external_channel_scheduled_task_url(
-    web_url: str,
+    web_url: str | None,
     workspace_handle: str,
     agent_id: str,
     session_id: str,
@@ -56,62 +63,60 @@ def session_presence_payload(
     state: ExternalChannelSessionPresenceState,
 ) -> dict[str, object]:
     """Build one durable provider target for a Session presence control."""
-    labels = labels or {}
+    return _session_presence_from_labels(
+        decode_external_channel_resource_labels(labels), state=state
+    )
+
+
+def _session_presence_from_labels(
+    labels: ExternalChannelResourceLabels,
+    *,
+    state: ExternalChannelSessionPresenceState,
+) -> dict[str, object]:
+    """Serialize a provider target from validated label decisions."""
     payload: dict[str, object] = {
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": state,
     }
-    provider = labels.get("provider")
-    if provider == "slack":
+    if labels.provider == "slack":
         payload.update(
             {
-                "tenant_id": labels.get("tenant_id"),
-                "channel_id": labels.get("channel_id"),
+                "tenant_id": labels.tenant_coordinate,
+                "channel_id": labels.channel_coordinate,
             }
         )
-        conversation_scope = labels.get("conversation_scope")
-        if isinstance(conversation_scope, str) and conversation_scope:
-            payload["conversation_scope"] = conversation_scope
-        thread_ts = labels.get("thread_ts")
-        if isinstance(thread_ts, str) and thread_ts:
-            payload["thread_ts"] = thread_ts
+        if labels.conversation_scope is not None:
+            payload["conversation_scope"] = labels.conversation_scope
+        if labels.thread_ts is not None:
+            payload["thread_ts"] = labels.thread_ts
         return payload
-    if provider == "discord":
-        conversation_scope = labels.get("conversation_scope")
-        if conversation_scope == "parent_channel":
+    if labels.provider == "discord":
+        if labels.conversation_scope == "parent_channel":
             payload.update(
                 {
-                    "guild_id": labels.get("guild_id"),
-                    "channel_id": labels.get("parent_channel_id"),
+                    "guild_id": labels.guild_coordinate,
+                    "channel_id": labels.parent_coordinate,
                     "conversation_scope": "parent_channel",
                 }
             )
             return payload
-        delivery_channel_id = labels.get("delivery_channel_id")
-        thread_id = (
-            delivery_channel_id
-            if isinstance(delivery_channel_id, str) and delivery_channel_id
-            else labels.get("thread_id")
-        )
+        thread_id = labels.delivery_channel_id or labels.thread_coordinate
         payload.update(
             {
-                "guild_id": labels.get("guild_id"),
+                "guild_id": labels.guild_coordinate,
                 "channel_id": thread_id,
                 "conversation_scope": "thread",
             }
         )
-        parent_channel_id = labels.get("parent_channel_id")
-        root_message_id = labels.get("root_message_id")
         if (
-            delivery_channel_id is None
-            and isinstance(parent_channel_id, str)
-            and parent_channel_id
-            and isinstance(root_message_id, str)
-            and root_message_id == thread_id
+            labels.delivery_channel_absent
+            and labels.parent_channel_id is not None
+            and labels.root_message_id is not None
+            and labels.root_message_id == labels.thread_id
         ):
-            payload["thread_parent_channel_id"] = parent_channel_id
-            payload["thread_root_message_id"] = root_message_id
+            payload["thread_parent_channel_id"] = labels.parent_channel_id
+            payload["thread_root_message_id"] = labels.root_message_id
         return payload
     return payload
 
@@ -124,20 +129,18 @@ def setup_required_payload(
     source_revision: int,
 ) -> dict[str, object]:
     """Build one durable provider target for a first-mention setup choice."""
-    labels = labels or {}
-    if labels.get("provider") == "discord":
-        parent_channel_id = labels.get("parent_channel_id")
-        if not isinstance(parent_channel_id, str) or not parent_channel_id:
-            parent_channel_id = labels.get("source_channel_id")
+    decoded = decode_external_channel_resource_labels(labels)
+    if decoded.provider == "discord":
+        parent_channel_id = decoded.parent_channel_id or decoded.source_coordinate
         payload: dict[str, object] = {
             "control_kind": "setup_required",
             "control_version": 2,
-            "guild_id": labels.get("guild_id"),
+            "guild_id": decoded.guild_coordinate,
             "channel_id": parent_channel_id,
             "conversation_scope": "parent_channel",
         }
     else:
-        payload = session_presence_payload(labels, state="joined")
+        payload = _session_presence_from_labels(decoded, state="joined")
         payload.pop("presence_state")
     payload.update(
         {

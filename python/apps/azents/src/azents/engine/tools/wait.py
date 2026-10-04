@@ -31,7 +31,7 @@ class WaitToolkit(Toolkit[WaitToolkitConfig]):
 
     def __init__(self, *, wait_service: AgentWaitService) -> None:
         self.wait_service = wait_service
-        self.session_id = ""
+        self.session_id: str | None = None
         self.observer: MailboxActivityObserverProtocol | None = None
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
@@ -75,6 +75,8 @@ class WaitToolkit(Toolkit[WaitToolkitConfig]):
         )
 
     async def _wait(self, timeout_seconds: int) -> str:
+        if self.session_id is None:
+            raise FunctionToolError("AgentSession is unavailable")
         deadline = time.monotonic() + timeout_seconds
         assert self.observer is not None
         revision = self.observer.current_revision()

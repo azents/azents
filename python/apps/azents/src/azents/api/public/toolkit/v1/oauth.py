@@ -438,27 +438,16 @@ async def get_agent_github_platform_installations(
         )
     items: list[GitHubInstallationItem] = []
     for installation in raw_installations:
-        account = installation.get("account")
-        if not isinstance(account, dict):
+        if installation.account_avatar_url is None:
             continue
-        installation_id = installation.get("id")
-        login = account.get("login")
-        account_type = account.get("type")
-        avatar_url = account.get("avatar_url")
-        if (
-            isinstance(installation_id, int)
-            and isinstance(login, str)
-            and isinstance(account_type, str)
-            and isinstance(avatar_url, str)
-        ):
-            items.append(
-                GitHubInstallationItem(
-                    id=installation_id,
-                    account_login=login,
-                    account_type=account_type,
-                    account_avatar_url=avatar_url,
-                )
+        items.append(
+            GitHubInstallationItem(
+                id=installation.installation_id,
+                account_login=installation.account_login,
+                account_type=installation.account_type,
+                account_avatar_url=installation.account_avatar_url,
             )
+        )
     return GitHubPlatformInstallationsResponse(installations=items)
 
 

@@ -79,6 +79,8 @@ class SlackNativeSettingsService:
 
     def web_url(self, path: str) -> str:
         """Use only the deployment web origin and service-owned relative paths."""
+        if self.config.web_url is None:
+            raise ValueError("Azents web navigation is not configured.")
         base = self.config.web_url.rstrip("/")
         parsed = urlsplit(base)
         if parsed.scheme not in {"https", "http"} or not parsed.netloc:

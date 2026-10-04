@@ -14,6 +14,7 @@ from azcommon.result import Failure
 from azcommon.types import JSONValue
 from PIL import Image, UnidentifiedImageError
 
+from azents.core.config import require_workspace_s3_bucket
 from azents.core.enums import ExchangeFileOrigin, ExchangeFileProvenanceKind
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.generated_files import (
@@ -327,7 +328,9 @@ class ProviderOutputMaterializer:
             raise ModelCallError(str(exc)) from None
         for key in sorted(uploaded_keys - protected_keys):
             await self.model_file_service.s3_service.delete(
-                bucket=self.model_file_service.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(
+                    self.model_file_service.config.workspace_s3
+                ),
                 key=key,
             )
 
@@ -608,7 +611,9 @@ class ProviderOutputMaterializer:
                 # Its generation-scoped key belongs to this compensation.
                 uploaded_keys.add(upload.key)
                 await self.model_file_service.s3_service.upload(
-                    bucket=self.model_file_service.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(
+                        self.model_file_service.config.workspace_s3
+                    ),
                     key=upload.key,
                     body=upload.body,
                     content_type=upload.media_type,

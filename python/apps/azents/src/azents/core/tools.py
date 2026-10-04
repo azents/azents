@@ -76,7 +76,7 @@ class TurnContext:
     model: str
     run_id: str
     publish_event: PublishEventFn
-    session_id: str = ""
+    session_id: str | None = None
     run_index: int = 1
     tool_search_enabled: bool = False
     check_stop: CheckStop | None = None
@@ -181,8 +181,8 @@ class ResolveContext:
     credentials_json: str | None
     agent_id: str
     session_id: str
-    web_url: str
-    oauth_secret_key: str
+    web_url: str | None
+    oauth_secret_key: str | None
     workspace_id: str
     workspace_handle: str | None
     mcp_proxy_url: str | None = None

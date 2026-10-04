@@ -26,6 +26,7 @@ from azents.core.auth.deps import WorkspaceMember
 from azents.core.auth.roles import get_permissions_for_role
 from azents.core.config import Config, CredentialEncryptionConfig
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.mcp_discovery import (
     DcrError,
     DcrRegistrationResult,
@@ -550,17 +551,26 @@ async def test_workspace_installation_revoke_is_success_only_and_after_sync(
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> list[dict[str, object]]:
+    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         if failure_stage == "list":
             raise failure
-        return [
-            {"id": 1, "account": {"login": "missing-avatar", "type": "User"}},
-            {
-                "id": 1,
-                "account": {"login": "last", "type": "User", "avatar_url": "avatar"},
-            },
-        ]
+        return (
+            GitHubInstallationSnapshot(
+                installation_id=1,
+                app_id=None,
+                account_login="missing-avatar",
+                account_type="User",
+                account_avatar_url=None,
+            ),
+            GitHubInstallationSnapshot(
+                installation_id=1,
+                app_id=None,
+                account_login="last",
+                account_type="User",
+                account_avatar_url="avatar",
+            ),
+        )
 
     async def revoke(*args: object) -> None:
         harness.boundary.external("revoke")
@@ -839,7 +849,7 @@ async def test_github_list_http_error_remains_transparent_runtime_failure(
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> list[dict[str, object]]:
+    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         raise httpx.HTTPStatusError(
             "failure",
@@ -902,11 +912,11 @@ async def test_agent_installation_finally_revoke_preserves_error_cancel_asymmetr
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> list[dict[str, object]]:
+    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
         if stage == "list":
             raise failure
-        return []
+        return ()
 
     async def revoke(*args: object) -> None:
         harness.boundary.external("revoke")
@@ -953,9 +963,9 @@ async def test_workspace_revoke_cancellation_happens_after_completed_sync(
         harness.boundary.external("github-token")
         return "temporary-token"
 
-    async def installations(*args: object) -> list[dict[str, object]]:
+    async def installations(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
         harness.boundary.external("list")
-        return []
+        return ()
 
     async def revoke(*args: object) -> None:
         harness.boundary.external("revoke")

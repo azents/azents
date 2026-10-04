@@ -18,7 +18,7 @@ from azcommon.types import JSONValue
 from azcommon.uuid import uuid7
 from fastapi import Depends
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import ArtifactStatus
 from azents.core.s3.deps import get_s3_service
@@ -149,7 +149,7 @@ class ArtifactService:
         succeeded = False
         try:
             await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=uploaded_object_key,
                 body=body,
                 content_type=media_type,
@@ -215,7 +215,7 @@ class ArtifactService:
         succeeded = False
         try:
             await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=object_key,
                 body=body,
                 content_type=media_type,
@@ -298,7 +298,7 @@ class ArtifactService:
                 await self.s3_service.copy_verified_transfer_object_to_product(
                     source=source,
                     destination=S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
+                        bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                         key=object_key,
                     ),
                     expected_size=size_bytes,
@@ -433,7 +433,7 @@ class ArtifactService:
         if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=artifact.value.storage_key,
         )
         if body is None:
@@ -507,7 +507,7 @@ class ArtifactService:
         if artifact.value.status == ArtifactStatus.EXPIRED:
             return Failure(ArtifactExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=artifact.value.storage_key,
         )
         if body is None:
@@ -519,7 +519,7 @@ class ArtifactService:
         if object_key is None:
             return
         await self.s3_service.delete(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=object_key,
         )
 

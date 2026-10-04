@@ -103,11 +103,13 @@ class RDBRuntimeInfrastructureProfile(RDBModel):
         name="ck_runtime_infrastructure_profiles_version_positive",
     )
     IX_PROVIDER_LIFECYCLE = sa.Index(
-        "ix_runtime_infrastructure_profiles_provider_lifecycle",
+        "ix_runtime_infrastructure_profiles_provider_id_lifecycle",
         "provider_id",
         "lifecycle",
     )
-    IX_KIND = sa.Index("ix_runtime_infrastructure_profiles_kind", "profile_kind")
+    IX_KIND = sa.Index(
+        "ix_runtime_infrastructure_profiles_profile_kind", "profile_kind"
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
@@ -176,7 +178,7 @@ class RDBWorkspaceRuntimeProfile(RDBModel):
         "version >= 1", name="ck_workspace_runtime_profiles_version_positive"
     )
     IX_WORKSPACE_LIFECYCLE = sa.Index(
-        "ix_workspace_runtime_profiles_workspace_lifecycle",
+        "ix_workspace_runtime_profiles_workspace_id_lifecycle",
         "workspace_id",
         "lifecycle",
     )
@@ -359,12 +361,14 @@ class RDBRuntimeConfigurationReconcileTask(RDBModel):
         name="ck_runtime_configuration_reconcile_tasks_attempt",
     )
     IX_STATUS_AVAILABLE = sa.Index(
-        "ix_runtime_configuration_reconcile_tasks_status_available",
+        "ix_runtime_configuration_reconcile_tasks_status_available_at",
         "status",
         "available_at",
     )
     IX_SOURCE = sa.Index(
-        "ix_runtime_configuration_reconcile_tasks_source", "source_type", "source_id"
+        "ix_runtime_configuration_reconcile_tasks_source_type_source_id",
+        "source_type",
+        "source_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -429,7 +433,9 @@ class RDBRuntimeRecreationOperation(RDBModel):
     )
     IX_STATUS = sa.Index("ix_runtime_recreation_operations_status", "status")
     IX_TARGET = sa.Index(
-        "ix_runtime_recreation_operations_target", "target_kind", "target_id"
+        "ix_runtime_recreation_operations_target_kind_target_id",
+        "target_kind",
+        "target_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -494,7 +500,7 @@ class RDBRuntimeRecreationOperationItem(RDBModel):
         name="ck_runtime_recreation_operation_items_attempt",
     )
     IX_OPERATION_STATUS = sa.Index(
-        "ix_runtime_recreation_operation_items_operation_status",
+        "ix_runtime_recreation_operation_items_operation_id_status",
         "operation_id",
         "status",
     )

@@ -2,12 +2,13 @@
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.mcp_credentials import (
     McpSecretsOAuth2,
     McpSecretsOAuth2Dcr,
@@ -165,59 +166,36 @@ async def exchange_and_handle_errors(
 
 
 def decode_installations(
-    installations: list[dict[str, object]],
+    installations: Sequence[GitHubInstallationSnapshot],
 ) -> tuple[GithubInstallationRecord, ...]:
-    """Decode ordered persistence rows with the original skip/avatar semantics."""
-    records: list[GithubInstallationRecord] = []
-    for installation in installations:
-        installation_id = installation.get("id")
-        account = installation.get("account")
-        if not isinstance(installation_id, int) or not isinstance(account, dict):
-            continue
-        login = account.get("login")
-        account_type = account.get("type")
-        avatar_url = account.get("avatar_url", "")
-        if not isinstance(login, str) or not isinstance(account_type, str):
-            continue
-        records.append(
-            GithubInstallationRecord(
-                installation_id=installation_id,
-                account_login=login,
-                account_type=account_type,
-                account_avatar_url=avatar_url if isinstance(avatar_url, str) else "",
-            )
+    """Project ordered decoded records with the original persistence avatar fallback."""
+    return tuple(
+        GithubInstallationRecord(
+            installation_id=installation.installation_id,
+            account_login=installation.account_login,
+            account_type=installation.account_type,
+            account_avatar_url=installation.account_avatar_url
+            if installation.account_avatar_url is not None
+            else "",
         )
-    return tuple(records)
+        for installation in installations
+    )
 
 
 def project_installations(
-    installations: list[dict[str, object]],
+    installations: Sequence[GitHubInstallationSnapshot],
 ) -> tuple[GitHubInstallationProjection, ...]:
-    """Decode the stricter Public avatar projection without deduplicating rows."""
-    items: list[GitHubInstallationProjection] = []
-    for installation in installations:
-        account = installation.get("account")
-        if not isinstance(account, dict):
-            continue
-        installation_id = installation.get("id")
-        login = account.get("login")
-        account_type = account.get("type")
-        avatar_url = account.get("avatar_url")
-        if (
-            isinstance(installation_id, int)
-            and isinstance(login, str)
-            and isinstance(account_type, str)
-            and isinstance(avatar_url, str)
-        ):
-            items.append(
-                GitHubInstallationProjection(
-                    id=installation_id,
-                    account_login=login,
-                    account_type=account_type,
-                    account_avatar_url=avatar_url,
-                )
-            )
-    return tuple(items)
+    """Project only known Public avatars without changing order or duplicates."""
+    return tuple(
+        GitHubInstallationProjection(
+            id=installation.installation_id,
+            account_login=installation.account_login,
+            account_type=installation.account_type,
+            account_avatar_url=installation.account_avatar_url,
+        )
+        for installation in installations
+        if installation.account_avatar_url is not None
+    )
 
 
 def merge_saved_test_credentials(

@@ -1,11 +1,14 @@
 """GitHub per-user Installation Repository."""
 
+from collections.abc import Sequence
+
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
 
 
@@ -17,7 +20,7 @@ class GithubUserInstallationRepository:
         session: AsyncSession,
         user_id: str,
         platform_app_id: str,
-        installations: list[dict[str, object]],
+        installations: Sequence[GitHubInstallationSnapshot],
     ) -> None:
         """Synchronize one user's installation list for one Platform App."""
         if not platform_app_id:
@@ -26,22 +29,12 @@ class GithubUserInstallationRepository:
         api_installation_ids: set[int] = set()
 
         for inst in installations:
-            inst_id = inst.get("id")
-            if not isinstance(inst_id, int):
-                continue
-
-            account = inst.get("account")
-            if not isinstance(account, dict):
-                continue
-
-            login = account.get("login")
-            account_type = account.get("type")
-            avatar_url = account.get("avatar_url", "")
-
-            if not isinstance(login, str) or not isinstance(account_type, str):
-                continue
-            if not isinstance(avatar_url, str):
-                avatar_url = ""
+            inst_id = inst.installation_id
+            login = inst.account_login
+            account_type = inst.account_type
+            avatar_url = (
+                inst.account_avatar_url if inst.account_avatar_url is not None else ""
+            )
 
             api_installation_ids.add(inst_id)
             stmt = insert(RDBGithubUserInstallation).values(

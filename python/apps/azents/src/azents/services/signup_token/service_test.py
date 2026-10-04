@@ -16,6 +16,7 @@ from azents.core.config import (
     RefreshTokenConfig,
     SignupTokenConfig,
 )
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.core.enums import SignupTokenDeliveryMethod
 from azents.core.signup_token_operations import (
@@ -59,7 +60,11 @@ def _make_service(
 ) -> SignupTokenService:
     """Create SignupTokenService for tests."""
     if email_service is None:
-        email_service = EmailService(config=None, ses_client=None)
+        email_service = EmailService(
+            config=None,
+            ses_client=None,
+            template_environment=create_template_environment(),
+        )
     return SignupTokenService(
         operation_repository=SignupTokenOperationRepository(
             session_manager=rdb_session_manager,
@@ -403,6 +408,7 @@ class TestSignupTokenService:
                 web_url="https://azents.example.com",
             ),
             ses_client=create_autospec(SESClient, instance=True),
+            template_environment=create_template_environment(),
         )
         email_service.send_signup_token = AsyncMock(return_value=True)
         service = _make_service(rdb_session_manager, email_service=email_service)

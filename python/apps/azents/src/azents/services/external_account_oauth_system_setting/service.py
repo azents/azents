@@ -347,7 +347,9 @@ def _section_for_provider(provider: str) -> SystemSettingSection:
     raise ValueError("Unsupported external account OAuth provider.")
 
 
-def _callback_url(web_url: str, provider: str) -> str | None:
+def _callback_url(web_url: str | None, provider: str) -> str | None:
+    if web_url is None:
+        return None
     parsed = urlsplit(web_url)
     if parsed.scheme not in {"https", "http"} or not parsed.netloc:
         return None

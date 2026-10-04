@@ -141,6 +141,8 @@ def get_runtime_terminal_web_origin(
     config: Annotated[Config, Depends(get_config)],
 ) -> str:
     """Return the exact configured Main Web origin for Terminal WebSockets."""
+    if config.web_url is None:
+        raise RuntimeError("Main Web URL is required for Runtime Terminal")
     parsed = urlsplit(config.web_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise RuntimeError("Main Web URL is required for Runtime Terminal")

@@ -7,6 +7,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from azents.core.github_installation import decode_github_installations
 from azents.core.mcp_discovery import DiscoveryError, OAuthServerMetadata
 from azents.core.oauth2 import OAuthTokenError, OAuthTokenResponse
 from azents.core.tools import McpToolkitConfig
@@ -40,7 +41,8 @@ def test_installation_decode_preserves_order_duplicates_and_avatar_distinction()
             },
         },
     ]
-    decoded = helpers.decode_installations(rows)
+    snapshots = decode_github_installations(rows)
+    decoded = helpers.decode_installations(snapshots)
     assert decoded == (
         GithubInstallationRecord(1, "first", "User", ""),
         GithubInstallationRecord(1, "last", "User", ""),
@@ -49,13 +51,20 @@ def test_installation_decode_preserves_order_duplicates_and_avatar_distinction()
             5, "org", "Organization", "https://example.test/avatar"
         ),
     )
-    projected = helpers.project_installations(rows)
+    projected = helpers.project_installations(snapshots)
     assert [(item.id, item.account_login) for item in projected] == [
         (True, "bool"),
         (5, "org"),
     ]
-    assert helpers.decode_installations([{"id": None}]) == ()
-    assert helpers.project_installations([{"id": 1, "account": None}]) == ()
+    assert (
+        helpers.decode_installations(decode_github_installations([{"id": None}])) == ()
+    )
+    assert (
+        helpers.project_installations(
+            decode_github_installations([{"id": 1, "account": None}])
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize(

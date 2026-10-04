@@ -8,12 +8,13 @@ from typing import Annotated
 from urllib.parse import urlparse
 
 from fastapi import Depends
-from jinja2 import Environment, PackageLoader
+from jinja2 import Environment
 from types_aiobotocore_ses.client import SESClient
 
 from azents.core.config import EmailConfig
+from azents.core.deps import get_email_config
 
-from .deps import get_email_config, get_ses_client
+from .deps import get_ses_client, get_template_environment
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +48,6 @@ JOIN_REQUEST_APPROVED_SUBJECTS = {
     "en": "[Azents] Your join request for {workspace_name} has been approved",
 }
 
-# Jinja2 template environment
-_jinja_env = Environment(
-    loader=PackageLoader("azents.core.email", "resources/templates"),
-    autoescape=True,
-)
-
 
 @dataclasses.dataclass
 class EmailService:
@@ -60,6 +55,7 @@ class EmailService:
 
     config: Annotated[EmailConfig | None, Depends(get_email_config)]
     ses_client: Annotated[SESClient | None, Depends(get_ses_client)]
+    template_environment: Annotated[Environment, Depends(get_template_environment)]
 
     @property
     def configured(self) -> bool:
@@ -309,7 +305,7 @@ class EmailService:
 
     def _render_template(self, template_name: str, **kwargs: object) -> str:
         """Render Jinja2 template."""
-        template = _jinja_env.get_template(template_name)
+        template = self.template_environment.get_template(template_name)
         return template.render(**kwargs)
 
     async def _send_email(

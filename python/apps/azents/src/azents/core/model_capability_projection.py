@@ -1,6 +1,6 @@
 """Presence-aware model facts bounded by implemented Azents request contracts."""
 
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, assert_never
 
 from pydantic_ai.profiles.google import GOOGLE_THINKING_LEVELS
 from pydantic_ai.providers.google import GoogleProvider
@@ -124,6 +124,8 @@ def _effort_value(level: ModelReasoningEffort) -> ReasoningEffortValue:
             return "xhigh"
         case ModelReasoningEffort.MAX:
             return "max"
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _reasoning(
