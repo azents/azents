@@ -47,7 +47,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-04
-spec_version: 82
+spec_version: 83
 ---
 
 # E2E Primary Test Strategy
