@@ -21,7 +21,7 @@ def test_link_model_has_active_partial_uniqueness_and_safe_labels() -> None:
     }
     indexes = (RDBExternalAccountLink.UQ_ACTIVE_EXTERNAL_IDENTITY,)
     assert {index.name for index in indexes} == {
-        "uq_external_account_links_active_external_identity",
+        "ix_external_account_links_provider_identity_sc_13d48b547d72dd7a",
     }
     assert all(
         str(index.dialect_options["postgresql"]["where"]) == "revoked_at IS NULL"
