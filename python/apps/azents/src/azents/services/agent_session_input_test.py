@@ -872,7 +872,7 @@ class TestAgentSessionInputService:
         mailbox_admission_repository = _MailboxAdmissionRepositoryDouble(calls)
         service = AgentSessionInputService(
             operations=AgentSessionInputOperationsRepository(
-                agent_repository=AgentRepository(),
+                agent_repository=_ActiveAgentRepositoryDouble(),
                 agent_project_preset_repository=AgentProjectPresetRepository(),
                 agent_project_catalog_repository=AgentProjectCatalogRepository(),
                 agent_project_default_repository=AgentProjectDefaultRepository(),
