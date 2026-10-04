@@ -418,19 +418,7 @@ class ImageGenerationCatalogService:
                     },
                 )
             )
-            return Success(
-                SystemCatalogProjectionSummary(
-                    provider=integration.provider,
-                    catalog_id=catalog.id,
-                    last_success_at=catalog.last_success_at,
-                    visible_count=catalog.visible_count,
-                    hidden_count=catalog.hidden_count,
-                    status="failed",
-                    failure_code=failure_code,
-                    failure_message=str(error),
-                    action_hint=action_hint,
-                )
-            )
+            raise
         except asyncio.CancelledError:
             raise
         except Exception as error:

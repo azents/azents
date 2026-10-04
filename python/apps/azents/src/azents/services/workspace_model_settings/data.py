@@ -1,6 +1,7 @@
 """Workspace model settings service data models."""
 
 import dataclasses
+from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -34,18 +35,12 @@ class WorkspaceModelSettingsOutput(BaseModel):
     )
 
 
-class WorkspaceModelSettingsUpdateInput(BaseModel):
+class WorkspaceModelSettingsUpdateInput(TypedDict, total=False):
     """Workspace model settings update input."""
 
-    default_selectable_model_options: list[SelectableModelOptionInput] | None = Field(
-        default=None, description="Ordered default selectable model option inputs"
-    )
-    default_main_model_label: str | None = Field(
-        default=None, description="Default main model option label"
-    )
-    default_lightweight_model_label: str | None = Field(
-        default=None, description="Default lightweight model option label"
-    )
+    default_selectable_model_options: list[SelectableModelOptionInput] | None
+    default_main_model_label: str | None
+    default_lightweight_model_label: str | None
 
 
 @dataclasses.dataclass(frozen=True)

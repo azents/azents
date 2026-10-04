@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
@@ -232,12 +233,20 @@ def _ready_state(
     )
 
 
-def _reconciler() -> tuple[
-    RuntimeRecreationReconciler,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
+class _ReconcilerFixture(NamedTuple):
+    reconciler: RuntimeRecreationReconciler
+    profiles: AsyncMock
+    runtimes: AsyncMock
+    agents: AsyncMock
+
+
+class _AuthorityFixture(NamedTuple):
+    service: RuntimeRecreationService
+    profiles: AsyncMock
+    providers: AsyncMock
+
+
+def _reconciler() -> _ReconcilerFixture:
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
     profile_repository.get_recreation_target_version.return_value = "2"
     runtime_repository = AsyncMock(spec=AgentRuntimeRepository)
@@ -253,14 +262,15 @@ def _reconciler() -> tuple[
         item_limit=1,
         maximum_attempts=3,
     )
-    return reconciler, profile_repository, runtime_repository, agent_repository
+    return _ReconcilerFixture(
+        reconciler=reconciler,
+        profiles=profile_repository,
+        runtimes=runtime_repository,
+        agents=agent_repository,
+    )
 
 
-def _authority_service() -> tuple[
-    RuntimeRecreationService,
-    AsyncMock,
-    AsyncMock,
-]:
+def _authority_service() -> _AuthorityFixture:
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
     provider_repository = AsyncMock(spec=RuntimeProviderRepository)
     service = RuntimeRecreationService(
@@ -268,7 +278,9 @@ def _authority_service() -> tuple[
         profile_repository=profile_repository,
         provider_repository=provider_repository,
     )
-    return service, profile_repository, provider_repository
+    return _AuthorityFixture(
+        service=service, profiles=profile_repository, providers=provider_repository
+    )
 
 
 async def test_workspace_operation_hides_foreign_profile_target() -> None:

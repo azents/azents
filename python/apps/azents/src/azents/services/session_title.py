@@ -364,6 +364,15 @@ class SessionTitleService:
                 return None
             runtime = resolved_runtime.value
             model = runtime.model
+            L = bind_extra(
+                logger,
+                {
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                    "provider": selection.provider.value,
+                    "model": model,
+                },
+            )
             structured_capability = saved_structured_response_support(
                 selection.normalized_capabilities,
                 requested_effort=None,
@@ -404,14 +413,10 @@ class SessionTitleService:
                         and active_mode is TitleOutputMode.STRUCTURED
                         and not compatibility_transitioned
                     ):
-                        logger.warning(
+                        L.warning(
                             "Automatic session title output contract was not honored",
                             extra={
-                                "session_id": session_id,
-                                "agent_id": agent_id,
                                 "attempt_number": attempt_number,
-                                "provider": selection.provider.value,
-                                "model": model,
                                 "title_structured_output_capability": None,
                                 "title_output_mode": active_mode.value,
                                 "title_output_mode_transitioned": True,
@@ -422,14 +427,10 @@ class SessionTitleService:
                         active_mode = TitleOutputMode.PLAIN_TEXT
                         compatibility_transitioned = True
                         continue
-                    logger.warning(
+                    L.warning(
                         "Automatic session title output contract was not honored",
                         extra={
-                            "session_id": session_id,
-                            "agent_id": agent_id,
                             "attempt_number": attempt_number,
-                            "provider": selection.provider.value,
-                            "model": model,
                             "title_structured_output_capability": (
                                 structured_capability
                             ),
@@ -457,11 +458,10 @@ class SessionTitleService:
                         and not compatibility_transitioned
                         and incompatibility is not None
                     ):
-                        attempt_logger = bind_extra(
-                            logger,
-                            {
-                                "session_id": session_id,
-                                "agent_id": agent_id,
+                        L.warning(
+                            "Automatic session title output contract is unavailable",
+                            exc_info=True,
+                            extra={
                                 "attempt_number": attempt_number,
                                 **model_provider_error_log_fields(exc),
                                 "title_structured_output_capability": None,
@@ -471,10 +471,6 @@ class SessionTitleService:
                                     incompatibility
                                 ),
                             },
-                        )
-                        attempt_logger.warning(
-                            "Automatic session title output contract is unavailable",
-                            exc_info=True,
                         )
                         active_mode = TitleOutputMode.PLAIN_TEXT
                         compatibility_transitioned = True
@@ -487,11 +483,10 @@ class SessionTitleService:
                                 failure=exc,
                             )
                         )
-                        attempt_logger = bind_extra(
-                            logger,
-                            {
-                                "session_id": session_id,
-                                "agent_id": agent_id,
+                        L.warning(
+                            "Automatic session title candidate quota failed",
+                            exc_info=True,
+                            extra={
                                 "attempt_number": attempt_number,
                                 **model_provider_error_log_fields(exc),
                                 "title_candidate_ordinal": candidate.ordinal,
@@ -500,20 +495,15 @@ class SessionTitleService:
                                 ),
                             },
                         )
-                        attempt_logger.warning(
-                            "Automatic session title candidate quota failed",
-                            exc_info=True,
-                        )
                         if advanced is None:
                             return None
                         current = advanced
                         break
                     retry_available = self.retry_policy.retry_available(attempt_number)
-                    attempt_logger = bind_extra(
-                        logger,
-                        {
-                            "session_id": session_id,
-                            "agent_id": agent_id,
+                    L.warning(
+                        "Automatic session title provider attempt failed",
+                        exc_info=True,
+                        extra={
                             "attempt_number": attempt_number,
                             **model_provider_error_log_fields(exc),
                             "title_structured_output_capability": (
@@ -529,10 +519,6 @@ class SessionTitleService:
                             ),
                         },
                     )
-                    attempt_logger.warning(
-                        "Automatic session title provider attempt failed",
-                        exc_info=True,
-                    )
                     if not retry_available:
                         return None
                     await asyncio.sleep(
@@ -540,14 +526,10 @@ class SessionTitleService:
                     )
                     attempt_number += 1
                 except ModelStreamTimeoutError as exc:
-                    logger.warning(
+                    L.warning(
                         "Automatic session title generation timed out",
                         extra={
-                            "session_id": session_id,
-                            "agent_id": agent_id,
                             "attempt_number": attempt_number,
-                            "provider": selection.provider.value,
-                            "model": model,
                             "title_structured_output_capability": (
                                 structured_capability
                             ),
@@ -565,14 +547,10 @@ class SessionTitleService:
                     )
                     return None
                 except ModelCallError, ResponsesOutputError:
-                    logger.exception(
+                    L.exception(
                         "Automatic session title generation failed",
                         extra={
-                            "session_id": session_id,
-                            "agent_id": agent_id,
                             "attempt_number": attempt_number,
-                            "provider": selection.provider.value,
-                            "model": model,
                             "title_structured_output_capability": (
                                 structured_capability
                             ),

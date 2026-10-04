@@ -4,6 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -70,9 +71,15 @@ def _deletion() -> WorkspaceRuntimeProfileDeletion:
     )
 
 
+class _WorkspaceProfileFixture(NamedTuple):
+    service: RuntimeProfileWorkspaceService
+    profiles: AsyncMock
+    transaction: dict[str, bool]
+
+
 def _service(
     outcome: WorkspaceRuntimeProfileDeleteOutcome | None = None,
-) -> tuple[RuntimeProfileWorkspaceService, AsyncMock, dict[str, bool]]:
+) -> _WorkspaceProfileFixture:
     """Build the service with transaction-state tracking dependencies."""
     transaction = {"committed": False, "rolled_back": False}
 
@@ -112,7 +119,9 @@ def _service(
             NoopTerminalPolicyInvalidationPublisher()
         ),
     )
-    return service, profile_repository, transaction
+    return _WorkspaceProfileFixture(
+        service=service, profiles=profile_repository, transaction=transaction
+    )
 
 
 def test_terminal_only_workspace_change_skips_physical_reconciliation() -> None:

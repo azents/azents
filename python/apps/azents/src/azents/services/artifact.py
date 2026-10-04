@@ -1,6 +1,5 @@
 """Artifact service."""
 
-import asyncio
 import dataclasses
 import datetime
 import hashlib
@@ -377,40 +376,6 @@ class ArtifactService:
         raise RuntimeError(
             "publication ID is already committed with different metadata"
         )
-
-    async def _has_committed_verified_publication(
-        self,
-        *,
-        authority: SessionResourceAuthority,
-        size_bytes: int,
-        sha256: str,
-        media_type: str,
-        publication_id: str,
-    ) -> bool:
-        """Preserve the final object when commit outcome cannot be disproven."""
-        try:
-            existing = await self.operation_repository.load_verified_publication(
-                authority=_repository_authority(authority),
-                artifact_id=publication_id,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return True
-        if isinstance(existing, Failure) or existing.value is None:
-            return isinstance(existing, Failure)
-        try:
-            self._validated_existing_verified_publication(
-                existing=existing.value,
-                authority=authority,
-                size_bytes=size_bytes,
-                sha256=sha256,
-                media_type=media_type,
-                publication_id=publication_id,
-            )
-        except RuntimeError:
-            return True
-        return True
 
     async def resolve_for_authority(
         self,

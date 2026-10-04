@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Annotated, NamedTuple, assert_never
 
 import httpx
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.core.enums import ExternalChannelProvider
@@ -204,15 +205,15 @@ class ExternalModelSettingsService:
         result = commit.result
         if not isinstance(result, ExternalModelApplied) or not result.created:
             return result
+        L = bind_extra(logger, {"mutation_id": result.mutation_id})
         try:
             context = await self.repository.get_notice_delivery_context(
                 mutation_id=result.mutation_id
             )
         except Exception as error:
-            logger.exception(
+            L.exception(
                 "External model notice context loading failed after Apply commit",
                 extra={
-                    "mutation_id": result.mutation_id,
                     "exception_type": type(error).__name__,
                 },
             )
@@ -226,7 +227,7 @@ class ExternalModelSettingsService:
                 encrypted_credentials=context.encrypted_credentials,
             )
         except Exception as error:
-            logger.error(
+            L.error(
                 "External model notice delivery failed after Apply commit",
                 exc_info=(
                     RuntimeError,
@@ -234,7 +235,6 @@ class ExternalModelSettingsService:
                     error.__traceback__,
                 ),
                 extra={
-                    "mutation_id": result.mutation_id,
                     "provider": context.plan.provider.value,
                     "exception_type": type(error).__name__,
                 },
@@ -249,10 +249,9 @@ class ExternalModelSettingsService:
                 error_summary=error_summary,
             )
         except Exception as error:
-            logger.exception(
+            L.exception(
                 "External model notice outcome recording failed after Apply commit",
                 extra={
-                    "mutation_id": result.mutation_id,
                     "outcome": outcome.value,
                     "exception_type": type(error).__name__,
                 },

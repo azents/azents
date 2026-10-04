@@ -88,7 +88,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-04
-spec_version: 44
+spec_version: 45
 ---
 
 # Model Catalog Domain Spec
@@ -401,6 +401,14 @@ configuration changes invalidate it transactionally. A matching successful image
 publication sets it true; a failed refresh does not invalidate an otherwise usable
 listing. Retained rows after invalidation remain diagnostic, but cannot authorize
 new explicit image saves or runtime dispatch.
+
+Image synchronization records its failed attempt before propagating the original
+provider listing exception and cause. It does not return a successful projection
+summary with a failed status. The failure retains provider diagnostics, retry
+policy and recovery hints without replacing current image entries, changing
+configuration authority or clearing an otherwise usable listing. Unexpected
+failures likewise record their attempt and propagate; successful synchronization
+and expected policy/precondition result variants keep their existing contracts.
 
 ### Coordinated data transition
 

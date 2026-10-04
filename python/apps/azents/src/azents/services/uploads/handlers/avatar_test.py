@@ -61,6 +61,29 @@ class TestValidate:
         with pytest.raises(UploadValidationError, match="invalid image"):
             await handler.validate(b"\x00\x01\x02 not an image")
 
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            RuntimeError("unexpected image decoder failure"),
+            MemoryError("resource failure"),
+        ],
+    )
+    async def test_unexpected_decoder_failure_propagates(
+        self,
+        handler: AvatarUploadHandler,
+        monkeypatch: pytest.MonkeyPatch,
+        failure: Exception,
+    ) -> None:
+        """Classify malformed image data without hiding unrelated failures."""
+
+        def fail_open(*args: object, **kwargs: object) -> Image.Image:
+            raise failure
+
+        monkeypatch.setattr(Image, "open", fail_open)
+        with pytest.raises(type(failure)) as raised:
+            await handler.validate(b"synthetic-image-input")
+        assert raised.value is failure
+
 
 class TestProcessAndPublish:
     @pytest.mark.asyncio

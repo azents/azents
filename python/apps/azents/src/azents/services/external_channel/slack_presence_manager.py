@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import datetime
 import logging
-from typing import Annotated
+from typing import Annotated, NamedTuple
 from uuid import uuid4
 
 from cryptography.fernet import InvalidToken
@@ -31,6 +31,7 @@ from azents.services.external_channel.slack_presence import (
     SlackWorkPresenceClient,
 )
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
@@ -39,7 +40,13 @@ _RENEW_INTERVAL = datetime.timedelta(seconds=15)
 _RECONCILE_INTERVAL = datetime.timedelta(seconds=5)
 _CHANNEL_REFRESH_INTERVAL = datetime.timedelta(seconds=90)
 
-type SlackPresenceKey = tuple[str, str, str]
+
+class SlackPresenceKey(NamedTuple):
+    """Immutable identity of one Slack presence projection."""
+
+    kind: str
+    channel_id: str
+    thread_ts: str
 
 
 class SlackPresenceLeaseLost(RuntimeError):
@@ -166,9 +173,12 @@ class SlackWorkPresenceManagerService:
                 raise
             except SlackPresenceLeaseLost:
                 return
-        except SlackPresenceCredentialError:
+        except SlackPresenceCredentialError as error:
             logger.warning(
                 "Slack Work presence credentials are unavailable",
+                exc_info=sanitized_exception_info(
+                    error, message="Slack Work presence credential details redacted."
+                ),
                 extra={
                     "provider": "slack",
                     "connection_id": connection_id,
@@ -484,7 +494,11 @@ class SlackWorkPresenceManagerService:
 
 
 def _presence_key(target: SlackWorkPresenceTarget) -> SlackPresenceKey:
-    return target.kind, target.channel_id, target.thread_ts
+    return SlackPresenceKey(
+        kind=target.kind,
+        channel_id=target.channel_id,
+        thread_ts=target.thread_ts,
+    )
 
 
 def _idle_target(target: SlackWorkPresenceTarget) -> SlackWorkPresenceTarget:

@@ -37,11 +37,20 @@ async def update_workspace_model_settings(
     request_body: WorkspaceModelSettingsUpdateRequest,
 ) -> WorkspaceModelSettingsResponse:
     """Update the workspace default model settings."""
+    payload: WorkspaceModelSettingsUpdateInput = {}
+    if "default_selectable_model_options" in request_body.model_fields_set:
+        payload["default_selectable_model_options"] = (
+            request_body.default_selectable_model_options
+        )
+    if "default_main_model_label" in request_body.model_fields_set:
+        payload["default_main_model_label"] = request_body.default_main_model_label
+    if "default_lightweight_model_label" in request_body.model_fields_set:
+        payload["default_lightweight_model_label"] = (
+            request_body.default_lightweight_model_label
+        )
     result = await service.update(
         member.workspace_id,
-        WorkspaceModelSettingsUpdateInput(
-            **request_body.model_dump(exclude_unset=True)
-        ),
+        payload,
     )
     if result.success:
         value = result.value

@@ -463,6 +463,7 @@ class ExternalChannelIngressAdmissionService:
         except JobRuntimeClosedError:
             logger.warning(
                 "External Channel ingress Runtime submission is unavailable",
+                exc_info=True,
                 extra={"external_channel_ingress_owner_id": owner_id},
             )
 

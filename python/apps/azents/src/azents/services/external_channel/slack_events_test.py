@@ -557,12 +557,12 @@ def test_provider_position_orders_variable_width_slack_timestamps() -> None:
 
 def test_extracts_bounded_user_and_channel_reference_ids() -> None:
     """Provider reference mapping preserves actionable IDs for the Agent."""
-    users, channels = slack_message_reference_ids(
+    references = slack_message_reference_ids(
         "<@U1> asks @W2 to check <#C1|incidents> and #G2."
     )
 
-    assert users == {"U1", "W2"}
-    assert channels == {"C1", "G2"}
+    assert references.user_ids == {"U1", "W2"}
+    assert references.channel_ids == {"C1", "G2"}
 
 
 def test_normalizes_block_only_rich_text_and_reference_ids() -> None:

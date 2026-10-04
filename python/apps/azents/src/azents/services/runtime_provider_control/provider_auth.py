@@ -14,6 +14,7 @@ from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1
 from kubernetes_asyncio.client.models.v1_token_review import V1TokenReview
 from kubernetes_asyncio.client.models.v1_token_review_spec import V1TokenReviewSpec
 from kubernetes_asyncio.client.rest import ApiException
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -46,6 +47,16 @@ _TERMINAL = frozenset(
 )
 _SERVICE_ACCOUNT_SUBJECT = re.compile(r"^system:serviceaccount:([^:]+):([^:]+)$")
 _KUBERNETES_AUDIENCE = "azents-runtime-control"
+
+
+class _KubernetesServiceAccountBindingConfig(BaseModel):
+    """Decode consumed binding fields while retaining unknown-field compatibility."""
+
+    model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
+
+    audience: str
+    namespace: str
+    service_account_name: str
 
 
 class KubernetesServiceAccountTokenReviewer(Protocol):
@@ -270,14 +281,18 @@ class KubernetesServiceAccountProviderAuthVerifier:
                 or binding.owner is not RuntimeProviderBindingOwner.BOOTSTRAP
             ):
                 raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            config = binding.config or {}
-            configured_audience = config.get("audience")
-            configured_namespace = config.get("namespace")
-            configured_service_account_name = config.get("service_account_name")
+            try:
+                config = _KubernetesServiceAccountBindingConfig.model_validate(
+                    binding.config
+                )
+            except ValidationError:
+                raise RuntimeProviderCredentialUnavailable(
+                    "binding_unavailable"
+                ) from None
             if (
-                configured_audience != _KUBERNETES_AUDIENCE
-                or configured_namespace != match.group(1)
-                or configured_service_account_name != match.group(2)
+                config.audience != _KUBERNETES_AUDIENCE
+                or config.namespace != match.group(1)
+                or config.service_account_name != match.group(2)
             ):
                 raise RuntimeProviderCredentialUnavailable("binding_unavailable")
             provider = await self.provider_repository.get_by_id(

@@ -298,11 +298,9 @@ async def _optional_slack_reference_cache(
     reference_user_ids: set[str] = set()
     channel_ids: set[str] = set()
     for message in messages:
-        message_user_ids, message_channel_ids = slack_message_reference_ids(
-            message.normalized_body
-        )
-        reference_user_ids.update(message_user_ids)
-        channel_ids.update(message_channel_ids)
+        references = slack_message_reference_ids(message.normalized_body)
+        reference_user_ids.update(references.user_ids)
+        channel_ids.update(references.channel_ids)
 
     user_ids = [
         *author_ids,
@@ -364,7 +362,9 @@ def _canonical_slack(
     reference_cache: dict[str, dict[str, str]],
 ) -> ExternalChannelCanonicalHistoryMessage:
     """Convert one normalized Slack history item without a raw event dependency."""
-    user_ids, channel_ids = slack_message_reference_ids(message.normalized_body)
+    references = slack_message_reference_ids(message.normalized_body)
+    user_ids = references.user_ids
+    channel_ids = references.channel_ids
     if message.provider_user_id is not None:
         user_ids.add(message.provider_user_id)
     reference_mappings: dict[str, object] = {}

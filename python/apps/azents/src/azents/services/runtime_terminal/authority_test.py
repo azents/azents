@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -170,6 +170,12 @@ async def test_private_agent_requires_owner_or_agent_admin() -> None:
     working_folder.resolve_bound_authority_for_target.assert_not_awaited()
 
 
+class _TerminalAuthorityFixture(NamedTuple):
+    resolver: DatabaseRuntimeTerminalAuthorityResolver
+    coordination: InMemoryRuntimeCoordinationStore
+    working_folder: AsyncMock
+
+
 def _resolver(
     *,
     runtime: AgentRuntime | None = None,
@@ -178,11 +184,7 @@ def _resolver(
     agent: Agent | None = None,
     workspace_role: WorkspaceUserRole = WorkspaceUserRole.OWNER,
     agent_admin: bool = False,
-) -> tuple[
-    DatabaseRuntimeTerminalAuthorityResolver,
-    InMemoryRuntimeCoordinationStore,
-    AsyncMock,
-]:
+) -> _TerminalAuthorityFixture:
     runtime = runtime or _runtime()
     applied = applied or _applied()
     workspace_profile = workspace_profile or _workspace_profile()
@@ -274,7 +276,11 @@ def _resolver(
         working_folder_service=working_folder,
         policy_resolver=TerminalPolicyResolver(),
     )
-    return resolver, runtime_coordination, working_folder
+    return _TerminalAuthorityFixture(
+        resolver=resolver,
+        coordination=runtime_coordination,
+        working_folder=working_folder,
+    )
 
 
 async def _register_runner(
