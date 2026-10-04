@@ -7,7 +7,7 @@ from typing import Annotated, Protocol
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import SystemAdmin, get_system_admin
-from azents.services.runtime_provider_control.data import (
+from azents.core.runtime_provider_control import (
     RuntimeProviderEnrollmentGrantIssued,
     RuntimeProviderEnrollmentUnavailable,
 )

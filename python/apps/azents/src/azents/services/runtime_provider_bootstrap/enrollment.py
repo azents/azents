@@ -9,13 +9,13 @@ from fastapi import Depends
 
 from azents.core.enums import RuntimeProviderBootstrapDeclarationState
 from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSnapshot
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialUnavailable,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
-)
 from azents.services.runtime_provider_control.deps import (
     get_runtime_provider_enrollment_service,
 )

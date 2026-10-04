@@ -51,6 +51,9 @@ from azents_runtime_control.system_metrics import (
 )
 from google.protobuf import timestamp_pb2
 
+from azents.core.runtime_connection_registration import (
+    RuntimeConnectionRegistrationUnavailable,
+)
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -80,9 +83,6 @@ from azents.runtime.coordination.data import (
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
-from azents.services.runtime_connection_registration.data import (
-    RuntimeConnectionRegistrationUnavailable,
-)
 from azents.services.runtime_connection_registration.service import (
     RuntimeRunnerConnectionRegistrar,
 )

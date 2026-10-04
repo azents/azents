@@ -81,8 +81,7 @@ class RuntimeProviderEnrollmentUnavailable(Exception):
 
     def __post_init__(self) -> None:
         Exception.__init__(
-            self,
-            f"Runtime Provider enrollment unavailable: {self.code}",
+            self, f"Runtime Provider enrollment unavailable: {self.code}"
         )
 
 
