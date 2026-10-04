@@ -33,7 +33,9 @@ class RDBArtifact(RDBModel):
     __tablename__ = "artifacts"
 
     IX_WORKSPACE_ID = sa.Index("ix_artifacts_workspace_id", "workspace_id")
-    IX_SESSION_STATUS = sa.Index("ix_artifacts_session_status", "session_id", "status")
+    IX_SESSION_STATUS = sa.Index(
+        "ix_artifacts_session_id_status", "session_id", "status"
+    )
     IX_STATUS_EXPIRES_AT = sa.Index(
         "ix_artifacts_status_expires_at",
         "status",

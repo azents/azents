@@ -12,6 +12,7 @@ from azcommon.result import Failure, Result, Success
 from fastapi.params import Depends
 
 from azents.core.config import Config, JWTConfig
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.core.enums import SignupTokenDeliveryMethod
 from azents.core.signup_token_operations import (
@@ -130,7 +131,11 @@ def _service(repository: SignupTokenOperationRepository) -> SignupTokenService:
     """Use required actual application collaborators with completed operations."""
     return SignupTokenService(
         operation_repository=repository,
-        email_service=EmailService(config=None, ses_client=None),
+        email_service=EmailService(
+            config=None,
+            ses_client=None,
+            template_environment=create_template_environment(),
+        ),
         auth_config=_TEST_AUTH_CONFIG,
         config=Config.model_construct(
             runtime_env=RuntimeEnvironment.LOCAL,

@@ -25,9 +25,11 @@ def discord_account_link_presentation(
     *,
     state: ExternalAccountNativeLinkState,
     provider_status: ExternalAccountOAuthEffectiveStatus | None,
-    web_url: str,
+    web_url: str | None,
 ) -> DiscordAccountLinkPresentation:
     """Render one direct Web connection or current management control."""
+    if web_url is None:
+        return discord_account_link_state_unavailable()
     if state.link is None:
         if provider_status is not ExternalAccountOAuthEffectiveStatus.READY:
             return discord_account_link_state_unavailable()

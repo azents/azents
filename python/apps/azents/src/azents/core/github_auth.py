@@ -1,241 +1,235 @@
-"""GitHub App authentication utilities.
+"""GitHub App authentication through supported public GitHubKit operations."""
 
-Logic for GitHub App JWT creation and Installation Access Token exchange.
-"""
-
+import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 import httpx
 import jwt
+from githubkit import (
+    BaseAuthStrategy,
+    GitHub,
+    OAuthAppAuthStrategy,
+    OAuthWebAuthStrategy,
+    UnauthAuthStrategy,
+)
+from githubkit.exception import AuthExpiredError, RequestError
+from pydantic import BaseModel, ConfigDict, StrictStr
 
-from azents.core.type_guards import (
-    is_string_object_dict,
-    is_string_object_dict_list,
+from azents.core.github_installation import (
+    GitHubInstallationSnapshot,
+    decode_github_installations,
 )
 
 logger = logging.getLogger(__name__)
 
+GitHubClientFactory = Callable[[BaseAuthStrategy | None], GitHub[BaseAuthStrategy]]
+_API_VERSION = "2022-11-28"
+
+
+class _AppMetadata(BaseModel):
+    """Ingress scalar contract with compatible external GitHub extension fields."""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    slug: StrictStr
+
+
+class _InstallationToken(BaseModel):
+    """Ingress token contract; expiration and provider extension fields are opaque."""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    token: StrictStr
+
+
+class _OAuthFailure(BaseModel):
+    """Known provider OAuth rejection fields at ingress."""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    error: str = "unknown_error"
+    error_description: str | None = None
+
+
+class _UserInstallationEnvelope(BaseModel):
+    """Validate the outer response object before its legacy-compatible list decoder."""
+
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
+    installations: object = None
+
+
+def create_github_client(auth: BaseAuthStrategy | None) -> GitHub[BaseAuthStrategy]:
+    """Construct an operation-owned SDK client without retries or response caching."""
+    return GitHub[BaseAuthStrategy](
+        auth=auth if auth is not None else UnauthAuthStrategy(),
+        timeout=5.0,
+        follow_redirects=False,
+        auto_retry=False,
+        http_cache=False,
+    )
+
+
+@asynccontextmanager
+async def _sdk_error_contract() -> AsyncIterator[None]:
+    """Preserve underlying failures without treating programming defects as cleanup."""
+    try:
+        yield
+    except asyncio.CancelledError:
+        raise
+    except RequestError as error:
+        raise error.exc from error
+
+
+@asynccontextmanager
+async def _github_client(
+    auth: BaseAuthStrategy | None,
+    client_factory: GitHubClientFactory,
+) -> AsyncIterator[GitHub[BaseAuthStrategy]]:
+    """Own the ordinary REST operation's SDK lifetime."""
+    async with _sdk_error_contract():
+        async with client_factory(auth) as client:
+            yield client
+
+
+def _bearer_headers(token: str) -> dict[str, str]:
+    """Preserve the established bearer and version contract through SDK headers."""
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": _API_VERSION,
+    }
+
 
 def create_github_app_jwt(app_id: str, private_key: str) -> str:
-    """Create GitHub App JWT with RS256, 9-minute expiry, and 60-second backdate.
-
-    :param app_id: GitHub App ID
-    :param private_key: Private key in PEM format
-    :return: JWT string
-    """
-    # Convert because literal ``\\n`` can remain from environment variables
+    """Create RS256 JWT with the existing 9-minute expiry and 60-second backdate."""
     normalized_key = private_key.replace("\\n", "\n")
     now = int(time.time())
-    payload = {
-        "iat": now - 60,  # 60-second backdate for clock skew tolerance
-        "exp": now + (9 * 60),  # 9-minute expiry, max 10 minutes
-        "iss": app_id,
-    }
+    payload = {"iat": now - 60, "exp": now + 9 * 60, "iss": app_id}
     return jwt.encode(payload, normalized_key, algorithm="RS256")
 
 
-async def get_app_slug(jwt_token: str) -> str:
-    """Get GitHub App slug.
-
-    GitHub API ``GET /app`` call.
-
-    :param jwt_token: GitHub App JWT
-    :return: App slug (e.g. ``my-github-app``)
-    :raises httpx.HTTPStatusError: GitHub API call failure
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://api.github.com/app",
-            headers={
-                "Authorization": f"Bearer {jwt_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+async def get_app_slug(
+    jwt_token: str,
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
+) -> str:
+    """Read the authenticated App slug through the public SDK operation."""
+    async with _github_client(None, client_factory) as client:
+        response = await client.rest.apps.async_get_authenticated(
+            headers=_bearer_headers(jwt_token)
         )
-        response.raise_for_status()
-        data: dict[str, object] = response.json()
-        slug = data["slug"]
-        assert isinstance(slug, str)  # noqa: S101 — GitHub API response schema guarantee
-        return slug
+        return _AppMetadata.model_validate(response.raw_response.json()).slug
 
 
 async def exchange_oauth_code(
     client_id: str,
     client_secret: str,
     code: str,
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
 ) -> str:
-    """Exchange GitHub OAuth authorization code for access token.
-
-    :param client_id: OAuth Client ID
-    :param client_secret: OAuth Client Secret
-    :param code: Authorization code
-    :return: Access token
-    :raises httpx.HTTPStatusError: GitHub API call failure
-    :raises ValueError: When access_token is missing from response
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://github.com/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            json={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "code": code,
-            },
+    """Exchange an authorization code through the SDK's public OAuth Web strategy."""
+    strategy = OAuthWebAuthStrategy(client_id, client_secret, code)
+    try:
+        async with _sdk_error_contract():
+            # The public OAuth strategy owns its client's context and close.
+            auth = await strategy.async_exchange_token(client_factory(None))
+    except AuthExpiredError as error:
+        failure = _OAuthFailure.model_validate(
+            error.args[1] if len(error.args) > 1 else {}
         )
-        response.raise_for_status()
-        data: dict[str, object] = response.json()
-        token = data.get("access_token")
-        if not isinstance(token, str) or not token:
-            error = data.get("error", "unknown_error")
-            desc = data.get("error_description", "")
-            msg = f"OAuth token exchange failed: {error}"
-            if desc:
-                msg += f" - {desc}"
-            raise ValueError(msg)
-        return token
+        message = f"OAuth token exchange failed: {failure.error}"
+        if failure.error_description:
+            message += f" - {failure.error_description}"
+        raise ValueError(message) from None
+    if not isinstance(auth.token, str) or not auth.token:
+        raise ValueError("OAuth token exchange failed: token is missing")
+    return auth.token
 
 
 async def list_user_installations(
     user_token: str,
-) -> list[dict[str, object]]:
-    """List GitHub App installations accessible by authenticated user.
-
-    GitHub API ``GET /user/installations`` call.
-    Uses the user OAuth token, so only installations accessible by that user are
-    returned.
-
-    :param user_token: User GitHub access token
-    :return: Installation list; each item includes id, account, app_id, etc.
-    :raises httpx.HTTPStatusError: GitHub API call failure
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://api.github.com/user/installations",
-            headers={
-                "Authorization": f"Bearer {user_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            params={"per_page": 100},
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
+) -> tuple[GitHubInstallationSnapshot, ...]:
+    """Decode the original first 100 user-visible installations at SDK ingress."""
+    async with _github_client(None, client_factory) as client:
+        response = (
+            await client.rest.apps.async_list_installations_for_authenticated_user(
+                per_page=100, headers=_bearer_headers(user_token)
+            )
         )
-        response.raise_for_status()
-        data: dict[str, object] = response.json()
-        installations = data.get("installations")
-        if not is_string_object_dict_list(installations):
-            return []
-        return installations
+        # This is the sole operation-specific ingress decoder. Generated SDK
+        # model coercion would change legacy boolean-ID and malformed-skip behavior.
+        payload = _UserInstallationEnvelope.model_validate(response.raw_response.json())
+        return decode_github_installations(payload.installations)
 
 
-async def list_installations(jwt_token: str) -> list[dict[str, object]]:
-    """List all installations of the GitHub App.
-
-    GitHub API ``GET /app/installations`` call.
-    Uses App JWT, so returns all installations for that App.
-
-    :param jwt_token: GitHub App JWT
-    :return: Installation list; each item includes id, account, app_id, etc.
-    :raises httpx.HTTPStatusError: GitHub API call failure
-    """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            "https://api.github.com/app/installations",
-            headers={
-                "Authorization": f"Bearer {jwt_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-            params={"per_page": 100},
+async def list_installations(
+    jwt_token: str,
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
+) -> tuple[GitHubInstallationSnapshot, ...]:
+    """Decode the original first 100 App installations through the public SDK."""
+    async with _github_client(None, client_factory) as client:
+        response = await client.rest.apps.async_list_installations(
+            per_page=100, headers=_bearer_headers(jwt_token)
         )
-        response.raise_for_status()
-        data: object = response.json()
-        if not is_string_object_dict_list(data):
-            return []
-        return data
+        return decode_github_installations(response.raw_response.json())
 
 
 async def revoke_oauth_token(
     client_id: str,
     client_secret: str,
     token: str,
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
 ) -> None:
-    """Revoke GitHub OAuth token.
-
-    Immediately invalidates used temporary tokens to reduce token leak risk.
-    On failure, logs only a warning and does not propagate exceptions.
-
-    :param client_id: OAuth Client ID
-    :param client_secret: OAuth Client Secret
-    :param token: Access token to revoke
-    """
+    """Revoke one temporary token with SDK Basic auth and best-effort HTTP cleanup."""
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.request(
-                "DELETE",
-                f"https://api.github.com/applications/{client_id}/token",
-                auth=(client_id, client_secret),
-                json={"access_token": token},
+        async with _github_client(
+            OAuthAppAuthStrategy(client_id, client_secret), client_factory
+        ) as client:
+            await client.rest.apps.async_delete_token(
+                client_id,
+                access_token=token,
                 headers={
                     "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
+                    "X-GitHub-Api-Version": _API_VERSION,
                 },
             )
-            response.raise_for_status()
-    except Exception:  # noqa: BLE001
-        logger.warning(
-            "Failed to revoke GitHub OAuth token",
-            exc_info=True,
+    except asyncio.CancelledError:
+        raise
+    except httpx.HTTPError:
+        logger.warning("Failed to revoke GitHub OAuth token", exc_info=True)
+
+
+async def get_installation(
+    jwt_token: str,
+    installation_id: str,
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
+) -> GitHubInstallationSnapshot:
+    """Return one typed App installation instead of unvalidated provider JSON."""
+    async with _github_client(None, client_factory) as client:
+        response = await client.rest.apps.async_get_installation(
+            int(installation_id), headers=_bearer_headers(jwt_token)
         )
+        records = decode_github_installations([response.raw_response.json()])
+        if not records:
+            raise ValueError("GitHub installation response has invalid identity fields")
+        return records[0]
 
 
-async def get_installation(jwt_token: str, installation_id: str) -> dict[str, object]:
-    """Fetch GitHub App installation metadata.
-
-    :param jwt_token: GitHub App JWT
-    :param installation_id: Installation ID
-    :return: GitHub installation JSON object
-    :raises httpx.HTTPStatusError: GitHub API call failure
-    """
-    url = f"https://api.github.com/app/installations/{installation_id}"
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            url,
-            headers={
-                "Authorization": f"Bearer {jwt_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+async def exchange_installation_token(
+    jwt_token: str,
+    installation_id: str,
+    *,
+    client_factory: GitHubClientFactory = create_github_client,
+) -> str:
+    """Issue an installation token through the supported App access-token operation."""
+    async with _github_client(None, client_factory) as client:
+        response = await client.rest.apps.async_create_installation_access_token(
+            int(installation_id), headers=_bearer_headers(jwt_token)
         )
-        response.raise_for_status()
-        data: object = response.json()
-        if not is_string_object_dict(data):
-            return {}
-        return data
-
-
-async def exchange_installation_token(jwt_token: str, installation_id: str) -> str:
-    """Exchange JWT for Installation Access Token.
-
-    GitHub API ``POST /app/installations/{id}/access_tokens`` call.
-
-    :param jwt_token: GitHub App JWT
-    :param installation_id: Installation ID
-    :return: Installation access token (``ghs_...``)
-    :raises httpx.HTTPStatusError: GitHub API call failure
-    """
-    url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {jwt_token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-        response.raise_for_status()
-        data: dict[str, object] = response.json()
-        token = data["token"]
-        assert isinstance(token, str)  # noqa: S101 — GitHub API response schema guarantee
-        return token
+        return _InstallationToken.model_validate(response.raw_response.json()).token

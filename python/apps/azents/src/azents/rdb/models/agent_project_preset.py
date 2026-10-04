@@ -21,7 +21,7 @@ class RDBAgentProjectPreset(RDBModel):
         name="uq_agent_project_presets_agent_path",
     )
     IX_AGENT_UPDATED = sa.Index(
-        "ix_agent_project_presets_agent_updated",
+        "ix_agent_project_presets_agent_id_updated_at",
         "agent_id",
         "updated_at",
     )

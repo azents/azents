@@ -22,6 +22,8 @@ dependencies = [
     "bcrypt==5.0.0",
     "pyjwt==2.15.1",
     "cryptography==50.0.1",
+    # Supported GitHub API and OAuth operations
+    "githubkit[auth-app]==0.16.1",
     # Utilities
     "pytz==2026.3.post1",
     "tzdata==2026.3",

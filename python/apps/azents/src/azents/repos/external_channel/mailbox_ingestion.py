@@ -2305,7 +2305,9 @@ def _response_mode_ignored_reason(
     return None
 
 
-def _approval_url(web_url: str, access_request_id: str) -> str | None:
+def _approval_url(web_url: str | None, access_request_id: str) -> str | None:
+    if web_url is None:
+        return None
     parsed = urlparse(web_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None

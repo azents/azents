@@ -736,7 +736,7 @@ def _settings_response(
     settings: ExternalChannelParticipationSettings,
     origin_interaction_id: str,
     secret: str,
-    web_url: str,
+    web_url: str | None,
     response_type: Literal[4, 7],
     personal: DiscordPrivatePresentations | None = None,
 ) -> dict[str, object]:
@@ -935,7 +935,7 @@ def _response_mode_options(
 def _settings_session_url(
     *,
     settings: ExternalChannelParticipationSettings,
-    web_url: str,
+    web_url: str | None,
 ) -> str | None:
     navigation = settings.session_navigation
     if navigation is None:

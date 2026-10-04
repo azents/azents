@@ -3,6 +3,10 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.github_installation import (
+    GitHubInstallationSnapshot,
+    decode_github_installations,
+)
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -26,16 +30,15 @@ def _make_installation(
     login: str = "test-org",
     account_type: str = "Organization",
     avatar_url: str = "https://example.com/avatar.png",
-) -> dict[str, object]:
-    """Create installation dict in GitHub API format."""
-    return {
-        "id": inst_id,
-        "account": {
-            "login": login,
-            "type": account_type,
-            "avatar_url": avatar_url,
-        },
-    }
+) -> GitHubInstallationSnapshot:
+    """Create a validated provider installation snapshot."""
+    return GitHubInstallationSnapshot(
+        installation_id=inst_id,
+        app_id=None,
+        account_login=login,
+        account_type=account_type,
+        account_avatar_url=avatar_url,
+    )
 
 
 class TestGithubUserInstallationRepository:
@@ -203,12 +206,17 @@ class TestGithubUserInstallationRepository:
             rdb_session,
             user_id,
             _PLATFORM_APP_ID,
-            [
-                {"id": "not-int", "account": {"login": "x", "type": "User"}},
-                {"id": 6001},  # account missing
-                {"id": 6002, "account": "not-dict"},
-                _make_installation(6003, login="valid-org"),
-            ],
+            decode_github_installations(
+                [
+                    {"id": "not-int", "account": {"login": "x", "type": "User"}},
+                    {"id": 6001},  # account missing
+                    {"id": 6002, "account": "not-dict"},
+                    {
+                        "id": 6003,
+                        "account": {"login": "valid-org", "type": "Organization"},
+                    },
+                ]
+            ),
         )
 
         # Then: save only one valid item

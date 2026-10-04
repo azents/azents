@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+from collections.abc import Sequence
 from typing import Annotated, Any, assert_never, overload
 
 from azcommon.result import Failure, Result, Success
@@ -10,6 +11,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from azents.core.enums import MCPOAuthConnectionStatus, WorkspaceUserRole
 from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatform
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.toolkit_errors import (
     DuplicateAgentToolkit,
@@ -896,7 +898,7 @@ class ToolkitService:
         user_id: str,
         role: WorkspaceUserRole,
         platform_app_id: str,
-        installations: list[dict[str, object]],
+        installations: Sequence[GitHubInstallationSnapshot],
     ) -> Result[None, AgentNotBelongToWorkspace | NotAdmin]:
         """Synchronize GitHub installations after current Agent authorization."""
 

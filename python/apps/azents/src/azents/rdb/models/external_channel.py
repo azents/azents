@@ -198,7 +198,7 @@ class RDBExternalChannelConnection(RDBModel):
         ),
     )
     UQ_HTTP_CALLBACK_SELECTOR_HASH = sa.Index(
-        "uq_external_channel_connections_http_callback_selector_hash",
+        "ix_external_channel_connections_http_callback_selector_hash",
         "http_callback_selector_hash",
         unique=True,
         postgresql_where=sa.text("http_callback_selector_hash IS NOT NULL"),
@@ -1396,7 +1396,7 @@ class RDBExternalChannelBinding(RDBModel):
         "route_id",
     )
     UQ_CONNECTED_RESOURCE = sa.Index(
-        "uq_external_channel_bindings_connected_resource",
+        "ix_external_channel_bindings_resource_id",
         "resource_id",
         unique=True,
         postgresql_where=sa.text("disconnected_at IS NULL"),
@@ -1670,14 +1670,14 @@ class RDBExternalChannelAccessGrant(RDBModel):
         "agent_session_id",
     )
     UQ_ACTIVE_AGENT_GRANT = sa.Index(
-        "uq_external_channel_access_grants_active_agent",
+        "ix_external_channel_access_grants_agent_id_principal_id",
         "agent_id",
         "principal_id",
         unique=True,
         postgresql_where=sa.text("scope = 'agent' AND revoked_at IS NULL"),
     )
     UQ_ACTIVE_SESSION_GRANT = sa.Index(
-        "uq_external_channel_access_grants_active_session",
+        "ix_external_channel_access_grants_agent_session_id_principal_id",
         "agent_session_id",
         "principal_id",
         unique=True,

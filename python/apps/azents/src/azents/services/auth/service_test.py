@@ -17,6 +17,7 @@ from azents.core.config import (
     RefreshTokenConfig,
     SignupTokenConfig,
 )
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.auth_operation import AuthOperationRepository
@@ -71,7 +72,9 @@ _TEST_AUTH_CONFIG = AuthConfig(
 
 def _make_email_service() -> EmailService:
     """EmailService for tests (works without SES)."""
-    service = EmailService(config=None, ses_client=None)
+    service = EmailService(
+        config=None, ses_client=None, template_environment=create_template_environment()
+    )
     service.send_verification_code = AsyncMock()
     return service
 
@@ -135,7 +138,11 @@ class _TransactionAssertingEmailService(EmailService):
     """Assert delivery occurs after the operation repository closes its session."""
 
     def __init__(self, observed_session_manager: _ObservedSessionManager) -> None:
-        super().__init__(config=None, ses_client=None)
+        super().__init__(
+            config=None,
+            ses_client=None,
+            template_environment=create_template_environment(),
+        )
         self.observed_session_manager = observed_session_manager
         self.delivery_count = 0
 

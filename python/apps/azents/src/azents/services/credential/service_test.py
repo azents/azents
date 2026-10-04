@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from types_aiobotocore_ses.client import SESClient
 
 from azents.core.config import EmailConfig
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.credential_read_operations import CredentialReadOperationRepository
@@ -29,7 +30,11 @@ from azents.services.credential.service import CredentialService
 def _make_email_service(*, configured: bool) -> EmailService:
     """Create EmailService for tests."""
     if not configured:
-        return EmailService(config=None, ses_client=None)
+        return EmailService(
+            config=None,
+            ses_client=None,
+            template_environment=create_template_environment(),
+        )
     return EmailService(
         config=EmailConfig(
             sender="noreply@example.com",
@@ -40,6 +45,7 @@ def _make_email_service(*, configured: bool) -> EmailService:
             web_url="https://azents.example.com",
         ),
         ses_client=create_autospec(SESClient, instance=True),
+        template_environment=create_template_environment(),
     )
 
 

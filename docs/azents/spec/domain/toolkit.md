@@ -9,6 +9,8 @@ code_paths:
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/github_auth.py
+  - python/apps/azents/src/azents/core/github_installation.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
@@ -108,7 +110,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-04
-spec_version: 131
+spec_version: 132
 ---
 
 # Toolkit
@@ -515,6 +517,26 @@ only after successful Workspace synchronization, while Agent setup retains its
 existing `finally` revocation. Persistence keeps duplicate-row order and defaults
 a missing or non-string avatar to an empty string; the Public list separately
 requires a string avatar.
+
+GitHub App identity, App/user installation listing, installation-token issuance,
+OAuth authorization-code exchange and temporary-token revocation use public
+asynchronous GitHubKit operations. SDK transport retains the current endpoints,
+authentication, `2022-11-28` header, five-second timeout and first-page
+100-installation limit; retries and response caching are disabled. App JWT
+issuance retains RS256, normalized PEM newlines, a 60-second backdate and a
+nine-minute expiry.
+
+Installation/account JSON is decoded at provider ingress into immutable
+`GitHubInstallationSnapshot` records. Domain, persistence and Public projections
+consume declared fields while preserving ordered duplicates, boolean-ID
+compatibility, malformed-record skipping, and the distinction between unknown
+avatars and explicit empty strings. Persistence retains its empty-string
+fallback; Public projections omit unknown avatars. Provider extensions remain
+compatible, and no Public wire field is added or renamed.
+
+Expected HTTP errors retain the caller contract. Revocation handles expected
+HTTP cleanup failures once; unexpected defects and cancellation propagate.
+Validation diagnostics do not expose token-bearing provider payloads.
 
 Toolkit list/detail responses expose an optional redacted `authorization_state` with `status=reconnect_required` and the stable reason `app_identity_changed` when a persisted Toolkit belongs to a different Platform App. Main Web uses this Public API projection to block misleading connect/test actions and guide a manager to reconnect; it does not call the Admin API or depend on the Admin client. Persisted Toolkit configuration and Agent attachments are retained across App identity changes.
 

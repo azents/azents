@@ -32,6 +32,7 @@ from azents.core.config import (
     RegistrationMode,
     SignupTokenConfig,
 )
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.core.enums import SignupTokenDeliveryMethod
 from azents.core.signup_token_operations import (
@@ -151,6 +152,7 @@ class ClosedSignupEmail(EmailService):
             ses_client=create_autospec(SESClient, instance=True)
             if configured
             else None,
+            template_environment=create_template_environment(),
         )
         self.scope = scope
         self.events = events

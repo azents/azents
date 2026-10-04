@@ -1085,7 +1085,9 @@ async def get_manifest_guidance(
         raise _not_found() from error
     callback_url = config.external_channel_slack_callback_url
     if not callback_url:
-        callback_url = f"{config.api_url.rstrip('/')}/external-channel/v1/slack/events"
+        callback_url = "/external-channel/v1/slack/events"
+        if config.api_url is not None:
+            callback_url = f"{config.api_url.rstrip('/')}{callback_url}"
     return slack_manifest_guidance(
         transport,
         callback_url=callback_url,
