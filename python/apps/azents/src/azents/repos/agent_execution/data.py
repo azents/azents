@@ -1,6 +1,7 @@
 """Event agent execution repository data models."""
 
 import datetime
+from typing import TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -59,55 +60,22 @@ class AgentRunCreate(BaseModel):
     )
 
 
-class AgentRunPatch(BaseModel):
-    """Agent run partial update schema."""
+class AgentRunPatch(TypedDict, total=False):
+    """Presence-aware run updates; omitted fields retain their current values."""
 
-    phase: AgentRunPhase | None = Field(default=None, description="Run phase")
-    status: AgentRunStatus | None = Field(default=None, description="Run status")
-    parent_agent_run_id: str | None = Field(default=None)
-    started_at: datetime.datetime | None = Field(default=None)
-    model_call_started_at: datetime.datetime | None = Field(
-        default=None,
-        description="Current model call start time",
-    )
-    active_tool_calls: list[ActiveToolCall] | None = Field(
-        default=None,
-        description="Active tool calls",
-    )
-    retry_state: FailedRunRetryState | None = Field(
-        default=None,
-        description="Durable failed-run retry state",
-    )
-    model_operation_state: ModelOperationState | None = Field(
-        default=None,
-        description="Durable foreground and compaction model operation state",
-    )
-    last_completed_event_id: str | None = Field(
-        default=None,
-        description="Last completed event ID",
-    )
-    terminal_result_event_id: str | None = Field(
-        default=None,
-        description="Terminal result source event ID",
-    )
-    terminal_result_message: str | None = Field(
-        default=None,
-        description="Terminal result message projected for parent observation",
-    )
-    parent_result_delivery_state: AgentRunParentResultDeliveryState | None = Field(
-        default=None,
-        description="Finalized parent mailbox delivery state",
-    )
-    parent_result_mailbox_item_id: str | None = Field(
-        default=None,
-        description="Delivered parent mailbox MailboxItem ID",
-    )
-    parent_result_enqueued_at: datetime.datetime | None = Field(
-        default=None,
-        description="Parent mailbox enqueue time",
-    )
-    stop_requested_at: datetime.datetime | None = Field(
-        default=None,
-        description="Stop requested time",
-    )
-    ended_at: datetime.datetime | None = Field(default=None, description="End time")
+    phase: AgentRunPhase | None
+    status: AgentRunStatus | None
+    parent_agent_run_id: str | None
+    started_at: datetime.datetime | None
+    model_call_started_at: datetime.datetime | None
+    active_tool_calls: list[ActiveToolCall] | None
+    retry_state: FailedRunRetryState | None
+    model_operation_state: ModelOperationState | None
+    last_completed_event_id: str | None
+    terminal_result_event_id: str | None
+    terminal_result_message: str | None
+    parent_result_delivery_state: AgentRunParentResultDeliveryState | None
+    parent_result_mailbox_item_id: str | None
+    parent_result_enqueued_at: datetime.datetime | None
+    stop_requested_at: datetime.datetime | None
+    ended_at: datetime.datetime | None

@@ -32,8 +32,7 @@ class MailboxDatabaseRepository:
         )
         if any(
             item.kind is MailboxItemKind.ACTION_MESSAGE
-            and item.presentation.action is not None
-            and item.presentation.action.get("type") == action_type
+            and item.presentation.action_identity.action_type == action_type
             for item in pending
         ):
             return True

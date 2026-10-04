@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.agent import SelectableModelOption
+from azents.core.agent import SelectableModelCandidate, SelectableModelOption
 from azents.core.enums import ExternalChannelProvider, LLMProvider
 from azents.core.external_model_settings import (
     ExternalModelActorContext,
@@ -39,6 +39,7 @@ from azents.rdb.models.external_model_settings import (
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_execution.repository_test import _model_operation_state
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.external_account_link import ExternalAccountLinkRepository
@@ -47,6 +48,7 @@ from azents.repos.external_channel.model_settings import (
     ExternalModelSettingsRepository,
     _AuthorizationResult,
     _AuthorizedModelTarget,
+    _SavedModelOptionIdentity,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.session_model_profile.repository import SessionModelProfileRepository
@@ -375,6 +377,121 @@ def test_duplicate_saved_support_remains_invalid() -> None:
 def test_no_supported_execution_options_stays_empty() -> None:
     projected = ExternalModelSettingsRepository._public_option(_snapshot([]))
     assert projected.execution_options == []
+
+
+def test_saved_id_lookup_preserves_prefix_and_ignored_target_validation() -> None:
+    draft = MagicMock(spec=RDBExternalModelDraft)
+    draft.options_snapshot = [
+        {"option_id": "other", "target_label": None},
+        {"option_id": "selected", "target_label": "Quality", "opaque": {"future": 1}},
+        {"option_id": None, "target_label": None},
+    ]
+    restored = ExternalModelSettingsRepository._snapshot_option(draft, "selected")
+    assert restored == _SavedModelOptionIdentity("selected", "Quality")
+    with pytest.raises(RuntimeError, match="option snapshot is invalid"):
+        ExternalModelSettingsRepository._snapshot_option(draft, "missing")
+
+
+def test_saved_target_lookup_preserves_unconsumed_ids_and_ignored_tail() -> None:
+    values: list[dict[str, object]] = [
+        {"option_id": None, "target_label": "Other"},
+        {"option_id": "selected", "target_label": "Quality"},
+        {"option_id": None, "target_label": None},
+    ]
+    restored = ExternalModelSettingsRepository._saved_option_for_target(
+        values, "Quality"
+    )
+    assert restored == _SavedModelOptionIdentity("selected", "Quality")
+    with pytest.raises(RuntimeError, match="option snapshot is invalid"):
+        ExternalModelSettingsRepository._saved_option_for_target(values, "Missing")
+
+
+def test_identity_refresh_ignores_display_metadata_that_is_replaced() -> None:
+    retained: dict[str, object] = {
+        "option_id": "selected",
+        "target_label": "Quality",
+        "label": None,
+        "reasoning_efforts": False,
+        "execution_options": "obsolete invalid display",
+    }
+    assert _SavedModelOptionIdentity.from_saved(retained) == (
+        _SavedModelOptionIdentity("selected", "Quality")
+    )
+    agent = MagicMock(spec=Agent)
+    agent.selectable_model_options = []
+    repository = _replay_fixture(
+        saved_definition={"id": "fast", "cost_hint": "Retained hint."},
+        removed_target=False,
+    ).repository
+    assert repository._options_snapshot(agent, previous=[retained]) == []
+
+
+def test_fresh_snapshot_keeps_flat_storage_shape_and_retained_identity() -> None:
+    operation = _model_operation_state().foreground
+    assert operation is not None
+    candidate = operation.current_candidate
+    option = SelectableModelOption(
+        label="Quality",
+        candidates=[
+            SelectableModelCandidate(
+                model_selection=candidate.model_selection,
+                settings=candidate.settings,
+            )
+        ],
+        subagent_enabled=True,
+        subagent_guidance=None,
+    )
+    agent = MagicMock(spec=Agent)
+    agent.selectable_model_options = [option]
+    repository = _replay_fixture(
+        saved_definition={"id": "fast", "cost_hint": "Retained hint."},
+        removed_target=False,
+    ).repository
+    snapshot = repository._options_snapshot(
+        agent,
+        previous=[{"option_id": "retained", "target_label": "Quality"}],
+    )[0]
+    assert snapshot.option_id == "retained"
+    assert snapshot.target_label == option.label
+    stored = snapshot.to_storage()
+    assert set(stored) == {
+        "option_id",
+        "target_label",
+        "label",
+        "model_display_name",
+        "reasoning_efforts",
+        "execution_options",
+    }
+    projected = repository._public_option(stored)
+    assert projected.option_id == snapshot.option_id
+    assert projected.model_display_name == candidate.model_selection.model_display_name
+
+
+@pytest.mark.parametrize("invalid", [None, "", 123, False, []])
+def test_saved_required_identity_keeps_visible_invalid_shape(
+    invalid: object,
+) -> None:
+    with pytest.raises(RuntimeError, match="option snapshot is invalid"):
+        _SavedModelOptionIdentity.from_saved(
+            {"option_id": invalid, "target_label": "Quality"}
+        )
+
+
+def test_public_display_keeps_unused_target_and_extra_metadata_opaque() -> None:
+    value = _snapshot([])
+    value["target_label"] = False
+    value["extension"] = {"future": ["retained", None]}
+    projected = ExternalModelSettingsRepository._public_option(value)
+    assert projected.option_id == "opaque-option-1"
+    assert projected.label == "Quality"
+
+
+def test_public_display_preserves_execution_validation_before_identity() -> None:
+    value = _snapshot([])
+    value["execution_options"] = None
+    value["option_id"] = ""
+    with pytest.raises(ValidationError):
+        ExternalModelSettingsRepository._public_option(value)
 
 
 @pytest.mark.asyncio

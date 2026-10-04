@@ -1096,21 +1096,21 @@ class AgentRunRepository:
         if rdb is None:
             raise ValueError("Agent run not found")
 
-        values = patch.model_dump(exclude_unset=True)
-        if "active_tool_calls" in values:
+        values = dict(patch)
+        if "active_tool_calls" in patch:
             values["active_tool_calls"] = [
                 call.model_dump(mode="json", exclude_none=True)
-                for call in patch.active_tool_calls or []
+                for call in patch["active_tool_calls"] or []
             ]
-        if "retry_state" in values:
+        if "retry_state" in patch:
             values["retry_state"] = (
-                patch.retry_state.model_dump(mode="json", exclude_none=True)
-                if patch.retry_state is not None
+                patch["retry_state"].model_dump(mode="json", exclude_none=True)
+                if patch["retry_state"] is not None
                 else None
             )
-        if "model_operation_state" in values:
+        if "model_operation_state" in patch:
             values["model_operation_state"] = _serialize_model_operation_state(
-                patch.model_operation_state
+                patch["model_operation_state"]
             )
         if values:
             await session.execute(

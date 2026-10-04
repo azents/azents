@@ -1,11 +1,12 @@
 """Repository-owned Runtime Web service authority operations."""
 
 import base64
+import dataclasses
 import datetime
 import hashlib
 import json
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import NamedTuple
 
 import sqlalchemy as sa
@@ -36,6 +37,18 @@ class RuntimeWebServicePage(NamedTuple):
 
     items: list[RuntimeWebServiceRecord]
     total: int
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeWebDeleteReceipt:
+    """Decoded delete-operation replay result."""
+
+    deleted: bool
+
+    @classmethod
+    def decode(cls, payload: Mapping[str, object]) -> "RuntimeWebDeleteReceipt":
+        """Restore persisted delete truthiness without rewriting opaque fields."""
+        return cls(deleted=bool(payload.get("deleted", False)))
 
 
 class RuntimeWebRepositoryConflict(ValueError):
@@ -426,7 +439,7 @@ class RuntimeWebRepository:
             payload=payload,
         )
         if replay is not None:
-            return bool(replay.result.get("deleted", False))
+            return RuntimeWebDeleteReceipt.decode(replay.result).deleted
         rdb = await self._service_by_id(session, service_id, for_update=True)
         if rdb is not None and (
             rdb.agent_id != agent_id or rdb.revision != expected_revision

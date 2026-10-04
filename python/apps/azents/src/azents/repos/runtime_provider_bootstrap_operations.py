@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from collections.abc import Mapping
 from typing import Annotated
 
 from azcommon.datetime import tznow
@@ -65,6 +66,27 @@ _TERMINAL_LIFECYCLE_STATES = frozenset(
         RuntimeProviderLifecycleState.FORCE_RETIRED,
     }
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class PlatformDefaultCreationSeed:
+    """Decoded creation-only Platform default decision."""
+
+    set_as_platform_default_when_unset: bool
+
+    @classmethod
+    def decode(
+        cls,
+        payload: Mapping[str, object] | None,
+    ) -> "PlatformDefaultCreationSeed":
+        """Restore the historical truthiness policy at the JSON boundary."""
+        return cls(
+            set_as_platform_default_when_unset=(
+                bool(payload.get("set_as_platform_default_when_unset", False))
+                if payload is not None
+                else False
+            )
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -422,15 +444,16 @@ class RuntimeProviderBootstrapOperations:
                 reconciled_provider_id=None,
                 conflicted_declaration_key=declaration.declaration_key,
             )
+        creation_seed = PlatformDefaultCreationSeed.decode(
+            existing.creation_seeds
+            if existing is not None and existing.creation_seeds is not None
+            else declaration.creation_seeds
+        )
         await self._seed_platform_default_when_unset(
             session=session,
             source=source,
             declaration=declaration,
-            creation_seeds=(
-                existing.creation_seeds
-                if existing is not None and existing.creation_seeds is not None
-                else declaration.creation_seeds
-            ),
+            creation_seed=creation_seed,
             now=now,
         )
         await self.repository.append_audit_event(
@@ -646,14 +669,11 @@ class RuntimeProviderBootstrapOperations:
         session: AsyncSession,
         source: RuntimeProviderBootstrapSource,
         declaration: RuntimeProviderBootstrapDeclarationInput,
-        creation_seeds: dict[str, object] | None,
+        creation_seed: PlatformDefaultCreationSeed,
         now: datetime.datetime,
     ) -> None:
         """Apply the creation-only Platform default seed when policy is unset."""
-        if not creation_seeds or not creation_seeds.get(
-            "set_as_platform_default_when_unset",
-            False,
-        ):
+        if not creation_seed.set_as_platform_default_when_unset:
             return
         section = SystemSettingSection.PLATFORM_RUNTIME
         await self.system_setting_repository.acquire_section_lock(

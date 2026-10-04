@@ -1,9 +1,10 @@
 """MailboxItem repository data models."""
 
 import datetime
+from dataclasses import dataclass
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -16,6 +17,21 @@ from azents.engine.events.types import FileOutputPart
 from azents.rdb.models.event import JSONValue
 
 
+@dataclass(frozen=True)
+class MailboxActionIdentity:
+    """Known action identity decoded independently of opaque extension fields."""
+
+    action_type: str | None
+
+    @classmethod
+    def from_action(
+        cls, action: dict[str, JSONValue] | None
+    ) -> "MailboxActionIdentity":
+        """Preserve absent/non-string discriminators without coercing raw JSON."""
+        value = None if action is None else action.get("type")
+        return cls(action_type=value if isinstance(value, str) else None)
+
+
 class MailboxPresentationItem(BaseModel):
     """Stable presentation item embedded in a mailbox envelope."""
 
@@ -26,6 +42,20 @@ class MailboxPresentationItem(BaseModel):
     action: dict[str, JSONValue] | None = None
     attachments: list[str] = Field(default_factory=list)
     file_parts: list[FileOutputPart] = Field(default_factory=list)
+    _action_identity: MailboxActionIdentity = PrivateAttr(
+        default_factory=lambda: MailboxActionIdentity(action_type=None)
+    )
+
+    @model_validator(mode="after")
+    def restore_action_identity(self) -> "MailboxPresentationItem":
+        """Restore consumed identity while retaining action JSON for relay/storage."""
+        self._action_identity = MailboxActionIdentity.from_action(self.action)
+        return self
+
+    @property
+    def action_identity(self) -> MailboxActionIdentity:
+        """Return the typed discriminator restored with this presentation."""
+        return self._action_identity
 
 
 class MailboxPayloadBase(BaseModel):
