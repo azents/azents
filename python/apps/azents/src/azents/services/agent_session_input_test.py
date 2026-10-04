@@ -4,7 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager, suppress
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 from uuid import uuid4
 
 import pytest
@@ -54,6 +54,7 @@ from azents.core.exchange_file_errors import (
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionAppliedInferenceProfile,
+    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.mailbox_data import MailboxItem
@@ -76,6 +77,10 @@ from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
@@ -614,6 +619,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=MailboxRepository(),
                 mailbox_admission_repository=mailbox_admission_repository,
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=mailbox_item_service,
             )
@@ -720,6 +728,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -813,6 +824,7 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_RejectingExchangeFileService(),
                 mailbox_repository=MailboxRepository(),
                 mailbox_admission_repository=mailbox_admission_repository,
+                active_profile_repository=_active_profile_repository(session_manager),
                 session_manager=session_manager,
                 mailbox_database_repository=mailbox_item_service,
             )
@@ -869,6 +881,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=MailboxRepository(),
                 mailbox_admission_repository=mailbox_admission_repository,
+                active_profile_repository=_active_profile_repository(
+                    _session_manager_double
+                ),
                 session_manager=_session_manager_double,
                 mailbox_database_repository=mailbox_item_service,
             )
@@ -937,6 +952,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=_mailbox_item_service(rdb_session_manager),
                 mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
                     rdb_session_manager
                 ),
                 session_manager=rdb_session_manager,
@@ -1048,6 +1066,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -1152,6 +1173,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -1228,6 +1252,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=_mailbox_item_service(rdb_session_manager),
                 mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
                     rdb_session_manager
                 ),
                 session_manager=rdb_session_manager,
@@ -1366,6 +1393,9 @@ class TestAgentSessionInputService:
                         mailbox_admission_repository=_mailbox_admission_repository(
                             independent_session_manager
                         ),
+                        active_profile_repository=_active_profile_repository(
+                            independent_session_manager
+                        ),
                         session_manager=independent_session_manager,
                         mailbox_database_repository=MailboxDatabaseRepository(
                             mailbox_item_repository=_mailbox_item_service(
@@ -1494,6 +1524,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -1588,6 +1621,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -1671,6 +1707,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -1750,6 +1789,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -1822,6 +1864,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=_mailbox_item_service(rdb_session_manager),
                 mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
                     rdb_session_manager
                 ),
                 session_manager=rdb_session_manager,
@@ -1898,6 +1943,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=_mailbox_item_service(rdb_session_manager),
                 mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
                     rdb_session_manager
                 ),
                 session_manager=rdb_session_manager,
@@ -2034,6 +2082,9 @@ class TestAgentSessionInputService:
                     mailbox_admission_repository=_mailbox_admission_repository(
                         session_manager
                     ),
+                    active_profile_repository=_active_profile_repository(
+                        session_manager
+                    ),
                     session_manager=session_manager,
                     mailbox_database_repository=MailboxDatabaseRepository(
                         mailbox_item_repository=_mailbox_item_service(session_manager),
@@ -2148,6 +2199,9 @@ class TestAgentSessionInputService:
                 attachment_claim_repository=_ExchangeFileService(),
                 mailbox_repository=_mailbox_item_service(rdb_session_manager),
                 mailbox_admission_repository=_mailbox_admission_repository(
+                    rdb_session_manager
+                ),
+                active_profile_repository=_active_profile_repository(
                     rdb_session_manager
                 ),
                 session_manager=rdb_session_manager,
@@ -2298,6 +2352,9 @@ class TestAgentSessionInputService:
                 mailbox_admission_repository=_mailbox_admission_repository(
                     rdb_session_manager
                 ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
                 mailbox_database_repository=MailboxDatabaseRepository(
                     mailbox_item_repository=_mailbox_item_service(rdb_session_manager),
@@ -2425,3 +2482,26 @@ class TestAgentSessionInputService:
             first_post_promotion_retry.value.accepted_mailbox_item_id
             == first.value.accepted_mailbox_item_id
         )
+
+
+def _active_profile_repository(
+    manager: SessionManager[AsyncSession],
+) -> ActiveProfileAdmissionRepository:
+    """Keep these lifecycle-only fixtures scoped to their declared option contract."""
+    del manager
+    repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
+
+    async def validate(
+        session: AsyncSession,
+        *,
+        agent: Agent,
+        profile: RequestedInferenceProfile,
+        captured: CapturedProfileAdmission | None,
+    ) -> None:
+        del session, captured
+        validate_requested_profile_against_options(
+            agent.selectable_model_options, profile
+        )
+
+    repository.validate_in_session.side_effect = validate
+    return repository

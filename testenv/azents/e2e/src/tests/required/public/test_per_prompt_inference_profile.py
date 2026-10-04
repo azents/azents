@@ -2012,7 +2012,7 @@ class TestModelSupportContract:
                     )
                 )
 
-            def reject_max() -> None:
+            def reject_max(expected_detail: str) -> None:
                 rejected_session = _create_profile_session(
                     server_url=azents_public_server_url, token=token, agent_id=agent_id
                 )
@@ -2026,7 +2026,7 @@ class TestModelSupportContract:
                     target="Quality",
                     effort="max",
                     enabled_execution_options=[],
-                    expected_detail="Reasoning effort is not supported by model target",
+                    expected_detail=expected_detail,
                 )
                 assert (
                     _input_event(
@@ -2064,14 +2064,14 @@ class TestModelSupportContract:
                 WorkspaceModelSettingsResponse,
             )
             saved_selections_unchanged(refreshed_contract)
-            reject_max()
+            reject_max("Reasoning effort is not supported by model target")
             dispatch("xhigh", 0.000003)
 
             refresh_source("missing-model")
             assert "gpt-5.5" not in entries()
             saved_selections_unchanged(None)
             # Missing current evidence cannot authorize a new dispatch.
-            reject_max()
+            reject_max("Active model metadata is unavailable: exact_entry_unavailable.")
 
             refresh_source("refreshed")
             reselected_workspace = _response_model(
@@ -2100,7 +2100,7 @@ class TestModelSupportContract:
                 assert contract(selected.normalized_capabilities) == refreshed_contract
                 assert selected.pricing is not None
                 assert selected.pricing != agent_selection.pricing
-            reject_max()
+            reject_max("Reasoning effort is not supported by model target")
             dispatch("xhigh", 0.000007)
         finally:
             # This local source fixture is global to the serial required-suite lane.

@@ -46,6 +46,10 @@ from azents.core.external_model_settings import (
     ExternalModelStale,
     ExternalModelTargetContext,
 )
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    validate_requested_profile_against_options,
+)
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
@@ -70,8 +74,14 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
+from azents.rdb.session import SessionManager
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_account_link import ExternalAccountLinkRepository
@@ -965,6 +975,7 @@ class TestExternalChannelRepository:
                 agent_session_repository=agent_session_repository,
                 workspace_user_repository=workspace_user_repository,
                 chat_write_request_repository=ChatWriteRequestRepository(),
+                active_profile_repository=_active_profile_repository(session_manager),
                 session_manager=session_manager,
             ),
             agent_repository=agent_repository,
@@ -2255,3 +2266,26 @@ async def test_create_agent_route_enforces_mode_and_workspace_boundaries(
                 update={"catalog_removed_by_user_id": "not-a-route-owner"}
             ),
         )
+
+
+def _active_profile_repository(
+    manager: SessionManager[AsyncSession],
+) -> ActiveProfileAdmissionRepository:
+    """Keep these lifecycle-only fixtures scoped to their declared option contract."""
+    del manager
+    repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
+
+    async def validate(
+        session: AsyncSession,
+        *,
+        agent: Agent,
+        profile: RequestedInferenceProfile,
+        captured: CapturedProfileAdmission | None,
+    ) -> None:
+        del session, captured
+        validate_requested_profile_against_options(
+            agent.selectable_model_options, profile
+        )
+
+    repository.validate_in_session.side_effect = validate
+    return repository

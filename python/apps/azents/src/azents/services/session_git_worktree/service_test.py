@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Literal, NamedTuple
+from unittest.mock import create_autospec
 
 import pytest
 import sqlalchemy as sa
@@ -33,7 +34,10 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     WorkspaceUserRole,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    validate_requested_profile_against_options,
+)
 from azents.core.mailbox_data import (
     AgentRemoveGitWorktreeContinuationResult,
     TurnActionContinuationMailboxPayload,
@@ -66,7 +70,12 @@ from azents.rdb.models.session_agent_context import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -1030,6 +1039,7 @@ def _input_service(
                 event_transcript_repository=event_repository,
                 action_execution_repository=action_repository,
             ),
+            active_profile_repository=_active_profile_repository(session_manager),
             session_manager=session_manager,
         )
     )
@@ -5013,3 +5023,26 @@ class TestSessionGitWorktreeService:
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
         assert [call["operation"] for call in runner.calls] == ["create_git_worktree"]
+
+
+def _active_profile_repository(
+    manager: SessionManager[AsyncSession],
+) -> ActiveProfileAdmissionRepository:
+    """Keep these lifecycle-only fixtures scoped to their declared option contract."""
+    del manager
+    repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
+
+    async def validate(
+        session: AsyncSession,
+        *,
+        agent: Agent,
+        profile: RequestedInferenceProfile,
+        captured: CapturedProfileAdmission | None,
+    ) -> None:
+        del session, captured
+        validate_requested_profile_against_options(
+            agent.selectable_model_options, profile
+        )
+
+    repository.validate_in_session.side_effect = validate
+    return repository

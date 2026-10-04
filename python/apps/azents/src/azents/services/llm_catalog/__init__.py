@@ -904,7 +904,7 @@ def project_deterministic_integration_entries(
     listing: ModelListingOutput,
     source: ModelMetadataSource | None,
 ) -> list[LLMCatalogEntryCreate]:
-    """Preserve fixture capabilities while exercising normal exact pricing copies."""
+    """Publish authored fixture declarations through the normal capability compiler."""
     entries = project_integration_replacement_entries(
         integration_id=integration_id,
         provider=provider,
@@ -915,9 +915,6 @@ def project_deterministic_integration_entries(
     return [
         dataclasses.replace(
             entry,
-            normalized_capabilities=candidate.normalized_capabilities.model_dump(
-                mode="json"
-            ),
             projection_metadata={
                 **(entry.projection_metadata or {}),
                 "testenv_fixture": True,

@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/repos/active_profile_admission.py
   - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/core/action_execution_data.py
   - python/apps/azents/src/azents/core/agent_session_data.py
@@ -179,7 +180,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-04
-spec_version: 180
+spec_version: 181
 ---
 
 # Conversation & Events
@@ -1263,8 +1264,9 @@ pending command, and other typed actions enter the turn-action flow. The route r
 `session_kind = subagent` before creating a chat write request, mailbox item, pending command, live
 projection, or broker wake-up.
 `PUT /chat/v1/sessions/{session_id}/model-profile` is the transcript-free full replacement for the
-applied Session profile. It validates the label, effort, and enabled execution-option IDs against the
-current Agent option snapshot and implemented option registry while holding the Session write lock,
+applied Session profile. It validates the label, effort, and enabled execution-option IDs against
+exact current compiled capabilities for the configured Agent choices and the implemented option
+registry while holding the Session write lock,
 records the required client idempotency key, and returns the accepted `session_id`, label, effort,
 and enabled execution-option list. A matching replay returns the original accepted result
 before revalidating mutable Agent options; reusing the key with a different payload is a conflict.
@@ -1276,6 +1278,17 @@ repository-owned replacement operation preserves this web contract and the match
 Every newly accepted replacement through web, input preparation, edited input, or subagent setup
 increments `applied_profile_generation`, including an equal-value replacement. A matching web
 idempotency replay does not invoke the setter and does not increment the generation.
+
+New Human input, Team/User root creation, message edit, and web profile replacement
+share the exact-current capability admission boundary. The first repository phase
+authorizes and checks idempotent replay before capturing local declarations; pure
+compilation completes outside the database transaction. The write phase repeats
+authorization and replay checks, fences the captured option identity/order/settings,
+requested profile and local metadata, then validates the compiled profile before any
+input, idempotency record, Session or history mutation. Changed inputs reject the
+new write rather than silently adopting another choice. Saved Agent configuration
+and captured prices are unchanged; accepted replays and failed-run retries do not
+recompile their frozen work.
 
 Composer execution-option controls are separate from static model capabilities and built-in tools.
 Fast and Ultrafast share the registry-owned `processing_speed` exclusive group. Supported saved
