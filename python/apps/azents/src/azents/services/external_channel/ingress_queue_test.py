@@ -38,6 +38,7 @@ from azents.core.external_channel_ingestion import (
     _provider_failure,
     _retry_transition,
 )
+from azents.core.mailbox_data import MailboxItem
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
@@ -68,7 +69,6 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult
-from azents.repos.mailbox.data import MailboxItem
 from azents.services.external_channel.ingress_metrics import (
     ExternalChannelIngressMetrics,
 )

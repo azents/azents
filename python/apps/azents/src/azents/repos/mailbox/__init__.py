@@ -11,15 +11,14 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
-from azents.rdb.models.event import JSONValue
-from azents.rdb.models.mailbox_item import RDBMailboxItem
-
-from .data import (
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxItemCreate,
     mailbox_payload_from_fields,
 )
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 
 _MAILBOX_PAYLOAD_ADAPTER = TypeAdapter(MailboxEnvelopePayload)
 

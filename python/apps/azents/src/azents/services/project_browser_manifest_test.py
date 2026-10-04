@@ -17,6 +17,7 @@ from azents.core.enums import (
     SessionGitWorktreeStatus,
     WorkspaceUserRole,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -31,7 +32,6 @@ from azents.repos.session_working_folder_binding.data import (
     SessionWorkingFolderAuthority,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository

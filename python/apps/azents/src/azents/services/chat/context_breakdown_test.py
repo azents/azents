@@ -4,6 +4,7 @@ import datetime
 from types import SimpleNamespace
 from typing import cast
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     EventKind,
     ExternalChannelPrincipalAuthorType,
@@ -26,7 +27,6 @@ from azents.engine.events.types import (
     SystemPromptFragmentPayload,
     build_native_compat_key,
 )
-from azents.repos.agent_session.data import AgentSession
 from azents.services.chat.context import (
     SessionContextSystemPrompt,
     _build_breakdown,

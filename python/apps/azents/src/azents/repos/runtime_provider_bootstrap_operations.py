@@ -29,6 +29,7 @@ from azents.core.runtime_provider_bootstrap import (
     RuntimeProviderBootstrapSnapshot,
     RuntimeProviderBootstrapSourceError,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.core.system_setting import (
     SystemSettingAuditEventType,
     SystemSettingAuditSource,
@@ -41,7 +42,6 @@ from azents.core.system_setting_data import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_provider.data import (
-    RuntimeProvider,
     RuntimeProviderAuditEventCreate,
     RuntimeProviderBootstrapDeclaration,
     RuntimeProviderBootstrapDeclarationCreate,

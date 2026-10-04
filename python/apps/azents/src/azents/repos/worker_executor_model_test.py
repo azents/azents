@@ -18,6 +18,7 @@ from azents.core.agent import (
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentRunPhase, AgentRunStatus, ModelCandidateClaimKind
 from azents.core.inference_profile import (
     InferenceProfileSource,
@@ -61,7 +62,6 @@ from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.model_candidate_health import (

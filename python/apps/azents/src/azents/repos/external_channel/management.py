@@ -25,6 +25,20 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
 )
+from azents.core.external_channel_management import (
+    ManagedApprovalRequest,
+    ManagedBinding,
+    ManagedBlock,
+    ManagedChannelDefault,
+    ManagedConnection,
+    ManagedGrant,
+    ManagedMultiConnection,
+    ManagedMultiRoute,
+    ManagedSlackManagementHandoff,
+    ManagedWork,
+    ManagedWorkSource,
+    ManagedWorkTask,
+)
 from azents.core.external_channel_provider import (
     DiscordThreadAutoArchiveDurationMinutes,
     decode_discord_connection_configuration,
@@ -46,20 +60,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
-)
-from azents.repos.external_channel.management_data import (
-    ManagedApprovalRequest,
-    ManagedBinding,
-    ManagedBlock,
-    ManagedChannelDefault,
-    ManagedConnection,
-    ManagedGrant,
-    ManagedMultiConnection,
-    ManagedMultiRoute,
-    ManagedSlackManagementHandoff,
-    ManagedWork,
-    ManagedWorkSource,
-    ManagedWorkTask,
 )
 from azents.repos.external_channel.work import (
     projection_state,

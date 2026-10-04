@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     ExternalChannelActionMode,
@@ -34,7 +35,6 @@ from azents.core.external_channel_provider_effect import (
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import (
     _create_agent,
     _create_workspace,

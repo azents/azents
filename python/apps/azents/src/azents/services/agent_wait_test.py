@@ -2,8 +2,8 @@
 
 from unittest.mock import AsyncMock
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentSessionRunState
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.agent_wait_read import AgentWaitReadRepository
 from azents.repos.agent_wait_read_data import (
     AgentWaitDescendantSnapshot,

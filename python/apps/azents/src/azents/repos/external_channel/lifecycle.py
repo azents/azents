@@ -24,6 +24,12 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_impact import (
+    ExternalChannelMultiConnectionImpact,
+    ExternalChannelMultiImpactBinding,
+    ExternalChannelMultiImpactDefault,
+    ExternalChannelMultiRouteImpact,
+)
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
@@ -46,10 +52,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
     ExternalChannelMultiConnectionDisconnect,
-    ExternalChannelMultiConnectionImpact,
-    ExternalChannelMultiImpactBinding,
-    ExternalChannelMultiImpactDefault,
-    ExternalChannelMultiRouteImpact,
     ExternalChannelMultiRouteRemoval,
     ExternalChannelPurgeCleanup,
     ExternalChannelPurgeVerification,

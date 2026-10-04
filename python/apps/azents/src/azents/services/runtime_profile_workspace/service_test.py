@@ -12,10 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import RuntimeProfileLifecycle
+from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
 from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileDeleteOutcome,
-    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
 )
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository

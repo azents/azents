@@ -3,9 +3,9 @@
 import dataclasses
 
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.repos.chat_write_request.data import ChatWriteRequest
-from azents.repos.mailbox.data import MailboxItem
 
 
 @dataclasses.dataclass(frozen=True)

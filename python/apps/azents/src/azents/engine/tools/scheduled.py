@@ -12,6 +12,7 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectOutcome
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -39,10 +40,7 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
-from azents.repos.scheduled_task.data import (
-    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
-    ScheduledTask,
-)
+from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.presentation import (
     render_scheduled_task_compaction_snapshot,
     render_scheduled_task_cycle_guidance,

@@ -50,6 +50,16 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import (
+    AgentCreateGitWorktreeContinuationResult,
+    ExternalChannelMessageMailboxPayload,
+    MailboxItem,
+    MailboxItemCreate,
+    MailboxPresentationItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.core.mailbox_errors import (
     MailboxOwnerGenerationStaleError,
     MailboxPreparationStaleError,
@@ -95,16 +105,6 @@ from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
-from azents.repos.mailbox.data import (
-    AgentCreateGitWorktreeContinuationResult,
-    ExternalChannelMessageMailboxPayload,
-    MailboxItem,
-    MailboxItemCreate,
-    MailboxPresentationItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
-    TurnActionContinuationMailboxPayload,
-)
 from azents.repos.mailbox.promotion import MailboxPromotionRepository
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.model_file.data import ModelFile

@@ -29,6 +29,7 @@ from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -51,7 +52,6 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
 )
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.toolkit_state.engine import (
     ToolkitClaudeRulesAppendixDedupeStateStore,
 )

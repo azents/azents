@@ -7,12 +7,12 @@ from azents.core.external_channel_labels import (
     decode_external_channel_reference_mappings,
     decode_external_channel_resource_labels,
 )
-from azents.engine.events.types import ExternalChannelMessagePayload
-from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
-from azents.repos.mailbox.data import (
+from azents.core.mailbox_data import (
     ExternalChannelMessageMailboxPayload,
     MailboxPresentationItem,
 )
+from azents.engine.events.types import ExternalChannelMessagePayload
+from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 
 
 def build_external_channel_mailbox_payload(

@@ -5,6 +5,8 @@ tags: [backend, frontend, admin, runtime, security, infra]
 spec_type: domain
 domain: runtime-provider
 code_paths:
+  - python/apps/azents/src/azents/core/runtime_provider_data.py
+  - python/apps/azents/src/azents/core/runtime_profile_deletion.py
   - python/apps/azents/src/azents/core/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/repos/runtime_provider_bootstrap_operations.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider.py
@@ -56,8 +58,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
-last_verified_at: 2026-09-30
-spec_version: 34
+last_verified_at: 2026-10-04
+spec_version: 35
 ---
 
 # Runtime Provider

@@ -6,6 +6,7 @@ import datetime
 import logging
 from typing import Annotated
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.broker.types import SessionBroker, SessionWakeUp
@@ -80,18 +81,15 @@ class StuckSessionRecovery:
             stale_threshold=self.stale_threshold, limit=self.limit
         )
         for rec in stuck:
-            logger.info(
-                "Recovering stuck running session",
-                extra={"session_id": rec.id, "agent_id": rec.agent_id},
+            operation_logger = bind_extra(logger, {"session_id": rec.id})
+            operation_logger.info(
+                "Recovering stuck running session", extra={"agent_id": rec.agent_id}
             )
             try:
                 await self.session_lifecycle.mark_session_running(rec.id)
                 await self.broker.send_message(_build_resume_message(rec))
             except Exception:
-                logger.exception(
-                    "Failed to enqueue RESUME for stuck session",
-                    extra={"session_id": rec.id},
-                )
+                operation_logger.exception("Failed to enqueue RESUME for stuck session")
 
 
 def _build_resume_message(rec: StuckWorkerSession) -> SessionWakeUp:

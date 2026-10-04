@@ -71,6 +71,10 @@ from azents.broker.types import (
     SessionWakeUp,
     WorkerSignal,
 )
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionUnreadTerminalRunProjection,
+)
 from azents.core.agent_session_input_data import (
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
@@ -125,7 +129,9 @@ from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
+from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
@@ -140,14 +146,8 @@ from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
-from azents.rdb.models.event import JSONValue
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionUnreadTerminalRunProjection,
-)
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult
-from azents.repos.mailbox.data import MailboxItem
 from azents.repos.skill_state_store import SkillStateStore
 from azents.services.agent_session_input import (
     AgentSessionInputService,

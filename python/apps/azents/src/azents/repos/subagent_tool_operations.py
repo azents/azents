@@ -8,6 +8,7 @@ from typing import NamedTuple
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import SubagentSettings
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionRunState,
@@ -18,6 +19,7 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.inference_profile import SessionInferenceState
+from azents.core.mailbox_data import MailboxItemCreate
 from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -25,9 +27,7 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import (
     CapturedContextSource,

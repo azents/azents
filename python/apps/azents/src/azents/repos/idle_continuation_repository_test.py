@@ -13,6 +13,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.mailbox_data import MailboxItem
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.idle_continuation import (
@@ -20,7 +21,6 @@ from azents.repos.idle_continuation import (
     IdleContinuationRepository,
 )
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 
 

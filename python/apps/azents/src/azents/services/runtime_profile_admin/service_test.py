@@ -22,6 +22,7 @@ from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileDeleteOutcome,
@@ -31,7 +32,6 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileUsage,
 )
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )

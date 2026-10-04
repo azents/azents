@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import SelectableModelCandidate, SelectableModelOption
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import ExternalChannelProvider, LLMProvider
 from azents.core.external_model_settings import (
     ExternalModelActorContext,
@@ -41,7 +42,6 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution.repository_test import _model_operation_state
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.external_account_link import ExternalAccountLinkRepository
 from azents.repos.external_account_link.data import ExternalAccountLink
 from azents.repos.external_channel.model_settings import (

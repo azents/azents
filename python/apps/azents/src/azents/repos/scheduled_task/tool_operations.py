@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     MailboxItemKind,
 )
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -26,11 +27,7 @@ from azents.rdb.models.external_channel import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.scheduled_task.data import (
-    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
-    ScheduledTask,
-    ScheduledTaskCreate,
-)
+from azents.repos.scheduled_task.data import ScheduledTask, ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import validate_schedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository

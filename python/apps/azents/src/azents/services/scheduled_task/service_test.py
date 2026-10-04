@@ -20,11 +20,11 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.mailbox_data import MailboxItem, MailboxItemCreate
 from azents.engine.events.types import ScheduledTaskTriggerPayload
 from azents.engine.run.emit import PublishedEvent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule

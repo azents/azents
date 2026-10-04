@@ -6,6 +6,7 @@ from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
@@ -15,14 +16,13 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ScheduledTaskScheduleType,
 )
+from azents.core.external_channel_management import ManagedBinding
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
 )
-from azents.repos.external_channel.management_data import ManagedBinding
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask

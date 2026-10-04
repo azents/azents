@@ -10,9 +10,9 @@ from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
     RuntimeProviderLifecycleState,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 
 

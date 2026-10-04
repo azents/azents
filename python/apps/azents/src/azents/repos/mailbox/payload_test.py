@@ -13,9 +13,8 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
-from azents.engine.events.types import ExternalChannelMessagePayload
-from azents.rdb.models.event import JSONValue
-from azents.repos.mailbox.data import (
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
     AgentCreateGitWorktreeContinuationResult,
     ExternalChannelContinuationMailboxPayload,
     ExternalChannelMessageMailboxPayload,
@@ -26,6 +25,7 @@ from azents.repos.mailbox.data import (
     TurnActionMailboxPayload,
     UserMessageMailboxPayload,
 )
+from azents.engine.events.types import ExternalChannelMessagePayload
 
 
 def _item(

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode, WorkspaceUserRole
 from azents.core.historical_memory import HistoricalMemoryCompletion
 from azents.core.historical_memory_consolidation import (
@@ -18,7 +19,6 @@ from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate

@@ -14,6 +14,7 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.runtime_provider_bootstrap import (
     RDBRuntimeProviderAuditEvent,
@@ -23,7 +24,6 @@ from azents.rdb.models.runtime_provider_bootstrap import (
 )
 
 from .data import (
-    RuntimeProvider,
     RuntimeProviderAuditEventCreate,
     RuntimeProviderBootstrapDeclaration,
     RuntimeProviderBootstrapDeclarationCreate,

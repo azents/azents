@@ -24,7 +24,7 @@ from azents.core.runtime_profile import (
     parse_workspace_runtime_profile_policy,
     project_runtime_network,
 )
-from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingAuditEvent,
 )

@@ -26,24 +26,11 @@ from azents.core.external_channel_conversation_data import (
     ExternalChannelParticipationLock,
     ExternalChannelParticipationScope,
 )
-from azents.core.external_channel_provider import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-    DiscordThreadAutoArchiveDurationMinutes,
-    ExternalChannelConnectionCredentialPayload,
-    ExternalChannelConnectionStatusSnapshot,
-    SlackConnectionCredentials,
-)
-from azents.repos.agent.data import Agent
-from azents.repos.external_channel.data import (
-    ExternalChannelMultiConnectionDisconnect,
+from azents.core.external_channel_impact import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
 )
-from azents.repos.external_channel.management import (
-    ExternalChannelChannelDefaultTransition,
-)
-from azents.repos.external_channel.management_data import (
+from azents.core.external_channel_management import (
     ManagedApprovalRequest,
     ManagedBinding,
     ManagedChannelDefault,
@@ -55,10 +42,23 @@ from azents.repos.external_channel.management_data import (
     ManagedMultiRoute,
     ManagedSlackManagementHandoff,
 )
-from azents.repos.external_channel.management_operation_data import (
+from azents.core.external_channel_management_errors import (
     ExternalChannelManagementNotFound,
-    ManagedAgentAccess,
 )
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+    DiscordThreadAutoArchiveDurationMinutes,
+    ExternalChannelConnectionCredentialPayload,
+    ExternalChannelConnectionStatusSnapshot,
+    SlackConnectionCredentials,
+)
+from azents.repos.agent.data import Agent
+from azents.repos.external_channel.data import ExternalChannelMultiConnectionDisconnect
+from azents.repos.external_channel.management import (
+    ExternalChannelChannelDefaultTransition,
+)
+from azents.repos.external_channel.management_operation_data import ManagedAgentAccess
 from azents.repos.external_channel.management_operations import (
     ExternalChannelManagementOperationRepository,
 )

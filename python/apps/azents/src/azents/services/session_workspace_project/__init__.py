@@ -10,13 +10,13 @@ from azents.core.session_workspace_paths import (
     InvalidProjectPath,
     normalize_session_workspace_path,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.engine.tools.deps import get_skill_state_store
 from azents.engine.tools.skill import SkillProjectionService
 from azents.repos.session_working_folder_binding.data import (
     SessionWorkingFolderTarget,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.session_workspace_project_operations import (
     ProjectCreateDatabaseError,
     SessionWorkspaceProjectOperationsRepository,

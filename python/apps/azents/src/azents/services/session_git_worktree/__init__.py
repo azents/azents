@@ -18,6 +18,12 @@ from fastapi import Depends
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import (
+    ActionExecution,
+    ActionExecutionEvent,
+    ActionExecutionEventCreate,
+    ActionExecutionProjection,
+)
 from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
@@ -32,12 +38,24 @@ from azents.core.enums import (
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
 )
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
+    AgentCreateGitWorktreeContinuationResult,
+    AgentRemoveGitWorktreeContinuationResult,
+    MailboxItemCreate,
+    MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.core.session_workspace_items import NewSessionWorkspaceItem
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
     normalize_session_workspace_path,
+)
+from azents.core.session_workspace_project import (
+    SessionWorkspaceProject,
+    SessionWorkspaceProjectCreate,
 )
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
@@ -50,15 +68,8 @@ from azents.engine.events.types import Event
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.engine.tools.skill import SkillProjectionService
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionEvent,
-    ActionExecutionEventCreate,
-    ActionExecutionProjection,
-)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -66,13 +77,6 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
-    AgentCreateGitWorktreeContinuationResult,
-    AgentRemoveGitWorktreeContinuationResult,
-    MailboxItemCreate,
-    MailboxPresentationItem,
-    TurnActionContinuationMailboxPayload,
-)
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -83,10 +87,6 @@ from azents.repos.session_git_worktree.data import (
     SessionGitWorktreeCreate,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import (
-    SessionWorkspaceProject,
-    SessionWorkspaceProjectCreate,
-)
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )

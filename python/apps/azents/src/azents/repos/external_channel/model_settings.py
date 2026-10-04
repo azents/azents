@@ -15,6 +15,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import SelectableModelOption
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAccessGrantScope,
@@ -73,7 +74,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.external_account_link import ExternalAccountLinkRepository
 from azents.repos.external_account_link.data import ExternalAccountLink
 from azents.repos.external_channel.repository import ExternalChannelRepository

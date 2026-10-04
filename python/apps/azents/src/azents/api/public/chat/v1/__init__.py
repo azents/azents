@@ -89,6 +89,7 @@ from azents.core.exchange_file_errors import (
     SessionNotFound as ExchangeSessionNotFound,
 )
 from azents.core.exchange_upload import ExchangeUploadError
+from azents.core.mailbox_data import MailboxItem
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
 )
@@ -96,7 +97,6 @@ from azents.engine.events.action_messages import CommandAction, PublicTurnAction
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
-from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_session_input import (
     AgentSessionInputService,
 )

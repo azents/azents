@@ -12,7 +12,7 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
-from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.core.runtime_provider_data import RuntimeProvider
 
 from .service import RuntimeProviderPublicService
 

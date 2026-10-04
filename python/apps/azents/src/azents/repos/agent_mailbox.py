@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import SessionAgent
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
@@ -13,12 +14,11 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     SessionAgentKind,
 )
+from azents.core.mailbox_data import MailboxItem
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import SessionAgent
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
-from azents.repos.mailbox.data import MailboxItem
 
 InstructionMessageKind = Literal["spawn_agent", "send_message", "followup_task"]
 

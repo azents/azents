@@ -16,11 +16,11 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
 from azents.repos.runtime_profile.data import (
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
     WorkspaceRuntimeProfile,
-    WorkspaceRuntimeProfileDeletion,
 )
 from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,

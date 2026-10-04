@@ -5,9 +5,8 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_project_preset import AgentProjectPreset
 from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
-
-from .data import AgentProjectPreset
 
 
 class AgentProjectPresetRepository:

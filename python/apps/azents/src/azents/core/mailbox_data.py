@@ -11,10 +11,10 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.engine.events.types import FileOutputPart
-from azents.rdb.models.event import JSONValue
 
 
 @dataclass(frozen=True)

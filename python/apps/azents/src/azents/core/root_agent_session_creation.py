@@ -2,7 +2,7 @@
 
 import dataclasses
 
-from azents.repos.agent_session.data import AgentSession
+from azents.core.agent_session_data import AgentSession
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

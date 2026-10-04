@@ -5,8 +5,8 @@ from typing import Annotated, Protocol
 
 from fastapi import Depends
 
+from azents.core.agent_session_data import AgentSession
 from azents.engine.events.types import AgentRunState
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.agent_wait_read import AgentWaitReadRepository
 from azents.services.mailbox import MailboxService
 

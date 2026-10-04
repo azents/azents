@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.external_channel_impact import ExternalChannelMultiRouteImpact
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
@@ -18,7 +19,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
     ExternalChannelMultiConnectionDisconnect,
-    ExternalChannelMultiRouteImpact,
     ExternalChannelMultiRouteRemoval,
     ExternalChannelPurgeCleanup,
     ExternalChannelPurgeVerification,

@@ -11,6 +11,7 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     MessageRole,
 )
+from azents.core.json_value import JSONValue
 from azents.engine.events.types import (
     Attachment,
     AttachmentOutputPart,
@@ -27,7 +28,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.repos.message import event_to_chat_message
 
 _JSON_PAYLOAD_ADAPTER: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(

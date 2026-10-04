@@ -1,8 +1,11 @@
 """SessionRunner error event storage and dispatch."""
 
 import logging
+from typing import Protocol
 
-from azents.engine.run.contracts import AgentEngineProtocol
+from azcommon.logging import bind_extra
+
+from azents.engine.events.types import Event
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.worker.events.publisher import WorkerEventPublisher
 
@@ -11,13 +14,23 @@ logger = logging.getLogger(__name__)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 
 
+class ErrorEventEngine(Protocol):
+    """The completed error-persistence operation actually used by the reporter."""
+
+    async def save_error_message(
+        self, session_id: str, content: str, *, owner_generation: int
+    ) -> Event:
+        """Persist one owner-fenced error event."""
+        ...
+
+
 class SessionRunnerErrorReporter:
     """Convert SessionRunner turn error to user event."""
 
     def __init__(
         self,
         *,
-        engine: AgentEngineProtocol,
+        engine: ErrorEventEngine,
         event_publisher: WorkerEventPublisher,
     ) -> None:
         self.engine = engine
@@ -31,12 +44,10 @@ class SessionRunnerErrorReporter:
         owner_generation: int,
     ) -> None:
         """Store and propagate runtime error that can be shown to user."""
-        logger.warning(
+        operation_logger = bind_extra(logger, {"session_id": session_id})
+        operation_logger.warning(
             "Unhandled user-visible error in session runner",
-            extra={
-                "session_id": session_id,
-                "error": exc.user_message,
-            },
+            extra={"error": exc.user_message},
         )
         error_event = await self.engine.save_error_message(
             session_id,
@@ -50,10 +61,7 @@ class SessionRunnerErrorReporter:
                 owner_generation=owner_generation,
             )
         except Exception:
-            logger.exception(
-                "Failed to dispatch error message",
-                extra={"session_id": session_id},
-            )
+            operation_logger.exception("Failed to dispatch error message")
 
     async def report_unhandled(
         self,
@@ -63,12 +71,10 @@ class SessionRunnerErrorReporter:
         owner_generation: int,
     ) -> None:
         """Store and propagate unexpected turn error as internal error event."""
-        logger.exception(
+        operation_logger = bind_extra(logger, {"session_id": session_id})
+        operation_logger.exception(
             "Unhandled error in process_message",
-            extra={
-                "session_id": session_id,
-                "error_type": exc.__class__.__name__,
-            },
+            extra={"error_type": exc.__class__.__name__},
         )
         error_event = await self.engine.save_error_message(
             session_id,
@@ -82,7 +88,4 @@ class SessionRunnerErrorReporter:
                 owner_generation=owner_generation,
             )
         except Exception:
-            logger.exception(
-                "Failed to publish error event",
-                extra={"session_id": session_id},
-            )
+            operation_logger.exception("Failed to publish error event")

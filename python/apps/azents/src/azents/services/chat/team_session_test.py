@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.chat_data import (
     InvalidSessionTitle,
     PrimarySessionArchiveBlocked,
@@ -55,7 +56,6 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository

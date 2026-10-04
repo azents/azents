@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.repos.message as message_module
 from azents.core.enums import EventKind
+from azents.core.json_value import JSONValue
 from azents.engine.events.historical_memory_projection import (
     HistoricalMemoryEvidence,
     HistoricalMemoryEvidenceTier,
@@ -18,7 +19,7 @@ from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
 )
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.repos.message import MessageRepository, _HistoricalMemoryScanBudget
 from azents.repos.message.repository_test import _native_artifact
 
