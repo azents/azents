@@ -17,6 +17,7 @@ from azents.rdb.models.runtime_connection_generation import (
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 
 from .data import (
+    RuntimeConnectionGeneration,
     RuntimeConnectionGenerationExhausted,
     RuntimeConnectionGenerationIntegrityError,
 )
@@ -108,6 +109,30 @@ async def _cleanup_owned_subject(
                 ~sa.exists(sa.select(RDBRuntimeConnectionGeneration.subject_id)),
             )
         )
+
+
+async def _generation_snapshot(
+    repository: RuntimeConnectionGenerationRepository,
+    session: WriteSession,
+) -> tuple[RuntimeConnectionGeneration, ...]:
+    """Capture exact ambient subjects, counters and timestamps for preservation."""
+    result = await session.read_session.execute(
+        sa.select(
+            RDBRuntimeConnectionGeneration.connection_kind,
+            RDBRuntimeConnectionGeneration.subject_id,
+        ).order_by(
+            RDBRuntimeConnectionGeneration.connection_kind,
+            RDBRuntimeConnectionGeneration.subject_id,
+        )
+    )
+    states = []
+    for kind, subject_id in result:
+        state = await repository.get_generation(
+            session, connection_kind=kind, subject_id=subject_id
+        )
+        assert state is not None
+        states.append(state)
+    return tuple(states)
 
 
 class TestRuntimeConnectionGenerationRepository:
@@ -296,8 +321,9 @@ class TestRuntimeConnectionGenerationRepository:
 async def test_owned_subject_cleanup_restores_cutover_baseline(
     rdb_session: WriteSession, preexisting: bool
 ) -> None:
-    """Absent/preexisting authority is restored inside the rolled-back test scope."""
+    """Cleanup retains exact authority when ambient subjects need the marker."""
     repository = RuntimeConnectionGenerationRepository()
+    foreign_states = await _generation_snapshot(repository, rdb_session)
     # This fixture rolls back the marker scenario; committed migration state survives.
     await rdb_session.write_session.execute(
         sa.delete(RDBRuntimeConnectionGenerationCutover).where(
@@ -311,11 +337,17 @@ async def test_owned_subject_cleanup_restores_cutover_baseline(
     created_at = await _activate_owned_subject(
         repository, rdb_session, subject_id=subject_id
     )
+    activated_cutover = await repository.get_cutover(rdb_session)
+    assert activated_cutover is not None
     assert (created_at is None) is preexisting
     await _cleanup_owned_subject(
         rdb_session, subject_id=subject_id, created_cutover_at=created_at
     )
-    assert await repository.get_cutover(rdb_session) == previous
+    expected = (
+        previous if preexisting else activated_cutover if foreign_states else None
+    )
+    assert await repository.get_cutover(rdb_session) == expected
+    assert await _generation_snapshot(repository, rdb_session) == foreign_states
     assert (
         await repository.get_generation(
             rdb_session,
@@ -324,6 +356,74 @@ async def test_owned_subject_cleanup_restores_cutover_baseline(
         )
         is None
     )
+
+
+async def test_owned_marker_cleanup_restores_absence_in_isolated_authority_tables(
+    rdb_session: WriteSession,
+) -> None:
+    """Exercise real absence without deleting any ambient public authority rows."""
+    repository = RuntimeConnectionGenerationRepository()
+    public_cutover = await repository.get_cutover(rdb_session)
+    public_generations = await _generation_snapshot(repository, rdb_session)
+    for table in (
+        "runtime_connection_generation_cutovers",
+        "runtime_connection_generations",
+    ):
+        # Temporary schema copies shadow public only on this rollback-owned connection.
+        await rdb_session.write_session.execute(
+            sa.text(
+                f"CREATE TEMP TABLE {table} (LIKE public.{table} INCLUDING ALL) "
+                "ON COMMIT DROP"
+            )
+        )
+    assert await repository.get_cutover(rdb_session) is None
+    assert await _generation_snapshot(repository, rdb_session) == ()
+    subject_id = uuid4().hex
+    created_at = await _activate_owned_subject(
+        repository, rdb_session, subject_id=subject_id
+    )
+    assert created_at is not None
+    await _cleanup_owned_subject(
+        rdb_session, subject_id=subject_id, created_cutover_at=created_at
+    )
+    assert await repository.get_cutover(rdb_session) is None
+    assert await _generation_snapshot(repository, rdb_session) == ()
+    await rdb_session.write_session.execute(
+        sa.text(
+            "DROP TABLE pg_temp.runtime_connection_generations, "
+            "pg_temp.runtime_connection_generation_cutovers"
+        )
+    )
+    assert await repository.get_cutover(rdb_session) == public_cutover
+    assert await _generation_snapshot(repository, rdb_session) == public_generations
+
+
+async def test_cleanup_preserves_preexisting_marker_and_foreign_sentinel(
+    rdb_session: WriteSession,
+) -> None:
+    """Explicit nonzero foreign authority survives cleanup of another owned subject."""
+    repository = RuntimeConnectionGenerationRepository()
+    other_subject = uuid4().hex
+    await _activate_subject(
+        repository,
+        rdb_session,
+        connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
+        subject_id=other_subject,
+        high_water_generation=31,
+        accepted_generation=17,
+    )
+    previous_cutover = await repository.get_cutover(rdb_session)
+    foreign_states = await _generation_snapshot(repository, rdb_session)
+    own_subject = uuid4().hex
+    created_at = await _activate_owned_subject(
+        repository, rdb_session, subject_id=own_subject
+    )
+    assert created_at is None
+    await _cleanup_owned_subject(
+        rdb_session, subject_id=own_subject, created_cutover_at=created_at
+    )
+    assert await repository.get_cutover(rdb_session) == previous_cutover
+    assert await _generation_snapshot(repository, rdb_session) == foreign_states
 
 
 async def test_owned_marker_cleanup_preserves_other_subject_authority(
