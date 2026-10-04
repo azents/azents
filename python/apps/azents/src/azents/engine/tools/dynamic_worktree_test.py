@@ -1,11 +1,10 @@
 """Dynamic Worktree Toolkit tests."""
 
 import json
-from typing import cast
 
 import pytest
 
-from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
+from azents.broker.types import BrokerMessage, SessionWakeUp
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
@@ -45,7 +44,7 @@ def _turn_context() -> TurnContext:
     )
 
 
-class _Service:
+class _Service(SessionGitWorktreeService):
     """SessionGitWorktreeService fake for Toolkit tests."""
 
     def __init__(
@@ -166,8 +165,8 @@ class _Broker:
 def _toolkit(service: _Service, broker: _Broker) -> DynamicWorktreeToolkit:
     """Create a Toolkit with typed production collaborators."""
     return DynamicWorktreeToolkit(
-        service=cast(SessionGitWorktreeService, service),
-        broker=cast(SessionBroker, broker),
+        service=service,
+        broker=broker,
         agent_id="agent-1",
         session_id="session-1",
     )

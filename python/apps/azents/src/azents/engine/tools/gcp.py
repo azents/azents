@@ -10,13 +10,15 @@ import dataclasses
 import hashlib
 import json
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from textwrap import dedent
 from typing import ClassVar
 
-import httpx
-import jwt
+import google.auth.transport.requests
 from azcommon.datetime import tznow
+from google.auth.exceptions import GoogleAuthError, RefreshError
+from google.oauth2 import service_account
 from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, ValidationError
 
@@ -54,6 +56,11 @@ from azents.engine.run.types import (
     FunctionToolResult,
     FunctionToolSpec,
 )
+from azents.engine.tools.background_discovery import (
+    DISCOVERY_ERRORS,
+    observe_discovery_failure,
+    require_expected_discovery_failure,
+)
 from azents.engine.tools.mcp_base import (
     ArtifactSinkGetter,
     McpArtifactSink,
@@ -66,6 +73,7 @@ from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
 from azents.services.artifact import ArtifactService
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +163,6 @@ GCP_SERVICE_CONFIG: dict[GcpService, GcpServiceMeta] = {
 # Refresh margin before token expiration
 _TOKEN_REFRESH_MARGIN = timedelta(minutes=5)
 # JWT validity period
-_JWT_LIFETIME = timedelta(hours=1)
 # Token endpoint
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 
@@ -163,6 +170,64 @@ _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 # ---------------------------------------------------------------------------
 # Access Token Provider
 # ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class _ServiceAccountToken:
+    """A validated token receipt returned by the public credential SDK."""
+
+    token: str
+    expires_at: datetime
+
+
+class GoogleAuthDispatchBudgetExceeded(RefreshError):
+    """A credential SDK attempted another dispatch after the one-call limit."""
+
+    def __init__(self, *, status_code: int | None) -> None:
+        """Retain safe status evidence without copying a provider token/body."""
+        self.status_code = status_code
+        suffix = f" after HTTP {status_code}" if status_code is not None else ""
+        super().__init__(
+            f"Google credential refresh cannot redispatch{suffix}.",
+            retryable=False,
+        )
+
+
+class _BoundedGoogleAuthRequest(google.auth.transport.Request):
+    """Public transport adapter imposing timeout and one physical dispatch."""
+
+    def __init__(self, request: google.auth.transport.Request) -> None:
+        """Keep SDK signing and protocol ownership unchanged."""
+        self.request = request
+        self.dispatched = False
+        self.status_code: int | None = None
+
+    def __call__(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        **kwargs: object,
+    ) -> google.auth.transport.Response:
+        """Reject SDK redispatch before reaching the actual transport."""
+        del timeout
+        if self.dispatched:
+            raise GoogleAuthDispatchBudgetExceeded(status_code=self.status_code)
+        self.dispatched = True
+        response = self.request(
+            url=url,
+            method=method,
+            body=body,
+            headers=headers,
+            timeout=30.0,
+            # The previous HTTPX transport did not follow redirects. A second
+            # physical request must not hide inside the SDK's HTTP session.
+            **{**kwargs, "allow_redirects": False},
+        )
+        self.status_code = response.status
+        return response
 
 
 class GcpAccessTokenProvider:
@@ -208,32 +273,39 @@ class GcpAccessTokenProvider:
         return self._expires_at > tznow() + _TOKEN_REFRESH_MARGIN
 
     async def _refresh_token(self) -> str:
-        """Create JWT and obtain access_token."""
-        now = tznow()
-        payload = {
-            "iss": self._key["client_email"],
-            "scope": " ".join(self._scopes),
-            "aud": _GOOGLE_TOKEN_URL,
-            "iat": int(now.timestamp()),
-            "exp": int((now + _JWT_LIFETIME).timestamp()),
-        }
-        signed_jwt = jwt.encode(payload, self._key["private_key"], algorithm="RS256")
+        """Use the public service-account refresh without blocking the loop."""
+        receipt = await asyncio.to_thread(self._refresh_token_sync)
+        self._token = receipt.token
+        self._expires_at = receipt.expires_at
+        return receipt.token
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                _GOOGLE_TOKEN_URL,
-                data={
-                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                    "assertion": signed_jwt,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        token: str = data["access_token"]
-        self._token = token
-        self._expires_at = now + timedelta(seconds=data["expires_in"])
-        return token
+    def _refresh_token_sync(self) -> _ServiceAccountToken:
+        """Own one SDK refresh and HTTP session for this credential operation."""
+        credentials = service_account.Credentials.from_service_account_info(
+            {
+                "client_email": self._key["client_email"],
+                "private_key": self._key["private_key"],
+                "token_uri": _GOOGLE_TOKEN_URL,
+            },
+            scopes=self._scopes,
+            always_use_jwt_access=False,
+        )
+        request = google.auth.transport.requests.Request()
+        try:
+            credentials.refresh(_BoundedGoogleAuthRequest(request))
+        finally:
+            request.session.close()
+        token = credentials.token
+        if (
+            not isinstance(token, str)
+            or not token
+            or not isinstance(credentials.expiry, datetime)
+        ):
+            raise ValueError("Google service-account refresh returned no token expiry.")
+        expiry = credentials.expiry
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=UTC)
+        return _ServiceAccountToken(token=token, expires_at=expiry)
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +409,9 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         if self._bg_task is not None and not self._bg_task.done():
             return
         self._bg_task = asyncio.create_task(self._refresh_tool_snapshot())
+        self._bg_task.add_done_callback(
+            observe_discovery_failure(logger, toolkit="gcp")
+        )
 
     async def _refresh_tool_snapshot(self) -> None:
         """Refresh the GCP MCP tool snapshot in the background."""
@@ -349,13 +424,17 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                 items = await self._refresh_service_items(server)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except (*DISCOVERY_ERRORS, ExceptionGroup) as error:
+                require_expected_discovery_failure(error)
                 logger.exception(
                     "Failed to refresh GCP MCP service snapshot",
                     extra={
                         "service": server.service.value,
                         "endpoint": server.endpoint,
                     },
+                    exc_info=sanitized_exception_info(
+                        error, message="GCP MCP discovery failed"
+                    ),
                 )
                 continue
             refreshed_by_endpoint[server.endpoint] = items
@@ -754,6 +833,14 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         try:
             provider = GcpAccessTokenProvider(key, sorted(all_scopes))
             token = await provider.get_token()
+        except GoogleAuthError as exc:
+            return TestConnectionResult(
+                success=False,
+                message=f"Authentication failed: {type(exc).__name__}",
+                discovered_auth_url=None,
+                discovered_token_url=None,
+                supports_dcr=None,
+            )
         except Exception as exc:
             net_msg = extract_network_error(exc)
             if net_msg is not None:

@@ -1,6 +1,7 @@
 """Event tool output part helper."""
 
 from collections.abc import Iterable
+from typing import assert_never
 
 from azents.engine.events.types import (
     ArtifactOutputPart,
@@ -75,14 +76,17 @@ def lower_output_to_text(output: ToolOutput) -> str:
     """Lower Tool output to model-visible text."""
     texts: list[str] = []
     for part in iter_output_parts(output):
-        if isinstance(part, OutputTextPart):
-            texts.append(part.text)
-        elif isinstance(part, AttachmentOutputPart):
-            texts.append(_attachment_text(part))
-        elif isinstance(part, ArtifactOutputPart):
-            texts.append(_artifact_text(part))
-        elif isinstance(part, FileOutputPart):
-            texts.append(_file_text(part))
+        match part:
+            case OutputTextPart():
+                texts.append(part.text)
+            case AttachmentOutputPart():
+                texts.append(_attachment_text(part))
+            case ArtifactOutputPart():
+                texts.append(_artifact_text(part))
+            case FileOutputPart():
+                texts.append(_file_text(part))
+            case _ as unreachable:
+                assert_never(unreachable)
     return "\n".join(text for text in texts if text)
 
 

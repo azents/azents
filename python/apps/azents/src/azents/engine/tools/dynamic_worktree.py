@@ -1,10 +1,11 @@
 """Agent-facing dynamic Git worktree Toolkit."""
 
 import json
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from azents.broker.types import SessionBroker, SessionWakeUp
+from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
@@ -23,6 +24,18 @@ from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.execution_context import get_client_tool_execution_context
 from azents.engine.tooling.make_tool import make_tool
 from azents.services.session_git_worktree import SessionGitWorktreeService
+
+
+class DynamicWorktreeBroker(Protocol):
+    """The two routing operations needed by managed-worktree admission."""
+
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Notify the already-running Session owner."""
+        ...
+
+    async def send_message(self, message: BrokerMessage) -> None:
+        """Route the admitted Session wake."""
+        ...
 
 
 class DynamicWorktreeToolkitConfig(BaseModel):
@@ -76,7 +89,7 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         self,
         *,
         service: SessionGitWorktreeService,
-        broker: SessionBroker,
+        broker: DynamicWorktreeBroker,
         agent_id: str,
         session_id: str,
     ) -> None:

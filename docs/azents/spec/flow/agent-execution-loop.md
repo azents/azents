@@ -181,7 +181,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-04
-spec_version: 211
+spec_version: 212
 ---
 
 # Agent Execution Loop
@@ -1089,6 +1089,13 @@ Model-visible `interrupt_agent` is intentionally narrower and records stop inten
 target agent's current run after rejecting the root and the caller itself.
 
 ## 5. Tool Loop
+
+Azents-owned executable tool inputs reject undeclared fields at runtime,
+including nested External Channel task/source inputs. Function schemas expose
+the same policy in OpenAI Responses and Pydantic AI paths. Existing required,
+omitted, null, default, coercion and cross-field semantics are retained.
+Provider-extensible SDK documents, opaque foreign MCP arguments and historical
+event projections remain separate boundaries.
 
 Memory-enabled root and subagent executions receive a prompt-only Memory
 Context binding. Root `on_run_start` preparation reselects a deterministic

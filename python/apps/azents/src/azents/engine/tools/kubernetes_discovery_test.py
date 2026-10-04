@@ -2,11 +2,25 @@
 
 import dataclasses
 import json
-from unittest.mock import AsyncMock
+from collections.abc import AsyncGenerator
+from typing import NamedTuple
+from unittest.mock import AsyncMock, create_autospec, patch
+from urllib.parse import urlsplit
 
-import httpx2 as httpx
 import pytest
+import pytest_asyncio
+from aiohttp import ClientResponse
+from kubernetes_asyncio.client import (
+    ApiClient,
+    Configuration,
+    V1APIGroup,
+    V1APIGroupList,
+    V1GroupVersionForDiscovery,
+    rest,
+)
+from kubernetes_asyncio.client.exceptions import ApiException
 from lightkube.generic_resource import GenericGlobalResource, GenericNamespacedResource
+from multidict import CIMultiDict, CIMultiDictProxy
 
 from azents.engine.tools.kubernetes_discovery import (
     ResourceDiscoveryCache,
@@ -14,19 +28,36 @@ from azents.engine.tools.kubernetes_discovery import (
 )
 
 
-def _make_mock_response(data: dict[str, object]) -> httpx.Response:
-    """Create httpx.Response for tests."""
-    return httpx.Response(
-        status_code=200,
-        content=json.dumps(data).encode(),
-        request=httpx.Request("GET", "http://test"),
-    )
+def _make_mock_response(data: dict[str, object]) -> rest.RESTResponse:
+    """Create a native wire receipt for the actual SDK deserializer."""
+    resources = data.get("resources")
+    if isinstance(resources, list):
+        for resource in resources:
+            assert isinstance(resource, dict)
+            kind = resource["kind"]
+            assert isinstance(kind, str)
+            resource["singularName"] = kind.lower()
+            resource["verbs"] = ["get", "list"]
+    groups = data.get("groups")
+    if isinstance(groups, list):
+        for group in groups:
+            assert isinstance(group, dict)
+            preferred = group["preferredVersion"]
+            assert isinstance(preferred, dict)
+            preferred["groupVersion"] = f"{group['name']}/{preferred['version']}"
+            group["versions"] = [preferred]
+    head = create_autospec(ClientResponse, instance=True)
+    head.status = 200
+    head.reason = "OK"
+    head.headers = CIMultiDictProxy(CIMultiDict({"Content-Type": "application/json"}))
+    return rest.RESTResponse(head, json.dumps(data).encode())
 
 
-def _make_core_v1_response() -> httpx.Response:
+def _make_core_v1_response() -> rest.RESTResponse:
     """Create Core v1 API response."""
     return _make_mock_response(
         {
+            "groupVersion": "v1",
             "resources": [
                 {"name": "pods", "kind": "Pod", "namespaced": True},
                 {"name": "namespaces", "kind": "Namespace", "namespaced": False},
@@ -34,12 +65,12 @@ def _make_core_v1_response() -> httpx.Response:
                 # Subresource: should be ignored
                 {"name": "pods/log", "kind": "Pod", "namespaced": True},
                 {"name": "pods/status", "kind": "Pod", "namespaced": True},
-            ]
+            ],
         }
     )
 
 
-def _make_apis_response() -> httpx.Response:
+def _make_apis_response() -> rest.RESTResponse:
     """Create API groups response."""
     return _make_mock_response(
         {
@@ -57,10 +88,11 @@ def _make_apis_response() -> httpx.Response:
     )
 
 
-def _make_apps_v1_response() -> httpx.Response:
+def _make_apps_v1_response() -> rest.RESTResponse:
     """Create apps/v1 API response."""
     return _make_mock_response(
         {
+            "groupVersion": "apps/v1",
             "resources": [
                 {"name": "deployments", "kind": "Deployment", "namespaced": True},
                 {"name": "daemonsets", "kind": "DaemonSet", "namespaced": True},
@@ -70,19 +102,20 @@ def _make_apps_v1_response() -> httpx.Response:
                     "kind": "Scale",
                     "namespaced": True,
                 },
-            ]
+            ],
         }
     )
 
 
-def _make_batch_v1_response() -> httpx.Response:
+def _make_batch_v1_response() -> rest.RESTResponse:
     """Create batch/v1 API response."""
     return _make_mock_response(
         {
+            "groupVersion": "batch/v1",
             "resources": [
                 {"name": "jobs", "kind": "Job", "namespaced": True},
                 {"name": "cronjobs", "kind": "CronJob", "namespaced": True},
-            ]
+            ],
         }
     )
 
@@ -90,25 +123,27 @@ def _make_batch_v1_response() -> httpx.Response:
 class TestResourceDiscoveryCache:
     """ResourceDiscoveryCache tests."""
 
-    @pytest.fixture
-    def mock_client(self) -> AsyncMock:
-        """Create mock httpx client with authentication configured."""
-        client = AsyncMock(spec=httpx.AsyncClient)
+    @pytest_asyncio.fixture
+    async def mock_client(self) -> AsyncGenerator[ApiClient, None]:
+        """Exercise actual SDK authentication and response model decoding."""
+        configuration = Configuration(host="https://cluster.example.test")
+        configuration.api_key["BearerToken"] = "Bearer local-token"
 
-        def _get(url: str) -> httpx.Response:
-            responses: dict[str, httpx.Response] = {
-                "/api/v1": _make_core_v1_response(),
-                "/apis": _make_apis_response(),
+        def _get(url: str, **_: object) -> rest.RESTResponse:
+            responses: dict[str, rest.RESTResponse] = {
+                "/api/v1/": _make_core_v1_response(),
+                "/apis/": _make_apis_response(),
                 "/apis/apps/v1": _make_apps_v1_response(),
                 "/apis/batch/v1": _make_batch_v1_response(),
             }
-            return responses[url]
+            return responses[urlsplit(url).path]
 
-        client.get = AsyncMock(side_effect=_get)
-        return client
+        async with ApiClient(configuration=configuration) as client:
+            with patch.object(client.rest_client, "GET", AsyncMock(side_effect=_get)):
+                yield client
 
     @pytest.mark.asyncio
-    async def test_discover(self, mock_client: AsyncMock) -> None:
+    async def test_discover(self, mock_client: ApiClient) -> None:
         """Full discovery works normally."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)
@@ -128,28 +163,106 @@ class TestResourceDiscoveryCache:
         assert len(resources) == 7
 
     @pytest.mark.asyncio
-    async def test_discover_apis_error_skipped(self, mock_client: AsyncMock) -> None:
+    async def test_public_sdk_preserves_auth_and_preferred_group_paths(
+        self, mock_client: ApiClient
+    ) -> None:
+        """Auth and typed decoding run through the existing owned SDK client."""
+
+        class RequestEvidence(NamedTuple):
+            path: str
+            authorization: str
+
+        calls: list[RequestEvidence] = []
+
+        def get(url: str, *, headers: dict[str, str], **_: object) -> rest.RESTResponse:
+            path = urlsplit(url).path
+            calls.append(
+                RequestEvidence(path=path, authorization=headers["authorization"])
+            )
+            replies = {
+                "/api/v1/": _make_core_v1_response(),
+                "/apis/": _make_apis_response(),
+                "/apis/apps/v1": _make_apps_v1_response(),
+                "/apis/batch/v1": _make_batch_v1_response(),
+            }
+            return replies[path]
+
+        cache = ResourceDiscoveryCache()
+        with patch.object(mock_client.rest_client, "GET", AsyncMock(side_effect=get)):
+            await cache.discover(mock_client)
+        assert [call.path for call in calls] == [
+            "/api/v1/",
+            "/apis/",
+            "/apis/apps/v1",
+            "/apis/batch/v1",
+        ]
+        assert all(call.authorization == "Bearer local-token" for call in calls)
+        assert cache.get_resource_class("apps/v1", "Deployment")
+
+    @pytest.mark.asyncio
+    async def test_group_without_preferred_version_is_not_dispatched(
+        self, mock_client: ApiClient
+    ) -> None:
+        """A typed optional preferred version preserves the existing skip behavior."""
+        group_list = V1APIGroupList(
+            groups=[
+                V1APIGroup(
+                    name="unselected",
+                    versions=[
+                        V1GroupVersionForDiscovery(
+                            group_version="unselected/v1", version="v1"
+                        )
+                    ],
+                )
+            ]
+        )
+        seen: list[str] = []
+
+        def get(url: str, **_: object) -> rest.RESTResponse:
+            path = urlsplit(url).path
+            seen.append(path)
+            if path == "/api/v1/":
+                return _make_core_v1_response()
+            assert path == "/apis/"
+            head = create_autospec(ClientResponse, instance=True)
+            head.status = 200
+            head.reason = "OK"
+            head.headers = CIMultiDictProxy(
+                CIMultiDict({"Content-Type": "application/json"})
+            )
+            return rest.RESTResponse(
+                head,
+                json.dumps(mock_client.sanitize_for_serialization(group_list)).encode(),
+            )
+
+        cache = ResourceDiscoveryCache()
+        with patch.object(mock_client.rest_client, "GET", AsyncMock(side_effect=get)):
+            await cache.discover(mock_client)
+        assert seen == ["/api/v1/", "/apis/"]
+        assert len(cache.list_all()) == 3
+
+    @pytest.mark.asyncio
+    async def test_discover_apis_error_skipped(self, mock_client: ApiClient) -> None:
         """Skip only corresponding group when API group discovery fails."""
 
-        def _get(url: str) -> httpx.Response:
-            if url == "/api/v1":
+        def _get(url: str, **_: object) -> rest.RESTResponse:
+            path = urlsplit(url).path
+            if path == "/api/v1/":
                 return _make_core_v1_response()
-            if url == "/apis":
+            if path == "/apis/":
                 return _make_apis_response()
-            if url == "/apis/apps/v1":
-                return httpx.Response(
-                    status_code=503,
-                    content=b"Service Unavailable",
-                    request=httpx.Request("GET", url),
-                )
-            if url == "/apis/batch/v1":
+            if path == "/apis/apps/v1":
+                error = ApiException(status=503, reason="Service Unavailable")
+                error.body = b"Service Unavailable"
+                raise error
+            if path == "/apis/batch/v1":
                 return _make_batch_v1_response()
             msg = f"Unexpected URL: {url}"
             raise ValueError(msg)
 
-        mock_client.get = AsyncMock(side_effect=_get)
         cache = ResourceDiscoveryCache()
-        await cache.discover(mock_client)
+        with patch.object(mock_client.rest_client, "GET", AsyncMock(side_effect=_get)):
+            await cache.discover(mock_client)
 
         resources = cache.list_all()
         kinds = {r.kind for r in resources}
@@ -159,7 +272,7 @@ class TestResourceDiscoveryCache:
         assert "Job" in kinds
 
     @pytest.mark.asyncio
-    async def test_get_resource_class_namespaced(self, mock_client: AsyncMock) -> None:
+    async def test_get_resource_class_namespaced(self, mock_client: ApiClient) -> None:
         """Namespaced resource class is created correctly."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)
@@ -168,7 +281,7 @@ class TestResourceDiscoveryCache:
         assert issubclass(cls, GenericNamespacedResource)
 
     @pytest.mark.asyncio
-    async def test_get_resource_class_global(self, mock_client: AsyncMock) -> None:
+    async def test_get_resource_class_global(self, mock_client: ApiClient) -> None:
         """Global resource class is created correctly."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)
@@ -177,7 +290,7 @@ class TestResourceDiscoveryCache:
         assert issubclass(cls, GenericGlobalResource)
 
     @pytest.mark.asyncio
-    async def test_get_resource_class_with_group(self, mock_client: AsyncMock) -> None:
+    async def test_get_resource_class_with_group(self, mock_client: ApiClient) -> None:
         """Resource class with group is created correctly."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)
@@ -186,7 +299,7 @@ class TestResourceDiscoveryCache:
         assert issubclass(cls, GenericNamespacedResource)
 
     @pytest.mark.asyncio
-    async def test_get_resource_class_cached(self, mock_client: AsyncMock) -> None:
+    async def test_get_resource_class_cached(self, mock_client: ApiClient) -> None:
         """Resource class is cached."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)
@@ -196,7 +309,7 @@ class TestResourceDiscoveryCache:
         assert cls1 is cls2
 
     @pytest.mark.asyncio
-    async def test_get_resource_class_not_found(self, mock_client: AsyncMock) -> None:
+    async def test_get_resource_class_not_found(self, mock_client: ApiClient) -> None:
         """KeyError when requesting uncollected resource."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)
@@ -205,7 +318,7 @@ class TestResourceDiscoveryCache:
             cache.get_resource_class("v1", "Unknown")
 
     @pytest.mark.asyncio
-    async def test_list_all_sorted(self, mock_client: AsyncMock) -> None:
+    async def test_list_all_sorted(self, mock_client: ApiClient) -> None:
         """list_all() returns sorted results."""
         cache = ResourceDiscoveryCache()
         await cache.discover(mock_client)

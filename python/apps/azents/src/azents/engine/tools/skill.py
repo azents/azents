@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, Protocol, assert_never
 import frontmatter
 import yaml
 from azcommon.uuid import uuid7
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState
@@ -96,6 +96,8 @@ If a skill's description says 'proactively', use it without waiting for the user
 
 class LoadSkillInput(BaseModel):
     """load_skill tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     skill_path: str = Field(
         min_length=1,

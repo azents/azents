@@ -3,7 +3,7 @@
 import datetime
 import json
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.goal import GOAL_TOOLKIT_NAMESPACE, GoalState, GoalUpdateStatus
 from azents.core.session_resource_authority import (
@@ -60,11 +60,15 @@ Rules:
 class CreateGoalInput(BaseModel):
     """create_goal tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     objective: str = Field(min_length=1, max_length=4000, description="Goal objective")
 
 
 class UpdateGoalInput(BaseModel):
     """update_goal tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     status: GoalUpdateStatus = Field(description="New goal status")
 
