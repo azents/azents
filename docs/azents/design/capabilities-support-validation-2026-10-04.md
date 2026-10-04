@@ -17,6 +17,7 @@ This report validates [capabilities-261004](capabilities-261004-complete-support
 - Current authorized exact local metadata supplies active reads and NEW operation captures. Agent/Workspace settings and exact model identities/order remain unchanged by reads.
 - New foreground, compaction, title and historical-memory operations use the same compiler. Existing operations, retries, quota progression and historical provenance remain frozen.
 - Web and private Slack/Discord model controls use compiled option views. Existing external mutation replay/already-applied drafts return before current metadata capture.
+- New public input, Team/User root creation, message edit and web profile replacement validate the same exact current support before admission. Capture and pure compilation finish outside the write transaction; the final phase repeats authorization and replay checks and fences raw configuration, intent and local metadata before mutation.
 - Actual request admission includes custom client tools, synthetic output tools, strict schemas, native response format, sampling and provider-specific reasoning overrides. Only genuine omission can use a captured known default.
 - Google effort domains are lossless codec intersections. Budget-only models do not acquire invented scalar levels; explicit budgets/adaptive/disabled settings retain their form.
 - Kimi coding function support and exact Grok 4.7 web support have reviewed route/model contracts. Kimi scalar effort controls remain excluded until their Chat encoder is implemented. Their raw reasoning facts remain retained.
@@ -32,7 +33,11 @@ uv run ruff format --check .
 uv run ty check --error-on-warning
 ```
 
-The final integrated backend run passed **9,974 tests**, with **3 skips** and **7 existing warning categories**, in 336.43 seconds. It includes disposable PostgreSQL and Redis fixtures rather than production databases. The skips are not counted as successful provider acceptance. Ruff, formatting and whole-backend typing passed.
+The pre-synchronization backend run passed **9,974 tests**, with **3 skips** and **7 existing warning categories**, in 336.43 seconds. It includes disposable PostgreSQL and Redis fixtures rather than production databases. The skips are not counted as successful provider acceptance. Ruff, formatting and whole-backend typing passed.
+
+After main synchronization and the public-admission corrections, [CI run 37188124993](https://github.com/azents/azents/actions/runs/37188124993) passed **10,159 backend tests**, with **3 skips**, in 460.21 seconds. Backend lint, formatting, typing and OpenAPI drift checks also passed. The public-admission focused set passed **51 tests** and the deterministic-fixture set passed **21 tests**; these overlap the full suite and are not added to its total.
+
+Actual product E2E exposed two gaps that unit-only validation had not covered: synthetic catalogs published final flags without replayable raw declarations, and public ingress validated raw saved support instead of active metadata. Both were corrected without changing the binary gate, saved configuration or pricing. Deterministic fixtures now publish explicit typed declarations through the ordinary compiler. The representative source-refresh E2E verifies new-request rejection after support disappears and unchanged captured prices until explicit reselection. A remaining title-retry mock response was aligned with its plain-text request envelope. Complete E2E delivery results are recorded on [PR #2113](https://github.com/azents/azents/pull/2113), separately from provider/account acceptance.
 
 The repository tests cover actual legacy v2 Agent/Workspace JSON, safe orphan-refinement decoding, exact scope/source matching, prewrite drift, compile-before-normalization, metadata-only drift without reprepare loops, immutable operation reuse, quota progression, unrelated configuration PATCH preservation and private-control replay/authorization boundaries.
 
@@ -61,6 +66,7 @@ Independent read-only review closed the material findings found during integrati
 - Bedrock synthetic output translation bypassing JSON text reconstruction.
 - Google unsupported/snap-only canonical levels being advertised.
 - Missing documented Kimi function and exact Grok web support.
+- Public admission using raw saved support, including write-free two-phase capture, repeated authorization, prewrite source/configuration fences and idempotent replay before metadata validation.
 
 The reviewer independently exercised declaration/source precedence, exact provider/model boundaries, seven dispatch encodings rejecting ultra, SDK wire serialization and stored operation/capture boundaries. Focused review counts overlap the full suite and are deliberately not added to the full-suite total.
 
@@ -124,4 +130,4 @@ The exact Grok 4.7 hosted web contract is grounded in its [model reference](http
 
 ## Operational Boundary
 
-This change includes no production mutation, catalog refresh, credential rotation, relational migration, merge or deployment. The new application publication guard rejects obsolete raw capability/compiler payloads; it does not fence an already running old binary at the database layer. Any separately authorized rollout must drain incompatible old active work and avoid mixed-binary continuation rather than rewriting frozen operations.
+This change includes no production mutation, catalog refresh, credential rotation, relational migration or deployment. The new application publication guard rejects obsolete raw capability/compiler payloads; it does not fence an already running old binary at the database layer. Any separately authorized rollout must drain incompatible old active work and avoid mixed-binary continuation rather than rewriting frozen operations.
