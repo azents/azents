@@ -21,7 +21,7 @@ from pydantic_ai.messages import (
 )
 
 from azents.core.enums import EventKind, LLMProvider
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.engine.events.model_messages import (
     TransientModelMessage,
 )
@@ -55,6 +55,11 @@ _TOOL: dict[str, object] = {
     "description": "Synthetic fixture tool",
     "parameters": {"type": "object", "properties": {}},
 }
+
+
+def _replay_capabilities() -> ModelCapabilities:
+    """Authorize the fixture's ordinary function tool, not extra model controls."""
+    return ModelCapabilities(tool_calling=ModelToolCallingCapabilities(supported=True))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -136,6 +141,7 @@ def test_responses_restart_never_replays_incompatible_encrypted_reasoning(
         provider=provider.value,
         provider_id=provider,
         model="synthetic-model",
+        model_capabilities=_replay_capabilities(),
         tools=[_TOOL],
         supported_execution_options=[],
         enabled_execution_options=[],
@@ -225,6 +231,7 @@ def test_responses_restart_never_replays_incompatible_encrypted_reasoning(
         provider=provider.value,
         provider_id=provider,
         model="synthetic-model",
+        model_capabilities=_replay_capabilities(),
         tools=[_TOOL],
         supported_execution_options=[],
         enabled_execution_options=[],
@@ -265,9 +272,9 @@ def test_all_native_families_bind_opaque_reasoning_assistant_and_tool_parts(
     lowerer = PydanticAILowerer(
         top_k=None,
         provider=family.provider.value,
-        model_capabilities=ModelCapabilities(),
         provider_id=family.provider,
         model="synthetic-model",
+        model_capabilities=_replay_capabilities(),
         tools=[_TOOL],
         supported_execution_options=[],
         enabled_execution_options=[],
@@ -359,9 +366,9 @@ def test_all_native_families_bind_opaque_reasoning_assistant_and_tool_parts(
     fresh = PydanticAILowerer(
         top_k=None,
         provider=family.provider.value,
-        model_capabilities=ModelCapabilities(),
         provider_id=family.provider,
         model="synthetic-model",
+        model_capabilities=_replay_capabilities(),
         tools=[_TOOL],
         supported_execution_options=[],
         enabled_execution_options=[],

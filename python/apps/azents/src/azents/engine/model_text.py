@@ -2,6 +2,7 @@
 
 import dataclasses
 import uuid
+from typing import assert_never
 
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter
@@ -11,6 +12,12 @@ from pydantic_ai.output import OutputObjectDefinition
 from pydantic_ai.settings import ModelSettings
 
 from azents.core.enums import LLMProvider
+from azents.engine.events.effective_model_request import (
+    RequestDialect,
+    normalize_effective_model_request,
+    prepare_effective_model_parameters,
+)
+from azents.engine.events.model_support_contract import validate_saved_model_request
 from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
 from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
 from azents.engine.events.pydantic_ai_types import PydanticAIRequest
@@ -26,6 +33,7 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     ModelStreamWatchdog,
 )
+from azents.engine.providers.bedrock_output import lower_bedrock_structured_parameters
 
 _OUTPUT_OBJECT_ADAPTER = TypeAdapter(OutputObjectDefinition)
 
@@ -74,6 +82,39 @@ async def call_provider_text_with_usage(
                 }
             ),
         )
+    parameters = prepare_effective_model_parameters(parameters)
+    factory = sdk_factories.provider_model(
+        provider=provider, credential_kwargs=credential_kwargs
+    )
+    dialect: RequestDialect
+    match factory.protocol(model=model):
+        case "responses":
+            dialect = "openai_responses"
+        case "chat_completions":
+            dialect = "openai_chat"
+        case "anthropic":
+            dialect = "anthropic"
+        case "google":
+            dialect = "google"
+        case "bedrock":
+            dialect = "bedrock"
+        case _ as unreachable:
+            assert_never(unreachable)
+    effective_parameters = (
+        prepare_effective_model_parameters(
+            lower_bedrock_structured_parameters(parameters)
+        )
+        if dialect == "bedrock"
+        else parameters
+    )
+    effective = normalize_effective_model_request(
+        dialect=dialect,
+        options=settings,
+        parameters=effective_parameters,
+        native_tools=None,
+    )
+    if assembly_metadata is not None:
+        validate_saved_model_request(assembly_metadata.capabilities, request=effective)
     request = PydanticAIRequest(
         native_replay_context=None,
         provider=provider.value,
@@ -87,12 +128,7 @@ async def call_provider_text_with_usage(
         parameters=parameters,
         assembly_metadata=assembly_metadata,
     )
-    adapter = PydanticAIModelAdapter(
-        factory=sdk_factories.provider_model(
-            provider=provider,
-            credential_kwargs=credential_kwargs,
-        )
-    )
+    adapter = PydanticAIModelAdapter(factory=factory)
     output = (
         PydanticAIOutputNormalizer(
             provider=provider.value,

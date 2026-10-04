@@ -6,13 +6,19 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, toolkit, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/engine/events/model_support_contract.py
+  - python/apps/azents/src/azents/engine/events/final_capability_lowering_test.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/chat_write_data.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
   - python/apps/azents/src/azents/core/memory_scope.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
@@ -33,10 +39,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/src/azents/repos/vfs_projection_operations.py
   - python/apps/azents/src/azents/repos/vfs_read_authority.py
-  - python/apps/azents/src/azents/repos/worker_run_operations.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
   - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
-  - python/apps/azents/src/azents/repos/worker_user_stop.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
@@ -81,7 +85,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/providers/model_factory.py
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/engine/responses.py
-  - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
@@ -181,7 +184,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-04
-spec_version: 211
+spec_version: 212
 ---
 
 # Agent Execution Loop
@@ -784,13 +787,19 @@ compaction. Scheduler-owned file cleanup does not run in run input preparation. 
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
 `AgentWorker` resolves the requested main target before the engine starts. The target label is
-resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and
-model catalogs are not consulted. The selected requested target label and nullable effort are
-persisted when the pending `AgentRun` activates. Fresh foreground and compaction operations freeze
-independent ordered candidate chains. The Session inference state holds the current candidate
-snapshot and effective limits, while the Run operation state owns candidate progression and recovery.
-The execution core receives one physical selection and its limits in each `RunRequest`, never the
-target label or complete fallback order.
+resolved against the Agent-owned identities and ordered settings. NEW foreground
+and compaction operations capture exact authorized LOCAL catalog declarations and
+source evidence, compile schema-3 capabilities, and normalize effective controls
+before their owner-fenced write. Local input equality is revalidated at
+preparation; changed inputs use the existing drift/retry boundary. Workspace
+defaults do not select another model during preparation.
+
+An existing operation is a separate frozen preparation path: candidate snapshots,
+cursor, requested intent and limits survive retry, takeover and quota progression.
+Current metadata is not consulted to reinterpret that path. Configuration drift
+compares user identities, order and settings rather than incidental compiled
+metadata. The execution core receives one captured physical selection and its
+limits in each `RunRequest`, never the complete fallback order.
 
 The selected lowerer owns the full provider-native request surface: generation options, client
 function tool passthrough, and provider-hosted tool lowering. OpenAI logical requests preserve
@@ -857,29 +866,41 @@ Missing historical selected-model pricing decodes read-only as absent and leaves
 estimation unavailable at dispatch, with no lazy fill. This metadata does not introduce
 a new cost UI or retroactive history rewrite.
 
-Saved v2 capability descriptors authorize requests independently from pricing.
-Explicit effort then a known saved default resolves conditions; omission is not
-none. Function-tool presence comes from the final published JSON declarations,
-not Toolkit existence. Configuration/ownership admits conditional potential,
-then actual client/hosted dispatch validates predicates. Known denial or unmet
-conditions fail without dropping an explicit strict/parameter/effort request.
-Unknown scalar requests preserve the provider error boundary, while unknown
-built-in authorization is rejected. SDK representability flags cannot reapply
-conservative display views and disable a satisfied condition. Native OpenAI and
-ChatGPT use saved semantics directly without Pydantic capability lookup; other
-routes keep actual protocol codecs. Historical descriptor absence preserves
-prior behavior, and no operation reads the retired genai source as fallback.
-Stock Pydantic usage-counter extraction remains transitive, not cost authority.
+Captured final capability fields authorize requests independently from pricing.
+Configuration uses supported membership; actual client/hosted execution evaluates
+conditions against the provider-encoded request. Only genuine effort omission
+can use a known captured default for evaluation. Explicit clear, disabled or
+adaptive thinking and budget-only requests retain their encoded meaning; they do
+not acquire a guessed scalar level. Absent features or unmet conditions fail
+before HTTP without silently removing selected controls.
 
-For v2 compatible xAI, xAI OAuth, OpenRouter and Kimi routes, explicit sampling
+`EffectiveModelRequest` is the shared typed normalization boundary after SDK
+customization and body-over-option replacement. It preserves null, false, zero,
+empty collections, provider effort/budget distinctions and the actual tool/output
+envelope. Replacement `tools` and reasoning objects replace preceding objects
+rather than unioning discarded declarations. Native custom client tools count as
+function use but do not acquire JSON-schema strictness. SDK synthetic output tools
+count as actual function declarations; native output objects remain distinct
+structured-response requests.
+
+Unspecified client/output-tool strict preferences become explicit false before
+SDK customization so a codec default cannot invent requested strict support.
+Explicit strict preferences and native structured-output objects are preserved.
+The same normalization/gate serves foreground, titles, compaction and historical
+Memory. Native OpenAI/ChatGPT use native codecs; other routes retain SDK
+formatting without stock model profiles becoming feature authority. Existing
+native artifact/replay fingerprints and captured history remain unchanged.
+
+For compatible xAI, xAI OAuth, OpenRouter and Kimi routes, explicit sampling
 values authorized by the saved contract are carried through the public SDK body
 extension instead of being removed by generic OpenAI reasoning codec policy.
 Body-over-option presence/null precedence and zero values are preserved, along
 with reasoning and unrelated options. Support validation reads the effective
 support-relevant scalar/format body envelope; explicit effort conflicts still fail.
 Native Responses supplies `parallel_tool_calls=false` when the caller omits it
-and the actual saved condition denies parallel calls. Supported/unknown omissions,
-historical behavior and explicit accepted options retain their existing meaning.
+and the actual captured condition denies parallel calls. Final support and actual
+conditions determine omitted parallel-call encoding; explicit accepted options
+retain their meaning.
 
 The Agent-local `top_k` value is carried explicitly through `RunRequest`,
 EngineAdapter and every lowerer. Google maps it to `generationConfig.topK`;

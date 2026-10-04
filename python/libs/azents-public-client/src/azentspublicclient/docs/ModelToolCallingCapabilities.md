@@ -1,14 +1,14 @@
 # ModelToolCallingCapabilities
 
-Represents tool calling capability.
+Final function and function-schema capabilities.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **supported** | **bool** |  | [optional] [default to False]
-**parallel_tool_calls** | **bool** |  | [optional] 
-**strict_json_schema** | **bool** |  | [optional] 
+**parallel_tool_calls** | **bool** |  | [optional] [default to False]
+**strict_json_schema** | **bool** |  | [optional] [default to False]
 
 ## Example
 

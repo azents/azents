@@ -27,9 +27,9 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
-from azents.core.model_capability_contract import CapabilitySupport
-from azents.core.model_capability_projection import project_capabilities
+from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.core.model_catalog_source import CatalogSourceModel
+from azents.core.model_provider_protocol import vertex_model_family
 from azents.engine.events.pydantic_ai_types import NativeModelProtocol
 from azents.engine.model_assembly import ModelAssemblyMetadata
 
@@ -137,20 +137,6 @@ def saved_bedrock_assembly_profile(
             assert_never(unreachable)
 
 
-def vertex_model_family(model: str) -> Literal["google", "anthropic"]:
-    """Interpret the existing Vertex protocol route without borrowing model facts."""
-    parts = model.split("/")
-    if "publishers" in parts:
-        index = parts.index("publishers")
-        if len(parts) <= index + 3 or parts[index + 2] != "models":
-            raise ValueError("The Vertex publisher resource is malformed.")
-        publisher = parts[index + 1]
-        if publisher in {"google", "anthropic"}:
-            return publisher
-        raise ValueError("The Vertex publisher is not an authorized model family.")
-    return "anthropic" if model.startswith("claude-") else "google"
-
-
 def protocol_for_provider(*, provider: LLMProvider, model: str) -> NativeModelProtocol:
     """Resolve the existing request protocol without credentials or source lookup."""
     match provider:
@@ -189,13 +175,7 @@ def resolve_runtime_model_profile(
     capabilities = (
         assembly_metadata.capabilities
         if assembly_metadata is not None
-        else project_capabilities(
-            provider=provider,
-            exact_model=model,
-            source_model=source_model,
-            evidence=None,
-            model_developer=None,
-        )
+        else ModelCapabilities()
     )
     if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
         return RuntimeModelProfileResolution(
@@ -280,10 +260,9 @@ def resolve_runtime_model_profile(
 
     profile = merge_profile(stock, override)
     profile = _preserve_sampling_codec(profile, protocol=protocol)
-    if assembly_metadata is not None and capabilities.semantic_contract is not None:
-        profile = _apply_saved_support(
-            profile, protocol=protocol, capabilities=capabilities
-        )
+    profile = _apply_saved_support(
+        profile, protocol=protocol, capabilities=capabilities
+    )
     if context_window_explicit:
         profile = merge_profile(profile, ModelProfile(context_window=context_window))
     profile_tools = profile.get("supported_native_tools")
@@ -340,50 +319,29 @@ def _apply_saved_support(
     protocol: NativeModelProtocol,
     capabilities: ModelCapabilities,
 ) -> ModelProfile:
-    """Preserve validated request semantics through the stock codec.
-
-    The lowerer evaluates predicates against the actual request before dispatch.
-    Codec flags admit conditional features and preserve explicitly requested
-    unknown controls at the provider error boundary. Conservative display views
-    cannot silently strip a feature after that validation. Hosted-tool
-    authorization still requires supported or satisfied conditional evidence.
-    """
-    contract = capabilities.semantic_contract
-    if contract is None:
-        return profile
-    reasoning = _codec_support(contract.reasoning.support)
-    efforts = {
-        ModelReasoningEffort(declaration.level)
-        for declaration in contract.reasoning.efforts
-        if reasoning and declaration.state == "supported"
-    }
-    strict = _codec_support(contract.strict_function_schema)
-    structured = _codec_support(contract.structured_response)
-    hosted_tools = {
-        declaration.tool
-        for declaration in contract.built_in_tools
-        if declaration.support.state in {"supported", "conditional"}
-    }
+    """Configure a codec from saved features; validation owns conditions."""
+    reasoning = capabilities.supports(ModelCapabilityFeature.REASONING)
+    efforts = set(capabilities.reasoning.effort_levels)
+    strict = capabilities.supports(ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA)
+    structured = capabilities.supports(ModelCapabilityFeature.STRUCTURED_RESPONSE)
     native_tools: set[type[AbstractNativeTool]] = set()
-    if "web_search" in hosted_tools:
+    if capabilities.supports(ModelCapabilityFeature.WEB_SEARCH):
         native_tools.add(WebSearchTool)
-    if protocol == "google" and "image_generation" in hosted_tools:
+    if protocol == "google" and capabilities.supports(
+        ModelCapabilityFeature.IMAGE_GENERATION
+    ):
         native_tools.add(ImageGenerationTool)
     profile = merge_profile(
         profile,
         ModelProfile(
-            # Unknown model knowledge does not disable the existing function wire.
-            supports_tools=contract.function_calling.state != "unsupported",
+            supports_tools=capabilities.supports(
+                ModelCapabilityFeature.FUNCTION_CALLING
+            ),
             supports_thinking=reasoning,
-            supports_json_schema_output=(
-                structured or (protocol == "anthropic" and strict)
-            ),
+            supports_json_schema_output=structured
+            or (protocol == "anthropic" and strict),
             supports_image_output=protocol == "google"
-            and any(
-                output.modality == "image"
-                and output.support.state in {"supported", "conditional"}
-                for output in contract.output_modalities
-            ),
+            and capabilities.supports(ModelCapabilityFeature.OUTPUT_IMAGE),
             supported_native_tools=frozenset(native_tools),
         ),
     )
@@ -397,7 +355,9 @@ def _apply_saved_support(
                     in efforts,
                     openai_supports_minimal_reasoning_effort=ModelReasoningEffort.MINIMAL
                     in efforts,
-                    openai_supports_strict_tool_definition=strict,
+                    # The SDK shares this encoding switch with native response schemas.
+                    # Function admission remains an independent final request feature.
+                    openai_supports_strict_tool_definition=strict or structured,
                     openai_responses_supports_json_schema_output=structured,
                 ),
             )
@@ -422,8 +382,3 @@ def _apply_saved_support(
             )
         case _ as unreachable:
             assert_never(unreachable)
-
-
-def _codec_support(support: CapabilitySupport) -> bool:
-    """Preserve explicit requests; validation owns denial and conditional gates."""
-    return support.state != "unsupported"

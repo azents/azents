@@ -69,6 +69,7 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
@@ -97,6 +98,8 @@ from azents.repos.external_channel.work_state import (
     ChannelWorkState,
     channel_work_state_name,
 )
+from azents.repos.llm_catalog import LLMCatalogRepository
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.session_model_profile.repository import (
     SessionModelProfileRepository,
 )
@@ -966,6 +969,11 @@ class TestExternalChannelRepository:
             ),
             agent_repository=agent_repository,
             agent_session_repository=agent_session_repository,
+            active_model_capabilities_repository=ActiveModelCapabilitiesRepository(
+                session_manager=session_manager,
+                catalog_repository=LLMCatalogRepository(),
+                source_repository=ModelMetadataSourceRepository(),
+            ),
         )
         actor = ExternalModelActorContext(
             provider=ExternalChannelProvider.DISCORD,

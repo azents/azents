@@ -1,4 +1,4 @@
-"""Rich inputs preserve unknown support through both model-message routes."""
+"""Rich inputs follow final support and encoded conditions on both routes."""
 
 import base64
 import json
@@ -14,13 +14,17 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from azents.core.enums import EventKind, LLMProvider
 from azents.core.llm_catalog import (
     ModelCapabilities,
+    ModelModalities,
     ModelModality,
+    ModelReasoningCapabilities,
     ModelReasoningEffort,
+    ModelToolCallingCapabilities,
 )
-from azents.core.model_capability_contract import CapabilitySupport, SupportPredicate
-from azents.core.model_capability_evidence import ProviderCapabilityEvidence
-from azents.core.model_capability_projection import project_capabilities
-from azents.core.model_catalog_source import CatalogFact
+from azents.core.model_capability_contract import (
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
+)
 from azents.engine.events.file_parts import (
     FilePartLoweringCapabilities,
     ModelFileLoweringContent,
@@ -43,58 +47,39 @@ from azents.engine.events.types import (
 )
 
 _Adapter = Literal["pydantic_ai", "responses"]
-_State = Literal["unknown", "supported", "unsupported", "conditional"]
+_State = Literal["supported", "unsupported", "conditional"]
 
 
 def _capabilities(provider: LLMProvider, state: _State) -> ModelCapabilities:
-    if state in {"unknown", "conditional"}:
-        modalities = CatalogFact[tuple[str, ...]](state="absent", value=None)
-    else:
-        modalities = CatalogFact[tuple[str, ...]](
-            state="value",
-            value=("text", "image", "pdf") if state == "supported" else ("text",),
-        )
-    result = project_capabilities(
-        provider=provider,
-        exact_model="probe-model",
-        source_model=None,
-        evidence=ProviderCapabilityEvidence(
-            input_modalities=modalities,
-            reasoning=CatalogFact(state="value", value=True),
-            reasoning_efforts=CatalogFact(
-                state="value",
-                value=(ModelReasoningEffort.LOW, ModelReasoningEffort.HIGH),
-            ),
+    return ModelCapabilities(
+        modalities=ModelModalities(
+            input=[ModelModality.TEXT]
+            + (
+                [ModelModality.IMAGE, ModelModality.PDF]
+                if state != "unsupported"
+                else []
+            )
         ),
-        model_developer=None,
+        tool_calling=ModelToolCallingCapabilities(supported=True),
+        reasoning=ModelReasoningCapabilities(
+            supported=True,
+            effort_levels=[
+                ModelReasoningEffort.LOW,
+                ModelReasoningEffort.HIGH,
+            ],
+        ),
+        request_constraints=ModelRequestConstraints(
+            feature_conditions=(
+                ModelFeatureCondition(
+                    feature=ModelCapabilityFeature.INPUT_IMAGE,
+                    reasoning_efforts=("high",),
+                    function_tools=None,
+                ),
+            )
+            if state == "conditional"
+            else ()
+        ),
     )
-    if state == "conditional":
-        data = result.model_dump(mode="json")
-        contract = result.semantic_contract
-        assert contract is not None
-        conditioned = contract.model_copy(
-            update={
-                "input_modalities": tuple(
-                    item.model_copy(
-                        update={
-                            "support": CapabilitySupport(
-                                state="conditional",
-                                origin="explicit",
-                                predicate=SupportPredicate(
-                                    reasoning_efforts=("high",), function_tools=None
-                                ),
-                            )
-                        }
-                    )
-                    if item.modality == "image"
-                    else item
-                    for item in contract.input_modalities
-                )
-            }
-        )
-        data["semantic_contract"] = conditioned.model_dump(mode="json")
-        result = ModelCapabilities.model_validate(data)
-    return result
 
 
 def _request(
@@ -197,9 +182,9 @@ def _rich_count(request: PydanticAIRequest | OpenAIResponsesRequest) -> int:
         ("pydantic_ai", LLMProvider.OPENROUTER),
     ],
 )
-@pytest.mark.parametrize("state", ["unknown", "supported", "unsupported"])
+@pytest.mark.parametrize("state", ["supported", "unsupported"])
 @pytest.mark.parametrize("media_type", ["image/jpeg", "application/pdf"])
-def test_tool_rich_input_unknown_is_not_an_explicit_denial(
+def test_tool_rich_input_uses_only_final_supported_membership(
     adapter: _Adapter,
     provider: LLMProvider,
     state: _State,
@@ -214,18 +199,6 @@ def test_tool_rich_input_unknown_is_not_an_explicit_denial(
         options=None,
     )
     assert _rich_count(request) == (0 if state == "unsupported" else 1)
-    if state == "unknown":
-        caps = _capabilities(provider, state)
-        assert caps.modalities.input == [ModelModality.TEXT]
-        assert caps.semantic_contract is not None
-        assert (
-            next(
-                item.support.state
-                for item in caps.semantic_contract.input_modalities
-                if item.modality == "image"
-            )
-            == "unknown"
-        )
 
 
 @pytest.mark.parametrize("adapter", ["pydantic_ai", "responses"])
@@ -256,13 +229,9 @@ def test_legacy_and_unimplemented_media_remain_conservative() -> None:
     assert not FilePartLoweringCapabilities.from_model_capabilities(
         None, context=context
     ).supports_pdf_input
-    caps = _capabilities(LLMProvider.XAI_OAUTH, "unknown")
-    assert caps.semantic_contract is not None
-    assert {
-        item.modality: item.support.state
-        for item in caps.semantic_contract.input_modalities
-        if item.modality in {"audio", "video"}
-    } == {"audio": "unsupported", "video": "unsupported"}
+    caps = _capabilities(LLMProvider.XAI_OAUTH, "unsupported")
+    assert ModelModality.AUDIO not in caps.modalities.input
+    assert ModelModality.VIDEO not in caps.modalities.input
 
 
 async def _sdk_wire(request: PydanticAIRequest) -> dict[str, object]:
@@ -308,7 +277,7 @@ async def _sdk_wire(request: PydanticAIRequest) -> dict[str, object]:
     return captured[0]
 
 
-@pytest.mark.parametrize("state", ["unknown", "supported", "unsupported"])
+@pytest.mark.parametrize("state", ["supported", "unsupported"])
 async def test_tool_image_reaches_public_responses_sdk_wire(state: _State) -> None:
     request = _request(
         "pydantic_ai",

@@ -6,6 +6,9 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [conversation, agent, external-channel]
 code_paths:
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - typescript/apps/azents-web/src/shared/lib/model-capability-support.ts
+  - typescript/apps/azents-web/src/shared/lib/reasoning-effort.ts
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/chat_operation_data.py
@@ -36,8 +39,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-10-03
-spec_version: 53
+last_verified_at: 2026-10-04
+spec_version: 54
 ---
 
 # Chat Session Resync
@@ -289,6 +292,19 @@ it does not use the direct human user-message bubble treatment. Subagent navigat
 internal-message surfaces use a robot icon as their representative symbol.
 
 ## 5.3 Composer Profile State
+
+Model controls consume the Agent response's active same-identity metadata
+projection. Final boolean/list fields are the support authority; configuration
+shows all supported potential rather than testing incomplete runtime predicates.
+Canonical effort controls remain `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`. Concrete model changes use the existing ordered adaptation,
+while valid explicit intent and nullable omission are preserved. Provider `ultra`
+remains original evidence and is excluded from the controls.
+
+The active metadata read does not rewrite saved model identities/settings,
+Session intent or historical applied profiles. NEW operations capture compiled
+metadata; durable turn-marker provenance and replay continue to use the actual
+captured operation.
 
 Composer profile edits and both settings-only apply and ordinary input submission
 drop execution options unsupported by the currently selected target's primary

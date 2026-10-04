@@ -4,7 +4,8 @@ import base64
 import dataclasses
 from typing import Protocol
 
-from azents.core.llm_catalog import ModelCapabilities, ModelModality
+from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.engine.events.model_support_contract import (
     ModelSupportContext,
     model_support_allowed,
@@ -82,29 +83,17 @@ class FilePartLoweringCapabilities:
         *,
         context: ModelSupportContext,
     ) -> "FilePartLoweringCapabilities":
-        """Resolve rich-input admission without turning unknown into a denial."""
+        """Resolve rich input from final features and effective conditions."""
         if capabilities is None:
             return cls()
-        input_modalities = set(capabilities.modalities.input)
-        contract = capabilities.semantic_contract
-
-        def permitted(modality: ModelModality) -> bool:
-            if contract is None:
-                return modality in input_modalities
-            declaration = next(
-                (
-                    item
-                    for item in contract.input_modalities
-                    if item.modality == modality.value
-                ),
-                None,
-            )
-            return declaration is not None and (
-                model_support_allowed(declaration.support, context=context) is not False
-            )
-
-        supports_image = permitted(ModelModality.IMAGE)
-        supports_pdf = permitted(ModelModality.PDF)
+        supports_image = model_support_allowed(
+            ModelCapabilityFeature.INPUT_IMAGE,
+            capabilities=capabilities,
+            context=context,
+        )
+        supports_pdf = model_support_allowed(
+            ModelCapabilityFeature.INPUT_PDF, capabilities=capabilities, context=context
+        )
         # Current TEXT modality in ModelCapabilities means general text prompt support.
         # Disable text file native input until separate capability exists.
         supports_text = False

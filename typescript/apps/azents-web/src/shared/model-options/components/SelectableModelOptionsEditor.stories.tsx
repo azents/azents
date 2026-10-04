@@ -710,9 +710,8 @@ export const MissingModel = {
   },
 } satisfies Story;
 
-export const ConditionalHostedToolAllowed = {
+export const ConditionalHostedToolsRemainConfigurable = {
   args: {
-    reasoningEffort: "max",
     options: [
       {
         ...defaultOption,
@@ -734,26 +733,6 @@ export const ConditionalHostedToolAllowed = {
     await expect(
       body.getByRole("checkbox", { name: "Image generation" }),
     ).toBeVisible();
-    await expect(
-      body.getByRole("checkbox", { name: "Web search" }),
-    ).toBeVisible();
-  },
-} satisfies Story;
-
-export const ConditionalHostedToolOmittedEffort = {
-  args: {
-    ...ConditionalHostedToolAllowed.args,
-    reasoningEffort: null,
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(
-      canvas.getByRole("button", { name: "Model settings" }),
-    );
-    const body = within(document.body);
-    await expect(
-      body.queryByRole("checkbox", { name: "Image generation" }),
-    ).not.toBeInTheDocument();
     await expect(
       body.getByRole("checkbox", { name: "Web search" }),
     ).toBeVisible();

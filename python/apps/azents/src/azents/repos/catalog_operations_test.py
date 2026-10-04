@@ -18,8 +18,16 @@ from azents.core.model_metadata_collection_data import FetchedModelMetadataSourc
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_metadata_source import RDBModelMetadataSource
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_model_capabilities_data import (
+    ActiveReadScope,
+    CapturedActiveChoiceInputs,
+)
 from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.llm_catalog.data import IntegrationCatalogSyncClaim
+from azents.repos.llm_catalog.data import (
+    IntegrationCatalogSyncClaim,
+    LLMCatalogEntryList,
+)
 from azents.repos.llm_catalog_operations import (
     CatalogPublicationSourceChanged,
     CatalogPublicationSuperseded,
@@ -62,6 +70,99 @@ class _Transactions:
             raise
         else:
             self.events.append("commit")
+
+
+async def test_picker_bundles_local_capture_before_finishing_the_same_transaction() -> (
+    None
+):
+    transactions = _Transactions()
+    catalogs = AsyncMock(spec=LLMCatalogRepository)
+    active = AsyncMock(spec=ActiveModelCapabilitiesRepository)
+    scope = ActiveReadScope(
+        workspace_id="workspace", integrations=(), source_metadata=None
+    )
+    inputs = CapturedActiveChoiceInputs(
+        workspace_id="workspace",
+        choices=(),
+        catalog_choices=(),
+        source_metadata=None,
+        source_expectations=(),
+    )
+    page = LLMCatalogEntryList(
+        catalog=LLMCatalogRepository.build_catalog(_catalog()), entries=[], total=0
+    )
+
+    async def prepare(
+        session: AsyncSession, *, workspace_id: str, integration_ids: tuple[str, ...]
+    ) -> ActiveReadScope:
+        assert session is transactions.session
+        assert workspace_id == "workspace"
+        assert integration_ids == ("integration",)
+        assert transactions.events == ["begin"]
+        transactions.events.append("prepare_integration_source_scope")
+        return scope
+
+    async def read(
+        session: AsyncSession,
+        *,
+        integration_id: str,
+        workspace_id: str,
+        purpose: LLMCatalogPurpose,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> LLMCatalogEntryList:
+        assert session is transactions.session
+        assert transactions.events[-1] == "prepare_integration_source_scope"
+        transactions.events.append("read_catalog_page")
+        return page
+
+    async def capture(
+        session: AsyncSession,
+        *,
+        scope: ActiveReadScope,
+        integration_id: str,
+        entries: tuple[object, ...],
+    ) -> CapturedActiveChoiceInputs:
+        assert session is transactions.session
+        assert scope.workspace_id == "workspace"
+        assert integration_id == "integration"
+        assert entries == ()
+        assert transactions.events[-1] == "read_catalog_page"
+        transactions.events.append("capture_page_exact_sources")
+        return inputs
+
+    active.prepare_read_scope_in_session.side_effect = prepare
+    active.capture_current_entries_in_session.side_effect = capture
+    catalogs.list_entries_by_integration.side_effect = read
+    catalogs.get_latest_integration_sync_for_workspace.return_value = None
+    catalogs.projection_version.return_value = None
+    operations = LLMCatalogOperationsRepository(
+        session_manager=transactions,
+        catalog_repository=catalogs,
+        integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+        source_repository=AsyncMock(spec=ModelMetadataSourceRepository),
+        active_repository=active,
+    )
+    result = await operations.read_page(
+        integration_id="integration",
+        workspace_id="workspace",
+        search=None,
+        limit=10,
+        offset=0,
+    )
+    assert result is not None
+    assert result.page is page
+    assert result.active_inputs is inputs
+    assert transactions.events == [
+        "begin",
+        "prepare_integration_source_scope",
+        "read_catalog_page",
+        "capture_page_exact_sources",
+        "commit",
+    ]
+    active.capture_current_entries_in_session.assert_awaited_once()
+    active.capture_exact_choices.assert_not_awaited()
 
 
 def _catalog(
@@ -135,6 +236,7 @@ async def test_prepared_source_change_rejects_before_any_catalog_write() -> None
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=sources,
+        active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
     )
     result = await operations.publish(
         catalog=LLMCatalogRepository.build_catalog(catalog),
@@ -172,6 +274,7 @@ async def test_credential_change_rejects_old_discovery_even_with_current_work() 
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=sources,
+        active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
     )
     result = await operations.publish(
         catalog=LLMCatalogRepository.build_catalog(catalog),
@@ -213,6 +316,7 @@ async def test_failed_current_write_exits_through_rollback() -> None:
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=sources,
+        active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
     )
     with pytest.raises(ValueError, match="Invalid current entries"):
         await operations.publish(

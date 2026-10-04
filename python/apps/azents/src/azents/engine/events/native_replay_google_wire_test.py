@@ -13,7 +13,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 
 from azents.core.enums import EventKind, LLMProvider
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.engine.events.model_messages import TransientModelMessage
 from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
@@ -56,7 +56,9 @@ async def test_google_sdk_preserves_supported_tool_history_without_old_opaque_st
         provider=provider_id.value,
         provider_id=provider_id,
         model=model_name,
-        model_capabilities=ModelCapabilities(),
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         tools=[tool],
         supported_execution_options=[],
         enabled_execution_options=[],

@@ -47,11 +47,12 @@ from azents.core.llm_catalog import (
     ModelBuiltInToolCapabilities,
     ModelCapabilities,
     ModelReasoningEffort,
+    ModelToolCallingCapabilities,
 )
 from azents.core.model_capability_contract import (
-    BuiltinToolSupport,
-    CapabilitySupport,
-    SupportPredicate,
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
 )
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
@@ -1247,6 +1248,9 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
@@ -1308,6 +1312,9 @@ async def test_event_engine_adapter_runs_execution() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -1362,6 +1369,9 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
@@ -1563,6 +1573,9 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
@@ -1682,6 +1695,9 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
@@ -1755,6 +1771,9 @@ async def _prepare_profiled_model_call(
         resolved_at=datetime.datetime.now(datetime.UTC),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
@@ -1886,9 +1905,10 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
                 provider=provider,
                 model="gpt-5.6-luna",
                 model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True),
                     built_in_tools=ModelBuiltInToolCapabilities(
                         supported=["image_generation", "web_search"]
-                    )
+                    ),
                 ),
                 credential_kwargs=credential_kwargs,
                 workspace_id="workspace-1",
@@ -2085,28 +2105,21 @@ async def test_actual_engine_builtin_admission_and_condition_gate_before_sdk_wir
             hosted_image_generation=CatalogFact(state="value", value=False),
         ),
     )
-    assert caps.semantic_contract is not None
-    if tool == "image_generation":
-        image = next(
-            f
-            for f in caps.semantic_contract.built_in_tools
-            if f.tool == "image_generation"
-        )
-        assert image.support.state == "supported"
-    support = CapabilitySupport(
-        state=state,
-        origin=None if state == "unknown" else "explicit",
-        predicate=SupportPredicate(
-            reasoning_efforts=("none",),
-            function_tools=tool == "image_generation",
+    caps.built_in_tools.supported = [tool] if state != "unknown" else []
+    caps.request_constraints = ModelRequestConstraints(
+        known_default="none" if default_none else None,
+        feature_conditions=(
+            ModelFeatureCondition(
+                feature=ModelCapabilityFeature.IMAGE_GENERATION
+                if tool == "image_generation"
+                else ModelCapabilityFeature.WEB_SEARCH,
+                reasoning_efforts=("none",),
+                function_tools=tool == "image_generation",
+            ),
         )
         if state == "conditional"
-        else None,
+        else (),
     )
-    caps.semantic_contract = caps.semantic_contract.model_copy(
-        update={"built_in_tools": (BuiltinToolSupport(tool=tool, support=support),)}
-    )
-    caps.built_in_tools.supported = [tool] if state == "supported" else []
     adapter = _agent_engine_adapter(execution_factory=execution_factory)
     adapter.sdk_factories = dataclasses.replace(
         adapter.sdk_factories,
@@ -2317,7 +2330,8 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
         provider=LLMProvider.XAI_OAUTH,
         model="xai/grok-4",
         model_capabilities=ModelCapabilities(
-            built_in_tools=ModelBuiltInToolCapabilities(supported=["image_generation"])
+            tool_calling=ModelToolCallingCapabilities(supported=True),
+            built_in_tools=ModelBuiltInToolCapabilities(supported=["image_generation"]),
         ),
         credential_kwargs={"api_key": "old-access-token"},
         workspace_id="workspace-1",
@@ -2409,6 +2423,9 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         xai_imagine_client_factory=_refreshing_imagine_client_factory([]),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=None,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,
@@ -2451,6 +2468,9 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
 
     stream = adapter.run(
         RunRequest(
+            model_capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
             top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
@@ -2506,6 +2526,9 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
         """Receive external cancellation while consuming adapter stream."""
         async for _emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -2563,6 +2586,9 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
 
     stream = adapter.run(
         RunRequest(
+            model_capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
             top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
@@ -2615,6 +2641,9 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -2674,6 +2703,9 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
     with pytest.raises(ModelCallError, match="Missing scopes"):
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -2779,6 +2811,9 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -2853,6 +2888,9 @@ async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> 
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -2936,6 +2974,9 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
         emit
         async for emit in adapter.run(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -3087,6 +3128,9 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -3194,6 +3238,9 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -3324,6 +3371,9 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
         emit
         async for emit in adapter.compact(
             RunRequest(
+                model_capabilities=ModelCapabilities(
+                    tool_calling=ModelToolCallingCapabilities(supported=True)
+                ),
                 top_k=None,
                 model_assembly_metadata=None,
                 compaction_assembly_metadata=None,
@@ -3389,6 +3439,9 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
 
     iterator = adapter.compact(
         RunRequest(
+            model_capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
             top_k=None,
             model_assembly_metadata=None,
             compaction_assembly_metadata=None,
@@ -3668,6 +3721,9 @@ async def test_engine_adapter_forwards_top_k_to_native_codec_denial() -> None:
         execution_factory=_capture_execution_factory(execution),
     )
     request = RunRequest(
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         top_k=37,
         model_assembly_metadata=None,
         compaction_assembly_metadata=None,

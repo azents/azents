@@ -24,7 +24,7 @@ from typing_extensions import Self
 
 class ModelBuiltInToolCapabilities(BaseModel):
     """
-    Represents provider built-in tool capability.
+    Supported route-projected built-in tools.
     """ # noqa: E501
     supported: Optional[List[StrictStr]] = None
     additional_properties: Dict[str, Any] = {}

@@ -186,6 +186,7 @@ from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepos
 from azents.repos.worker_executor_model_data import (
     FreshModelPreparation,
     FreshProfileSnapshot,
+    agent_model_configuration_signature,
 )
 from azents.repos.worker_executor_model_test import model_fixture, model_rows
 from azents.repos.worker_executor_read import WorkerExecutorReadRepository
@@ -1762,8 +1763,9 @@ class _CompletedModels:
         agent_id: str,
         session_id: str,
         explicit_profile: RequestedInferenceProfile | None,
+        run_id: str | None = None,
     ) -> RequestedProfileSelection:
-        del agent_id, session_id
+        del agent_id, session_id, run_id
         agent = self.require_agent()
         if explicit_profile is not None:
             return normalize_profile_selection_for_agent(
@@ -1775,13 +1777,29 @@ class _CompletedModels:
         return self.requested(None)
 
     async def load_fresh_profile_snapshot(
-        self, *, agent_id: str, session_id: str
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str | None = None,
+        override: RequestedProfileSelection | None = None,
+        replace_operation: bool = False,
     ) -> FreshProfileSnapshot:
-        del agent_id
+        del agent_id, run_id, override, replace_operation
         current = await self.session.snapshot(session_id)
         if current is None:
             raise ValueError("AgentSession or Agent not found")
-        return FreshProfileSnapshot(agent=self.require_agent(), session=current)
+        agent = self.require_agent()
+        return FreshProfileSnapshot(
+            agent=agent,
+            session=current,
+            raw_configuration_signature=agent_model_configuration_signature(agent),
+            raw_run_intent_signature=None,
+            operation_state=self.run.run.model_operation_state,
+            captured_inputs=None,
+            compiled_choices=None,
+            compaction_option=None,
+        )
 
     async def prepare_fresh(
         self,
@@ -1793,11 +1811,12 @@ class _CompletedModels:
         selected: RequestedProfileSelection,
         override: RequestedProfileSelection | None,
         replace_operation: bool,
+        prepared_snapshot: FreshProfileSnapshot | None = None,
     ) -> Result[
         FreshModelPreparation | None,
         ModelTargetNotFound | ModelCandidateChainExhausted,
     ]:
-        del agent_id, session_id
+        del agent_id, session_id, prepared_snapshot
         self.require_owner(owner_generation)
         agent = self.require_agent()
         expected = self.requested(override)
@@ -1884,7 +1903,11 @@ class _CompletedModels:
             )
         )
         return Success(
-            FreshModelPreparation(selection=foreground, compaction_selection=background)
+            FreshModelPreparation(
+                selection=foreground,
+                compaction_selection=background,
+                configuration_signature=agent_model_configuration_signature(agent),
+            )
         )
 
     async def finalize_fresh(
@@ -8040,3 +8063,97 @@ async def test_empty_worker_tree_changes_do_not_open_a_transaction() -> None:
 
     manager.assert_not_called()
     publish.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("change", "drift"),
+    [
+        ("compiled_metadata", False),
+        ("identity", True),
+        ("option_order", True),
+        ("settings", True),
+        ("raw_intent", True),
+    ],
+)
+async def test_user_configuration_drift_excludes_compiled_metadata(
+    change: str,
+    drift: bool,
+) -> None:
+    executor = _executor()
+    agent = executor.test_agent_state.agent
+    assert agent is not None
+    signature = agent_model_configuration_signature(agent)
+    option = agent.selectable_model_options[0]
+    candidate = option.candidates[0]
+    selected = candidate.model_selection
+    compiled_caps = selected.normalized_capabilities.model_copy(
+        update={
+            "tool_calling": selected.normalized_capabilities.tool_calling.model_copy(
+                update={"supported": True, "strict_json_schema": True}
+            )
+        }
+    )
+    captured_selection = selected.model_copy(
+        update={
+            "normalized_capabilities": compiled_caps,
+            "source_metadata": {"active_capabilities": {"compiler_revision": "new"}},
+            "model_display_name": "Current compiled display",
+            "model_snapshot": {"compiled": True},
+        }
+    )
+    state = SessionInferenceState(
+        model_target_label=option.label,
+        model_selection=captured_selection,
+        model_settings=candidate.settings,
+        reasoning_effort=None,
+        enabled_execution_options=[],
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    options = list(agent.selectable_model_options)
+    if change == "identity":
+        changed = candidate.model_copy(
+            update={
+                "model_selection": selected.model_copy(
+                    update={"model_identifier": "user-selected-other"}
+                )
+            }
+        )
+        options[0] = option.model_copy(update={"candidates": [changed]})
+    elif change == "option_order":
+        options.reverse()
+    elif change == "settings":
+        changed = candidate.model_copy(
+            update={
+                "settings": candidate.settings.model_copy(
+                    update={"context_window_tokens": 16_000}
+                )
+            }
+        )
+        options[0] = option.model_copy(update={"candidates": [changed]})
+    elif change == "raw_intent":
+        executor.test_session_state.applied_inference_profile = (
+            SessionAppliedInferenceProfile(
+                model_target_label="planning",
+                reasoning_effort=None,
+                enabled_execution_options=[],
+            )
+        )
+    executor.test_agent_state.agent = agent.model_copy(
+        update={"selectable_model_options": options}
+    )
+    assert (
+        await executor._has_model_configuration_drift(
+            agent_id=agent.id,
+            session_id="session-001",
+            requested_profile=RequestedInferenceProfile(
+                model_target_label=option.label,
+                reasoning_effort=None,
+                enabled_execution_options=[],
+            ),
+            prepared_inference_state=state,
+            configuration_signature=signature,
+        )
+        is drift
+    )

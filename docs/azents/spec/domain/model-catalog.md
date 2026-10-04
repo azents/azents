@@ -5,6 +5,15 @@ tags: [backend, frontend, engine]
 spec_type: domain
 domain: model-catalog
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/_legacy_model_capability_contract.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/repos/llm_catalog/capability_publication_test.py
   - typescript/apps/azents-web/src/shared/model-options/containers/SelectableModelOptionsEditorContainer.tsx
   - typescript/apps/azents-web/src/shared/model-options/containers/useSelectableModelOptionsEditor.ts
   - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
@@ -88,7 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-04
-spec_version: 44
+spec_version: 45
 ---
 
 # Model Catalog Domain Spec
@@ -170,19 +179,16 @@ dataset or fetch one dataset per candidate.
 
 ### ChatGPT web-search support
 
-Every account-visible ChatGPT OAuth conversation model retains the reviewed Codex
-route's native web-search capability. When the account listing has no web-search
-declaration, the final v2 contract records this support as `contract_derived`;
-optional descriptive source absence, a native OpenAI record with the same name,
-source tool prices or weaker generic source flags do not own this route policy.
-Explicit account web-search evidence, including denial or null, is preserved.
-This policy does not enable unknown web-search support for other provider routes.
+Account-visible ChatGPT OAuth conversation models use the reviewed Codex route's
+native web-search contract alongside exact account declarations. The compiler
+retains source presence and diagnostics separately and produces one final
+built-in support list. Native OpenAI records, price fields and model-name
+similarity do not establish ChatGPT permission.
 
-The final stored entry, not the listing's intermediate normalized tool list,
-supplies the semantic and effective built-in views. Explicit selection copies that
-contract into the saved selection used by configuration validation and native
-request lowering. Corrected catalog publication does not rewrite existing saved
-Agent or Workspace selections; ordinary explicit reselection adopts the correction.
+Current exact local declarations supply active same-identity metadata even when
+an existing selection carries an older compiled object. Configuration and native
+dispatch consume the final support list; read projections preserve stored user
+settings.
 
 ### Route-bounded support propagation
 
@@ -190,8 +196,8 @@ Eligible `chat` and `responses` conversation modes retain the same reviewed
 client-image executor policy. Provider-hosted image permission is separate from
 client execution. Google and Vertex Google use the implemented GenerateContent
 image-output boundary for both the adopted explicit IMAGE output declaration and
-the configurable native image tool. Saved positive/negative/null facts govern
-codec image flags; stock model-name knowledge cannot replenish a denied fact.
+the configurable native image tool. Final compiled support governs codec image
+flags; declaration presence and route exclusions remain diagnostic inputs.
 
 Explicit Google efforts are bounded by the installed scalar codec's lossless
 level domain, including its documented sparse-profile floor. An omitted optional
@@ -199,12 +205,24 @@ codec level set is not an empty model effort declaration; absent model evidence
 still advertises no efforts, budget-only or snapped mappings remain excluded.
 Account effort-control denial overrides conflicting xAI OAuth presets/defaults.
 
-Unknown function support does not erase an explicit positive parallel/strict
-declaration. Such refinements are conditional on actual function declarations;
-known function denial remains terminal. Configuration and profile membership
-use individually justified effort potential without rewriting conservative
-flat views, while actual dispatch enforces the saved predicate. Descriptor-absent
-selections retain their prior decoding and consumer-specific validation.
+Function calls, parallel calls, strict schemas and structured responses use
+separate final fields. A conditional supported feature remains configurable;
+actual request admission evaluates its captured effort/function conditions.
+Configuration and profile controls read complete final lists without inventing
+request dimensions or maintaining a second descriptor authority.
+
+Two reviewed supplements have exact route/feature scope. Eligible authenticated
+Kimi OAuth managed coding inventory establishes function-calling potential; it
+does not establish parallel calls, strict schemas, structured responses, efforts
+or hosted tools. The exact `grok-4.7` model on xAI API-key and xAI OAuth routes has
+a hosted web-search supplement. That web rule does not predict support for
+other model IDs or authentication routes.
+
+For Kimi function calling and exact Grok web search, an own-provider null combined
+with matching-source false denies the final feature while retaining the raw null
+declaration. Explicit own-provider false remains a denial; own-provider true
+retains support over matching generic false. These narrow supplement guards do
+not extend to other features or convert original evidence into guessed facts.
 
 Catalog diagnostics include applicable installed codec
 dependencies. Native OpenAI/ChatGPT record the OpenAI SDK dependency and do not
@@ -313,13 +331,19 @@ credential/configuration generation, and the active work token. Changed inputs
 repeat local preparation; stale workers cannot publish. No hash, data revision, or
 work token substitutes for source-value comparison.
 
-New conversation projections carry `semantic_contract` version `2`, separating
-unknown, conditional, explicit and contract-derived support from the conservative
-boolean/list views. Function calling, strict function schemas, structured responses,
-parallel calls, reasoning/effort/defaults, parameters and implemented media are
-independent facts. Native OpenAI/ChatGPT never consult Pydantic model profiles for
-capability authority. Other routes retain actual codec traits without treating
-missing stock model knowledge as a capability ceiling.
+Conversation projections carry `capability_schema_version = 3`. The final
+boolean/list fields alone determine support: inclusion is support and omission or
+false is absence. `structured_response` is independent of strict function schemas.
+`request_constraints` contains a nullable known reasoning default and one
+conjunction per supported conditional feature, not another support state.
+Function calls, parallel calls, reasoning, summaries, parameters, modalities and
+implemented built-ins retain distinct fields.
+
+The compiler combines exact provider declarations, locally captured source facts
+and reviewed route contracts. Source presence, completeness and unavailable-price
+diagnostics remain typed evidence rather than final unknown capability states.
+Native OpenAI/ChatGPT keep native codecs, while other routes retain SDK formatting
+without making stock model profiles a second model-feature authority.
 
 Explicit reasoning denial is terminal within a source record. A complete effort
 array, including `[]`, takes precedence over flags. Only an absent array and a
@@ -327,8 +351,13 @@ valid per-level flag enable the versioned native OpenAI/ChatGPT flag convention:
 none/minimal/low are opt-out, medium/high are derived baseline, and xhigh/max are
 opt-in; null remains unknown. Generic reasoning true alone creates no effort set.
 Defaults are independently declared, not inferred from order or none membership.
-Every advertised effort must have lossless route encoding; Google v2 does not
+Every advertised effort must have lossless route encoding; the Google scalar codec does not
 invent budgets or remap to a nearby level.
+
+The selectable and directly dispatched effort domain remains `none`, `minimal`,
+`low`, `medium`, `high`, `xhigh`, and `max`. Provider `ultra` declarations remain
+original evidence and are excluded from canonical controls, matching the
+pre-Pydantic parser. They do not become `max` or a new selectable level.
 
 ChatGPT preserves exact account arrays/limits/tool declarations and its audited
 provider policy; request hints/instructions do not become model options. OpenRouter
@@ -348,14 +377,18 @@ existing execution owner. Hosted denial does not deny the maintained client
 executor. Source audio/video flags do not implement a rich-file route, and strict
 function schemas do not imply structured responses.
 
-Configuration/ownership preparation admits supported or conditional built-ins as
-potential choices. Actual dispatch checks the saved predicate after effective
-effort and published JSON-function declarations are known, for client and hosted
-owners alike. Unmet/unknown tool authorization fails before HTTP; a conservative
-display view cannot reject a satisfied condition earlier or disable it in the SDK
-codec. Explicit unsupported strict requests fail rather than becoming false.
-Unknown scalar requests retain the existing provider error boundary without being
-advertised as supported. Historical descriptor absence retains prior semantics.
+Configuration, selection, settings copy and image-catalog controls expose every
+final supported built-in independently of a partially known request. Dispatch
+checks membership and conditions after effective effort and actual function
+declarations are known. Client and hosted execution use the same gate. Absent
+support or an unmet condition fails before HTTP; explicit strictness, scalar
+settings and effort are not silently removed to pass admission.
+
+Conversation publication validates the raw schema-3 object and current
+`capability_compiler_revision = "4"` before replacing current rows. Historical
+read decoding does not satisfy this writer guard. These are application checks
+using the existing owner/source integrity fences; this capability repair
+introduces no database migration.
 
 Each source or catalog owner retains only its current synchronization status, counts,
 failure metadata, action hint, and diagnostics. An opaque work token exists only while
@@ -570,31 +603,44 @@ compatibility field. Submit normalization must not refetch a dynamic provider li
 
 ## Snapshot semantics
 
-Agent and Workspace model selections remain snapshots. Catalog changes do not automatically mutate existing selections. UI can surface drift diagnostics between the stored selection snapshot and the current catalog, but runtime selection remains the saved snapshot unless the user changes it.
+Saved integration/model IDs, labels, candidate order and settings are user
+configuration. Active Agent detail/list and Workspace responses compile metadata
+for those exact authorized local choices and return detached copies. Capture uses
+current catalog declarations, including legitimate older raw entries, exact local
+source rows and reviewed route rules. Failed sync preserves usable last-good
+declarations. Missing scope, exact entry or required evidence retains the
+configured identity with an explicit metadata diagnostic and empty final support.
 
-New explicit selection/save copies the complete stored v2 descriptor and normalized
-pricing definition. Reads and
-ordinary non-selection saves do not enrich old selections or mark additive
-descriptor decoding as a user change. Descriptor absence/null preserves historical
-behavior without consulting retired metadata. Exact current-source reads for optional
-context do not rewrite saved authorization or prices; cost capture uses saved pricing.
-Omitted effort is not literal `none`; conditions use explicit effort then a known
-saved default. Unsupported requested settings are not dropped or remapped.
+Normal reads and unrelated PATCH/label saves preserve stored user settings. A
+new Agent inheriting Workspace defaults captures compiled metadata for the same
+ordered choices. Existing selection prices remain independently captured pricing.
+
+Historical capability JSON is decoded read-only for captured operations and
+history. That boundary is separate from compilation of current raw declarations
+and cannot authorize a new schema-3 catalog publication. Final API support has
+one representation; source evidence diagnostics keep their separate typed shape.
+
+A NEW model operation captures final capabilities before effective-profile
+normalization and revalidates local inputs within the existing owner write fence.
+Retries, quota progression, takeover and history use its captured candidates;
+newer metadata cannot reinterpret an existing operation. Lowerers receive that
+snapshot and perform no current metadata lookup or provider/source discovery.
 
 If an integration is deleted or disabled, runtime or configuration operations can still fail because the credential/config source is unavailable. That is an integration availability failure, not a catalog drift failure.
 
 The effective provider-request tool declaration limit is the narrow exception to saved selection snapshot authority when the current Agent has Tool Search enabled. On that enabled path, runtime resolves a reviewed rule before each prepared model call from the current provider, adapter/native request path, runtime model identifier, model developer, and normalized family. The code-owned compatibility registry is authoritative for this transport constraint so a previously saved `AgentModelSelection` cannot freeze a stale hard limit. Exact-model rules take precedence over family rules and family rules over endpoint rules; an equally specific overlap is invalid configuration. When Tool Search is disabled, runtime preserves the complete legacy client-tool catalog and does not apply registry projection.
 
-The current registry applies xAI's documented 200 total-tools request ceiling and a conservative 128 function-declaration ceiling only to Vertex AI request paths targeting Google/Gemini models. The Vertex rule records the conflicting official 128 and 512 sources and their verification date. Direct Gemini API requests and Vertex-hosted Anthropic or other non-Google models remain unmatched. When no verified rule matches, the limit is absent and runtime does not invent a product-wide fallback cap. All other normalized capabilities, supported built-ins, limits, and settings retain normal saved-snapshot semantics.
+The current registry applies xAI's documented 200 total-tools request ceiling and a conservative 128 function-declaration ceiling only to Vertex AI request paths targeting Google/Gemini models. The Vertex rule records the conflicting official 128 and 512 sources and their verification date. Direct Gemini API requests and Vertex-hosted Anthropic or other non-Google models remain unmatched. When no verified rule matches, the limit is absent and runtime does not invent a product-wide fallback cap. This is a transport constraint; compiled active metadata and frozen operation capabilities retain their separate ownership boundaries.
 
 ## Picker behavior
 
 The web picker is integration-first. The form displays the current model summary and opens a model picker modal to change the selection. Forms and settings pages must not prefetch every integration catalog while rendering. The picker lazily reads the selected integration catalog only after the modal is opened and an integration is selected.
 
-Existing optional controls consume saved effective support and predicates
-conservatively. Unknown conditions do not become affirmative controls, independently
-justified subsets remain available, and exact xhigh/max values are retained. There
-is no new source or unknown-state configuration mode.
+Optional controls read final support fields and exact effort lists. Conditions
+constrain actual requests rather than removing configurable potential. Concrete
+model changes retain the existing ordered effort adaptation; explicit null stays
+null and a valid selected value stays unchanged. The final capability surface has
+no unknown/unverified badge or additional configuration mode.
 
 The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing before first success, failed before first success, ready, ready with latest failed sync, ready empty result, and loading next page. Failure state renders before empty result state. Pages are current-data offset reads, not revision-pinned views.
 
@@ -672,8 +718,8 @@ not native model capability authority. No direct genai/LiteLLM execution import,
 process-local price map, package-bundled pricing fallback or request-time remote
 fetch supplies catalog, context or estimated-pricing authority.
 
-Selected sampling controls remain requests governed by their saved support
-contract. Google/Anthropic/Bedrock top-k encoding is a transport bound, not a
+Selected sampling controls are admitted against captured final support and actual
+encoded-request conditions. Google/Anthropic/Bedrock top-k encoding is a transport bound, not a
 positive model capability fact. Runtime profiles preserve accepted controls
 through the actual codec; missing canonical top-k mappings fail before dispatch.
 
@@ -683,6 +729,8 @@ visibility. Generic source matching is optional enrichment and never a visibilit
 gate. Provider-facing and runtime identifiers remain the exact raw provider IDs.
 Retired genai source data and nullable provenance remain inert history, while its
 active collector/matcher/evaluator/dependency/configuration are replaced. Stock
-Pydantic usage-counter extraction remains transitive. The complete replacement
-requires coordinated old-producer drain and the writer fence; binary-only rollback
-is unsupported, and no intermediate connection-only release is authorized.
+Pydantic usage-counter extraction remains transitive. Release preparation drains
+old read/save/dispatch producers before exposing the new contract and application
+publication guard. This is operational coordination rather than a new runtime
+mode. Existing database integrity and historical operation/provenance are
+preserved; no new database migration is part of this capability correction.

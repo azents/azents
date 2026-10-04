@@ -580,7 +580,10 @@ def _interpret_reasoning(
                     support=(
                         "unsupported"
                         if level
-                        in {ModelReasoningEffort.XHIGH, ModelReasoningEffort.MAX}
+                        in {
+                            ModelReasoningEffort.XHIGH,
+                            ModelReasoningEffort.MAX,
+                        }
                         else "supported"
                     ),
                     origin="source_contract",

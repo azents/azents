@@ -79,10 +79,13 @@ from azents.core.llm_catalog import (
     ModelToolCallingCapabilities,
 )
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
-from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_supported_execution_options,
+)
+from azents.core.model_provider_declarations import (
+    MalformedProviderDeclarations,
+    decode_stored_provider_evidence,
 )
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
@@ -233,6 +236,7 @@ class _ChatGPTEvidencePayload(_ListingEvidencePayload):
     default_reasoning_level: str | None = None
     supports_parallel_tool_calls: bool | None = None
     supports_reasoning_summaries: bool | None = None
+    supports_reasoning_summary_parameter: bool | None = None
     experimental_supported_tools: list[str] | None = None
 
 
@@ -336,6 +340,7 @@ class _ChatGPTModelPayload(_ChatGPTEvidencePayload, _ModelMetadataPayload):
             "auto_compact_token_limit",
             "context_window",
             "default_reasoning_level",
+            "default_reasoning_summary",
             "effective_context_window_percent",
             "experimental_supported_tools",
             "input_modalities",
@@ -347,8 +352,11 @@ class _ChatGPTModelPayload(_ChatGPTEvidencePayload, _ModelMetadataPayload):
             "supported_reasoning_levels",
             "supports_parallel_tool_calls",
             "supports_reasoning_summaries",
+            "supports_reasoning_summary_parameter",
+            "supports_search_tool",
             "tool_mode",
             "visibility",
+            "web_search_tool_type",
         }
     )
     slug: _OptionalIdentity = None
@@ -369,7 +377,15 @@ class _ChatGPTModelPayload(_ChatGPTEvidencePayload, _ModelMetadataPayload):
             supported_builtin_capabilities(
                 provider=LLMProvider.CHATGPT_OAUTH,
                 model_identifier=slug,
-                metadata=value,
+                metadata={
+                    **value,
+                    "mode": value.get("mode")
+                    if value.get("mode") is not None
+                    else "responses",
+                    "supports_function_calling": value.get("supports_function_calling")
+                    if value.get("supports_function_calling") is not None
+                    else True,
+                },
             )
             if slug is not None and cls.accepts_entry(value)
             else []
@@ -554,43 +570,6 @@ def create_listing_client_factories() -> ListingClientFactories:
     )
 
 
-def _listing_fact[T](payload: BaseModel, field: str, value: T | None) -> CatalogFact[T]:
-    """Capture presence at ingress, before candidate serialization."""
-    if field not in payload.model_fields_set:
-        return CatalogFact(state="absent", value=None)
-    if value is None:
-        return CatalogFact(state="null", value=None)
-    return CatalogFact(state="value", value=value)
-
-
-def _nested_listing_fact[T](
-    payload: BaseModel,
-    field: str,
-    nested: BaseModel | None,
-    nested_field: str,
-    value: T | None,
-) -> CatalogFact[T]:
-    """Preserve an explicitly unknown parent without fabricating child defaults."""
-    if field not in payload.model_fields_set:
-        return CatalogFact(state="absent", value=None)
-    if nested is None:
-        return CatalogFact(state="null", value=None)
-    return _listing_fact(nested, nested_field, value)
-
-
-def _modality_values(values: list[str] | None) -> tuple[str, ...] | None:
-    """Normalize token spelling without discarding future modality declarations."""
-    return tuple(value.lower() for value in values) if values is not None else None
-
-
-def _effort_values(values: list[str] | None) -> tuple[ModelReasoningEffort, ...] | None:
-    """Preserve canonical controls without adding levels for future provider values."""
-    if values is None:
-        return None
-    canonical = {effort.value: effort for effort in ModelReasoningEffort}
-    return tuple(canonical[value] for value in values if value in canonical)
-
-
 def _canonical_effort(value: str | None) -> ModelReasoningEffort | None:
     """Keep unsupported provider defaults unknown rather than choosing another level."""
     return next(
@@ -615,315 +594,75 @@ def _effort_diagnostics(values: list[str]) -> dict[str, object]:
 def _chatgpt_capability_evidence(
     payload: _ChatGPTModelPayload,
 ) -> ProviderCapabilityEvidence:
-    """Keep account declarations independent of model-name and SDK profile rules."""
-    levels = _effort_values(
-        [level.effort for level in payload.supported_reasoning_levels]
-        if payload.supported_reasoning_levels is not None
-        else None
-    )
-    context = _listing_fact(payload, "context_window", payload.context_window)
-    return ProviderCapabilityEvidence(
-        default_input_tokens=context,
-        max_input_tokens=(
-            _listing_fact(payload, "max_context_window", payload.max_context_window)
-            if "max_context_window" in payload.model_fields_set
-            else context
-        ),
-        input_modalities=_listing_fact(
-            payload, "input_modalities", _modality_values(payload.input_modalities)
-        ),
-        parallel_function_calling=_listing_fact(
-            payload,
-            "supports_parallel_tool_calls",
-            payload.supports_parallel_tool_calls,
-        ),
-        reasoning=(
-            CatalogFact(state="value", value=True)
-            if levels
-            else CatalogFact(state="absent", value=None)
-        ),
-        reasoning_efforts=_listing_fact(payload, "supported_reasoning_levels", levels),
-        default_reasoning_effort=_listing_fact(
-            payload,
-            "default_reasoning_level",
-            _canonical_effort(payload.default_reasoning_level),
-        ),
-        reasoning_summaries=_listing_fact(
-            payload,
-            "supports_reasoning_summaries",
-            payload.supports_reasoning_summaries,
-        ),
-        client_image_generation=(
-            CatalogFact(state="value", value=True)
-            if payload.experimental_supported_tools is not None
-            and "image_generation" in payload.experimental_supported_tools
-            else CatalogFact(state="absent", value=None)
-        ),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.CHATGPT_OAUTH,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
     )
 
 
 def _kimi_capability_evidence(payload: _KimiModelPayload) -> ProviderCapabilityEvidence:
-    """Record Kimi's independent flags; missing media/effort facts are not denials."""
-    return ProviderCapabilityEvidence(
-        max_input_tokens=_listing_fact(
-            payload, "context_length", payload.context_length
-        ),
-        image_input=_listing_fact(
-            payload, "supports_image_in", payload.supports_image_in
-        ),
-        video_input=_listing_fact(
-            payload, "supports_video_in", payload.supports_video_in
-        ),
-        reasoning=_listing_fact(
-            payload, "supports_reasoning", payload.supports_reasoning
-        ),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.KIMI_OAUTH,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
     )
 
 
 def _bedrock_capability_evidence(
     payload: _BedrockModelPayload,
 ) -> ProviderCapabilityEvidence:
-    """Summary media is evidence; synthetic reasoning/function defaults are not."""
-    return ProviderCapabilityEvidence(
-        input_modalities=_listing_fact(
-            payload, "inputModalities", _modality_values(payload.inputModalities)
-        ),
-        output_modalities=_listing_fact(
-            payload, "outputModalities", _modality_values(payload.outputModalities)
-        ),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.AWS_BEDROCK,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
     )
 
 
 def _vertex_capability_evidence(
     payload: _VertexModelPayload,
 ) -> ProviderCapabilityEvidence:
-    """Publisher token fields do not imply placeholder capability denials."""
-    return ProviderCapabilityEvidence(
-        max_input_tokens=_listing_fact(
-            payload, "inputTokenLimit", payload.inputTokenLimit
-        ),
-        max_output_tokens=_listing_fact(
-            payload, "outputTokenLimit", payload.outputTokenLimit
-        ),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.GOOGLE_VERTEX_AI,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
     )
 
 
 def _openrouter_capability_evidence(
     payload: _OpenRouterModelPayload,
 ) -> ProviderCapabilityEvidence:
-    """Use complete parameter declarations without inventing model effort levels."""
-    parameters = payload.supported_parameters
-
-    def parameter(*names: str) -> CatalogFact[bool]:
-        return _listing_fact(
-            payload,
-            "supported_parameters",
-            any(name in parameters for name in names)
-            if parameters is not None
-            else None,
-        )
-
-    architecture = payload.architecture
-    top = payload.top_provider
-    effort_parameter = parameter("reasoning", "reasoning_effort")
-    return ProviderCapabilityEvidence(
-        max_input_tokens=_listing_fact(
-            payload, "context_length", payload.context_length
-        ),
-        max_output_tokens=_nested_listing_fact(
-            payload,
-            "top_provider",
-            top,
-            "max_completion_tokens",
-            top.max_completion_tokens if top is not None else None,
-        ),
-        input_modalities=_nested_listing_fact(
-            payload,
-            "architecture",
-            architecture,
-            "input_modalities",
-            _modality_values(architecture.input_modalities)
-            if architecture is not None
-            else None,
-        ),
-        output_modalities=_nested_listing_fact(
-            payload,
-            "architecture",
-            architecture,
-            "output_modalities",
-            _modality_values(architecture.output_modalities)
-            if architecture is not None
-            else None,
-        ),
-        function_calling=parameter("tools"),
-        parallel_function_calling=parameter("parallel_tool_calls"),
-        structured_response=parameter("structured_outputs"),
-        reasoning=parameter("reasoning", "reasoning_effort", "include_reasoning"),
-        reasoning_efforts=(
-            CatalogFact(state="value", value=())
-            if effort_parameter.state == "value" and effort_parameter.value is False
-            else CatalogFact(state="null", value=None)
-            if effort_parameter.state == "null"
-            else CatalogFact(state="absent", value=None)
-        ),
-        temperature=parameter("temperature"),
-        top_p=parameter("top_p"),
-        top_k=parameter("top_k"),
-        stop_sequences=parameter("stop"),
-        max_output_parameter=parameter("max_tokens", "max_completion_tokens"),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.OPENROUTER,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
     )
 
 
 def _xai_api_capability_evidence(
     extra: dict[str, object] | None,
 ) -> ProviderCapabilityEvidence:
-    """Validate SDK model extensions without transferring opaque request hints."""
-    payload = _XaiApiEvidencePayload.model_validate(extra if extra is not None else {})
-    caps = payload.capabilities
-    raw_efforts = caps.reasoning_effort if caps is not None else None
-    effort_fact: CatalogFact[tuple[ModelReasoningEffort, ...]]
-    if isinstance(raw_efforts, list):
-        effort_fact = _nested_listing_fact(
-            payload,
-            "capabilities",
-            caps,
-            "reasoning_effort",
-            _effort_values(raw_efforts),
-        )
-    elif raw_efforts is False:
-        effort_fact = CatalogFact(state="value", value=())
-    elif raw_efforts is True:
-        effort_fact = CatalogFact(state="absent", value=None)
-    else:
-        effort_fact = _nested_listing_fact(
-            payload, "capabilities", caps, "reasoning_effort", None
-        )
-    reasoning = _nested_listing_fact(
-        payload,
-        "capabilities",
-        caps,
-        "reasoning",
-        caps.reasoning if caps is not None else None,
-    )
-    if reasoning.state == "absent" and (raw_efforts is True or bool(effort_fact.value)):
-        reasoning = CatalogFact(state="value", value=True)
-    return ProviderCapabilityEvidence(
-        max_input_tokens=_listing_fact(
-            payload, "context_length", payload.context_length
-        ),
-        input_modalities=_listing_fact(
-            payload, "input_modalities", _modality_values(payload.input_modalities)
-        ),
-        output_modalities=_listing_fact(
-            payload, "output_modalities", _modality_values(payload.output_modalities)
-        ),
-        reasoning=reasoning,
-        reasoning_efforts=effort_fact,
-        default_reasoning_effort=_nested_listing_fact(
-            payload,
-            "capabilities",
-            caps,
-            "default_reasoning_effort",
-            _canonical_effort(caps.default_reasoning_effort)
-            if caps is not None
-            else None,
-        ),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.XAI,
+        provider_metadata=extra,
+        capability_evidence=None,
     )
 
 
 def _xai_oauth_capability_evidence(
     payload: _XaiOAuthModelPayload,
 ) -> ProviderCapabilityEvidence:
-    """Preserve proxy declarations without treating empty controls as no reasoning."""
-    levels = None
-    default = None
-    defaults: list[ModelReasoningEffort | None] = []
-    if payload.reasoning_efforts is not None:
-        values = []
-        defaults = []
-        for preset in payload.reasoning_efforts:
-            value = preset.id if preset.id is not None else preset.value
-            if value is None:
-                raise ValueError("Provider reasoning preset must contain an effort.")
-            effort = _canonical_effort(value)
-            if effort is not None:
-                values.append(effort)
-            if preset.default is True:
-                defaults.append(effort)
-        levels = tuple(values)
-        default = defaults[0] if len(defaults) == 1 else None
-    # The CLI's model_default_reasoning_effort reads this top-level model field.
-    declared_default = _listing_fact(
-        payload, "reasoning_effort", _canonical_effort(payload.reasoning_effort)
-    )
-    if declared_default.state != "absent":
-        default = declared_default.value
-        if defaults and (len(defaults) != 1 or defaults[0] != default):
-            default = None
-        if default is not None and levels is not None and default not in levels:
-            default = None
-    control = _listing_fact(
-        payload, "supports_reasoning_effort", payload.supports_reasoning_effort
-    )
-    effort_fact: CatalogFact[tuple[ModelReasoningEffort, ...]] = _listing_fact(
-        payload, "reasoning_efforts", levels
-    )
-    if control.state == "value" and control.value is False:
-        effort_fact = CatalogFact(state="value", value=())
-        default = None
-    elif effort_fact.state == "absent" and control.state == "null":
-        effort_fact = CatalogFact(state="null", value=None)
-    backend = _listing_fact(payload, "api_backend", payload.api_backend)
-    default_context = _listing_fact(payload, "context_window", payload.context_window)
-    maximum_context = (
-        _listing_fact(
-            payload,
-            "context_windows",
-            max(payload.context_windows) if payload.context_windows else None,
-        )
-        if "context_windows" in payload.model_fields_set
-        else default_context
-    )
-    if (
-        default_context.value is not None
-        and maximum_context.value is not None
-        and default_context.value > maximum_context.value
-    ):
-        raise InvalidProviderResponseError(
-            "Default context window exceeds the advertised maximum."
-        )
-    return ProviderCapabilityEvidence(
-        default_input_tokens=default_context,
-        max_input_tokens=maximum_context,
-        input_modalities=_listing_fact(
-            payload, "input_modalities", _modality_values(payload.input_modalities)
-        ),
-        output_modalities=_listing_fact(
-            payload, "output_modalities", _modality_values(payload.output_modalities)
-        ),
-        reasoning=(
-            CatalogFact(state="value", value=True)
-            if payload.supports_reasoning_effort is True or bool(levels)
-            else CatalogFact(state="absent", value=None)
-        ),
-        reasoning_efforts=effort_fact,
-        default_reasoning_effort=(
-            CatalogFact(state="value", value=default)
-            if default is not None
-            else CatalogFact(state="null", value=None)
-            if declared_default.state != "absent"
-            or payload.reasoning_efforts is not None
-            and any(preset.default is True for preset in payload.reasoning_efforts)
-            else CatalogFact(state="absent", value=None)
-        ),
-        web_search=_listing_fact(
-            payload, "supports_backend_search", payload.supports_backend_search
-        ),
-        responses_api=(
-            CatalogFact(state="value", value=backend.value == "responses")
-            if backend.state == "value"
-            else CatalogFact(state=backend.state, value=None)
-        ),
+    """Decode own-provider declarations through the shared pure core boundary."""
+    return decode_stored_provider_evidence(
+        provider=LLMProvider.XAI_OAUTH,
+        provider_metadata=payload.model_dump(exclude_unset=True),
+        capability_evidence=None,
     )
 
 
@@ -1126,6 +865,7 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
             UnicodeDecodeError,
             ValidationError,
             InvalidProviderResponseError,
+            MalformedProviderDeclarations,
         ),
     ):
         return False
@@ -1161,6 +901,7 @@ def _xai_listing_provider_error(exc: Exception) -> XaiListingProviderError:
             UnicodeDecodeError,
             ValidationError,
             InvalidProviderResponseError,
+            MalformedProviderDeclarations,
         ),
     ):
         failure_code = "XaiInvalidProviderResponse"
@@ -1325,6 +1066,7 @@ def _candidate_from_chatgpt_model(
     if model_id is None or not model.eligible:
         return None
     display_name = model.display_name or model_id
+    evidence = _chatgpt_capability_evidence(model)
     reasoning_efforts = _chatgpt_reasoning_efforts(model.supported_reasoning_levels)
     input_modalities = _chatgpt_modalities(model)
     context_window = _chatgpt_context_window(model)
@@ -1341,7 +1083,7 @@ def _candidate_from_chatgpt_model(
         reasoning=ModelReasoningCapabilities(
             supported=bool(reasoning_efforts),
             effort_levels=reasoning_efforts,
-            summaries=model.supports_reasoning_summaries,
+            summaries=evidence.reasoning_summaries.value is True,
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
             supported=model.builtin_capabilities
@@ -1357,7 +1099,7 @@ def _candidate_from_chatgpt_model(
         model_display_name=display_name,
         model_developer=LLMModelDeveloper.OPENAI,
         model_family=_chatgpt_family(model_id),
-        capability_evidence=_chatgpt_capability_evidence(model),
+        capability_evidence=evidence,
         normalized_capabilities=capabilities,
         supported_execution_options=_chatgpt_supported_execution_options(model),
         model_snapshot={
@@ -1377,7 +1119,7 @@ def _chatgpt_source_metadata(model: _ChatGPTModelPayload) -> dict[str, object]:
     return {
         **model.source_metadata,
         **_effort_diagnostics(
-            [preset.effort for preset in model.supported_reasoning_levels or []]
+            [preset.effort for preset in model.supported_reasoning_levels or []],
         ),
     }
 
@@ -1686,7 +1428,11 @@ def _candidate_from_xai_oauth_model(
 ) -> NormalizedModelCandidate:
     """Normalize one account-visible Grok model."""
     evidence = _xai_oauth_capability_evidence(model)
-    efforts = _xai_reasoning_efforts(model.reasoning_efforts)
+    efforts = [
+        level
+        for level in ModelReasoningEffort
+        if level in (evidence.reasoning_efforts.value or ())
+    ]
     built_in_tools = ["web_search"] if model.supports_backend_search is True else []
     responses_api = (
         model.api_backend == "responses" if model.api_backend is not None else None
@@ -1701,7 +1447,7 @@ def _candidate_from_xai_oauth_model(
             output=_xai_modality_snapshot(model.output_modalities),
         ),
         reasoning=ModelReasoningCapabilities(
-            supported=model.supports_reasoning_effort is True,
+            supported=evidence.reasoning.value is True,
             effort_levels=efforts,
         ),
         built_in_tools=ModelBuiltInToolCapabilities(supported=built_in_tools),
@@ -1731,7 +1477,7 @@ def _candidate_from_xai_oauth_model(
     source_metadata.update(
         _effort_diagnostics(
             [value for value in raw_efforts if value is not None]
-            + ([model.reasoning_effort] if model.reasoning_effort is not None else [])
+            + ([model.reasoning_effort] if model.reasoning_effort is not None else []),
         )
     )
     if model.supports_reasoning_effort is False and model.reasoning_efforts:
@@ -1788,24 +1534,6 @@ def _conservative_xai_capabilities() -> ModelCapabilities:
             responses_api=None,
         ),
     )
-
-
-def _xai_reasoning_efforts(
-    payloads: list[_XaiOAuthReasoningEffortPayload] | None,
-) -> list[ModelReasoningEffort]:
-    """Normalize xAI reasoning levels into canonical order."""
-    if payloads is None:
-        return []
-    available: set[ModelReasoningEffort] = set()
-    for payload in payloads:
-        raw = payload.value or payload.id
-        if raw is None:
-            continue
-        try:
-            available.add(ModelReasoningEffort(raw))
-        except ValueError:
-            continue
-    return [effort for effort in ModelReasoningEffort if effort in available]
 
 
 def _xai_family(model_id: str) -> str:

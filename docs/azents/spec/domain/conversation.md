@@ -6,6 +6,10 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
@@ -30,9 +34,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
   - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
-  - python/apps/azents/src/azents/repos/worker_user_stop.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/model_availability.py
@@ -135,7 +138,6 @@ code_paths:
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/repos/toolkit_state/**
 api_routes:
   - /chat/v1
   - /chat/v1/sessions/{session_id}/inputs
@@ -171,8 +173,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-03
-spec_version: 179
+last_verified_at: 2026-10-04
+spec_version: 180
 ---
 
 # Conversation & Events
@@ -470,17 +472,15 @@ External Channel root Session may instead use only the creation-marked human
 results are ineligible. Its title text is limited to the authorized body and bounded safe attachment
 names and media types without reading attachment contents. The worker then immediately schedules
 best-effort lightweight model title generation from that exact initial prompt without waiting for the
-first run to complete. The title operation freezes the Agent's saved Lightweight label candidates and
-owns an independent cursor and candidate-local retry counter. Each candidate's saved
-structured-response snapshot selects its response envelope. For v2 descriptors this
-is the separate `structured_response` fact evaluated with omitted effort/known saved
-default and no function declarations; descriptor-absent candidates retain their
-historical `strict_json_schema` interpretation. Strict function support is not a new
-response-schema fact. `true` uses only a strict one-field
-Structured Output contract, `false` uses only title-only plain text, and `null` starts with Structured
-Output. The unknown branch changes once to plain text only when a typed provider parameter or code
-identifies that output contract as unsupported or unroutable, or when a successful response cannot be
-decoded as the required title object. A normalized `quota_or_billing` failure shares Workspace
+first run to complete. A NEW title operation compiles local metadata for the same
+configured Lightweight candidates, then freezes an independent cursor and
+candidate-local retry counter. Captured final `structured_response` support and
+its actual request conditions select either the strict one-field Structured
+Output contract or title-only plain text. Omitted effort can use a known captured
+default for evaluation; actual output-tool shape is validated by the shared
+effective-request gate. Strict function schemas remain independent of native
+structured output. Invalid structured title output fails the operation rather
+than entering an unknown-support compatibility branch. A normalized `quota_or_billing` failure shares Workspace
 cooldown and advances to the next candidate; authentication, ordinary rate limiting, timeout,
 transport, provider availability, and other operational failures retain the active candidate and its
 existing retry policy. Shared instructions preserve request-named products, tools, filenames, and
@@ -724,6 +724,19 @@ not reserved-root membership or `session_agent_context_projects`, is required
 before destructive cleanup can remove a path or branch.
 
 ## 3. AgentRun
+
+NEW foreground and compaction model operations compile current exact authorized
+local declarations for the configured identities before effective-profile
+normalization. Owner-locked preparation revalidates those local inputs.
+Configured IDs, candidate order and settings remain user configuration. Active
+Agent responses may carry newly compiled metadata, but reads and unrelated saves
+do not rewrite that configuration.
+
+Existing operations freeze final capabilities with their candidates. Automatic
+retry, quota cursor progression, takeover and replay retain those snapshots and
+historical fingerprints instead of consulting current metadata. Missing required
+metadata at NEW preparation retains the assigned identity and yields a typed
+failure; it is not a quota skip or permission to select another model.
 
 `agent_runs` is the durable execution-state table for the event loop.
 

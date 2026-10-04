@@ -615,8 +615,8 @@ def test_provider_declaration_budget_is_preserved(
         lowerer.lower([], native_replay_context=None, model="selected")
 
 
-def test_unknown_saved_strict_parallel_support_is_conservative() -> None:
-    request = _lowerer(
+def test_absent_strict_function_support_rejects_explicit_request() -> None:
+    lowerer = _lowerer(
         tools=[
             {
                 "type": "function",
@@ -625,14 +625,14 @@ def test_unknown_saved_strict_parallel_support_is_conservative() -> None:
                 "strict": True,
             }
         ]
-    ).lower([], native_replay_context=None, model="claude-selected")
-    assert request.parameters.function_tools[0].strict is False
-    assert request.settings["parallel_tool_calls"] is False
+    )
+    with pytest.raises(ValueError, match="function"):
+        lowerer.lower([], native_replay_context=None, model="claude-selected")
 
 
 def test_library_tool_availability_does_not_authorize_hosted_search() -> None:
     lowerer = _lowerer(hosted_tools=[BuiltinToolSpec(name="web_search", config={})])
-    with pytest.raises(ValueError, match="not authorized"):
+    with pytest.raises(ValueError, match="builtin:web_search"):
         lowerer.lower([], native_replay_context=None, model="claude-selected")
 
 
@@ -680,7 +680,7 @@ def test_library_image_support_does_not_authorize_selected_hosted_image() -> Non
         model="gemini-3.1-flash-image-preview",
         hosted_tools=[BuiltinToolSpec(name="image_generation", config={})],
     )
-    with pytest.raises(ValueError, match="not authorized"):
+    with pytest.raises(ValueError, match="builtin:image_generation"):
         lowerer.lower(
             [], native_replay_context=None, model="gemini-3.1-flash-image-preview"
         )
@@ -721,7 +721,7 @@ def test_google_effort_without_legacy_mapping_fails_before_sdk_dispatch(
         ),
         reasoning_effort=effort,
     )
-    with pytest.raises(ValueError, match="no supported mapping"):
+    with pytest.raises(ValueError, match="no lossless mapping"):
         lowerer.lower([], native_replay_context=None, model="gemini-3.1-pro-preview")
 
 
@@ -743,7 +743,7 @@ def test_fast_and_reasoning_require_saved_authorization() -> None:
     with pytest.raises(ValueError, match="not supported by the model"):
         lowerer.lower([], native_replay_context=None, model="claude-selected")
     lowerer = _lowerer(reasoning_effort="high")
-    with pytest.raises(ValueError, match="Reasoning effort is not authorized"):
+    with pytest.raises(ValueError, match="support reasoning"):
         lowerer.lower([], native_replay_context=None, model="claude-selected")
     caps = ModelCapabilities(
         reasoning=ModelReasoningCapabilities(
@@ -769,7 +769,8 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
             from azents.engine.model_text import call_provider_text
         from azents.core.enums import LLMModelDeveloper, LLMProvider
         from azents.core.llm_catalog import (
-            ModelCapabilities, ModelReasoningCapabilities, ModelReasoningEffort
+            ModelCapabilities, ModelReasoningCapabilities,
+            ModelReasoningEffort, ModelParameterCapabilities
         )
         from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
         from azents.engine.model_text import call_provider_text
@@ -786,7 +787,12 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
             provider_id=LLMProvider.AWS_BEDROCK,
             model=model,
             tools=None,
-            model_capabilities=None,
+            model_capabilities=ModelCapabilities(
+                reasoning=ModelReasoningCapabilities(supported=True),
+                parameters=ModelParameterCapabilities(
+                    top_k=True, max_output_tokens=True
+                ),
+            ),
             supported_execution_options=[],
             enabled_execution_options=[],
             model_developer=LLMModelDeveloper.ANTHROPIC,
@@ -817,13 +823,13 @@ def test_bedrock_settings_and_structured_helper_import_in_fresh_process(
         lowerer.model_capabilities = ModelCapabilities(
             reasoning=ModelReasoningCapabilities(
                 supported=True, effort_levels=[ModelReasoningEffort.HIGH]
-            )
+            ), parameters=ModelParameterCapabilities(top_k=True, max_output_tokens=True)
         )
         lowerer.reasoning_effort = "high"
         effort_request = lowerer.lower([], native_replay_context=None, model=model)
         assert effort_request.settings["bedrock_additional_model_requests_fields"] == {
             "thinking": {"type": "enabled", "budget_tokens": 1024},
-            "output_config": {"existing_option": "preserved", "effort": "high"},
+            "output_config": {"existing_option": "preserved"},
         }
         lowerer.reasoning_effort = None
         lowerer.model_developer = None

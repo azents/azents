@@ -6,6 +6,10 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
@@ -31,7 +35,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-04
-spec_version: 6
+spec_version: 7
 ---
 
 # Kimi OAuth Flow
@@ -204,13 +208,28 @@ credentials and requests `GET /models` from the Kimi Code API. The response must
 source record.
 
 Projection preserves the provider model id and display name and records Moonshot as model developer.
-The catalog may expose:
+The compiler preserves raw declarations and produces final schema-3 support for
+the actual implemented route: positive limits, supported content forms, function
+tools, generation parameters and reasoning are separate fields. A declaration
+in the standalone provider API does not itself implement a richer product route.
+Internal reasoning does not invent selectable effort levels.
 
-- positive context length;
-- text input and output;
-- image and video input when explicitly reported;
-- function tool calling;
-- reasoning support without selectable effort levels.
+Eligible models in the authenticated Kimi Code managed coding inventory use the
+reviewed JSON function-tool contract even when discovery omits a per-model tool
+flag. This supplement establishes only function calling, not parallel calls,
+strict schemas, structured responses, selectable efforts or hosted tools. It is
+scoped to this managed route rather than a Moonshot publisher/name inference.
+Own-provider null with matching-source false denies function calling and keeps
+the original null evidence; explicit own false denies it, while own true retains
+support over matching generic false. Other features retain their independent
+declaration and route rules.
+
+Active reads and NEW operations compile current exact authorized LOCAL
+declarations for the same configured ID. User identities/order/settings and
+pricing remain unchanged by read projection. Existing operations keep their
+captured candidates and replay metadata. Request conditions use the actual
+Chat Completions envelope after scalar/tool overrides. Provider `ultra` remains
+original evidence and is excluded from the seven canonical levels.
 
 Invalid individual model items are skipped. A missing or invalid top-level model list fails the sync.
 Stored catalog lifecycle, cooldown, backoff, fencing, stale refresh, explicit sync, and

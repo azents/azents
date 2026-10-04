@@ -17,6 +17,7 @@ from azents.core.model_catalog_source import (
 from azents.core.model_metadata_collection_data import FetchedModelMetadataSource
 from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -243,6 +244,7 @@ async def test_local_projection_failure_preserves_data_and_truthful_summary(
             catalog_repository=repository,
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
             source_repository=ModelMetadataSourceRepository(),
+            active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
         ),
         source_sync_service=service,
     )

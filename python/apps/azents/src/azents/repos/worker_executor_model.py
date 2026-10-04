@@ -9,6 +9,12 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import (
+    apply_to_options,
+    compile_capture,
+    identities_for_options,
+    require_selection,
+)
 from azents.core.inference_profile import (
     InferenceProfileSource,
     RequestedInferenceProfile,
@@ -35,6 +41,7 @@ from azents.core.worker_model_profile import (
 from azents.engine.run.provider_failure import ModelProviderFailure
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository
@@ -51,9 +58,55 @@ from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStal
 from azents.repos.worker_executor_model_data import (
     FreshModelPreparation,
     FreshProfileSnapshot,
+    agent_model_configuration_signature,
+    apply_frozen_operation,
+    run_model_intent_signature,
 )
 from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
+
+
+def _requested_profile(
+    agent: Agent,
+    session: AgentSession,
+    override: RequestedProfileSelection | None,
+) -> RequestedProfileSelection:
+    """Keep raw input separate from metadata-dependent fallback normalization."""
+    if override is not None and override.source in {
+        InferenceProfileSource.PARENT_RUN,
+        InferenceProfileSource.SPAWN_OVERRIDE,
+        InferenceProfileSource.RETRY_ORIGINAL,
+    }:
+        return override
+    if session.applied_inference_profile is not None:
+        applied = session.applied_inference_profile
+        return RequestedProfileSelection(
+            RequestedInferenceProfile(
+                model_target_label=applied.model_target_label,
+                reasoning_effort=applied.reasoning_effort,
+                enabled_execution_options=applied.enabled_execution_options,
+            ),
+            InferenceProfileSource.SESSION_LAST_USED,
+        )
+    return RequestedProfileSelection(
+        agent_default_inference_profile(agent), InferenceProfileSource.AGENT_DEFAULT
+    )
+
+
+def _reuses_foreground(
+    operation: ModelOperationSnapshot | None,
+    profile: RequestedInferenceProfile,
+    *,
+    replace_operation: bool,
+) -> bool:
+    return (
+        not replace_operation
+        and operation is not None
+        and operation.terminal_reason is None
+        and operation.semantic_label == profile.model_target_label
+        and operation.requested_reasoning_effort == profile.reasoning_effort
+        and operation.requested_execution_options == profile.enabled_execution_options
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -74,6 +127,9 @@ class WorkerExecutorModelOperationRepository:
     worker_session_repository: Annotated[
         WorkerSessionOperationRepository, Depends(WorkerSessionOperationRepository)
     ]
+    active_capabilities_repository: Annotated[
+        ActiveModelCapabilitiesRepository, Depends(ActiveModelCapabilitiesRepository)
+    ]
 
     async def select_requested_profile(
         self,
@@ -81,6 +137,7 @@ class WorkerExecutorModelOperationRepository:
         agent_id: str,
         session_id: str,
         explicit_profile: RequestedInferenceProfile | None,
+        run_id: str | None = None,
     ) -> RequestedProfileSelection:
         """Apply explicit, Session-applied, then Agent-default profile precedence."""
         async with self.session_manager() as session:
@@ -117,7 +174,52 @@ class WorkerExecutorModelOperationRepository:
                     source=InferenceProfileSource.AGENT_DEFAULT,
                 )
 
-            return normalize_profile_selection_for_agent(agent, selected)
+            run = (
+                await self.agent_run_repository.get_by_id(session, run_id)
+                if run_id is not None
+                else None
+            )
+            if run is not None and run.session_id != session_id:
+                raise ValueError("AgentRun does not belong to AgentSession")
+            foreground = (
+                run.model_operation_state.foreground
+                if run is not None and run.model_operation_state is not None
+                else None
+            )
+            reused = _reuses_foreground(
+                foreground, selected.profile, replace_operation=False
+            )
+            capture_exact = (
+                self.active_capabilities_repository.capture_exact_choices_in_session
+            )
+            captured = (
+                await capture_exact(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    identities=identities_for_options(agent.selectable_model_options),
+                )
+                if not reused
+                else None
+            )
+        compiled = (
+            compile_capture(
+                captured,
+                selections=[
+                    candidate.model_selection
+                    for option in agent.selectable_model_options
+                    for candidate in option.candidates
+                ],
+            )
+            if captured is not None
+            else None
+        )
+        options = (
+            apply_to_options(agent.selectable_model_options, compiled)
+            if compiled is not None
+            else apply_frozen_operation(agent.selectable_model_options, foreground)
+        )
+        active_agent = agent.model_copy(update={"selectable_model_options": options})
+        return normalize_profile_selection_for_agent(active_agent, selected)
 
     async def advance_after_quota(
         self,
@@ -279,21 +381,126 @@ class WorkerExecutorModelOperationRepository:
         )
 
     async def load_fresh_profile_snapshot(
-        self, *, agent_id: str, session_id: str
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        run_id: str | None = None,
+        override: RequestedProfileSelection | None = None,
+        replace_operation: bool = False,
+        include_foreground: bool = True,
     ) -> FreshProfileSnapshot:
-        """Complete the existing unlocked snapshot before profile normalization."""
+        """Capture NEW slots before normalization; reused slots never read metadata."""
         async with self.session_manager() as session:
             session_state = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
             )
             agent = await self.agent_repository.get_by_id(session, agent_id)
-        if session_state is None or agent is None:
-            raise ValueError("AgentSession or Agent not found")
-        if not isinstance(session_state, AgentSession) or not isinstance(agent, Agent):
-            raise ValueError("AgentSession or Agent has invalid persisted data")
-
-        return FreshProfileSnapshot(agent=agent, session=session_state)
+            run = (
+                await self.agent_run_repository.get_by_id(session, run_id)
+                if run_id is not None
+                else None
+            )
+            if session_state is None or agent is None:
+                raise ValueError("AgentSession or Agent not found")
+            if run_id is not None and run is None:
+                raise ValueError("AgentRun not found")
+            if session_state.agent_id != agent_id:
+                raise ValueError("AgentSession does not belong to Agent")
+            if run is not None and run.session_id != session_id:
+                raise ValueError("AgentRun does not belong to AgentSession")
+            state = run.model_operation_state if run is not None else None
+            foreground = state.foreground if state is not None else None
+            compaction = state.compaction if state is not None else None
+            raw_profile = _requested_profile(agent, session_state, override).profile
+            target_configured = any(
+                option.label == raw_profile.model_target_label
+                for option in agent.selectable_model_options
+            )
+            reused_foreground = not include_foreground or (
+                target_configured
+                and _reuses_foreground(
+                    foreground, raw_profile, replace_operation=replace_operation
+                )
+            )
+            target = (
+                raw_profile.model_target_label
+                if any(
+                    option.label == raw_profile.model_target_label
+                    for option in agent.selectable_model_options
+                )
+                else agent_default_inference_profile(agent).model_target_label
+            )
+            new_labels = set()
+            if not reused_foreground:
+                new_labels.add(target)
+            if compaction is None or compaction.terminal_reason is not None:
+                new_labels.add(agent.lightweight_model_label)
+            new_options = [
+                option
+                for option in agent.selectable_model_options
+                if option.label in new_labels
+            ]
+            capture_exact = (
+                self.active_capabilities_repository.capture_exact_choices_in_session
+            )
+            captured = (
+                await capture_exact(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    identities=identities_for_options(new_options),
+                )
+                if new_options
+                else None
+            )
+        compiled = (
+            compile_capture(
+                captured,
+                selections=[
+                    candidate.model_selection
+                    for option in new_options
+                    for candidate in option.candidates
+                ],
+            )
+            if captured is not None
+            else None
+        )
+        active_options = (
+            apply_to_options(agent.selectable_model_options, compiled)
+            if compiled is not None
+            else agent.selectable_model_options
+        )
+        compaction_option = next(
+            (
+                option
+                for option in active_options
+                if option.label == agent.lightweight_model_label
+            ),
+            None,
+        )
+        if compaction is not None and compaction.terminal_reason is None:
+            # A reused background operation is independent of current label mapping.
+            compaction_option = next(
+                (
+                    option
+                    for option in apply_frozen_operation(active_options, compaction)
+                    if option.label == compaction.semantic_label
+                ),
+                compaction_option,
+            )
+        if reused_foreground:
+            active_options = apply_frozen_operation(active_options, foreground)
+        return FreshProfileSnapshot(
+            agent=agent.model_copy(update={"selectable_model_options": active_options}),
+            session=session_state,
+            raw_configuration_signature=agent_model_configuration_signature(agent),
+            raw_run_intent_signature=run_model_intent_signature(run),
+            operation_state=state,
+            captured_inputs=captured,
+            compiled_choices=compiled,
+            compaction_option=compaction_option,
+        )
 
     async def prepare_fresh(
         self,
@@ -305,6 +512,7 @@ class WorkerExecutorModelOperationRepository:
         selected: RequestedProfileSelection,
         override: RequestedProfileSelection | None,
         replace_operation: bool,
+        prepared_snapshot: FreshProfileSnapshot | None = None,
     ) -> Result[
         FreshModelPreparation | None,
         ModelTargetNotFound | ModelCandidateChainExhausted,
@@ -315,6 +523,15 @@ class WorkerExecutorModelOperationRepository:
             InferenceProfileSource.SPAWN_OVERRIDE,
             InferenceProfileSource.RETRY_ORIGINAL,
         }
+        frame = prepared_snapshot
+        if frame is None:
+            frame = await self.load_fresh_profile_snapshot(
+                agent_id=agent_id,
+                session_id=session_id,
+                run_id=run_id,
+                override=override,
+                replace_operation=replace_operation,
+            )
         async with self.session_manager() as session:
             locked_agent = await self.agent_repository.lock_by_id(
                 session,
@@ -339,10 +556,28 @@ class WorkerExecutorModelOperationRepository:
             if locked_run.session_id != session_id:
                 raise ValueError("AgentRun does not belong to AgentSession")
 
+            if (
+                agent_model_configuration_signature(locked_agent)
+                != frame.raw_configuration_signature
+                or locked_session.applied_inference_profile
+                != frame.session.applied_inference_profile
+                or locked_session.applied_profile_generation
+                != frame.session.applied_profile_generation
+                or run_model_intent_signature(locked_run)
+                != frame.raw_run_intent_signature
+                or locked_run.model_operation_state != frame.operation_state
+            ):
+                return Success(None)
+            inputs_match = self.active_capabilities_repository.inputs_match_in_session
+            if frame.captured_inputs is not None and not await inputs_match(
+                session, captured=frame.captured_inputs
+            ):
+                return Success(None)
+            active_agent = frame.agent
             stale_profile_was_replaced = False
             if override is not None and override.source in override_sources:
                 expected_selection = normalize_profile_selection_for_agent(
-                    locked_agent,
+                    active_agent,
                     override,
                 )
                 expected = expected_selection.profile
@@ -358,13 +593,13 @@ class WorkerExecutorModelOperationRepository:
                     source=InferenceProfileSource.SESSION_LAST_USED,
                 )
                 expected_selection = normalize_profile_selection_for_agent(
-                    locked_agent,
+                    active_agent,
                     applied_selection,
                 )
                 expected = expected_selection.profile
                 stale_profile_was_replaced = expected != applied_selection.profile
             else:
-                expected = agent_default_inference_profile(locked_agent)
+                expected = agent_default_inference_profile(active_agent)
 
             if expected != selected.profile:
                 return Success(None)
@@ -387,7 +622,7 @@ class WorkerExecutorModelOperationRepository:
             option = next(
                 (
                     item
-                    for item in locked_agent.selectable_model_options
+                    for item in active_agent.selectable_model_options
                     if item.label == expected.model_target_label
                 ),
                 None,
@@ -401,15 +636,10 @@ class WorkerExecutorModelOperationRepository:
                 compaction=None,
             )
             existing = operation_state.foreground
-            if (
-                replace_operation
-                or existing is None
-                or existing.semantic_label != expected.model_target_label
-                or existing.requested_reasoning_effort != expected.reasoning_effort
-                or existing.requested_execution_options
-                != expected.enabled_execution_options
-                or existing.terminal_reason is not None
-            ):
+            new_foreground = not _reuses_foreground(
+                existing, expected, replace_operation=replace_operation
+            )
+            if new_foreground:
                 operation = build_model_operation(
                     option=option,
                     profile=expected,
@@ -418,6 +648,7 @@ class WorkerExecutorModelOperationRepository:
                     recorded_at=datetime.datetime.now(datetime.UTC),
                 )
             else:
+                assert existing is not None
                 operation = existing
             try:
                 selection = await select_model_operation_candidate(
@@ -440,14 +671,11 @@ class WorkerExecutorModelOperationRepository:
                     AgentRunPatch(model_operation_state=exhausted_state),
                 )
                 return Failure(ModelCandidateChainExhausted(exc.operation))
-            lightweight_option = next(
-                (
-                    candidate
-                    for candidate in locked_agent.selectable_model_options
-                    if candidate.label == locked_agent.lightweight_model_label
-                ),
-                None,
-            )
+            if new_foreground and frame.compiled_choices is not None:
+                require_selection(
+                    frame.compiled_choices, selection.candidate.model_selection
+                )
+            lightweight_option = frame.compaction_option
             if lightweight_option is None:
                 return Failure(
                     ModelTargetNotFound(
@@ -455,6 +683,10 @@ class WorkerExecutorModelOperationRepository:
                     )
                 )
             compaction_operation = operation_state.compaction
+            new_compaction = (
+                compaction_operation is None
+                or compaction_operation.terminal_reason is not None
+            )
             if (
                 compaction_operation is None
                 or compaction_operation.terminal_reason is not None
@@ -492,6 +724,11 @@ class WorkerExecutorModelOperationRepository:
                     AgentRunPatch(model_operation_state=exhausted_state),
                 )
                 return Failure(ModelCandidateChainExhausted(exc.operation))
+            if new_compaction and frame.compiled_choices is not None:
+                require_selection(
+                    frame.compiled_choices,
+                    compaction_selection.candidate.model_selection,
+                )
             next_operation_state = ModelOperationState(
                 foreground=selection.operation,
                 compaction=compaction_selection.operation,
@@ -521,7 +758,9 @@ class WorkerExecutorModelOperationRepository:
                     )
         return Success(
             FreshModelPreparation(
-                selection=selection, compaction_selection=compaction_selection
+                selection=selection,
+                compaction_selection=compaction_selection,
+                configuration_signature=frame.raw_configuration_signature,
             )
         )
 
@@ -575,97 +814,127 @@ class WorkerExecutorModelOperationRepository:
         workspace_id: str,
     ) -> ModelCandidateSelection:
         """Commit selection, but roll exhausted-state writes back on inside error."""
-        async with self.session_manager() as session:
-            locked_agent = await self.agent_repository.lock_by_id(session, agent_id)
-            locked_session = await self.agent_session_repository.lock_by_id(
-                session,
-                session_id,
+        for _attempt in range(3):
+            frame = await self.load_fresh_profile_snapshot(
+                agent_id=agent_id,
+                session_id=session_id,
+                run_id=run_id,
+                include_foreground=False,
             )
-            locked_run = await self.agent_run_repository.lock_by_id(
-                session,
-                run_id,
-            )
-            if locked_agent is None or locked_session is None or locked_run is None:
-                raise ValueError("AgentSession, Agent, or AgentRun not found")
-            if locked_session.owner_generation != owner_generation:
-                raise CanonicalExecutionOwnerGenerationStaleError(
-                    "Session owner generation is stale"
+            async with self.session_manager() as session:
+                locked_agent = await self.agent_repository.lock_by_id(session, agent_id)
+                locked_session = await self.agent_session_repository.lock_by_id(
+                    session,
+                    session_id,
                 )
-            if locked_session.agent_id != agent_id:
-                raise ValueError("AgentSession does not belong to Agent")
-            if locked_run.session_id != session_id:
-                raise ValueError("AgentRun does not belong to AgentSession")
-            if locked_agent.workspace_id != workspace_id:
-                raise ValueError("Run request does not belong to Agent Workspace")
+                locked_run = await self.agent_run_repository.lock_by_id(
+                    session,
+                    run_id,
+                )
+                if locked_agent is None or locked_session is None or locked_run is None:
+                    raise ValueError("AgentSession, Agent, or AgentRun not found")
+                if locked_session.owner_generation != owner_generation:
+                    raise CanonicalExecutionOwnerGenerationStaleError(
+                        "Session owner generation is stale"
+                    )
+                if locked_session.agent_id != agent_id:
+                    raise ValueError("AgentSession does not belong to Agent")
+                if locked_run.session_id != session_id:
+                    raise ValueError("AgentRun does not belong to AgentSession")
+                if locked_agent.workspace_id != workspace_id:
+                    raise ValueError("Run request does not belong to Agent Workspace")
 
-            operation_state = locked_run.model_operation_state or ModelOperationState(
-                foreground=None,
-                compaction=None,
-            )
-            operation = operation_state.compaction
-            if operation is None or operation.terminal_reason is not None:
-                option = next(
-                    (
-                        candidate
-                        for candidate in locked_agent.selectable_model_options
-                        if candidate.label == locked_agent.lightweight_model_label
-                    ),
-                    None,
+                if (
+                    agent_model_configuration_signature(locked_agent)
+                    != frame.raw_configuration_signature
+                    or run_model_intent_signature(locked_run)
+                    != frame.raw_run_intent_signature
+                    or locked_run.model_operation_state != frame.operation_state
+                ):
+                    continue
+                inputs_match = (
+                    self.active_capabilities_repository.inputs_match_in_session
                 )
-                if option is None:
-                    raise ProfileResolutionRuntimeError(
-                        profile_resolution_failure(
-                            ModelTargetNotFound(
-                                model_target_label=locked_agent.lightweight_model_label
+                if frame.captured_inputs is not None and not await inputs_match(
+                    session, captured=frame.captured_inputs
+                ):
+                    continue
+
+                operation_state = (
+                    locked_run.model_operation_state
+                    or ModelOperationState(
+                        foreground=None,
+                        compaction=None,
+                    )
+                )
+                operation = operation_state.compaction
+                new_operation = (
+                    operation is None or operation.terminal_reason is not None
+                )
+                if new_operation:
+                    option = frame.compaction_option
+                    if option is None:
+                        raise ProfileResolutionRuntimeError(
+                            profile_resolution_failure(
+                                ModelTargetNotFound(
+                                    model_target_label=locked_agent.lightweight_model_label
+                                )
                             )
                         )
+                    profile = RequestedInferenceProfile(
+                        model_target_label=option.label,
+                        reasoning_effort=None,
+                        enabled_execution_options=[],
                     )
-                profile = RequestedInferenceProfile(
-                    model_target_label=option.label,
-                    reasoning_effort=None,
-                    enabled_execution_options=[],
-                )
-                operation = build_model_operation(
-                    option=option,
-                    profile=profile,
-                    kind=ModelOperationKind.COMPACTION,
-                    operation_id=uuid7().hex,
-                    recorded_at=datetime.datetime.now(datetime.UTC),
-                )
-            try:
-                selection = await select_model_operation_candidate(
-                    session,
-                    operation=operation,
-                    workspace_id=locked_agent.workspace_id,
-                    health_repository=self.model_candidate_health_repository,
-                    recorded_at=datetime.datetime.now(datetime.UTC),
-                    session_id=None,
-                    reservation=None,
-                )
-            except ModelOperationChainExhaustedError as exc:
+                    operation = build_model_operation(
+                        option=option,
+                        profile=profile,
+                        kind=ModelOperationKind.COMPACTION,
+                        operation_id=uuid7().hex,
+                        recorded_at=datetime.datetime.now(datetime.UTC),
+                    )
+                assert operation is not None
+                try:
+                    selection = await select_model_operation_candidate(
+                        session,
+                        operation=operation,
+                        workspace_id=locked_agent.workspace_id,
+                        health_repository=self.model_candidate_health_repository,
+                        recorded_at=datetime.datetime.now(datetime.UTC),
+                        session_id=None,
+                        reservation=None,
+                    )
+                except ModelOperationChainExhaustedError as exc:
+                    await self.agent_run_repository.update(
+                        session,
+                        run_id,
+                        AgentRunPatch(
+                            model_operation_state=ModelOperationState(
+                                foreground=operation_state.foreground,
+                                compaction=exc.operation,
+                            )
+                        ),
+                    )
+                    raise ProfileResolutionRuntimeError(
+                        profile_resolution_failure(
+                            ModelCandidateChainExhausted(exc.operation)
+                        )
+                    ) from exc
+                if new_operation and frame.compiled_choices is not None:
+                    require_selection(
+                        frame.compiled_choices, selection.candidate.model_selection
+                    )
                 await self.agent_run_repository.update(
                     session,
                     run_id,
                     AgentRunPatch(
                         model_operation_state=ModelOperationState(
                             foreground=operation_state.foreground,
-                            compaction=exc.operation,
+                            compaction=selection.operation,
                         )
                     ),
                 )
-                raise ProfileResolutionRuntimeError(
-                    profile_resolution_failure(
-                        ModelCandidateChainExhausted(exc.operation)
-                    )
-                ) from exc
-            await self.agent_run_repository.update(
-                session,
-                run_id,
-                AgentRunPatch(
-                    model_operation_state=ModelOperationState(
-                        foreground=operation_state.foreground,
-                        compaction=selection.operation,
-                    )
-                ),
-            )
-        return selection
+            return selection
+        raise CanonicalExecutionWorkDriftError(
+            "Active model inputs changed during compaction preparation"
+        )

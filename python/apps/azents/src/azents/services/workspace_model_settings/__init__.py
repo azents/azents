@@ -6,6 +6,7 @@ from typing import Annotated, assert_never
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.active_model_capabilities import ConfiguredModelIdentity
 from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
@@ -19,6 +20,10 @@ from azents.repos.workspace_model_settings.data import (
 )
 from azents.repos.workspace_model_settings.operations import (
     WorkspaceModelSettingsOperationRepository,
+)
+from azents.services.active_model_capabilities import (
+    ActiveModelCapabilitiesService,
+    apply_to_workspace_read,
 )
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
@@ -49,11 +54,14 @@ class WorkspaceModelSettingsService:
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
     ]
+    active_model_capabilities_service: Annotated[
+        ActiveModelCapabilitiesService, Depends(ActiveModelCapabilitiesService)
+    ]
 
     async def get(self, workspace_id: str) -> WorkspaceModelSettingsOutput:
         """Fetch Workspace default model settings."""
         settings = await self.repository.get_or_create(workspace_id)
-        return self._build_output_from_settings(settings)
+        return await self._build_active_output_from_settings(settings)
 
     async def update(
         self,
@@ -79,7 +87,9 @@ class WorkspaceModelSettingsService:
             ):
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             current_or_empty = await self.repository.get_or_create(workspace_id)
-            return Success(self._build_output_from_settings(current_or_empty))
+            return Success(
+                await self._build_active_output_from_settings(current_or_empty)
+            )
         if update.default_selectable_model_options is not None:
             options_result = await self._normalize_option_inputs(
                 workspace_id,
@@ -109,7 +119,9 @@ class WorkspaceModelSettingsService:
 
         if model_options is None:
             current_or_empty = await self.repository.get_or_create(workspace_id)
-            return Success(self._build_output_from_settings(current_or_empty))
+            return Success(
+                await self._build_active_output_from_settings(current_or_empty)
+            )
 
         repo_update = WorkspaceModelSettingsUpdate(
             default_model_selection=model_options.model_selection,
@@ -121,7 +133,7 @@ class WorkspaceModelSettingsService:
         result = await self.repository.update(workspace_id, repo_update)
         match result:
             case Success(value):
-                return Success(self._build_output_from_settings(value))
+                return Success(await self._build_active_output_from_settings(value))
             case Failure(_):
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             case _:
@@ -199,6 +211,35 @@ class WorkspaceModelSettingsService:
                 )
             case _:
                 assert_never(result)
+
+    async def _build_active_output_from_settings(
+        self, settings: WorkspaceModelSettings
+    ) -> WorkspaceModelSettingsOutput:
+        """Compile detached response metadata after any raw settings write."""
+        selections: dict[ConfiguredModelIdentity, AgentModelSelection] = {}
+        choices = [
+            candidate.model_selection
+            for option in settings.default_selectable_model_options or []
+            for candidate in option.candidates
+        ]
+        for selection in (
+            *choices,
+            settings.default_model_selection,
+            settings.default_lightweight_model_selection,
+        ):
+            if selection is not None:
+                selections.setdefault(
+                    ConfiguredModelIdentity.from_selection(selection), selection
+                )
+        if not selections:
+            return self._build_output_from_settings(settings)
+        compiled = await self.active_model_capabilities_service.capture_and_compile(
+            workspace_id=settings.workspace_id,
+            selections=list(selections.values()),
+        )
+        return self._build_output_from_settings(
+            apply_to_workspace_read(settings, compiled)
+        )
 
     def _build_output_from_settings(
         self,

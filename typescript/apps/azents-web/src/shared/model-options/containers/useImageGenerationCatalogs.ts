@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { supportedBuiltinTools } from "@/shared/lib/model-capability-support";
+import { configurableBuiltinTools } from "@/shared/lib/model-capability-support";
 import type { UseImageCatalogTransport } from "../catalog-query";
 import type {
   ImageGenerationCatalogState,
   SelectableModelOptionFormValue,
 } from "../model-selection";
-import type { ModelReasoningEffort } from "@azents/public-client";
 
 export interface ImageGenerationCatalogsOutput {
   states: ReadonlyMap<string, ImageGenerationCatalogState>;
@@ -16,15 +15,13 @@ export interface ImageGenerationCatalogsOutput {
 
 function imageCatalogIntegrationIds(
   options: SelectableModelOptionFormValue[],
-  reasoningEffort: ModelReasoningEffort | null,
 ): string[] {
   return [
     ...new Set(
       options.flatMap((option) => {
         return option.candidates.flatMap((candidate) => {
-          const supported = supportedBuiltinTools(
+          const supported = configurableBuiltinTools(
             candidate.normalized_capabilities,
-            { reasoningEffort },
           );
           if (
             candidate.model_provider_integration_id == null ||
@@ -43,11 +40,10 @@ export function useImageGenerationCatalogs(
   handle: string,
   options: SelectableModelOptionFormValue[],
   useCatalogTransport: UseImageCatalogTransport,
-  reasoningEffort: ModelReasoningEffort | null = null,
 ): ImageGenerationCatalogsOutput {
   const integrationIds = useMemo(
-    () => imageCatalogIntegrationIds(options, reasoningEffort),
-    [options, reasoningEffort],
+    () => imageCatalogIntegrationIds(options),
+    [options],
   );
   const { query, sync } = useCatalogTransport(handle, integrationIds);
 

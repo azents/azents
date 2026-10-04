@@ -1,18 +1,23 @@
-"""Evaluate saved model support without a source, profile, or provider lookup."""
+"""Admit typed request intent against the single final saved feature view."""
 
 import dataclasses
-from collections.abc import Mapping
-from typing import assert_never
-
-from pydantic import BaseModel, ConfigDict
 
 from azents.core.llm_catalog import ModelCapabilities
-from azents.core.model_capability_contract import CapabilitySupport
+from azents.core.model_capability_contract import ModelCapabilityFeature
+from azents.engine.events.effective_model_request import (
+    AdaptiveReasoning,
+    BudgetReasoning,
+    DisabledReasoning,
+    EffectiveModelRequest,
+    EffortReasoning,
+    OmittedReasoning,
+    ReasoningIntent,
+)
 
 
 @dataclasses.dataclass(frozen=True)
 class ModelSupportContext:
-    """Effective saved effort and actual function-tool presence for one request."""
+    """Effective condition dimensions from one request, never a source lookup."""
 
     reasoning_effort: str | None
     function_tools: bool | None
@@ -20,7 +25,11 @@ class ModelSupportContext:
 
 @dataclasses.dataclass(frozen=True)
 class ModelSupportRequest:
-    """Requested controls, distinct from values a lowerer supplies by default."""
+    """Preparatory selected controls before a physical provider request exists.
+
+    Lowerer and operation dispatch use ``EffectiveModelRequest`` instead. This
+    selection view cannot represent encoded budgets or cleared SDK overrides.
+    """
 
     reasoning_effort: str | None
     function_tools: bool | None
@@ -35,169 +44,18 @@ class ModelSupportRequest:
     reasoning_summary: bool
 
 
-class _ReasoningOptions(BaseModel):
-    """The support-relevant portion of a provider reasoning declaration."""
+class ModelRequestFeatureError(ValueError):
+    """A requested final feature is absent or its actual condition is unmet."""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    effort: str | None = None
-    summary: str | None = None
-
-
-class _ResponseFormat(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    type: str | None = None
-
-
-class _ResponseText(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    format: _ResponseFormat | None = None
-
-
-class _ExtraBodyOptions(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    reasoning: _ReasoningOptions | None = None
-    temperature: float | None = None
-    top_p: float | None = None
-    max_output_tokens: int | None = None
-    max_tokens: int | None = None
-    top_k: int | None = None
-    stop: str | list[str] | None = None
-    stop_sequences: list[str] | None = None
-    parallel_tool_calls: bool | None = None
-    text: _ResponseText | None = None
-    response_format: _ResponseFormat | None = None
-
-
-class ModelSupportOptions(BaseModel):
-    """Decode support-relevant options at the provider translation boundary.
-
-    Optional ingress fields preserve absence without inventing model facts.
-    Unrelated options retain the existing SDK and credential validation.
-    """
-
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    reasoning: _ReasoningOptions | None = None
-    extra_body: _ExtraBodyOptions | None = None
-    openai_reasoning_effort: str | None = None
-    anthropic_effort: str | None = None
-    openai_reasoning_summary: str | None = None
-    temperature: float | None = None
-    max_output_tokens: int | None = None
-    max_tokens: int | None = None
-    top_p: float | None = None
-    top_k: int | None = None
-    stop: str | list[str] | None = None
-    stop_sequences: list[str] | None = None
-    parallel_tool_calls: bool | None = None
-    text: _ResponseText | None = None
-    response_format: _ResponseFormat | None = None
-
-    @property
-    def effective_controls(self) -> _ExtraBodyOptions:
-        """Validate the same body-over-option precedence used by the public SDK."""
-        controls = self.model_dump(
-            include=set(_ExtraBodyOptions.model_fields), exclude_unset=True
+    def __init__(self, feature: ModelCapabilityFeature, *, conditional: bool) -> None:
+        self.feature = feature
+        self.conditional = conditional
+        message = (
+            f"The selected request does not satisfy {feature.value} conditions."
+            if conditional
+            else f"The saved model capabilities do not support {feature.value}."
         )
-        if self.extra_body is not None:
-            controls.update(self.extra_body.model_dump(exclude_unset=True))
-        return _ExtraBodyOptions.model_validate(controls)
-
-    @property
-    def explicit_effort(self) -> str | None:
-        """Resolve an explicit effort, rejecting conflicting wire declarations."""
-        efforts = {
-            effort
-            for effort in (
-                self.reasoning.effort if self.reasoning is not None else None,
-                self.extra_body.reasoning.effort
-                if self.extra_body is not None and self.extra_body.reasoning is not None
-                else None,
-                self.openai_reasoning_effort,
-                self.anthropic_effort,
-            )
-            if effort is not None
-        }
-        if len(efforts) > 1:
-            raise ValueError("Conflicting reasoning effort settings are not supported.")
-        return next(iter(efforts), None)
-
-    @property
-    def summary_requested(self) -> bool:
-        """Return whether a supported wire dialect explicitly requests summary."""
-        if (
-            self.extra_body is not None
-            and "reasoning" in self.extra_body.model_fields_set
-        ):
-            return (
-                self.extra_body.reasoning is not None
-                and self.extra_body.reasoning.summary not in {None, "none"}
-            )
-        return any(
-            summary not in {None, "none"}
-            for summary in (
-                self.reasoning.summary if self.reasoning is not None else None,
-                self.extra_body.reasoning.summary
-                if self.extra_body is not None and self.extra_body.reasoning is not None
-                else None,
-                self.openai_reasoning_summary,
-            )
-        )
-
-    @property
-    def structured_response_requested(self) -> bool:
-        """Keep response schemas separate from strict function definitions."""
-        controls = self.effective_controls
-        return (
-            controls.text is not None
-            and controls.text.format is not None
-            and controls.text.format.type in {"json_schema", "json_object"}
-        ) or (
-            controls.response_format is not None
-            and controls.response_format.type in {"json_schema", "json_object"}
-        )
-
-
-def decode_model_support_options(options: Mapping[str, object]) -> ModelSupportOptions:
-    """Decode declared support-relevant options before evaluating the contract."""
-    return ModelSupportOptions.model_validate(dict(options))
-
-
-def model_support_request_from_options(
-    options: ModelSupportOptions,
-    *,
-    selected_effort: str | None,
-    function_tools: bool,
-    strict_function_schema: bool,
-) -> ModelSupportRequest:
-    """Build a typed request view without modifying wire options or selection."""
-    wire_effort = options.explicit_effort
-    if (
-        selected_effort is not None
-        and wire_effort is not None
-        and selected_effort != wire_effort
-    ):
-        raise ValueError("Conflicting reasoning effort settings are not supported.")
-    controls = options.effective_controls
-    return ModelSupportRequest(
-        reasoning_effort=wire_effort if wire_effort is not None else selected_effort,
-        function_tools=function_tools,
-        temperature=controls.temperature is not None,
-        max_output_tokens=(
-            controls.max_output_tokens is not None or controls.max_tokens is not None
-        ),
-        top_p=controls.top_p is not None,
-        top_k=controls.top_k is not None,
-        stop_sequences=controls.stop is not None or controls.stop_sequences is not None,
-        parallel_function_calls=controls.parallel_tool_calls is True,
-        strict_function_schema=strict_function_schema,
-        structured_response=options.structured_response_requested,
-        reasoning_summary=options.summary_requested,
-    )
+        super().__init__(message)
 
 
 def resolve_model_support_context(
@@ -205,132 +63,172 @@ def resolve_model_support_context(
     *,
     requested_effort: str | None,
     function_tools: bool | None,
+    reasoning_intent: ReasoningIntent | None = None,
 ) -> ModelSupportContext:
-    """Resolve conditions from explicit effort, then a known saved default.
+    """Apply a known saved default only to genuine request omission.
 
-    :param capabilities: the selected immutable capability snapshot
-    :param requested_effort: explicit request setting, or omission
-    :param function_tools: whether this request declares function tools
-    :returns: condition context; an unknown default remains unknown
+    Encoded clear, adaptive thinking, or a budget without a canonical level stays
+    level-less. The nullable preparatory effort is an omitted selection, whereas
+    an effective provider request always supplies its explicit reasoning kind.
+
+    :param capabilities: immutable final capability and request metadata snapshot
+    :param requested_effort: canonical scalar physically selected, or omission
+    :param function_tools: actual declarations, or missing preparatory context
+    :param reasoning_intent: provider-encoded request kind, or preparatory omission
+    :returns: condition context; does not add defaults to the wire
     """
+    omitted = (
+        isinstance(reasoning_intent, OmittedReasoning)
+        if reasoning_intent is not None
+        else requested_effort is None
+    )
     effort = requested_effort
-    contract = capabilities.semantic_contract
-    if effort is None and contract is not None:
-        default = contract.reasoning.default_effort
-        if default is not None:
-            effort = default.level
+    if omitted:
+        effort = capabilities.request_constraints.known_default
     return ModelSupportContext(reasoning_effort=effort, function_tools=function_tools)
 
 
-def model_support_allowed(
-    support: CapabilitySupport, *, context: ModelSupportContext
-) -> bool | None:
-    """Evaluate a saved predicate while keeping unknown distinct from denial.
-
-    :param support: one saved support fact
-    :param context: actual request conditions, with possibly unknown effort
-    :returns: allowed, denied, or unknown; does not alter the request
-    """
-    match support.state:
-        case "supported":
-            return True
-        case "unsupported":
-            return False
-        case "unknown":
-            return None
-        case "conditional":
-            predicate = support.predicate
-            if predicate is None:
-                raise ValueError("Conditional model support lacks its saved predicate.")
-            if predicate.reasoning_efforts is not None and (
-                context.reasoning_effort is None
-                or context.reasoning_effort not in predicate.reasoning_efforts
-            ):
-                return False
-            if predicate.function_tools is not None:
-                if context.function_tools is None:
-                    return None
-                if predicate.function_tools != context.function_tools:
-                    return False
-            return True
-        case _ as unreachable:
-            assert_never(unreachable)
-
-
-def validate_saved_model_request(
-    capabilities: ModelCapabilities, *, request: ModelSupportRequest
-) -> None:
-    """Reject known incompatible controls without clamping or dropping settings.
-
-    Unknown model support retains the existing provider error boundary instead of
-    inventing a denial. Effort selection still requires an individually justified
-    saved level, as it does in the existing inference-profile authorization path.
-    Descriptor-absent historical selections retain their previous behavior.
-
-    :param capabilities: saved capability authorization
-    :param request: explicit requested controls and function-tool presence
-    :raises ValueError: a requested control is denied or its condition is unmet
-    """
-    contract = capabilities.semantic_contract
-    if contract is None:
-        return
-    context = resolve_model_support_context(
+def effective_model_support_context(
+    capabilities: ModelCapabilities, request: EffectiveModelRequest
+) -> ModelSupportContext:
+    """Resolve final conditions from one normalized provider request."""
+    return resolve_model_support_context(
         capabilities,
         requested_effort=request.reasoning_effort,
         function_tools=request.function_tools,
+        reasoning_intent=request.reasoning,
     )
-    if request.reasoning_effort is not None:
-        allowed_efforts = {
-            declaration.level
-            for declaration in contract.reasoning.efforts
-            if declaration.state == "supported"
-        }
-        if request.reasoning_effort not in allowed_efforts:
-            raise ValueError(
-                "Reasoning effort is not authorized by the saved capability snapshot"
-            )
-        _require_support(contract.reasoning.support, "reasoning effort", context)
-    checks = (
-        (request.function_tools, contract.function_calling, "function tools"),
-        (request.temperature, contract.parameters.temperature, "temperature"),
-        (
-            request.max_output_tokens,
-            contract.parameters.max_output_tokens,
-            "maximum output tokens",
-        ),
-        (request.top_p, contract.parameters.top_p, "top-p"),
-        (request.top_k, contract.parameters.top_k, "top-k"),
-        (request.stop_sequences, contract.parameters.stop_sequences, "stop sequences"),
-        (
-            request.parallel_function_calls,
-            contract.parallel_function_calls,
-            "parallel function calls",
-        ),
-        (
-            request.strict_function_schema,
-            contract.strict_function_schema,
-            "strict function schemas",
-        ),
-        (
-            request.structured_response,
-            contract.structured_response,
-            "structured output",
-        ),
-        (request.reasoning_summary, contract.reasoning_summaries, "reasoning summary"),
-    )
-    for requested, support, name in checks:
-        if requested:
-            _require_support(support, name, context)
 
 
-def _require_support(
-    support: CapabilitySupport, name: str, context: ModelSupportContext
+def model_support_allowed(
+    feature: ModelCapabilityFeature,
+    *,
+    capabilities: ModelCapabilities,
+    context: ModelSupportContext,
+) -> bool:
+    """Evaluate final feature membership and its optional request conjunction.
+
+    :param feature: the requested feature's stable derived key
+    :param capabilities: the only support authority
+    :param context: actual request conditions; a missing dimension cannot satisfy it
+    :returns: definite authorization, with no second or unknown support state
+    """
+    if not capabilities.supports(feature):
+        return False
+    for condition in capabilities.request_constraints.feature_conditions:
+        if condition.feature != feature:
+            continue
+        if condition.reasoning_efforts is not None and (
+            context.reasoning_effort is None
+            or context.reasoning_effort not in condition.reasoning_efforts
+        ):
+            return False
+        if condition.function_tools is not None and (
+            context.function_tools is None
+            or context.function_tools != condition.function_tools
+        ):
+            return False
+    return True
+
+
+def _require_feature(
+    capabilities: ModelCapabilities,
+    feature: ModelCapabilityFeature,
+    context: ModelSupportContext,
 ) -> None:
-    if model_support_allowed(support, context=context) is not False:
+    if model_support_allowed(feature, capabilities=capabilities, context=context):
         return
-    if support.state == "conditional":
-        raise ValueError(f"The selected request does not satisfy {name} conditions.")
-    raise ValueError(f"The saved model contract does not support {name}.")
+    raise ModelRequestFeatureError(feature, conditional=capabilities.supports(feature))
+
+
+def validate_saved_model_request(
+    capabilities: ModelCapabilities,
+    *,
+    request: ModelSupportRequest | EffectiveModelRequest,
+) -> None:
+    """Validate selected controls or complete effective intent without rewriting it.
+
+    :param capabilities: immutable final support authority
+    :param request: preparatory selection or normalized actual wire intent
+    :raises ModelRequestFeatureError: a feature is absent or a condition is unmet
+    :raises ValueError: an explicitly encoded effort is not a declared level
+    """
+    if isinstance(request, EffectiveModelRequest):
+        context = effective_model_support_context(capabilities, request)
+        controls = (
+            (request.function_tools, ModelCapabilityFeature.FUNCTION_CALLING),
+            (request.temperature is not None, ModelCapabilityFeature.TEMPERATURE),
+            (
+                request.max_output_tokens is not None,
+                ModelCapabilityFeature.MAX_OUTPUT_TOKENS,
+            ),
+            (request.top_p is not None, ModelCapabilityFeature.TOP_P),
+            (request.top_k is not None, ModelCapabilityFeature.TOP_K),
+            (request.stop_sequences is not None, ModelCapabilityFeature.STOP_SEQUENCES),
+            (
+                request.parallel_function_calls is True,
+                ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS,
+            ),
+            (
+                request.strict_function_schema,
+                ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA,
+            ),
+            (request.structured_response, ModelCapabilityFeature.STRUCTURED_RESPONSE),
+            (request.summary_requested, ModelCapabilityFeature.REASONING_SUMMARIES),
+        )
+        effort_selected = isinstance(request.reasoning, EffortReasoning)
+        reasoning_requested = isinstance(
+            request.reasoning,
+            EffortReasoning | BudgetReasoning | AdaptiveReasoning | DisabledReasoning,
+        ) or isinstance(
+            request.encoded_thinking,
+            BudgetReasoning | AdaptiveReasoning | DisabledReasoning,
+        )
+    else:
+        context = resolve_model_support_context(
+            capabilities,
+            requested_effort=request.reasoning_effort,
+            function_tools=request.function_tools,
+        )
+        controls = (
+            (request.function_tools is True, ModelCapabilityFeature.FUNCTION_CALLING),
+            (request.temperature, ModelCapabilityFeature.TEMPERATURE),
+            (request.max_output_tokens, ModelCapabilityFeature.MAX_OUTPUT_TOKENS),
+            (request.top_p, ModelCapabilityFeature.TOP_P),
+            (request.top_k, ModelCapabilityFeature.TOP_K),
+            (request.stop_sequences, ModelCapabilityFeature.STOP_SEQUENCES),
+            (
+                request.parallel_function_calls,
+                ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS,
+            ),
+            (
+                request.strict_function_schema,
+                ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA,
+            ),
+            (request.structured_response, ModelCapabilityFeature.STRUCTURED_RESPONSE),
+            (request.reasoning_summary, ModelCapabilityFeature.REASONING_SUMMARIES),
+        )
+        effort_selected = request.reasoning_effort is not None
+        reasoning_requested = effort_selected
+    if reasoning_requested:
+        _require_feature(capabilities, ModelCapabilityFeature.REASONING, context)
+    if effort_selected and request.reasoning_effort not in {
+        level.value for level in capabilities.reasoning.effort_levels
+    }:
+        raise ValueError(
+            "Reasoning effort is not authorized by the saved capability snapshot"
+        )
+    for requested, feature in controls:
+        if requested:
+            _require_feature(capabilities, feature, context)
+    if isinstance(request, EffectiveModelRequest):
+        for tool in request.builtin_tools:
+            feature = (
+                ModelCapabilityFeature.WEB_SEARCH
+                if tool == "web_search"
+                else ModelCapabilityFeature.IMAGE_GENERATION
+            )
+            _require_feature(capabilities, feature, context)
 
 
 def saved_structured_response_support(
@@ -338,21 +236,16 @@ def saved_structured_response_support(
     *,
     requested_effort: str | None,
     function_tools: bool,
-) -> bool | None:
-    """Select the response-format contract independently from strict tool schemas.
-
-    :returns: effective response support; the historical strict flag is retained
-        only when no versioned response contract exists
-    """
-    contract = capabilities.semantic_contract
-    if contract is None:
-        return capabilities.tool_calling.strict_json_schema
+) -> bool:
+    """Evaluate response-format support independently of strict function schemas."""
     context = resolve_model_support_context(
-        capabilities,
-        requested_effort=requested_effort,
-        function_tools=function_tools,
+        capabilities, requested_effort=requested_effort, function_tools=function_tools
     )
-    return model_support_allowed(contract.structured_response, context=context)
+    return model_support_allowed(
+        ModelCapabilityFeature.STRUCTURED_RESPONSE,
+        capabilities=capabilities,
+        context=context,
+    )
 
 
 def saved_builtin_tool_allowed(
@@ -361,18 +254,11 @@ def saved_builtin_tool_allowed(
     tool: str,
     context: ModelSupportContext,
 ) -> bool:
-    """Authorize route-projected built-in tools from satisfied saved facts.
-
-    :param capabilities: immutable selected capability snapshot
-    :param tool: actual requested route-projected built-in capability name
-    :param context: effective effort and actual function-declaration presence
-    :returns: known authorization; unknown or missing v2 facts remain unavailable
-    """
-    contract = capabilities.semantic_contract
-    if contract is None:
-        return tool in capabilities.built_in_tools.supported
-    return any(
-        declaration.tool == tool
-        and model_support_allowed(declaration.support, context=context) is True
-        for declaration in contract.built_in_tools
-    )
+    """Authorize route-projected builtins from the same final capability view."""
+    if tool == "web_search":
+        feature = ModelCapabilityFeature.WEB_SEARCH
+    elif tool == "image_generation":
+        feature = ModelCapabilityFeature.IMAGE_GENERATION
+    else:
+        return False
+    return model_support_allowed(feature, capabilities=capabilities, context=context)

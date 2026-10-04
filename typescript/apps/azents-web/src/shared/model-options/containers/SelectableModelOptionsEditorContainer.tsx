@@ -73,9 +73,7 @@ export function SelectableModelOptionsEditorContainer({
             }
             handleChangeOptions(
               updateCandidate(props.options, pickerTarget, (candidate) =>
-                selectCandidateModel(candidate, model, {
-                  reasoningEffort: props.reasoningEffort ?? null,
-                }),
+                selectCandidateModel(candidate, model),
               ),
             );
           },

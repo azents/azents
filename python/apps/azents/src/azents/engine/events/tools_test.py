@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from azents.core.enums import LLMProvider
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.generated_files import GeneratedFileOutput
 from azents.engine.events.openai_responses import OpenAIResponsesLowerer
@@ -194,6 +195,9 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
         enabled_execution_options=[],
         provider="openai",
         model="gpt-5.1",
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         tools=catalog.native_tools,
     ).lower([], native_replay_context=None, model="gpt-5.1")
     assert request.tools == catalog.native_tools

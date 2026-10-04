@@ -6,6 +6,10 @@ spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/chat_data.py
@@ -23,14 +27,12 @@ code_paths:
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/src/azents/repos/vfs_projection_operations.py
   - python/apps/azents/src/azents/repos/vfs_read_authority.py
-  - python/apps/azents/src/azents/repos/worker_run_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/model_capability_contract.py
-  - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/core/inference_profile.py
@@ -61,7 +63,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/model_candidate_health/**
   - python/apps/azents/src/azents/repos/model_candidate_chain_cutover/**
   - python/apps/azents/src/azents/services/model_availability.py
-  - python/apps/azents/src/azents/services/model_candidate_selection.py
+  - python/apps/azents/src/azents/repos/model_candidate_selection.py
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
@@ -139,7 +141,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-04
-spec_version: 91
+spec_version: 92
 ---
 
 # Agent Domain Spec
@@ -298,24 +300,32 @@ Required snapshot fields:
 - `source_metadata`
 - `last_refreshed_at`
 
-Snapshot is created by resolving submitted model identifiers through stored model catalog projection at submit time. Runtime does not query latest listing again and uses snapshot in Agent row as source of truth.
+Submitted exact integration/model IDs and ordered settings form user
+configuration. `normalized_capabilities` has schema version `3`: final support is
+represented by its boolean/list fields, with a separate `structured_response`
+boolean and `request_constraints` for known defaults and feature conditions.
+Source evidence and compiler diagnostics do not become another final support
+state.
 
-New explicit selections copy the complete `semantic_contract` version `2`.
-Unknown/conditional facts and default-effort evidence remain distinct from the
-conservative boolean/list views. Normal reads, non-selection saves and catalog
-refresh do not enrich or rewrite existing Agent/Workspace snapshots; absent/null
-descriptors retain historical behavior without a retired-source fallback.
-Conditional built-ins can be configured as potential choices, but actual request
-effort and published function declarations govern dispatch. Strict functions and
-structured responses are separate. Existing optional controls use saved conditions
-conservatively and preserve exact xhigh/max values without nearest-level remapping.
+Agent detail/list responses and their chat model controls compile current
+authorized LOCAL declarations for those same IDs and return detached metadata
+copies. Lists batch exact choices by Workspace, including distinct existing
+aliases. Missing required metadata retains the selected identity and reports a
+diagnostic with empty support; it does not choose another candidate. Unrelated
+PATCH and label saves persist user settings without copying response metadata
+back into the Agent row.
 
-Profile preparation, candidate compatibility, defaults, subagent choices and
-external model editors use individually justified reasoning-effort potential,
-including a conditional descriptor, rather than the unconditional display list.
-Known effort predicates narrow that potential; actual function-tool predicates
-remain enforced at dispatch. The saved descriptor and its flat views are not
-rewritten, and historical consumer-specific support guards remain intact.
+NEW operations capture compiled metadata before profile preparation. Once
+captured, retries, quota progression and historical execution use the operation's
+candidate snapshots. Lowerers validate the actual encoded request against those
+final fields and conditions without mutable catalog lookup.
+
+Configuration controls use the complete final effort and built-in lists.
+Conditional potential stays configurable until actual request admission evaluates
+effective effort and function declarations. Existing effort ordering/adaptation
+is retained for concrete model changes; valid values and explicit null are
+preserved. The canonical domain is `none`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`; provider `ultra` remains raw declaration evidence only.
 
 ### 1.2 WorkspaceModelSettings
 
@@ -338,7 +348,9 @@ Rules:
 - Once Workspace defaults are configured, the default selectable model list cannot be cleared to empty.
 - Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
 - Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
-- New Agents copy each Workspace option's model snapshot and complete model-scoped settings, including built-in tool configs; later Workspace changes do not change existing Agent options or effective snapshots.
+- New Agents copy exact Workspace identities, order and complete model-scoped settings,
+  including built-in configs, while capturing current compiled capabilities for those
+  choices. Existing Agents retain their user configuration when Workspace defaults change.
 - Public Workspace mutation accepts only the nested default candidate-chain contract. The
   denormalized default snapshots remain internal derived mirrors.
 
@@ -705,6 +717,12 @@ Successful preparation atomically stores the full selected `AgentModelSelection`
 Runtime does not query Workspace defaults or model listing. Workspace defaults act only as copy sources at Agent create/update submit time, and model catalog changes do not mutate an already prepared Session snapshot.
 
 ## 4. Built-in Tool Validation
+
+Configuration and settings-copy validation use final supported-tool membership.
+They do not remove a conditional tool by evaluating an incomplete runtime request.
+Actual request admission evaluates captured conditions with the complete encoded
+effort and JSON-function declarations; support, strict schemas and structured
+responses remain separate.
 
 Each selectable model option owns a semantic built-in tool opt-in list. Model snapshot `normalized_capabilities.built_in_tools.supported` means the capability is selectable; it does not prescribe whether the provider or Azents executes it. A supported tool omitted from that option's settings is not exposed when the option is selected.
 

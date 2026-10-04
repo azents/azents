@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from collections.abc import Sequence
 from typing import Any, NamedTuple
 
 import sqlalchemy as sa
@@ -10,6 +11,7 @@ from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import ConfiguredModelIdentity
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
@@ -17,7 +19,10 @@ from azents.core.enums import (
     LLMCatalogScope,
     LLMProvider,
 )
-from azents.core.llm_catalog import INTEGRATION_SCOPED_CATALOG_PROVIDERS
+from azents.core.llm_catalog import (
+    INTEGRATION_SCOPED_CATALOG_PROVIDERS,
+    ModelCapabilities,
+)
 from azents.core.llm_catalog_sync import (
     CatalogProjectionVersion,
     CatalogSyncState,
@@ -26,6 +31,7 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
     evaluate_integration_catalog_sync_policy,
 )
+from azents.core.model_capability_projection import CAPABILITY_PROJECTION_REVISION
 from azents.core.model_pricing import ModelPricingDefinition
 from azents.rdb.models.llm_catalog import (
     RDBImageGenerationCatalogEntry,
@@ -363,6 +369,7 @@ class LLMCatalogRepository:
         if owner.purpose != LLMCatalogPurpose.CONVERSATION:
             raise ValueError("Conversation publication requires a conversation owner.")
         self._validate_entry_scope(owner, entries)
+        self._validate_conversation_capabilities(entries)
         identifiers = {entry.provider_model_identifier for entry in entries}
         existing_result = await session.execute(
             sa.select(RDBLLMCatalogEntry.provider_model_identifier)
@@ -478,6 +485,110 @@ class LLMCatalogRepository:
         )
         owner.image_usable = True
         await session.flush()
+
+    async def get_selectable_entries_for_identities(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        identities: Sequence[ConfiguredModelIdentity],
+    ) -> dict[ConfiguredModelIdentity, CatalogEntryWithCatalog]:
+        """Read exact choices in bulk, locking current owners in stable ID order."""
+        integrations = {}
+        for integration_id in sorted(
+            {identity.integration_id for identity in identities}
+        ):
+            integration = await self.lock_integration(
+                session,
+                integration_id=integration_id,
+                workspace_id=workspace_id,
+                shared=True,
+            )
+            if integration is not None:
+                integrations[integration_id] = integration
+        authorized = tuple(
+            identity
+            for identity in identities
+            if identity.integration_id in integrations
+            and integrations[identity.integration_id].provider == identity.provider
+        )
+        if not authorized:
+            return {}
+        system_providers = {
+            identity.provider
+            for identity in authorized
+            if identity.provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS
+        }
+        owners_result = await session.execute(
+            sa.select(RDBLLMCatalog)
+            .where(
+                RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
+                sa.or_(
+                    RDBLLMCatalog.provider_integration_id.in_(integrations),
+                    sa.and_(
+                        RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
+                        RDBLLMCatalog.provider.in_(system_providers),
+                    ),
+                ),
+            )
+            .order_by(RDBLLMCatalog.id)
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        owners = list(owners_result.scalars())
+        exact_owners = {}
+        for identity in authorized:
+            owner = next(
+                (
+                    item
+                    for item in owners
+                    if item.provider == identity.provider
+                    and item.provider_integration_id == identity.integration_id
+                ),
+                None,
+            )
+            if owner is None and identity.provider in system_providers:
+                owner = next(
+                    (
+                        item
+                        for item in owners
+                        if item.provider == identity.provider
+                        and item.scope == LLMCatalogScope.SYSTEM
+                    ),
+                    None,
+                )
+            if owner is not None:
+                exact_owners[identity] = owner
+        if not exact_owners:
+            return {}
+        rows_result = await session.execute(
+            sa.select(RDBLLMCatalogEntry)
+            .where(
+                sa.tuple_(
+                    RDBLLMCatalogEntry.catalog_id,
+                    RDBLLMCatalogEntry.provider_model_identifier,
+                ).in_(
+                    {
+                        (owner.id, identity.model_identifier)
+                        for identity, owner in exact_owners.items()
+                    }
+                ),
+                RDBLLMCatalogEntry.visibility_status
+                == LLMCatalogEntryVisibility.SELECTABLE,
+            )
+            .execution_options(populate_existing=True)
+        )
+        rows = {
+            (row.catalog_id, row.provider_model_identifier): row
+            for row in rows_result.scalars()
+        }
+        return {
+            identity: CatalogEntryWithCatalog(
+                catalog=self.build_catalog(owner), entry=self._build_entry(row)
+            )
+            for identity, owner in exact_owners.items()
+            if (row := rows.get((owner.id, identity.model_identifier))) is not None
+        }
 
     async def _read_owner_for_integration(
         self,
@@ -802,6 +913,26 @@ class LLMCatalogRepository:
             diagnostics=owner.diagnostics,
             sync_status=current_sync_status(owner),
         )
+
+    @staticmethod
+    def _validate_conversation_capabilities(
+        entries: list[LLMCatalogEntryCreate],
+    ) -> None:
+        """Require current raw compiler output at the new publication boundary."""
+        for entry in entries:
+            if entry.normalized_capabilities.get("capability_schema_version") != 3:
+                raise ValueError(
+                    "Conversation publication requires final v3 capabilities."
+                )
+            if (
+                entry.projection_metadata is None
+                or entry.projection_metadata.get("capability_compiler_revision")
+                != CAPABILITY_PROJECTION_REVISION
+            ):
+                raise ValueError(
+                    "Conversation publication requires the current capability compiler."
+                )
+            ModelCapabilities.model_validate(entry.normalized_capabilities)
 
     @staticmethod
     def _validate_entry_scope(

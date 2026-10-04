@@ -202,11 +202,6 @@ def adapt_inference_profile_to_model(
     if effort is not None:
         capabilities = selection.normalized_capabilities
         supported_efforts = capabilities.configurable_reasoning_efforts()
-        if (
-            capabilities.semantic_contract is None
-            and not capabilities.reasoning.supported
-        ):
-            supported_efforts = []
         effort = normalize_inherited_reasoning_effort(effort, supported_efforts)
     supported_options = validate_supported_execution_options(
         provider=selection.provider,

@@ -1,6 +1,6 @@
 # ModelContextWindow
 
-Model context window capability.
+Saved context limits, independent of supported control membership.
 
 ## Properties
 

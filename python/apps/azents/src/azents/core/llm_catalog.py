@@ -1,15 +1,19 @@
-"""LLM catalog capability contract models."""
+"""Single final LLM capability view and descriptive route metadata."""
 
 import enum
 import re
 from collections.abc import Mapping
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from azents.core._legacy_model_capability_contract import decode_historical_capabilities
 from azents.core.builtin_tools import BUILTIN_TOOL_RULES
 from azents.core.enums import LLMProvider
-from azents.core.model_capability_contract import ModelCapabilityContract
+from azents.core.model_capability_contract import (
+    ModelCapabilityFeature,
+    ModelRequestConstraints,
+)
 
 INTEGRATION_SCOPED_CATALOG_PROVIDERS: frozenset[LLMProvider] = frozenset(
     {
@@ -58,14 +62,14 @@ class ModelReasoningEffort(enum.StrEnum):
 
 
 class UnsupportedMediaPolicy(enum.StrEnum):
-    """Unsupported media handling policy."""
+    """Descriptive unsupported media handling policy."""
 
     TEXT_SUBSTITUTION = "text_substitution"
     BLOCK = "block"
 
 
 class ModelContextWindow(BaseModel):
-    """Model context window capability."""
+    """Saved context limits, independent of supported control membership."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -75,51 +79,76 @@ class ModelContextWindow(BaseModel):
 
 
 class ModelModalities(BaseModel):
-    """Input/output modalities supported by the model."""
+    """Supported input/output forms; absent entries mean unsupported."""
 
     model_config = ConfigDict(extra="ignore")
 
     input: list[ModelModality] = Field(default_factory=list)
     output: list[ModelModality] = Field(default_factory=list)
 
+    @field_validator("input", "output")
+    @classmethod
+    def validate_unique_modalities(
+        cls, value: list[ModelModality]
+    ) -> list[ModelModality]:
+        """Reject duplicate membership rather than storing conflicting lists."""
+        if len(value) != len(set(value)):
+            raise ValueError("Supported modalities must be unique.")
+        return value
+
 
 class ModelToolCallingCapabilities(BaseModel):
-    """Represents tool calling capability."""
+    """Final function and function-schema capabilities."""
 
     model_config = ConfigDict(extra="ignore")
 
     supported: bool = False
-    parallel_tool_calls: bool | None = None
-    strict_json_schema: bool | None = None
+    parallel_tool_calls: bool = False
+    strict_json_schema: bool = False
+
+    @field_validator("parallel_tool_calls", "strict_json_schema", mode="before")
+    @classmethod
+    def decode_historical_null(cls, value: object) -> object:
+        """Read old null flags as absent final features, never permissive states."""
+        return False if value is None else value
 
 
 class ModelReasoningCapabilities(BaseModel):
-    """Represents reasoning capability."""
+    """Final reasoning support and the supported selectable effort list."""
 
     model_config = ConfigDict(extra="ignore")
+
     supported: bool = False
     effort_levels: list[ModelReasoningEffort] = Field(default_factory=list)
-    summaries: bool | None = None
+    summaries: bool = False
+
+    @field_validator("summaries", mode="before")
+    @classmethod
+    def decode_historical_null(cls, value: object) -> object:
+        """Retain historical readability without a final unknown state."""
+        return False if value is None else value
 
 
 class ModelBuiltInToolCapabilities(BaseModel):
-    """Represents provider built-in tool capability."""
+    """Supported route-projected built-in tools."""
 
     model_config = ConfigDict(extra="ignore")
+
     supported: list[str] = Field(default_factory=list)
 
     @field_validator("supported")
     @classmethod
     def validate_known_tools(cls, value: list[str]) -> list[str]:
-        """Allow only registered built-in tools."""
-        unknown = set(value) - set(BUILTIN_TOOL_RULES)
-        if unknown:
+        """Allow only unique registered built-in tools."""
+        if set(value) - set(BUILTIN_TOOL_RULES):
             raise ValueError("Unknown built-in tools are not supported.")
+        if len(value) != len(set(value)):
+            raise ValueError("Supported built-in tools must be unique.")
         return value
 
 
 class ModelParameterCapabilities(BaseModel):
-    """Configurable generation parameters supported by the model."""
+    """Final supported generation controls."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -131,19 +160,21 @@ class ModelParameterCapabilities(BaseModel):
 
 
 class ModelCompatibilityCapabilities(BaseModel):
-    """Provider compatibility capability."""
+    """Descriptive route metadata; never a second feature admission authority."""
 
     model_config = ConfigDict(extra="ignore")
+
     provider_family: str | None = None
     responses_api: bool | None = None
     unsupported_media_policy: UnsupportedMediaPolicy | None = None
 
 
 class ModelCapabilities(BaseModel):
-    """Normalized LLM model capability contract."""
+    """One final boolean/list feature contract with separate request constraints."""
 
     model_config = ConfigDict(extra="ignore")
 
+    capability_schema_version: Literal[3] = 3
     context_window: ModelContextWindow = Field(default_factory=ModelContextWindow)
     modalities: ModelModalities = Field(default_factory=ModelModalities)
     tool_calling: ModelToolCallingCapabilities = Field(
@@ -161,143 +192,94 @@ class ModelCapabilities(BaseModel):
     compatibility: ModelCompatibilityCapabilities = Field(
         default_factory=ModelCompatibilityCapabilities
     )
-    # Descriptor absence is the approved historical snapshot boundary.
-    semantic_contract: ModelCapabilityContract | None = Field(
-        default=None, exclude_if=lambda value: value is None
+    structured_response: bool = False
+    request_constraints: ModelRequestConstraints = Field(
+        default_factory=ModelRequestConstraints
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def decode_historical_descriptor(cls, value: object) -> object:
+        """Decode old JSON without writing rows or restoring unknown support."""
+        if not isinstance(value, Mapping):
+            return value
+        if (
+            value.get("capability_schema_version") == 3
+            and value.get("semantic_contract") is not None
+        ):
+            raise ValueError("Final capabilities cannot contain a semantic descriptor.")
+        return decode_historical_capabilities(value)
+
     def configurable_reasoning_efforts(self) -> list[ModelReasoningEffort]:
-        """Expose known selection potential; dispatch evaluates actual conditions."""
-        contract = self.semantic_contract
-        if contract is None:
-            return list(self.reasoning.effort_levels)
-        support = contract.reasoning.support
-        if support.state not in {"supported", "conditional"}:
-            return []
-        predicate = support.predicate
-        return [
-            ModelReasoningEffort(declaration.level)
-            for declaration in contract.reasoning.efforts
-            if declaration.state == "supported"
-            and (
-                predicate is None
-                or predicate.reasoning_efforts is None
-                or declaration.level in predicate.reasoning_efforts
-            )
-        ]
+        """Expose final declared levels; dispatch owns effective request conditions."""
+        return list(self.reasoning.effort_levels) if self.reasoning.supported else []
+
+    def supported_features(self) -> frozenset[ModelCapabilityFeature]:
+        """Derive membership from final fields without storing a second list."""
+        flags = {
+            ModelCapabilityFeature.FUNCTION_CALLING: self.tool_calling.supported,
+            ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS: (
+                self.tool_calling.parallel_tool_calls
+            ),
+            ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA: (
+                self.tool_calling.strict_json_schema
+            ),
+            ModelCapabilityFeature.STRUCTURED_RESPONSE: self.structured_response,
+            ModelCapabilityFeature.REASONING: self.reasoning.supported,
+            ModelCapabilityFeature.REASONING_SUMMARIES: self.reasoning.summaries,
+            ModelCapabilityFeature.TEMPERATURE: self.parameters.temperature,
+            ModelCapabilityFeature.MAX_OUTPUT_TOKENS: self.parameters.max_output_tokens,
+            ModelCapabilityFeature.TOP_P: self.parameters.top_p,
+            ModelCapabilityFeature.TOP_K: self.parameters.top_k,
+            ModelCapabilityFeature.STOP_SEQUENCES: self.parameters.stop_sequences,
+        }
+        features = {feature for feature, present in flags.items() if present}
+        features.update(
+            ModelCapabilityFeature(f"input:{modality.value}")
+            for modality in self.modalities.input
+        )
+        features.update(
+            ModelCapabilityFeature(f"output:{modality.value}")
+            for modality in self.modalities.output
+        )
+        features.update(
+            ModelCapabilityFeature(f"builtin:{tool}")
+            for tool in self.built_in_tools.supported
+        )
+        return frozenset(features)
+
+    def supports(self, feature: ModelCapabilityFeature) -> bool:
+        """Return feature membership without evaluating an incomplete request."""
+        return feature in self.supported_features()
 
     @model_validator(mode="after")
-    def validate_semantic_views(self) -> Self:
-        """Reject competing boolean/list facts for a versioned semantic contract."""
-        contract = self.semantic_contract
-        if contract is None:
-            return self
-        flag_views = (
-            (
-                "tool_calling.supported",
-                self.tool_calling.supported,
-                contract.function_calling.enabled,
-            ),
-            (
-                "tool_calling.parallel_tool_calls",
-                self.tool_calling.parallel_tool_calls,
-                contract.parallel_function_calls.nullable_enabled,
-            ),
-            (
-                "tool_calling.strict_json_schema",
-                self.tool_calling.strict_json_schema,
-                contract.strict_function_schema.nullable_enabled,
-            ),
-            (
-                "reasoning.supported",
-                self.reasoning.supported,
-                contract.reasoning.support.enabled,
-            ),
-            (
-                "reasoning.summaries",
-                self.reasoning.summaries,
-                contract.reasoning_summaries.nullable_enabled,
-            ),
-            (
-                "parameters.temperature",
-                self.parameters.temperature,
-                contract.parameters.temperature.enabled,
-            ),
-            (
-                "parameters.max_output_tokens",
-                self.parameters.max_output_tokens,
-                contract.parameters.max_output_tokens.enabled,
-            ),
-            (
-                "parameters.top_p",
-                self.parameters.top_p,
-                contract.parameters.top_p.enabled,
-            ),
-            (
-                "parameters.top_k",
-                self.parameters.top_k,
-                contract.parameters.top_k.enabled,
-            ),
-            (
-                "parameters.stop_sequences",
-                self.parameters.stop_sequences,
-                contract.parameters.stop_sequences.enabled,
-            ),
-        )
-        for name, actual, expected in flag_views:
-            if actual != expected:
-                raise ValueError(f"{name} must match the saved semantic contract.")
-        list_views = (
-            (
-                "reasoning.effort_levels",
-                [level.value for level in self.reasoning.effort_levels],
-                list(contract.reasoning.enabled_efforts),
-            ),
-            (
-                "modalities.input",
-                [modality.value for modality in self.modalities.input],
-                [
-                    declaration.modality
-                    for declaration in contract.input_modalities
-                    if declaration.support.enabled
-                ],
-            ),
-            (
-                "modalities.output",
-                [modality.value for modality in self.modalities.output],
-                [
-                    declaration.modality
-                    for declaration in contract.output_modalities
-                    if declaration.support.enabled
-                ],
-            ),
-            (
-                "built_in_tools.supported",
-                self.built_in_tools.supported,
-                [
-                    declaration.tool
-                    for declaration in contract.built_in_tools
-                    if declaration.support.enabled
-                ],
-            ),
-        )
-        for name, actual, expected in list_views:
-            if actual != expected:
-                raise ValueError(f"{name} must match the saved semantic contract.")
+    def validate_final_capabilities(self) -> Self:
+        """Keep metadata subordinate to the single final feature view."""
+        features = self.supported_features()
+        for condition in self.request_constraints.feature_conditions:
+            if condition.feature not in features:
+                raise ValueError("A feature condition requires a present feature.")
+        if self.reasoning.effort_levels and not self.reasoning.supported:
+            raise ValueError("Reasoning effort levels require reasoning support.")
+        if len(self.reasoning.effort_levels) != len(set(self.reasoning.effort_levels)):
+            raise ValueError("Reasoning effort levels must be unique.")
+        if not self.tool_calling.supported and (
+            self.tool_calling.parallel_tool_calls
+            or self.tool_calling.strict_json_schema
+        ):
+            raise ValueError("Function refinements require function calling support.")
         return self
 
 
 def build_initial_model_capabilities(
     *, thinking: bool, metadata: Mapping[str, Any] | None
 ) -> ModelCapabilities:
-    """Convert legacy provider model values to initial capability contract."""
+    """Convert legacy provider model values to initial capability fields."""
     capabilities = ModelCapabilities()
     if thinking:
         capabilities.reasoning.supported = True
-
     if metadata is None:
         return capabilities
-
     default_input_tokens = metadata.get("default_input_tokens")
     if (
         isinstance(default_input_tokens, int)
@@ -305,18 +287,20 @@ def build_initial_model_capabilities(
         and default_input_tokens > 0
     ):
         capabilities.context_window.default_input_tokens = default_input_tokens
-
     max_input_tokens = metadata.get("max_input_tokens")
-    if isinstance(max_input_tokens, int) and not isinstance(max_input_tokens, bool):
-        if max_input_tokens > 0:
-            capabilities.context_window.max_input_tokens = max_input_tokens
-
+    if (
+        isinstance(max_input_tokens, int)
+        and not isinstance(max_input_tokens, bool)
+        and max_input_tokens > 0
+    ):
+        capabilities.context_window.max_input_tokens = max_input_tokens
     supported_builtin_tools = metadata.get("supported_builtin_tools")
     if isinstance(supported_builtin_tools, list):
-        capabilities.built_in_tools.supported = [
-            tool_id
-            for tool_id in supported_builtin_tools
-            if isinstance(tool_id, str) and tool_id in BUILTIN_TOOL_RULES
-        ]
-
+        capabilities.built_in_tools.supported = list(
+            dict.fromkeys(
+                tool_id
+                for tool_id in supported_builtin_tools
+                if isinstance(tool_id, str) and tool_id in BUILTIN_TOOL_RULES
+            )
+        )
     return capabilities

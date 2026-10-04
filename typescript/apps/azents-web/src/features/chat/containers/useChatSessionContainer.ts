@@ -11,6 +11,7 @@
 import { useDocumentVisibility } from "@mantine/hooks";
 import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { knownReasoningEffort } from "@/shared/lib/reasoning-effort";
 import { trpc } from "@/trpc/client";
 import { continuationMetadata } from "../continuationPresentation";
 import { executionOptionIdsFromValue } from "../executionOptions";
@@ -76,7 +77,6 @@ import type {
   ChatEventResponse,
   ChatWriteResponse,
   LiveEventListResponse,
-  ModelReasoningEffort,
   PendingMailboxEnvelope,
   RequestedInferenceProfile,
 } from "@azents/public-client";
@@ -90,23 +90,6 @@ type WritableChatAction = Extract<
   | { type: "skill" }
   | { type: "cleanup_orphan_git_worktrees" }
 >;
-
-function modelReasoningEffortFromValue(
-  value: string | null,
-): ModelReasoningEffort | null {
-  switch (value) {
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-    case "max":
-      return value;
-    default:
-      return null;
-  }
-}
 
 function writableChatAction(
   action?: ChatAction | null,
@@ -3146,9 +3129,7 @@ export function useChatSessionContainer(
         sessionId,
         profile,
       });
-      const reasoningEffort = modelReasoningEffortFromValue(
-        profile.reasoning_effort,
-      );
+      const reasoningEffort = knownReasoningEffort(profile.reasoning_effort);
       if (profile.reasoning_effort !== null && reasoningEffort === null) {
         return false;
       }

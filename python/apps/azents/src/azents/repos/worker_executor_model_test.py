@@ -2,7 +2,8 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Literal, NamedTuple
@@ -13,6 +14,14 @@ from azcommon.result import Failure, Success
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.repos.worker_executor_model as model_module
+from azents.core.active_model_capabilities import (
+    ActiveModelCapabilitiesUnavailable,
+    ActiveModelMetadataUnavailable,
+    CapturedStoredChoice,
+    CompiledActiveChoices,
+    ConfiguredModelIdentity,
+)
 from azents.core.agent import (
     AgentModelSelection,
     SelectableModelCandidate,
@@ -29,6 +38,7 @@ from azents.core.model_availability import (
     ModelCandidateIdentity as PublicCandidateIdentity,
 )
 from azents.core.model_availability import PrimaryModelReservation
+from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.model_operation import (
     ModelOperationKind,
@@ -55,6 +65,8 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.model_candidate_health import RDBModelCandidateHealth
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository
@@ -87,6 +99,74 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
 )
+
+
+class ModelActiveCapabilities(ActiveModelCapabilitiesRepository):
+    """Deterministic current declarations, independent of saved capability views."""
+
+    def __init__(self) -> None:
+        self.captures = 0
+        self.revalidations = 0
+        self.matches = True
+        self.efforts: list[str] = []
+        self.identities: list[tuple[ConfiguredModelIdentity, ...]] = []
+        self.unavailable: set[str] = set()
+
+    async def capture_exact_choices_in_session(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        identities: Sequence[ConfiguredModelIdentity],
+    ) -> CapturedActiveChoiceInputs:
+        del session
+        self.captures += 1
+        self.identities.append(tuple(identities))
+        choices: list[CapturedStoredChoice | ActiveModelMetadataUnavailable] = []
+        for identity in identities:
+            if identity.model_identifier in self.unavailable:
+                choices.append(
+                    ActiveModelMetadataUnavailable(identity, "exact_entry_unavailable")
+                )
+                continue
+            source = decode_catalog_source(
+                json.dumps(
+                    {
+                        identity.model_identifier: {
+                            "litellm_provider": identity.provider.value,
+                            "mode": "responses",
+                            "supports_function_calling": True,
+                            "supports_reasoning": bool(self.efforts),
+                            "reasoning_effort_levels": self.efforts,
+                            "supports_web_search": True,
+                        }
+                    }
+                ).encode()
+            )
+            choices.append(
+                CapturedStoredChoice(
+                    identity=identity,
+                    source_metadata=None,
+                    source_models=source.models,
+                    supported_execution_options=(),
+                    model_developer=None,
+                    catalog_id="current-test-catalog",
+                )
+            )
+        return CapturedActiveChoiceInputs(
+            workspace_id=workspace_id,
+            choices=tuple(choices),
+            catalog_choices=(),
+            source_metadata=None,
+            source_expectations=(),
+        )
+
+    async def inputs_match_in_session(
+        self, session: AsyncSession, *, captured: CapturedActiveChoiceInputs
+    ) -> bool:
+        del session, captured
+        self.revalidations += 1
+        return self.matches
 
 
 class ModelManager:
@@ -429,7 +509,13 @@ async def model_fixture(
     )
     guard = ModelGuard(observed, sessions, runs, mailbox, terminal, fault)
     repository = WorkerExecutorModelOperationRepository(
-        observed, agents, sessions, runs, ModelHealth(observed, fault), guard
+        observed,
+        agents,
+        sessions,
+        runs,
+        ModelHealth(observed, fault),
+        guard,
+        ModelActiveCapabilities(),
     )
     return ModelFixture(
         observed,
@@ -735,7 +821,9 @@ async def test_fresh_unlocked_snapshot_and_three_distinct_scopes_before_external
 ) -> None:
     fixture = await model_fixture(rdb_session_manager, "model-fresh-three-phases")
     snapshot = await fixture.repository.load_fresh_profile_snapshot(
-        agent_id=fixture.agent_id, session_id=fixture.session_id
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
     )
     assert (
         snapshot.agent.id == fixture.agent_id
@@ -761,6 +849,7 @@ async def test_fresh_unlocked_snapshot_and_three_distinct_scopes_before_external
         selected=selected,
         override=None,
         replace_operation=False,
+        prepared_snapshot=snapshot,
     )
     assert isinstance(result, Success) and isinstance(
         result.value, FreshModelPreparation
@@ -1615,3 +1704,430 @@ async def test_profile_snapshot_missing_value_error_follows_scope_completion(
         )
     await ExternalWitness(fixture.manager).invoke("provider", None)
     fixture.manager.assert_closed()
+
+
+async def test_new_foreground_and_compaction_compile_before_both_normalizations(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale saved capabilities never enter new profile normalization."""
+    fixture = await model_fixture(rdb_session_manager, "active-before-normalization")
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    active.efforts = ["xhigh", "max"]
+    async with fixture.manager() as session:
+        original = await fixture.repository.agent_repository.get_by_id(
+            session, fixture.agent_id
+        )
+    assert original is not None
+    before = original.model_dump(mode="json")
+    seen = []
+    compile_original = model_module.compile_capture
+    normalize_original = model_module.normalize_profile_selection_for_agent
+
+    def compile_after_transaction(
+        captured: CapturedActiveChoiceInputs,
+        *,
+        selections: Sequence[AgentModelSelection],
+    ) -> CompiledActiveChoices:
+        assert not fixture.manager.active
+        return compile_original(captured, selections=selections)
+
+    def normalize_compiled(
+        agent: Agent, selected: RequestedProfileSelection
+    ) -> RequestedProfileSelection:
+        caps = (
+            agent.selectable_model_options[0]
+            .candidates[0]
+            .model_selection.normalized_capabilities
+        )
+        seen.append(tuple(caps.reasoning.effort_levels))
+        assert caps.capability_schema_version == 3
+        assert caps.reasoning.effort_levels == [
+            ModelReasoningEffort.XHIGH,
+            ModelReasoningEffort.MAX,
+        ]
+        return normalize_original(agent, selected)
+
+    monkeypatch.setattr(model_module, "compile_capture", compile_after_transaction)
+    monkeypatch.setattr(
+        model_module, "normalize_profile_selection_for_agent", normalize_compiled
+    )
+    override = RequestedProfileSelection(
+        RequestedInferenceProfile(
+            model_target_label="removed",
+            reasoning_effort=ModelReasoningEffort.MAX,
+            enabled_execution_options=[],
+        ),
+        InferenceProfileSource.PARENT_RUN,
+    )
+    frame = await fixture.repository.load_fresh_profile_snapshot(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        override=override,
+    )
+    selected = model_module.normalize_profile_selection_for_agent(frame.agent, override)
+    # The fallback uses the Agent's raw default intent; capability compilation
+    # precedes deciding whether that intent remains valid.
+    result = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=selected,
+        override=override,
+        replace_operation=False,
+        prepared_snapshot=frame,
+    )
+    assert isinstance(result, Success) and result.value is not None
+    for operation in (
+        result.value.selection.operation,
+        result.value.compaction_selection.operation,
+    ):
+        assert operation.candidates[
+            0
+        ].model_selection.normalized_capabilities.reasoning.effort_levels == [
+            ModelReasoningEffort.XHIGH,
+            ModelReasoningEffort.MAX,
+        ]
+    assert len(seen) == 2
+    assert active.captures == 1 and active.revalidations == 1
+    async with fixture.manager() as session:
+        persisted = await fixture.repository.agent_repository.get_by_id(
+            session, fixture.agent_id
+        )
+    assert persisted is not None and persisted.model_dump(mode="json") == before
+
+
+async def test_frozen_reuse_and_quota_advance_do_not_relookup_active_metadata(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, "active-frozen-quota")
+    first = await prepare(fixture)
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    calls = active.captures, active.revalidations
+    frozen = first.selection.operation.candidates
+    active.efforts = ["max"]
+    active.matches = False
+    advanced = await fixture.repository.advance_after_quota(
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        workspace_id=fixture.workspace_id,
+        failure=quota_failure(first.selection.operation, "sampling"),
+    )
+    assert advanced.operation.cursor == 1
+    selected = await fixture.repository.select_requested_profile(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        explicit_profile=None,
+    )
+    frame = await fixture.repository.load_fresh_profile_snapshot(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+    )
+    assert frame.captured_inputs is None and frame.compiled_choices is None
+    reused = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=selected,
+        override=None,
+        replace_operation=False,
+        prepared_snapshot=frame,
+    )
+    assert isinstance(reused, Success) and reused.value is not None
+    assert (
+        reused.value.selection.operation.operation_id == advanced.operation.operation_id
+    )
+    assert reused.value.selection.operation.cursor == 1
+    assert reused.value.selection.operation.candidates == frozen
+    assert (
+        reused.value.compaction_selection.operation
+        == first.compaction_selection.operation
+    )
+    assert (active.captures, active.revalidations) == calls
+
+
+async def test_source_input_change_is_prewrite_drift_not_mixed_operation(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, "active-input-drift")
+    frame = await fixture.repository.load_fresh_profile_snapshot(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+    )
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    active.matches = False
+    before = await model_rows(fixture)
+    result = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=RequestedProfileSelection(
+            agent_default_inference_profile(frame.agent),
+            InferenceProfileSource.AGENT_DEFAULT,
+        ),
+        override=None,
+        replace_operation=False,
+        prepared_snapshot=frame,
+    )
+    assert isinstance(result, Success) and result.value is None
+    assert await model_rows(fixture) == before
+    assert active.revalidations == 1
+    assert "slot" not in fixture.fault.trace
+
+
+async def test_standalone_compaction_captures_only_new_lightweight_then_freezes(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, "active-compaction-only")
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    active.efforts = ["max"]
+    first = await fixture.repository.prepare_compaction(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        workspace_id=fixture.workspace_id,
+    )
+    assert active.identities == [
+        (
+            ConfiguredModelIdentity.from_selection(
+                fixture.options[1].candidates[0].model_selection
+            ),
+        )
+    ]
+    assert (
+        first.candidate.model_selection.normalized_capabilities.reasoning.effort_levels
+        == [ModelReasoningEffort.MAX]
+    )
+    active.efforts = []
+    active.matches = False
+    second = await fixture.repository.prepare_compaction(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        workspace_id=fixture.workspace_id,
+    )
+    assert second.operation == first.operation
+    assert active.captures == 1 and active.revalidations == 1
+
+
+async def test_unavailable_selected_metadata_fails_without_model_substitution(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, "active-unavailable")
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    active.unavailable.add(fixture.primary.model_identifier)
+    before = await model_rows(fixture)
+    with pytest.raises(ActiveModelCapabilitiesUnavailable) as error:
+        await prepare(fixture)
+    assert (
+        error.value.diagnostic.identity.model_identifier
+        == fixture.primary.model_identifier
+    )
+    assert await model_rows(fixture) == before
+
+
+@pytest.mark.parametrize("change", ["metadata", "settings", "order", "identity"])
+async def test_locked_prepare_fences_user_configuration_not_metadata(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, f"active-config-{change}")
+    frame = await fixture.repository.load_fresh_profile_snapshot(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+    )
+    original_lock = fixture.repository.agent_repository.lock_by_id
+
+    async def changed_lock(session: AsyncSession, agent_id: str) -> Agent | None:
+        agent = await original_lock(session, agent_id)
+        assert agent is not None
+        options = list(agent.selectable_model_options)
+        option = options[0]
+        candidate = option.candidates[0]
+        if change == "metadata":
+            selected = candidate.model_selection.model_copy(
+                update={
+                    "model_display_name": "New display-only metadata",
+                    "source_metadata": {"diagnostics": "changed"},
+                    "model_snapshot": {"new": "compiled"},
+                }
+            )
+            option = option.model_copy(
+                update={
+                    "candidates": [
+                        candidate.model_copy(update={"model_selection": selected}),
+                        *option.candidates[1:],
+                    ]
+                }
+            )
+        elif change == "settings":
+            option = option.model_copy(
+                update={
+                    "candidates": [
+                        candidate.model_copy(
+                            update={
+                                "settings": candidate.settings.model_copy(
+                                    update={"max_output_tokens": 777}
+                                )
+                            }
+                        ),
+                        *option.candidates[1:],
+                    ]
+                }
+            )
+        elif change == "order":
+            option = option.model_copy(
+                update={"candidates": list(reversed(option.candidates))}
+            )
+        else:
+            selected = candidate.model_selection.model_copy(
+                update={"model_identifier": "changed-by-user"}
+            )
+            option = option.model_copy(
+                update={
+                    "candidates": [
+                        candidate.model_copy(update={"model_selection": selected}),
+                        *option.candidates[1:],
+                    ]
+                }
+            )
+        options[0] = option
+        return agent.model_copy(update={"selectable_model_options": options})
+
+    monkeypatch.setattr(fixture.repository.agent_repository, "lock_by_id", changed_lock)
+    before = await model_rows(fixture)
+    result = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=RequestedProfileSelection(
+            agent_default_inference_profile(frame.agent),
+            InferenceProfileSource.AGENT_DEFAULT,
+        ),
+        override=None,
+        replace_operation=False,
+        prepared_snapshot=frame,
+    )
+    assert isinstance(result, Success)
+    if change == "metadata":
+        assert result.value is not None
+    else:
+        assert result.value is None
+        assert await model_rows(fixture) == before
+
+
+async def test_compaction_input_drift_is_bounded_before_any_slot_write(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, "active-compaction-drift")
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    active.matches = False
+    before = await model_rows(fixture)
+    with pytest.raises(CanonicalExecutionWorkDriftError, match="compaction"):
+        await fixture.repository.prepare_compaction(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            run_id=fixture.run_id,
+            owner_generation=fixture.generation,
+            workspace_id=fixture.workspace_id,
+        )
+    assert active.captures == active.revalidations == 3
+    assert await model_rows(fixture) == before
+    assert "slot" not in fixture.fault.trace
+
+
+async def test_same_candidate_retry_keeps_capture_new_operation_adopts_change(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    fixture = await model_fixture(rdb_session_manager, "active-retry-capture")
+    active = fixture.repository.active_capabilities_repository
+    assert isinstance(active, ModelActiveCapabilities)
+    active.efforts = ["max"]
+    original_profile = RequestedProfileSelection(
+        RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=ModelReasoningEffort.MAX,
+            enabled_execution_options=[],
+        ),
+        InferenceProfileSource.SPAWN_OVERRIDE,
+    )
+    first = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=original_profile,
+        override=original_profile,
+        replace_operation=False,
+    )
+    assert isinstance(first, Success) and first.value is not None
+    foreground = first.value.selection.operation
+    compaction = first.value.compaction_selection.operation
+    active.efforts = ["xhigh"]
+    active.matches = False
+    retry = dataclasses.replace(
+        original_profile, source=InferenceProfileSource.RETRY_ORIGINAL
+    )
+    reused = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=retry,
+        override=retry,
+        replace_operation=False,
+    )
+    assert isinstance(reused, Success) and reused.value is not None
+    assert reused.value.selection.operation == foreground
+    assert reused.value.compaction_selection.operation == compaction
+    assert active.captures == active.revalidations == 1
+    active.matches = True
+    next_profile = dataclasses.replace(
+        retry,
+        profile=retry.profile.model_copy(update={"reasoning_effort": None}),
+    )
+    replacement = await fixture.repository.prepare_fresh(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        run_id=fixture.run_id,
+        owner_generation=fixture.generation,
+        selected=next_profile,
+        override=next_profile,
+        replace_operation=True,
+    )
+    assert isinstance(replacement, Success) and replacement.value is not None
+    new_operation = replacement.value.selection.operation
+    assert new_operation.operation_id != foreground.operation_id
+    assert (
+        new_operation.current_candidate.model_selection.normalized_capabilities.reasoning.effort_levels
+        == [ModelReasoningEffort.XHIGH]
+    )
+    assert (
+        new_operation.current_candidate.settings
+        == foreground.current_candidate.settings
+    )
+    assert (
+        new_operation.current_candidate.model_selection.model_identifier
+        == foreground.current_candidate.model_selection.model_identifier
+    )
+    assert replacement.value.compaction_selection.operation == compaction
+    assert active.captures == active.revalidations == 2

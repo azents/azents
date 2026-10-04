@@ -1,6 +1,7 @@
 """Session title helper tests."""
 
 import datetime
+import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -12,6 +13,10 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.session_title as session_title_module
+from azents.core.active_model_capabilities import (
+    CapturedStoredChoice,
+    ConfiguredModelIdentity,
+)
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     AgentModelSelection,
@@ -37,10 +42,12 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
-from azents.core.model_capability_evidence import ProviderCapabilityEvidence
-from azents.core.model_capability_projection import project_capabilities
-from azents.core.model_catalog_source import CatalogFact
+from azents.core.llm_catalog import (
+    ModelCapabilities,
+    ModelToolCallingCapabilities,
+)
+from azents.core.model_catalog_identity import catalog_source_keys
+from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeReason,
     ModelOperationKind,
@@ -64,6 +71,8 @@ from azents.engine.run.provider_failure import (
 from azents.engine.run.resolve import ResolvedModelCandidateRuntime
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -342,16 +351,15 @@ class TestSessionTitleHelpers:
         [
             (True, TitleOutputMode.STRUCTURED),
             (False, TitleOutputMode.PLAIN_TEXT),
-            (None, TitleOutputMode.STRUCTURED),
         ],
     )
     async def test_generate_title_selects_mode_from_saved_capability(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        capability: bool | None,
+        capability: bool,
         expected_mode: TitleOutputMode,
     ) -> None:
-        """The saved tri-state capability selects the initial title mode."""
+        """The saved structured-response feature selects the initial title mode."""
         modes: list[TitleOutputMode] = []
 
         async def generate(**kwargs: object) -> str:
@@ -383,14 +391,15 @@ class TestSessionTitleHelpers:
         [
             (True, False, TitleOutputMode.PLAIN_TEXT),
             (False, True, TitleOutputMode.STRUCTURED),
-            (True, None, TitleOutputMode.STRUCTURED),
+            (True, True, TitleOutputMode.STRUCTURED),
+            (False, False, TitleOutputMode.PLAIN_TEXT),
         ],
     )
-    async def test_v2_title_uses_response_support_independently_from_strict_tools(
+    async def test_title_uses_response_support_independently_from_strict_tools(
         self,
         monkeypatch: pytest.MonkeyPatch,
         strict: bool,
-        structured: bool | None,
+        structured: bool,
         expected_mode: TitleOutputMode,
     ) -> None:
         modes: list[TitleOutputMode] = []
@@ -405,17 +414,10 @@ class TestSessionTitleHelpers:
             session_title_module, "generate_session_title_with_model", generate
         )
         snapshot = _generation_snapshot(strict)
-        caps = project_capabilities(
-            provider=LLMProvider.OPENAI,
-            exact_model="gpt-test",
-            source_model=None,
-            model_developer=LLMModelDeveloper.OPENAI,
-            evidence=ProviderCapabilityEvidence(
-                function_calling=CatalogFact(state="value", value=True),
-                strict_function_schema=CatalogFact(state="value", value=strict),
-                structured_response=CatalogFact(
-                    state="null" if structured is None else "value", value=structured
-                ),
+        caps = ModelCapabilities(
+            structured_response=structured,
+            tool_calling=ModelToolCallingCapabilities(
+                supported=True, strict_json_schema=strict
             ),
         )
         snapshot.operation.current_candidate.model_selection.normalized_capabilities = (
@@ -559,13 +561,11 @@ class TestSessionTitleHelpers:
         assert attempts == [("gpt-primary", 1), ("gpt-fallback", 1)]
         service.session_title_repository.advance_after_quota.assert_awaited_once()
 
-    @pytest.mark.parametrize("capability", [True, None])
-    async def test_contract_rejection_fallback_is_unknown_only(
+    async def test_supported_contract_rejection_does_not_change_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        capability: bool | None,
     ) -> None:
-        """Only unknown capability changes mode after typed contract rejection."""
+        """A typed rejection cannot silently bypass a saved supported contract."""
         calls: list[dict[str, object]] = []
         rejection = model_provider_failure(
             operation="session_title",
@@ -591,30 +591,18 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(
-            capability
-        )._generate_title(  # Exercise the bounded compatibility transition.
+        result = await _title_service(True)._generate_title(
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(capability),
+            snapshot=_generation_snapshot(True),
         )
 
-        if capability is None:
-            assert result == "Plain compatibility title"
-            assert [call["output_mode"] for call in calls] == [
-                TitleOutputMode.STRUCTURED,
-                TitleOutputMode.PLAIN_TEXT,
-            ]
-            assert [call["attempt_number"] for call in calls] == [1, 1]
-            assert {call["model"] for call in calls} == {"gpt-test"}
-        else:
-            assert result is None
-            assert [call["output_mode"] for call in calls] == [
-                TitleOutputMode.STRUCTURED
-            ]
+        assert result is None
+        assert [call["output_mode"] for call in calls] == [TitleOutputMode.STRUCTURED]
+        assert [call["attempt_number"] for call in calls] == [1]
 
-    async def test_unknown_operational_failure_retries_structured_mode(
+    async def test_operational_failure_retries_structured_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -647,34 +635,23 @@ class TestSessionTitleHelpers:
         )
 
         result = await _title_service(
-            None, max_retries=1
+            True, max_retries=1
         )._generate_title(  # Exercise retry interaction with the active mode.
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(None),
+            snapshot=_generation_snapshot(True),
         )
 
         assert result == "Retried structured title"
         assert modes == [TitleOutputMode.STRUCTURED, TitleOutputMode.STRUCTURED]
 
-    async def test_retry_after_transition_stays_in_plain_text_mode(
+    async def test_unsupported_structured_response_retries_plain_text_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A transient failure after transition retries only plain text."""
+        """A plain-text operation retries without attempting a structured schema."""
         calls: list[dict[str, object]] = []
-        rejection = model_provider_failure(
-            operation="session_title",
-            provider="openai",
-            model="gpt-test",
-            integration="integration-001",
-            provider_message="Unsupported response format.",
-            status_code=400,
-            provider_code="invalid_request",
-            provider_error_type="invalid_request_error",
-            provider_error_param="text.format",
-        )
         rate_limit = model_provider_failure(
             operation="session_title",
             provider="openai",
@@ -690,8 +667,6 @@ class TestSessionTitleHelpers:
         async def generate(**kwargs: object) -> str:
             calls.append(kwargs)
             if len(calls) == 1:
-                raise rejection
-            if len(calls) == 2:
                 raise rate_limit
             return "Plain title after retry"
 
@@ -701,30 +676,25 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(
-            None, max_retries=1
-        )._generate_title(  # Exercise retry after the one-way transition.
+        result = await _title_service(False, max_retries=1)._generate_title(
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(None),
+            snapshot=_generation_snapshot(False),
         )
 
         assert result == "Plain title after retry"
         assert [call["output_mode"] for call in calls] == [
-            TitleOutputMode.STRUCTURED,
             TitleOutputMode.PLAIN_TEXT,
             TitleOutputMode.PLAIN_TEXT,
         ]
-        assert [call["attempt_number"] for call in calls] == [1, 1, 2]
+        assert [call["attempt_number"] for call in calls] == [1, 2]
 
-    @pytest.mark.parametrize("capability", [True, None])
-    async def test_schema_decode_fallback_is_unknown_only(
+    async def test_supported_schema_decode_failure_does_not_change_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
-        capability: bool | None,
     ) -> None:
-        """Only unknown capability changes mode after schema decode failure."""
+        """Schema decoding failure does not silently bypass the output contract."""
         modes: list[TitleOutputMode] = []
 
         async def generate(**kwargs: object) -> str:
@@ -741,24 +711,15 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(
-            capability
-        )._generate_title(  # Exercise schema-decode transition policy.
+        result = await _title_service(True)._generate_title(
             session_id="session-001",
             generation_event_id="0" * 32,
             context="Compare two insurance options",
-            snapshot=_generation_snapshot(capability),
+            snapshot=_generation_snapshot(True),
         )
 
-        if capability is None:
-            assert result == "Plain title after decode failure"
-            assert modes == [
-                TitleOutputMode.STRUCTURED,
-                TitleOutputMode.PLAIN_TEXT,
-            ]
-        else:
-            assert result is None
-            assert modes == [TitleOutputMode.STRUCTURED]
+        assert result is None
+        assert modes == [TitleOutputMode.STRUCTURED]
 
     async def test_openrouter_structured_title_requires_routable_parameters(
         self,
@@ -812,7 +773,7 @@ class TestSessionTitleHelpers:
             sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=_session_title_repository(
-                strict_json_schema=None,
+                structured_response=False,
                 session_manager=_session_manager,
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
@@ -929,7 +890,7 @@ class TestSessionTitleHelpers:
             sdk_factories=get_model_sdk_factories(),
             model_metadata_service=make_test_model_metadata_service(source=None),
             session_title_repository=_session_title_repository(
-                strict_json_schema=None,
+                structured_response=False,
                 session_manager=_session_manager,
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
@@ -1000,7 +961,7 @@ class TestSessionTitleHelpers:
                 session_id="session-001",
                 generation_event_id="0" * 32,
                 context="Compare two insurance options",
-                snapshot=_generation_snapshot(None),
+                snapshot=_generation_snapshot(False),
             )
 
         assert attempts == [1]
@@ -1035,6 +996,9 @@ class TestSessionTitleHelpers:
                 agent_repository=_AgentRepository(),
                 agent_session_repository=title_repository,
                 health_repository=_healthy_health_repository(),
+                active_capabilities_repository=_active_metadata_repository(
+                    structured_output=False
+                ),
                 session_manager=_session_manager,
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
@@ -1105,7 +1069,7 @@ class TestSessionTitleHelpers:
                 session_id="session-001",
                 generation_event_id="0" * 32,
                 context="Compare two insurance options",
-                snapshot=_generation_snapshot(None),
+                snapshot=_generation_snapshot(False),
             )
         )
 
@@ -1173,6 +1137,9 @@ class TestSessionTitleHelpers:
                 agent_repository=_AgentRepository(),
                 agent_session_repository=repository,
                 health_repository=_healthy_health_repository(),
+                active_capabilities_repository=_active_metadata_repository(
+                    structured_output=False
+                ),
                 session_manager=session_manager,
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
@@ -1317,6 +1284,9 @@ class TestSessionTitleHelpers:
                 agent_repository=_AgentRepository(),
                 agent_session_repository=WinningRepository(),
                 health_repository=_healthy_health_repository(),
+                active_capabilities_repository=_active_metadata_repository(
+                    structured_output=False
+                ),
                 session_manager=session_manager,
             ),
             model_stream_watchdog=make_test_model_stream_watchdog(),
@@ -1473,7 +1443,7 @@ def _external_channel_event(
 
 
 def _model_selection(
-    strict_json_schema: bool | None = None,
+    structured_response: bool = False,
 ) -> AgentModelSelection:
     return AgentModelSelection(
         llm_provider_integration_id="integration-001",
@@ -1483,22 +1453,20 @@ def _model_selection(
         model_developer=LLMModelDeveloper.OPENAI,
         pricing=None,
         normalized_capabilities=ModelCapabilities(
-            tool_calling=ModelToolCallingCapabilities(
-                strict_json_schema=strict_json_schema
-            )
+            structured_response=structured_response is True
         ),
         model_snapshot={},
     )
 
 
 class _AgentRepository(AgentRepository):
-    def __init__(self, strict_json_schema: bool | None = None) -> None:
-        self.strict_json_schema = strict_json_schema
+    def __init__(self, structured_response: bool = False) -> None:
+        self.structured_response = structured_response
 
     async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
         del session, agent_id
         now = datetime.datetime.now(datetime.UTC)
-        selection = _model_selection(self.strict_json_schema)
+        selection = _model_selection(self.structured_response)
         return Agent(
             id="agent-001",
             workspace_id="workspace-001",
@@ -1584,7 +1552,7 @@ class _ThreadTitleService(ExternalChannelThreadTitleService):
 
 
 def _title_service(
-    strict_json_schema: bool | None,
+    structured_response: bool,
     *,
     max_retries: int = 0,
 ) -> SessionTitleService:
@@ -1592,7 +1560,7 @@ def _title_service(
         sdk_factories=get_model_sdk_factories(),
         model_metadata_service=make_test_model_metadata_service(source=None),
         session_title_repository=_session_title_repository(
-            strict_json_schema=strict_json_schema,
+            structured_response=structured_response,
             session_manager=_session_manager,
         ),
         model_stream_watchdog=make_test_model_stream_watchdog(),
@@ -1636,14 +1604,17 @@ def _title_service(
 
 def _session_title_repository(
     *,
-    strict_json_schema: bool | None,
+    structured_response: bool,
     session_manager: SessionManager[AsyncSession],
 ) -> SessionTitleRepository:
     """Create the title database operation repository for tests."""
     return SessionTitleRepository(
-        agent_repository=_AgentRepository(strict_json_schema),
+        agent_repository=_AgentRepository(structured_response),
         agent_session_repository=_AgentSessionRepository(),
         health_repository=_healthy_health_repository(),
+        active_capabilities_repository=_active_metadata_repository(
+            structured_output=structured_response is True
+        ),
         session_manager=session_manager,
     )
 
@@ -1672,10 +1643,10 @@ def _chatgpt_oauth_runtime_repository(
 
 
 def _generation_snapshot(
-    strict_json_schema: bool | None,
+    structured_response: bool,
 ) -> SessionTitleGenerationSnapshot:
     """Create a completed title generation database snapshot."""
-    selection = _model_selection(strict_json_schema)
+    selection = _model_selection(structured_response)
     option = SelectableModelOption(
         label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         candidates=[
@@ -1780,3 +1751,59 @@ class _AgentSessionRepository(AgentSessionRepository):
     ) -> AgentSession | None:
         del session, session_id, title, event_id
         raise AssertionError("replace should not be called when generation fails")
+
+
+def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
+    """Capture synthetic exact declarations, never the saved capability object."""
+    repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
+
+    async def capture(
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        identities: tuple[ConfiguredModelIdentity, ...],
+    ) -> CapturedActiveChoiceInputs:
+        del session
+        choices = []
+        for identity in identities:
+            key = catalog_source_keys(
+                provider=identity.provider, model_identifier=identity.model_identifier
+            )[0]
+            source = decode_catalog_source(
+                json.dumps(
+                    {
+                        key.source_model_key: {
+                            "litellm_provider": key.provider,
+                            "mode": "chat",
+                            "supported_endpoints": ["/v1/responses"],
+                            "supported_modalities": ["text"],
+                            "supported_output_modalities": ["text"],
+                            "supports_function_calling": True,
+                            "supports_response_schema": structured_output,
+                            "max_input_tokens": 128000,
+                            "max_output_tokens": 16384,
+                        }
+                    }
+                ).encode()
+            ).models[0]
+            choices.append(
+                CapturedStoredChoice(
+                    identity=identity,
+                    source_metadata=None,
+                    source_models=(source,),
+                    supported_execution_options=(),
+                    model_developer=None,
+                    catalog_id="synthetic-local-catalog",
+                )
+            )
+        return CapturedActiveChoiceInputs(
+            workspace_id=workspace_id,
+            choices=tuple(choices),
+            catalog_choices=(),
+            source_metadata=None,
+            source_expectations=(),
+        )
+
+    repository.capture_exact_choices_in_session.side_effect = capture
+    repository.inputs_match_in_session.return_value = True
+    return repository

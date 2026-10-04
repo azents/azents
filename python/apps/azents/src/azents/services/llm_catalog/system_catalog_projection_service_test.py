@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -25,6 +26,7 @@ async def test_system_catalogs_exclude_integration_scoped_providers(
             catalog_repository=LLMCatalogRepository(),
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
             source_repository=ModelMetadataSourceRepository(),
+            active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
         ),
         source_sync_service=source,
     )

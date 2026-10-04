@@ -28,6 +28,7 @@ from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai.settings import ModelSettings
 
 from azents.core.enums import LLMProvider
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
 from azents.engine.events.pydantic_ai_adapter_test import context_for_test
 from azents.engine.events.pydantic_ai_output import PydanticAIOutputNormalizer
@@ -367,7 +368,14 @@ async def test_installed_converse_schema_and_json_output_tool_extraction(
                     "required": ["title"],
                 },
             ),
-        )
+        ),
+        assembly_metadata=ModelAssemblyMetadata(
+            model_developer=None,
+            model_family=None,
+            capabilities=ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            ),
+        ),
     )
     assert call.boundary.paths == [f"/model/{model}/converse-stream"]
     payload = call.boundary.bodies[0]

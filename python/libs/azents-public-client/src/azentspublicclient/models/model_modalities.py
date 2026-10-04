@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class ModelModalities(BaseModel):
     """
-    Input/output modalities supported by the model.
+    Supported input/output forms; absent entries mean unsupported.
     """ # noqa: E501
     input: Optional[List[ModelModality]] = None
     output: Optional[List[ModelModality]] = None

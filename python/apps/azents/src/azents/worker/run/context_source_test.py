@@ -47,7 +47,10 @@ from azents.repos.model_metadata_source_data import (
     ContextModelRequest,
 )
 from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
-from azents.repos.worker_executor_model_data import FreshModelPreparation
+from azents.repos.worker_executor_model_data import (
+    FreshModelPreparation,
+    FreshProfileSnapshot,
+)
 from azents.services.model_metadata import ModelMetadataService
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -143,6 +146,7 @@ class _TrackedSelectionOperations(fixtures._CompletedModels):
         selected: RequestedProfileSelection,
         override: RequestedProfileSelection | None,
         replace_operation: bool,
+        prepared_snapshot: FreshProfileSnapshot | None = None,
     ) -> Result[
         FreshModelPreparation | None, ModelTargetNotFound | ModelCandidateChainExhausted
     ]:
@@ -156,6 +160,7 @@ class _TrackedSelectionOperations(fixtures._CompletedModels):
                 selected=selected,
                 override=override,
                 replace_operation=replace_operation,
+                prepared_snapshot=prepared_snapshot,
             )
         finally:
             self.open_operations -= 1

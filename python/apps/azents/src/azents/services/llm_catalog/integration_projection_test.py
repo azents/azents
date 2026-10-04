@@ -31,6 +31,7 @@ from azents.core.llm_catalog import (
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_catalog import (
@@ -112,6 +113,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 catalog_repository=LLMCatalogRepository(),
                 integration_repository=integration_repository,
                 source_repository=ModelMetadataSourceRepository(),
+                active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
             ),
             listing_clients=create_listing_client_factories(),
             oauth_clients=create_runtime_oauth_client_factories(),
@@ -326,6 +328,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
                 catalog_repository=LLMCatalogRepository(),
                 integration_repository=integration_repository,
                 source_repository=ModelMetadataSourceRepository(),
+                active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
             ),
             listing_clients=create_listing_client_factories(),
             oauth_clients=create_runtime_oauth_client_factories(),
@@ -474,6 +477,7 @@ async def test_xai_failure_preserves_last_successful_current_data(
                 catalog_repository=catalog_repository,
                 integration_repository=integration_repository,
                 source_repository=ModelMetadataSourceRepository(),
+                active_repository=AsyncMock(spec=ActiveModelCapabilitiesRepository),
             ),
             listing_clients=create_listing_client_factories(),
             oauth_clients=create_runtime_oauth_client_factories(),

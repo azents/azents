@@ -36,6 +36,7 @@ from azents.job_runtime.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.engine_read_deps import get_engine_model_read_repository
@@ -202,6 +203,9 @@ class HistoricalMemoryConsolidationService:
     health_repository: Annotated[
         ModelCandidateHealthRepository, Depends(ModelCandidateHealthRepository)
     ]
+    active_capabilities_repository: Annotated[
+        ActiveModelCapabilitiesRepository, Depends(ActiveModelCapabilitiesRepository)
+    ]
     model_read_repository: Annotated[
         EngineModelReadRepository,
         Depends(get_engine_model_read_repository),
@@ -266,7 +270,10 @@ class ConsolidationAttemptExecution:
         service = self.service
         key = self.claim.principal.unit
         operations = ConsolidationModelOperationRepository(
-            service.session_manager, service.agent_repository, service.health_repository
+            service.session_manager,
+            service.agent_repository,
+            service.health_repository,
+            service.active_capabilities_repository,
         )
         recovery = ConsolidationRecoveryRepository(service.session_manager)
         while True:

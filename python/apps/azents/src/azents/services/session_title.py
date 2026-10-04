@@ -370,11 +370,10 @@ class SessionTitleService:
                 function_tools=False,
             )
             active_mode = (
-                TitleOutputMode.PLAIN_TEXT
-                if structured_capability is False
-                else TitleOutputMode.STRUCTURED
+                TitleOutputMode.STRUCTURED
+                if structured_capability
+                else TitleOutputMode.PLAIN_TEXT
             )
-            compatibility_transitioned = False
             attempt_number = 1
             while True:
                 if attempt_number > 1 and not await self._generation_is_current(
@@ -399,29 +398,6 @@ class SessionTitleService:
                         output_mode=active_mode,
                     )
                 except TitleOutputContractError as exc:
-                    if (
-                        structured_capability is None
-                        and active_mode is TitleOutputMode.STRUCTURED
-                        and not compatibility_transitioned
-                    ):
-                        logger.warning(
-                            "Automatic session title output contract was not honored",
-                            extra={
-                                "session_id": session_id,
-                                "agent_id": agent_id,
-                                "attempt_number": attempt_number,
-                                "provider": selection.provider.value,
-                                "model": model,
-                                "title_structured_output_capability": None,
-                                "title_output_mode": active_mode.value,
-                                "title_output_mode_transitioned": True,
-                                "title_output_contract_incompatibility": exc.kind,
-                            },
-                            exc_info=True,
-                        )
-                        active_mode = TitleOutputMode.PLAIN_TEXT
-                        compatibility_transitioned = True
-                        continue
                     logger.warning(
                         "Automatic session title output contract was not honored",
                         extra={
@@ -434,9 +410,6 @@ class SessionTitleService:
                                 structured_capability
                             ),
                             "title_output_mode": active_mode.value,
-                            "title_output_mode_transitioned": (
-                                compatibility_transitioned
-                            ),
                             "title_output_contract_incompatibility": exc.kind,
                         },
                         exc_info=True,
@@ -451,34 +424,6 @@ class SessionTitleService:
                         if active_mode is TitleOutputMode.STRUCTURED
                         else None
                     )
-                    if (
-                        structured_capability is None
-                        and active_mode is TitleOutputMode.STRUCTURED
-                        and not compatibility_transitioned
-                        and incompatibility is not None
-                    ):
-                        attempt_logger = bind_extra(
-                            logger,
-                            {
-                                "session_id": session_id,
-                                "agent_id": agent_id,
-                                "attempt_number": attempt_number,
-                                **model_provider_error_log_fields(exc),
-                                "title_structured_output_capability": None,
-                                "title_output_mode": active_mode.value,
-                                "title_output_mode_transitioned": True,
-                                "title_output_contract_incompatibility": (
-                                    incompatibility
-                                ),
-                            },
-                        )
-                        attempt_logger.warning(
-                            "Automatic session title output contract is unavailable",
-                            exc_info=True,
-                        )
-                        active_mode = TitleOutputMode.PLAIN_TEXT
-                        compatibility_transitioned = True
-                        continue
                     if exc.category is ModelProviderFailureCategory.QUOTA_OR_BILLING:
                         advanced = (
                             await self.session_title_repository.advance_after_quota(
@@ -520,9 +465,6 @@ class SessionTitleService:
                                 structured_capability
                             ),
                             "title_output_mode": active_mode.value,
-                            "title_output_mode_transitioned": (
-                                compatibility_transitioned
-                            ),
                             "title_output_contract_incompatibility": incompatibility,
                             "provider_failure_retry_outcome": (
                                 "scheduled" if retry_available else "exhausted"
@@ -552,9 +494,6 @@ class SessionTitleService:
                                 structured_capability
                             ),
                             "title_output_mode": active_mode.value,
-                            "title_output_mode_transitioned": (
-                                compatibility_transitioned
-                            ),
                             "title_output_contract_incompatibility": None,
                             "model_stream_timeout_kind": exc.timeout_kind,
                             "model_stream_failure_code": exc.failure_code,
@@ -577,9 +516,6 @@ class SessionTitleService:
                                 structured_capability
                             ),
                             "title_output_mode": active_mode.value,
-                            "title_output_mode_transitioned": (
-                                compatibility_transitioned
-                            ),
                             "title_output_contract_incompatibility": None,
                         },
                     )

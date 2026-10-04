@@ -1,10 +1,9 @@
-import { supportedBuiltinTools } from "../lib/model-capability-support.ts";
+import { configurableBuiltinTools } from "../lib/model-capability-support.ts";
 import {
   builtinToolConfigHasSettings,
   encodeImageGenerationModel,
   projectImageGenerationConfig,
 } from "./image-generation-config.ts";
-import type { CapabilityRequestContext } from "../lib/model-capability-support.ts";
 import type {
   AgentModelSelection,
   AgentModelSelectionInput,
@@ -113,7 +112,6 @@ export interface PrimarySettingsCopyResult {
 export function copyCompatiblePrimarySettings(
   primary: SelectableModelCandidateFormValue,
   target: SelectableModelCandidateFormValue,
-  request: CapabilityRequestContext = {},
 ): PrimarySettingsCopyResult {
   const omitted: PrimarySettingsCopyResult["omitted"] = [];
   const targetContext = target.normalized_capabilities?.context_window;
@@ -141,9 +139,8 @@ export function copyCompatiblePrimarySettings(
   ) {
     omitted.push("max_output");
   }
-  const supportedTools = supportedBuiltinTools(
+  const supportedTools = configurableBuiltinTools(
     target.normalized_capabilities,
-    request,
   );
   const builtinTools = primary.builtin_tools.filter((tool) =>
     supportedTools.includes(tool),
@@ -216,15 +213,12 @@ export function selectCandidateIntegration(
 export function selectCandidateModel(
   candidate: SelectableModelCandidateFormValue,
   model: SelectableModelCandidate,
-  request: CapabilityRequestContext = {},
 ): SelectableModelCandidateFormValue {
-  const previousTools = supportedBuiltinTools(
+  const previousTools = configurableBuiltinTools(
     candidate.normalized_capabilities,
-    request,
   );
-  const supportedTools = supportedBuiltinTools(
+  const supportedTools = configurableBuiltinTools(
     model.normalized_capabilities,
-    request,
   );
   const enabledTools = supportedTools.filter(
     (tool) =>

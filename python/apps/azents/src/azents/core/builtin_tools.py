@@ -10,7 +10,6 @@ from collections.abc import Mapping, Sequence
 from typing import ClassVar, Protocol
 
 from azents.core.enums import LLMProvider
-from azents.core.model_capability_contract import ModelCapabilityContract
 
 
 class BuiltinToolConfigLike(Protocol):
@@ -33,11 +32,6 @@ class BuiltinToolCapabilities(Protocol):
 
 class BuiltinToolModelCapabilities(Protocol):
     """Capability fields required for built-in tool validation."""
-
-    @property
-    def semantic_contract(self) -> ModelCapabilityContract | None:
-        """Versioned saved support, absent for historical snapshots."""
-        ...
 
     @property
     def built_in_tools(self) -> BuiltinToolCapabilities:
@@ -84,25 +78,16 @@ class BuiltinToolRule(ABC):
 def builtin_tool_configurable(
     capabilities: BuiltinToolModelCapabilities, *, tool: str
 ) -> bool:
-    """Check configuration potential without inventing a request context.
+    """Read configuration potential from the final supported-tool list.
 
-    Save and preparation have no effective effort or actual function declarations.
-    A known conditional fact permits configuration, not dispatch authorization.
-    Runtime lowerers evaluate its saved predicate before sending the request.
-    Historical snapshots retain their unconditional-list compatibility.
+    Saved request constraints are evaluated only at actual dispatch. Configuration
+    does not invent an effort or function-tool context to filter supported choices.
 
     :param capabilities: the selected model's saved capability snapshot
     :param tool: the route-projected built-in capability name
     :returns: whether the saved facts allow this tool to be configured
     """
-    contract = capabilities.semantic_contract
-    if contract is None:
-        return tool in capabilities.built_in_tools.supported
-    return any(
-        declaration.tool == tool
-        and declaration.support.state in {"supported", "conditional"}
-        for declaration in contract.built_in_tools
-    )
+    return tool in capabilities.built_in_tools.supported
 
 
 class WebSearchRule(BuiltinToolRule):
@@ -145,14 +130,6 @@ BUILTIN_TOOL_RULES: dict[str, BuiltinToolRule] = {
 }
 """Registered built-in tool validation rule registry."""
 
-_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES = (
-    "gpt-6",
-    "gpt-5",
-    "gpt-4.1",
-    "gpt-4o",
-    "o3",
-)
-
 
 def supported_builtin_capabilities(
     *,
@@ -162,9 +139,9 @@ def supported_builtin_capabilities(
 ) -> list[str]:
     """Return built-in tools supported by trusted provider metadata and policy."""
     supported: list[str] = []
-    if (
-        metadata.get("supports_web_search") is True
-        or provider == LLMProvider.CHATGPT_OAUTH
+    if metadata.get("supports_web_search") is True or (
+        provider == LLMProvider.CHATGPT_OAUTH
+        and metadata.get("supports_web_search") is not False
     ):
         supported.append("web_search")
     if _supports_image_generation(
@@ -182,18 +159,15 @@ def _supports_image_generation(
     model_identifier: str,
     metadata: Mapping[str, object],
 ) -> bool:
-    if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-        if metadata.get("supports_function_calling") is False:
-            return False
-        if metadata.get("mode") not in {None, "chat", "responses"}:
-            return False
-        normalized = model_identifier.removeprefix("openai/").lower()
-        return normalized.startswith(_IMAGE_GENERATION_OPENAI_MODEL_PREFIXES) or any(
-            _string_sequence_contains(metadata.get(key), "image_generation")
-            for key in ("supported_builtin_tools", "experimental_supported_tools")
-        )
-
-    if provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+    if provider in {
+        LLMProvider.OPENAI,
+        LLMProvider.CHATGPT_OAUTH,
+        LLMProvider.XAI,
+        LLMProvider.XAI_OAUTH,
+    }:
+        # This is a registered client executor, not a hosted model output form.
+        # Its request owner needs a supported function route and conversation
+        # mode; similarly named models do not establish either prerequisite.
         return (
             metadata.get("mode") in {"chat", "responses"}
             and metadata.get("supports_function_calling") is True

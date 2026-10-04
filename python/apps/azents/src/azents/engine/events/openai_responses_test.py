@@ -56,7 +56,11 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     LLMProvider,
 )
-from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.core.llm_catalog import (
+    ModelCapabilities,
+    ModelReasoningEffort,
+    ModelToolCallingCapabilities,
+)
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
@@ -655,6 +659,9 @@ def test_chatgpt_lowerer_uses_standard_full_context_request() -> None:
     }
     lowerer = OpenAIResponsesLowerer(
         top_k=None,
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="chatgpt_oauth",
@@ -697,6 +704,9 @@ def test_openai_sdk_lowerer_accepts_plaintext_custom_apply_patch_tool() -> None:
     }
     lowerer = OpenAIResponsesLowerer(
         top_k=None,
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -715,6 +725,9 @@ def test_openai_sdk_lowerer_projects_incompatible_custom_history() -> None:
     """Do not emit a historical custom call on a function-only SDK request."""
     lowerer = OpenAIResponsesLowerer(
         top_k=None,
+        model_capabilities=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
         supported_execution_options=[],
         enabled_execution_options=[],
         provider="openai",
@@ -2475,9 +2488,15 @@ async def test_projected_chatgpt_search_reaches_official_sdk_wire(model: str) ->
 
 
 @pytest.mark.parametrize(
-    "effort", [ModelReasoningEffort.XHIGH, ModelReasoningEffort.MAX]
+    ("provider", "effort"),
+    [
+        (LLMProvider.OPENAI, ModelReasoningEffort.XHIGH),
+        (LLMProvider.OPENAI, ModelReasoningEffort.MAX),
+        (LLMProvider.CHATGPT_OAUTH, ModelReasoningEffort.MAX),
+    ],
 )
-async def test_official_sdk_preserves_saved_v2_effort_wire(
+async def test_official_sdk_preserves_final_declared_effort_wire(
+    provider: LLMProvider,
     effort: ModelReasoningEffort,
 ) -> None:
     """The selected canonical scalar survives the complete official SDK boundary."""
@@ -2496,7 +2515,7 @@ async def test_official_sdk_preserves_saved_v2_effort_wire(
         )
 
     capabilities = project_capabilities(
-        provider=LLMProvider.OPENAI,
+        provider=provider,
         exact_model="exact-supported-model",
         source_model=None,
         model_developer=None,
@@ -2508,7 +2527,7 @@ async def test_official_sdk_preserves_saved_v2_effort_wire(
     )
     request = OpenAIResponsesLowerer(
         top_k=None,
-        provider=LLMProvider.OPENAI,
+        provider=provider,
         model="exact-supported-model",
         credential_kwargs={},
         tools=None,

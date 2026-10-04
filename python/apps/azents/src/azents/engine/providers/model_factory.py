@@ -36,6 +36,7 @@ from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from azents.core.enums import LLMProvider
+from azents.core.model_provider_protocol import vertex_model_family
 from azents.core.type_guards import is_string_object_dict, is_string_string_dict
 from azents.engine.events.pydantic_ai_types import NativeModelProtocol, SDKFailureMapper
 from azents.engine.providers.bedrock_output import BedrockOutputCompatibilityModel
@@ -43,7 +44,6 @@ from azents.engine.providers.http_observation import ObservedHTTPX2Transport
 from azents.engine.providers.model_profiles import (
     protocol_for_provider,
     resolve_runtime_model_profile,
-    vertex_model_family,
 )
 from azents.engine.providers.observation_state import NativeObservationState
 

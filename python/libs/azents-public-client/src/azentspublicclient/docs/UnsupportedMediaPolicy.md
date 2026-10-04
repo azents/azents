@@ -1,6 +1,6 @@
 # UnsupportedMediaPolicy
 
-Unsupported media handling policy.
+Descriptive unsupported media handling policy.
 
 ## Enum
 

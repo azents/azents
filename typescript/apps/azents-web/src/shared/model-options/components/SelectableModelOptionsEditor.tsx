@@ -37,7 +37,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { supportedBuiltinTools } from "@/shared/lib/model-capability-support";
+import { configurableBuiltinTools } from "@/shared/lib/model-capability-support";
 import {
   candidateHasDuplicateModel,
   rowHasDuplicateLabel,
@@ -62,7 +62,6 @@ import type {
   SelectableModelCandidateFormValue,
   SelectableModelOptionFormValue,
 } from "../model-selection";
-import type { ModelReasoningEffort } from "@azents/public-client";
 import type { useSortable } from "@dnd-kit/sortable";
 import type { ComponentType, ReactNode } from "react";
 
@@ -74,7 +73,6 @@ export interface SelectableModelOptionsEditorProps {
   mainModelLabel: string | null;
   lightweightModelLabel: string | null;
   defaultReasoningEffortControl?: ReactNode;
-  reasoningEffort?: ModelReasoningEffort | null;
   providerOptions: ProviderIntegrationOption[];
   canEdit: boolean;
   showValidationErrors?: boolean;
@@ -398,7 +396,6 @@ interface SelectableModelSettingsModalProps {
   opened: boolean;
   label: string;
   candidate: SelectableModelCandidateFormValue;
-  reasoningEffort: ModelReasoningEffort | null;
   imageGenerationCatalogStates: ReadonlyMap<
     string,
     ImageGenerationCatalogState
@@ -415,7 +412,6 @@ function SelectableModelSettingsModal({
   opened,
   label,
   candidate,
-  reasoningEffort,
   imageGenerationCatalogStates,
   canSyncImageCatalog,
   onClose,
@@ -430,11 +426,8 @@ function SelectableModelSettingsModal({
   const outputLimit =
     candidate.normalized_capabilities?.context_window?.max_output_tokens ??
     null;
-  const supportedTools = supportedBuiltinTools(
+  const supportedTools = configurableBuiltinTools(
     candidate.normalized_capabilities,
-    {
-      reasoningEffort,
-    },
   );
   const imageGenerationEnabled =
     candidate.builtin_tools.includes("image_generation");
@@ -828,7 +821,6 @@ export function SelectableModelOptionsEditor({
   description,
   options,
   defaultReasoningEffortControl,
-  reasoningEffort = null,
   canEdit,
   showValidationErrors = false,
   imageGenerationCatalogStates,
@@ -910,7 +902,6 @@ export function SelectableModelOptionsEditor({
           opened={settingsTarget != null}
           label={settings.option.label || t("newOption")}
           candidate={settings.candidate}
-          reasoningEffort={reasoningEffort}
           imageGenerationCatalogStates={imageGenerationCatalogStates}
           canSyncImageCatalog={canSyncImageCatalog}
           onClose={() => setSettingsTarget(null)}

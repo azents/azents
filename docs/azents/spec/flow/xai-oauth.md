@@ -6,6 +6,10 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/core/route_capability_constraints.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
@@ -34,7 +38,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-04
-spec_version: 11
+spec_version: 12
 ---
 
 # xAI OAuth Flow
@@ -263,6 +267,24 @@ Unexpected presentation failures remain inside a card-local error boundary.
 | `GET` | `/llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/subscription-usage` | read one live integration-scoped subscription-usage outcome |
 
 ## Model Catalog
+
+The final schema-3 contract compiles exact OAuth-account declarations, applicable
+local source facts and reviewed route bounds into boolean/list membership.
+Provider/source omissions and completeness remain diagnostic inputs rather than
+an unknown capability authority. Active reads and NEW operations use the central
+same-identity local capture; existing operations retain their captured candidates
+and replay metadata. API-key records are not OAuth capability evidence.
+
+The exact `grok-4.7` identity has the reviewed hosted web-search supplement on
+this OAuth inference route as well. Own-provider null with matching-source false
+denies web search while retaining the null evidence; own false remains a denial
+and own true retains support over matching generic false. This is an exact-model
+web rule, not borrowing from an API-key twin or predicting other model features.
+
+Actual request admission follows the encoded tool/scalar/output envelope.
+Unspecified client strictness is resolved before SDK customization, while explicit
+strict and structured-response requests remain independent. Raw `ultra` is retained
+as provider evidence and excluded from the existing seven canonical effort levels.
 
 Each `xai_oauth` integration owns a stored account-specific catalog. Before synchronization, Azents reuses the runtime token-freshness service and persists any rotated token set. It then calls the Grok CLI proxy `/models` endpoint with the bearer token, account id, token-auth marker, pinned model-list client version, Grok shell identifier, and interactive client mode.
 

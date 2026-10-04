@@ -71,7 +71,6 @@ export function useSelectableModelOptionsEditor({
   options,
   mainModelLabel,
   lightweightModelLabel,
-  reasoningEffort = null,
   imageGenerationCatalogStates,
   onChangeOptions,
   onChangeMainModelLabel,
@@ -209,9 +208,7 @@ export function useSelectableModelOptionsEditor({
     if (primary == null || target == null || primary.id === target.id) {
       return;
     }
-    const copied = copyCompatiblePrimarySettings(primary, target, {
-      reasoningEffort,
-    });
+    const copied = copyCompatiblePrimarySettings(primary, target);
     handleChangeOptions(
       updateCandidate(
         options,

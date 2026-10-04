@@ -9,6 +9,10 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import ValidationError
 
+from azents.core.active_model_capabilities import (
+    ConfiguredModelIdentity,
+    apply_to_options,
+)
 from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
@@ -48,6 +52,10 @@ from azents.repos.agent_operations import (
     AgentRuntimeProfileSelectionChange,
 )
 from azents.repos.model_metadata_source_data import CapturedContextSource
+from azents.services.active_model_capabilities import (
+    ActiveModelCapabilitiesService,
+    apply_to_agent_read,
+)
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_metadata import ModelMetadataService
@@ -167,8 +175,7 @@ def _default_session_reasoning_effort(
         return None
     capabilities = model_selection.normalized_capabilities
     if (
-        capabilities.semantic_contract is None
-        and not capabilities.reasoning.supported
+        not capabilities.reasoning.supported
         or model_parameters.reasoning_effort
         not in capabilities.configurable_reasoning_efforts()
     ):
@@ -187,6 +194,9 @@ class AgentService:
     model_catalog_read_service: Annotated[ModelCatalogReadService, Depends()]
     model_metadata_service: Annotated[
         ModelMetadataService, Depends(ModelMetadataService)
+    ]
+    active_model_capabilities_service: Annotated[
+        ActiveModelCapabilitiesService, Depends(ActiveModelCapabilitiesService)
     ]
     image_generation_catalog_service: Annotated[
         ImageGenerationCatalogService, Depends()
@@ -320,9 +330,19 @@ class AgentService:
                     assert_never(options_result)
 
         if settings.default_selectable_model_options is not None:
+            compiled = await self.active_model_capabilities_service.capture_and_compile(
+                workspace_id=create.workspace_id,
+                selections=[
+                    candidate.model_selection
+                    for option in settings.default_selectable_model_options
+                    for candidate in option.candidates
+                ],
+            )
             return Success(
                 normalize_stored_selectable_model_options(
-                    selectable_model_options=settings.default_selectable_model_options,
+                    selectable_model_options=apply_to_options(
+                        settings.default_selectable_model_options, compiled
+                    ),
                     main_model_label=settings.default_main_model_label,
                     lightweight_model_label=settings.default_lightweight_model_label,
                 )
@@ -407,10 +427,9 @@ class AgentService:
             case _:
                 assert_never(create_result)
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 agent,
                 can_manage=True,
-                source_snapshot=await self._capture_context_source([agent]),
             )
         )
 
@@ -434,14 +453,15 @@ class AgentService:
                 workspace_user_id=workspace_user_id,
                 agent_ids=[agent.id for agent in result.items],
             )
-        source_snapshot = await self._capture_context_source(result.items)
+        agents = await self._project_active_agents(workspace_id, result.items)
+        source_snapshot = await self._capture_context_source(agents)
         items = [
             await self._build_output(
                 agent,
                 can_manage=agent.id in managed_agent_ids,
                 source_snapshot=source_snapshot,
             )
-            for agent in result.items
+            for agent in agents
         ]
         return AgentListOutput(items=items)
 
@@ -471,10 +491,9 @@ class AgentService:
         if agent.type == AgentType.PRIVATE and not can_manage:
             return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 agent,
                 can_manage=can_manage,
-                source_snapshot=await self._capture_context_source([agent]),
             )
         )
 
@@ -655,10 +674,9 @@ class AgentService:
                         )
                     )
                 return Success(
-                    await self._build_output(
+                    await self._build_active_output(
                         value,
                         can_manage=True,
-                        source_snapshot=await self._capture_context_source([value]),
                     )
                 )
             case Failure(error):
@@ -970,10 +988,9 @@ class AgentService:
                     case _:
                         assert_never(error)
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 updated_agent,
                 can_manage=True,
-                source_snapshot=await self._capture_context_source([updated_agent]),
             )
         )
 
@@ -1016,11 +1033,49 @@ class AgentService:
                     case _:
                         assert_never(error)
         return Success(
-            await self._build_output(
+            await self._build_active_output(
                 updated_agent,
                 can_manage=True,
-                source_snapshot=await self._capture_context_source([updated_agent]),
             )
+        )
+
+    async def _project_active_agents(
+        self, workspace_id: str, agents: list[Agent]
+    ) -> list[Agent]:
+        """Batch local metadata reads while leaving stored mutation models intact."""
+        if not agents:
+            return []
+        selections: dict[ConfiguredModelIdentity, AgentModelSelection] = {}
+        for agent in agents:
+            choices = [
+                candidate.model_selection
+                for option in agent.selectable_model_options
+                for candidate in option.candidates
+            ]
+            for selection in (
+                *choices,
+                agent.model_selection,
+                agent.lightweight_model_selection,
+            ):
+                if selection is not None:
+                    selections.setdefault(
+                        ConfiguredModelIdentity.from_selection(selection), selection
+                    )
+        compiled = await self.active_model_capabilities_service.capture_and_compile(
+            workspace_id=workspace_id,
+            selections=list(selections.values()),
+        )
+        return [apply_to_agent_read(agent, compiled) for agent in agents]
+
+    async def _build_active_output(
+        self, agent: Agent, *, can_manage: bool
+    ) -> AgentOutput:
+        """Resolve current capabilities at the detached product read boundary."""
+        projected = (await self._project_active_agents(agent.workspace_id, [agent]))[0]
+        return await self._build_output(
+            projected,
+            can_manage=can_manage,
+            source_snapshot=await self._capture_context_source([projected]),
         )
 
     async def _capture_context_source(

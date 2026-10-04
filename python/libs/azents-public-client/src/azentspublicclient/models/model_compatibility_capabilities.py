@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class ModelCompatibilityCapabilities(BaseModel):
     """
-    Provider compatibility capability.
+    Descriptive route metadata; never a second feature admission authority.
     """ # noqa: E501
     provider_family: Optional[StrictStr] = None
     responses_api: Optional[StrictBool] = None

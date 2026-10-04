@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import json
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, NamedTuple, Protocol, TypeVar, runtime_checkable
 
 import sqlalchemy as sa
@@ -14,6 +14,11 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import (
+    apply_to_options,
+    compile_capture,
+    identities_for_options,
+)
 from azents.core.agent import SelectableModelOption
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -70,6 +75,7 @@ from azents.rdb.models.external_model_settings import (
 )
 from azents.rdb.models.user import RDBUser
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -247,6 +253,10 @@ class ExternalModelSettingsRepository:
         agent_session_repository: Annotated[
             AgentSessionRepository, Depends(AgentSessionRepository)
         ],
+        active_model_capabilities_repository: Annotated[
+            ActiveModelCapabilitiesRepository,
+            Depends(ActiveModelCapabilitiesRepository),
+        ],
     ) -> None:
         self.session_manager = session_manager
         self.external_channel_repository = external_channel_repository
@@ -254,6 +264,7 @@ class ExternalModelSettingsRepository:
         self.session_model_profile_repository = session_model_profile_repository
         self.agent_repository = agent_repository
         self.agent_session_repository = agent_session_repository
+        self.active_model_capabilities_repository = active_model_capabilities_repository
 
     async def open_editor(
         self,
@@ -296,6 +307,7 @@ class ExternalModelSettingsRepository:
                 )
                 if rejection is not None:
                     return rejection
+                authorized = await self._project_authorized_options(session, authorized)
                 self._refresh_options(existing, authorized.agent)
                 await session.flush()
                 return ExternalModelEditorReady(
@@ -306,6 +318,7 @@ class ExternalModelSettingsRepository:
                         limit=limit,
                     )
                 )
+            authorized = await self._project_authorized_options(session, authorized)
             draft = self._new_draft(
                 actor=actor,
                 target=target,
@@ -359,6 +372,7 @@ class ExternalModelSettingsRepository:
             if authorization.rejection is not None:
                 return authorization.rejection
             authorized = self._require_authorized(authorization)
+            authorized = await self._project_authorized_options(session, authorized)
             self._refresh_options(draft, authorized.agent)
             option = self._snapshot_option(draft, selection.option_id)
             if option is None:
@@ -435,6 +449,7 @@ class ExternalModelSettingsRepository:
             if authorization.rejection is not None:
                 return authorization.rejection
             authorized = self._require_authorized(authorization)
+            authorized = await self._project_authorized_options(session, authorized)
             self._refresh_options(draft, authorized.agent)
             await session.flush()
             return ExternalModelEditorReady(
@@ -565,6 +580,7 @@ class ExternalModelSettingsRepository:
                     ),
                     notice_plan=None,
                 )
+            authorized = await self._project_authorized_options(session, authorized)
             previous_fingerprint = self._selection_fingerprint(draft)
             self._refresh_options(draft, authorized.agent)
             if (
@@ -996,6 +1012,34 @@ class ExternalModelSettingsRepository:
                 link=link,
             ),
             rejection=None,
+        )
+
+    async def _project_authorized_options(
+        self,
+        session: AsyncSession,
+        authorized: _AuthorizedModelTarget,
+    ) -> _AuthorizedModelTarget:
+        """Compile exact local metadata into a detached authorized option view."""
+        options = authorized.agent.selectable_model_options
+        active_repository = self.active_model_capabilities_repository
+        captured = await active_repository.capture_exact_choices_in_session(
+            session,
+            workspace_id=authorized.agent.workspace_id,
+            identities=identities_for_options(options),
+        )
+        compiled = compile_capture(
+            captured,
+            selections=[
+                candidate.model_selection
+                for option in options
+                for candidate in option.candidates
+            ],
+        )
+        return replace(
+            authorized,
+            agent=authorized.agent.model_copy(
+                update={"selectable_model_options": apply_to_options(options, compiled)}
+            ),
         )
 
     def _new_draft(
