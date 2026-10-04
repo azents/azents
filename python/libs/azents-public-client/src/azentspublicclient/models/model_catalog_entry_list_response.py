@@ -126,7 +126,9 @@ class ModelCatalogEntryListResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "catalog_id": obj.get("catalog_id"),
             "catalog_scope": obj.get("catalog_scope"),
             "last_success_at": obj.get("last_success_at"),
@@ -138,6 +140,7 @@ class ModelCatalogEntryListResponse(BaseModel):
             "total": obj.get("total"),
             "limit": obj.get("limit"),
             "offset": obj.get("offset")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

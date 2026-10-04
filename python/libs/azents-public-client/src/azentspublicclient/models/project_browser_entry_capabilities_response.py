@@ -93,7 +93,9 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "open": obj.get("open"),
             "remove_project": obj.get("remove_project"),
             "delete_worktree": obj.get("delete_worktree"),
@@ -101,6 +103,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
             "filesystem_move": obj.get("filesystem_move"),
             "filesystem_rename": obj.get("filesystem_rename"),
             "prepare_session_folder": obj.get("prepare_session_folder")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

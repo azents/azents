@@ -126,7 +126,9 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "profile_kind": obj.get("profile_kind"),
             "display_name": obj.get("display_name"),
@@ -146,6 +148,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
             "capability_revision_id": obj.get("capability_revision_id"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

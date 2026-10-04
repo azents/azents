@@ -98,12 +98,15 @@ class GitRefEntryResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "name": obj.get("name"),
             "ref": obj.get("ref"),
             "type": obj.get("type"),
             "target": obj.get("target"),
             "default": obj.get("default")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

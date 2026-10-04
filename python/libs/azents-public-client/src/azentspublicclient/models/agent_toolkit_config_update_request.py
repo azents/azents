@@ -109,7 +109,9 @@ class AgentToolkitConfigUpdateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "slug": obj.get("slug"),
             "name": obj.get("name"),
             "description": obj.get("description"),
@@ -118,6 +120,7 @@ class AgentToolkitConfigUpdateRequest(BaseModel):
             "credentials": obj.get("credentials"),
             "enabled": obj.get("enabled"),
             "always_expose_tools": obj.get("always_expose_tools")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

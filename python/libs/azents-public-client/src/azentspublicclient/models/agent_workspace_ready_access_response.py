@@ -99,9 +99,12 @@ class AgentWorkspaceReadyAccessResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "manifest": AgentWorkspaceManifestResponse.from_dict(obj["manifest"]) if obj.get("manifest") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
