@@ -17,10 +17,10 @@ from azents.core.enums import (
 )
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY, CatalogSourcePayload
 from azents.core.model_metadata_collection_data import FetchedModelMetadataSource
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     LLMCatalog,
@@ -86,6 +86,9 @@ class ModelMetadataSourceOperations:
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
     repository: Annotated[
         ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
     ]
@@ -150,13 +153,13 @@ class ModelMetadataSourceOperations:
             return token
 
     async def read_current(self) -> ModelMetadataSource | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.repository.get_current(
                 session, source_key=CATALOG_SOURCE_KEY
             )
 
     async def read_sync_status(self) -> LLMCatalogSyncStatus | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.repository.get_sync_status(
                 session, source_key=CATALOG_SOURCE_KEY
             )

@@ -177,6 +177,7 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
     result = await ModelCatalogReadService(
         operations=LLMCatalogOperationsRepository(
             session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
             catalog_repository=catalog_repository,
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
             source_repository=ModelMetadataSourceRepository(),
@@ -337,6 +338,7 @@ async def test_active_picker_recompiles_historical_rows_without_writing_them(
     service = ModelCatalogReadService(
         operations=LLMCatalogOperationsRepository(
             session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
             catalog_repository=catalogs,
             integration_repository=integrations,
             source_repository=source_repository,

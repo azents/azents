@@ -47,7 +47,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-04
-spec_version: 50
+spec_version: 51
 ---
 
 # Context Compaction
@@ -141,6 +141,12 @@ archived, inaccessible, or disabled entries. They do not reselect replacements,
 refresh edited Saved descriptions, or include newly published documents.
 Historical filtering checks each selected immutable revision's own complete
 manifest and removes the whole affected unit, retaining the independent peer.
+This filtering uses independent read-only description scopes and a correlated
+exact-revision validity projection rather than consumer/source/revision read
+locks. Collected or disappeared selected references are unavailable; filtering
+does not borrow a newer revision's manifest or reselect a replacement document.
+Snapshot writes and critical consolidation publication retain separate mutation
+authority.
 Changed/denied context forces native opaque replay and stored-response continuation
 to use the current permitted input. Prepared text and exact admitted unit/revision
 identities bind native compatibility out-of-band; identical text on a new clean
