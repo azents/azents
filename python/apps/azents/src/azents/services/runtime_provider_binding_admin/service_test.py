@@ -25,6 +25,9 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.admin_operations import (
+    RuntimeProviderBindingAdminOperationsRepository,
+)
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingCreate,
 )
@@ -70,10 +73,13 @@ def _service(
 ) -> RuntimeProviderBindingAdminService:
     """Build the binding Admin service with production repositories."""
     return RuntimeProviderBindingAdminService(
-        session_manager=session_manager,
-        provider_repository=RuntimeProviderRepository(),
-        binding_repository=RuntimeProviderAuthBindingRepository(),
-        control_repository=RuntimeProviderControlRepository(),
+        repository=RuntimeProviderBindingAdminOperationsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            provider_repository=RuntimeProviderRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
+            control_repository=RuntimeProviderControlRepository(),
+        ),
         enrollment_service=enrollment_service,
     )
 
