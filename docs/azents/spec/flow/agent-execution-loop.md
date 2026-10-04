@@ -184,7 +184,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-05
-spec_version: 214
+spec_version: 215
 ---
 
 # Agent Execution Loop
@@ -1489,6 +1489,12 @@ transaction commits without gating or changing the Agent Run.
 
 Production dependency injection returns `AgentEngineAdapter`. Worker and service
 entrypoints depend on `AgentEngineProtocol`, not SDK concrete adapters.
+
+Existing-session Human input admission locks Agent before Session, matching the
+worker profile-commit prefix. Session identity, status and root-kind rejection
+precedence remains unchanged, followed by Agent lifecycle/Workspace validation.
+This prevents admission from holding Session while waiting for a worker-held
+Agent; it does not relax authority fences or retry hidden database failures.
 
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an
 `AgentSession`, materialize user input attachments, record the accepted write under
