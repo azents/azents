@@ -1,12 +1,14 @@
 """Real PostgreSQL transaction ownership for configured channel admission."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -47,8 +49,11 @@ from azents.core.workspace import WorkspaceCreate
 from azents.job_runtime.types import JobHandle, JobOutcome, JobRequest
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAccessRequest,
     RDBExternalChannelAgentRoute,
+    RDBExternalChannelConnection,
     RDBExternalChannelConversationPosition,
+    RDBExternalChannelParticipationSetting,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
 )
@@ -57,6 +62,7 @@ from azents.rdb.models.external_channel_ingress import (
     RDBExternalChannelIngressOwner,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import (
     ReadSession,
@@ -120,161 +126,287 @@ class _Fixture:
     route_id: str
 
 
-async def _fixture(engine: AsyncEngine, *, label: str) -> _Fixture:
-    """Create committed isolated authority using the native RW scope factory."""
+@dataclass(frozen=True)
+class _FixtureGraph:
+    """Exact committed authority identities owned by one native fixture."""
+
+    workspace_id: str
+    integration_id: str
+    agent_id: str
+    connection_id: str
+    configuring_principal_id: str
+    provider_tenant_id: str
+
+
+async def _cleanup_fixture(engine: AsyncEngine, graph: _FixtureGraph) -> None:
+    """Remove only this fixture's rows in inverse foreign-key order."""
+    async with create_read_write_session_manager(engine)() as session:
+        principal_ids = tuple(
+            await session.read_session.scalars(
+                sa.select(RDBExternalChannelPrincipal.id).where(
+                    sa.or_(
+                        RDBExternalChannelPrincipal.id
+                        == graph.configuring_principal_id,
+                        sa.and_(
+                            RDBExternalChannelPrincipal.provider
+                            == ExternalChannelProvider.SLACK,
+                            RDBExternalChannelPrincipal.provider_tenant_id
+                            == graph.provider_tenant_id,
+                            RDBExternalChannelPrincipal.provider_user_id == "U1",
+                        ),
+                    ),
+                ),
+            )
+        )
+        connection_models = (
+            RDBExternalChannelIngressItem,
+            RDBExternalChannelIngressOwner,
+            RDBExternalChannelAccessRequest,
+            RDBExternalChannelConversationPosition,
+            RDBExternalChannelResource,
+            RDBExternalChannelParticipationSetting,
+            RDBExternalChannelAgentRoute,
+        )
+        for model in connection_models:
+            await session.write_session.execute(
+                sa.delete(model).where(model.connection_id == graph.connection_id)
+            )
+        await session.write_session.execute(
+            sa.delete(RDBExternalChannelConnection).where(
+                RDBExternalChannelConnection.id == graph.connection_id
+            )
+        )
+        await session.write_session.execute(
+            sa.delete(RDBExternalChannelPrincipal).where(
+                RDBExternalChannelPrincipal.id.in_(principal_ids)
+            )
+        )
+        await session.write_session.execute(
+            sa.delete(RDBAgent).where(RDBAgent.id == graph.agent_id)
+        )
+        await session.write_session.execute(
+            sa.delete(RDBLLMProviderIntegration).where(
+                RDBLLMProviderIntegration.id == graph.integration_id
+            )
+        )
+        await session.write_session.execute(
+            sa.delete(RDBWorkspace).where(RDBWorkspace.id == graph.workspace_id)
+        )
+
+    async with create_read_only_session_manager(engine)() as session:
+        for model in connection_models:
+            assert (
+                await session.read_session.scalar(
+                    sa.select(model.id).where(
+                        model.connection_id == graph.connection_id
+                    )
+                )
+                is None
+            )
+        assert (
+            await session.read_session.get(
+                RDBExternalChannelConnection, graph.connection_id
+            )
+            is None
+        )
+        for principal_id in principal_ids:
+            assert (
+                await session.read_session.get(
+                    RDBExternalChannelPrincipal, principal_id
+                )
+                is None
+            )
+        assert await session.read_session.get(RDBAgent, graph.agent_id) is None
+        assert (
+            await session.read_session.get(
+                RDBLLMProviderIntegration, graph.integration_id
+            )
+            is None
+        )
+        assert await session.read_session.get(RDBWorkspace, graph.workspace_id) is None
+
+
+@asynccontextmanager
+async def _fixture(engine: AsyncEngine, *, label: str) -> AsyncIterator[_Fixture]:
+    """Own committed native authority and remove its exact graph on scope exit."""
     manager = create_read_write_session_manager(engine)
     repository = ExternalChannelRepository()
     now = datetime.datetime.now(datetime.UTC)
-    async with manager() as session:
-        workspace_repository = WorkspaceRepository()
-        created = await workspace_repository.create(
-            session, WorkspaceCreate(name=label, handle=label)
-        )
-        assert isinstance(created, Success)
-        workspace_id = await workspace_repository.resolve_id(session, label)
-        assert workspace_id is not None
-        integration = RDBLLMProviderIntegration(
-            workspace_id=workspace_id,
-            provider=LLMProvider.ANTHROPIC,
-            name=label,
-            encrypted_credentials="encrypted",
-            config=None,
-        )
-        session.write_session.add(integration)
-        await session.write_session.flush()
-        selection = make_test_model_selection_dict(
-            integration_id=integration.id,
-            provider=LLMProvider.ANTHROPIC,
-            model_identifier="admission-model",
-        )
-        agent = RDBAgent(
-            workspace_id=workspace_id,
-            name=label,
-            model_selection=selection,
-            lightweight_model_selection=selection,
-            selectable_model_options=make_test_selectable_model_option_dicts(
-                model_selection=selection, lightweight_model_selection=selection
-            ),
-            main_model_label="default",
-            lightweight_model_label="lightweight",
-        )
-        session.write_session.add(agent)
-        await session.write_session.flush()
-        connection = await repository.create_connection(
-            session,
-            ExternalChannelConnectionCreate(
+    graph: _FixtureGraph | None = None
+    try:
+        async with manager() as session:
+            workspace_repository = WorkspaceRepository()
+            created = await workspace_repository.create(
+                session, WorkspaceCreate(name=label, handle=label)
+            )
+            assert isinstance(created, Success)
+            workspace_id = await workspace_repository.resolve_id(session, label)
+            assert workspace_id is not None
+            integration = RDBLLMProviderIntegration(
                 workspace_id=workspace_id,
-                provider=ExternalChannelProvider.SLACK,
-                transport=ExternalChannelTransport.HTTP,
-                ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
-                app_mode=ExternalChannelAppMode.SINGLE,
-                status=ExternalChannelConnectionStatus.ACTIVE,
-                provider_app_id=f"{label}-app",
-                provider_tenant_id=f"{label}-tenant",
-                provider_bot_user_id=None,
-                http_callback_selector_hash=None,
-                encrypted_credentials="ciphertext",
-                capabilities=None,
-                provider_config=None,
-                last_verified_at=None,
-                last_health_at=None,
-                disconnected_at=None,
-                socket_lease_owner=None,
-                socket_lease_until=None,
-                socket_heartbeat_at=None,
-                socket_gap_detected_at=None,
-                socket_gap_reason=None,
-            ),
-        )
-        route = await repository.create_agent_route(
-            session,
-            ExternalChannelAgentRouteCreate(
-                connection_id=connection.id,
+                provider=LLMProvider.ANTHROPIC,
+                name=label,
+                encrypted_credentials="encrypted",
+                config=None,
+            )
+            session.write_session.add(integration)
+            await session.write_session.flush()
+            selection = make_test_model_selection_dict(
+                integration_id=integration.id,
+                provider=LLMProvider.ANTHROPIC,
+                model_identifier="admission-model",
+            )
+            agent = RDBAgent(
+                workspace_id=workspace_id,
+                name=label,
+                model_selection=selection,
+                lightweight_model_selection=selection,
+                selectable_model_options=make_test_selectable_model_option_dicts(
+                    model_selection=selection, lightweight_model_selection=selection
+                ),
+                main_model_label="default",
+                lightweight_model_label="lightweight",
+            )
+            session.write_session.add(agent)
+            await session.write_session.flush()
+            connection = await repository.create_connection(
+                session,
+                ExternalChannelConnectionCreate(
+                    workspace_id=workspace_id,
+                    provider=ExternalChannelProvider.SLACK,
+                    transport=ExternalChannelTransport.HTTP,
+                    ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+                    app_mode=ExternalChannelAppMode.SINGLE,
+                    status=ExternalChannelConnectionStatus.ACTIVE,
+                    provider_app_id=f"{label}-app",
+                    provider_tenant_id=f"{label}-tenant",
+                    provider_bot_user_id=None,
+                    http_callback_selector_hash=None,
+                    encrypted_credentials="ciphertext",
+                    capabilities=None,
+                    provider_config=None,
+                    last_verified_at=None,
+                    last_health_at=None,
+                    disconnected_at=None,
+                    socket_lease_owner=None,
+                    socket_lease_until=None,
+                    socket_heartbeat_at=None,
+                    socket_gap_detected_at=None,
+                    socket_gap_reason=None,
+                ),
+            )
+            route = await repository.create_agent_route(
+                session,
+                ExternalChannelAgentRouteCreate(
+                    connection_id=connection.id,
+                    agent_id=agent.id,
+                    agent_id_snapshot=agent.id,
+                    route_mode=ExternalChannelRouteMode.DEDICATED,
+                    connection_app_mode=ExternalChannelAppMode.SINGLE,
+                    catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    catalog_removed_at=None,
+                    catalog_removed_by_user_id=None,
+                ),
+            )
+            configuring_principal = await repository.create_principal_idempotent(
+                session,
+                ExternalChannelPrincipalCreate(
+                    provider=ExternalChannelProvider.SLACK,
+                    provider_tenant_id=f"{label}-tenant",
+                    provider_user_id="UCONFIG",
+                    author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                    display_name=None,
+                    avatar_url=None,
+                    profile=None,
+                ),
+            )
+            await repository.create_participation_setting(
+                session,
+                ExternalChannelParticipationSettingCreate(
+                    connection_id=connection.id,
+                    provider_parent_channel_id="C1",
+                    route_id=route.id,
+                    location=ExternalChannelConversationLocation.THREADS,
+                    response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+                    settings_generation=1,
+                    configured_by_user_id=None,
+                    configured_by_principal_id=configuring_principal.id,
+                    status=ExternalChannelParticipationSettingStatus.ACTIVE,
+                    invalidated_at=None,
+                    invalidation_reason=None,
+                ),
+            )
+            graph = _FixtureGraph(
+                workspace_id=workspace_id,
+                integration_id=integration.id,
                 agent_id=agent.id,
-                agent_id_snapshot=agent.id,
-                route_mode=ExternalChannelRouteMode.DEDICATED,
-                connection_app_mode=ExternalChannelAppMode.SINGLE,
-                catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
-                catalog_removed_at=None,
-                catalog_removed_by_user_id=None,
-            ),
-        )
-        configuring_principal = await repository.create_principal_idempotent(
-            session,
-            ExternalChannelPrincipalCreate(
-                provider=ExternalChannelProvider.SLACK,
-                provider_tenant_id=f"{label}-tenant",
-                provider_user_id="UCONFIG",
-                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-                display_name=None,
-                avatar_url=None,
-                profile=None,
-            ),
-        )
-        await repository.create_participation_setting(
-            session,
-            ExternalChannelParticipationSettingCreate(
                 connection_id=connection.id,
-                provider_parent_channel_id="C1",
-                route_id=route.id,
-                location=ExternalChannelConversationLocation.THREADS,
-                response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
-                settings_generation=1,
-                configured_by_user_id=None,
-                configured_by_principal_id=configuring_principal.id,
-                status=ExternalChannelParticipationSettingStatus.ACTIVE,
-                invalidated_at=None,
-                invalidation_reason=None,
+                configuring_principal_id=configuring_principal.id,
+                provider_tenant_id=f"{label}-tenant",
+            )
+        tenant = f"{label}-tenant"
+        request = ExternalChannelIngestionRequest(
+            locator=ExternalChannelTriggerLocator(
+                connection_id=connection.id,
+                provider=ExternalChannelProvider.SLACK,
+                provider_event_type="app_mention",
+                provider_tenant_id=tenant,
+                provider_channel_id="C1",
+                provider_parent_channel_id=None,
+                provider_thread_key="1.0",
+                delivery_thread_key="1.0",
+                provider_resource_key=f"slack:{tenant}:C1:1.0",
+                trigger_provider_message_key=f"slack:{tenant}:C1:2.0",
+                trigger_provider_message_id="2.0",
+                trigger_position="00000000000000000002",
+                provider_user_id="U1",
+                invocation=True,
+                expected_file_count=None,
             ),
+            scope=ExternalChannelConversationScope(
+                connection_id=connection.id,
+                kind=ExternalChannelConversationScopeKind.THREAD,
+                provider_channel_id="C1",
+                provider_thread_key="1.0",
+            ),
+            authority=ExternalChannelIngressAuthority(
+                kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
+                ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+                configuration_generation=connection.configuration_generation,
+                lease_owner=None,
+                lease_generation=None,
+            ),
+            deadline=ExternalChannelOperationDeadline(
+                now + datetime.timedelta(seconds=30)
+            ),
+            operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
+            selected_route_id=None,
+            replay_boundary=None,
+            initial_title_eligible=False,
         )
-    tenant = f"{label}-tenant"
-    request = ExternalChannelIngestionRequest(
-        locator=ExternalChannelTriggerLocator(
-            connection_id=connection.id,
-            provider=ExternalChannelProvider.SLACK,
-            provider_event_type="app_mention",
-            provider_tenant_id=tenant,
-            provider_channel_id="C1",
-            provider_parent_channel_id=None,
-            provider_thread_key="1.0",
-            delivery_thread_key="1.0",
-            provider_resource_key=f"slack:{tenant}:C1:1.0",
-            trigger_provider_message_key=f"slack:{tenant}:C1:2.0",
-            trigger_provider_message_id="2.0",
-            trigger_position="00000000000000000002",
-            provider_user_id="U1",
-            invocation=True,
-            expected_file_count=None,
-        ),
-        scope=ExternalChannelConversationScope(
-            connection_id=connection.id,
-            kind=ExternalChannelConversationScopeKind.THREAD,
-            provider_channel_id="C1",
-            provider_thread_key="1.0",
-        ),
-        authority=ExternalChannelIngressAuthority(
-            kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
-            ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
-            configuration_generation=connection.configuration_generation,
-            lease_owner=None,
-            lease_generation=None,
-        ),
-        deadline=ExternalChannelOperationDeadline(now + datetime.timedelta(seconds=30)),
-        operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
-        selected_route_id=None,
-        replay_boundary=None,
-        initial_title_eligible=False,
-    )
-    return _Fixture(
-        operations=ExternalChannelIngressAdmissionOperations(
-            session_manager=manager,
-            repository=repository,
-            queue_repository=ExternalChannelIngressQueueRepository(),
-            agent_session_repository=AgentSessionRepository(),
-        ),
-        request=request,
-        route_id=route.id,
-    )
+        yield _Fixture(
+            operations=ExternalChannelIngressAdmissionOperations(
+                session_manager=manager,
+                repository=repository,
+                queue_repository=ExternalChannelIngressQueueRepository(),
+                agent_session_repository=AgentSessionRepository(),
+            ),
+            request=request,
+            route_id=route.id,
+        )
+
+    finally:
+        if graph is not None:
+            cleanup = asyncio.create_task(_cleanup_fixture(engine, graph))
+            cancelled = False
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    cancelled = True
+            cleanup.result()
+            if cancelled:
+                raise asyncio.CancelledError
 
 
 async def _counts(session: ReadSession, connection_id: str) -> tuple[int, ...]:
@@ -299,10 +431,21 @@ async def _counts(session: ReadSession, connection_id: str) -> tuple[int, ...]:
     return tuple(counts)
 
 
+@pytest_asyncio.fixture
+async def fixture_scope() -> AsyncIterator[AsyncExitStack]:
+    """Finalize each test's committed native fixture even when its assertions abort."""
+    async with AsyncExitStack() as stack:
+        yield stack
+
+
 async def test_completed_trigger_operation_is_atomic_and_idempotent(
-    rdb_engine: AsyncEngine, latest_db_schema: None
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    fixture_scope: AsyncExitStack,
 ) -> None:
-    fixture = await _fixture(rdb_engine, label="wt9-admission-idempotency")
+    fixture = await fixture_scope.enter_async_context(
+        _fixture(rdb_engine, label="wt9-admission-idempotency")
+    )
     now = datetime.datetime.now(datetime.UTC)
     first = await fixture.operations.admit_current_trigger(
         provider_event_id="event-1", request=fixture.request, now=now
@@ -343,9 +486,13 @@ class _FailingQueue(ExternalChannelIngressQueueRepository):
 
 
 async def test_queue_failure_rolls_back_source_principal_position_owner_and_item(
-    rdb_engine: AsyncEngine, latest_db_schema: None
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    fixture_scope: AsyncExitStack,
 ) -> None:
-    fixture = await _fixture(rdb_engine, label="wt9-admission-rollback")
+    fixture = await fixture_scope.enter_async_context(
+        _fixture(rdb_engine, label="wt9-admission-rollback")
+    )
     operations = replace(fixture.operations, queue_repository=_FailingQueue())
     with pytest.raises(RuntimeError, match="Injected queue failure"):
         await operations.admit_current_trigger(
@@ -373,9 +520,13 @@ async def test_queue_failure_rolls_back_source_principal_position_owner_and_item
 
 
 async def test_stale_authority_and_restricted_route_never_queue(
-    rdb_engine: AsyncEngine, latest_db_schema: None
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    fixture_scope: AsyncExitStack,
 ) -> None:
-    fixture = await _fixture(rdb_engine, label="wt9-admission-authorization")
+    fixture = await fixture_scope.enter_async_context(
+        _fixture(rdb_engine, label="wt9-admission-authorization")
+    )
     stale = replace(
         fixture.request,
         authority=replace(
@@ -410,9 +561,12 @@ async def test_stale_authority_and_restricted_route_never_queue(
 async def test_native_read_snapshots_and_replay_close_before_external_processing(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
+    fixture_scope: AsyncExitStack,
 ) -> None:
     """Real RO/RW transactions complete before credential/provider/job collaborators."""
-    fixture = await _fixture(rdb_engine, label="wt9-admission-completion")
+    fixture = await fixture_scope.enter_async_context(
+        _fixture(rdb_engine, label="wt9-admission-completion")
+    )
     base_read = create_read_only_session_manager(rdb_engine)
     base_write = create_read_write_session_manager(rdb_engine)
     active = 0
@@ -598,3 +752,50 @@ async def test_native_read_snapshots_and_replay_close_before_external_processing
             principal_id=item.principal_id,
         )
     assert active == 0 and read_count >= 7 and write_count == 2
+
+
+@pytest.mark.parametrize("interruption", ["error", "cancel"])
+async def test_committed_fixture_cleanup_survives_error_and_cancellation(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    interruption: str,
+) -> None:
+    """Test failure and task cancellation cannot leak committed authority."""
+    label = f"wt9-admission-cleanup-{interruption}"
+    committed = asyncio.Event()
+    release = asyncio.Event()
+
+    async def interrupted_test() -> None:
+        async with _fixture(rdb_engine, label=label) as fixture:
+            result = await fixture.operations.admit_current_trigger(
+                provider_event_id="cleanup-regression",
+                request=fixture.request,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+            assert result.admission is not None
+            committed.set()
+            if interruption == "error":
+                raise RuntimeError("Injected test failure after commit")
+            await release.wait()
+
+    if interruption == "error":
+        with pytest.raises(RuntimeError, match="Injected test failure after commit"):
+            await interrupted_test()
+    else:
+        execution = asyncio.create_task(interrupted_test())
+        await committed.wait()
+        execution.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await execution
+    async with create_read_only_session_manager(rdb_engine)() as session:
+        assert await WorkspaceRepository().resolve_id(session, label) is None
+        assert (
+            await session.read_session.scalar(
+                sa.select(RDBExternalChannelPrincipal.id).where(
+                    RDBExternalChannelPrincipal.provider
+                    == ExternalChannelProvider.SLACK,
+                    RDBExternalChannelPrincipal.provider_tenant_id == f"{label}-tenant",
+                )
+            )
+            is None
+        )
