@@ -96,10 +96,10 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
-  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
-  - typescript/apps/azents-web/src/features/agents/model-selection.ts
+  - typescript/apps/azents-web/src/shared/model-options/model-selection.ts
   - typescript/apps/azents-web/src/features/agents/terminalSettingsVisibility.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**

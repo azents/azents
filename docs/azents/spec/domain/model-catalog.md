@@ -5,10 +5,10 @@ tags: [backend, frontend, engine]
 spec_type: domain
 domain: model-catalog
 code_paths:
-  - typescript/apps/azents-web/src/features/agents/containers/SelectableModelOptionsEditorContainer.tsx
-  - typescript/apps/azents-web/src/features/agents/containers/useSelectableModelOptionsEditor.ts
-  - typescript/apps/azents-web/src/features/agents/model-option-editor.ts
-  - typescript/apps/azents-web/src/features/agents/image-generation-config.ts
+  - typescript/apps/azents-web/src/shared/model-options/containers/SelectableModelOptionsEditorContainer.tsx
+  - typescript/apps/azents-web/src/shared/model-options/containers/useSelectableModelOptionsEditor.ts
+  - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/model_metadata_collection_data.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
@@ -75,12 +75,12 @@ code_paths:
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/events/engine_adapter.py
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
-  - typescript/apps/azents-web/src/features/agents/containers/ModelCatalogPickerContainer.tsx
-  - typescript/apps/azents-web/src/features/agents/model-selection.ts
-  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
+  - typescript/apps/azents-web/src/shared/model-options/containers/ModelCatalogPickerContainer.tsx
+  - typescript/apps/azents-web/src/shared/model-options/model-selection.ts
+  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
-  - typescript/apps/azents-web/src/features/agents/containers/useImageGenerationCatalogs.ts
+  - typescript/apps/azents-web/src/shared/model-options/containers/useImageGenerationCatalogs.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmIntegrationsContainer.ts
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/model-settings-input-schemas.ts
@@ -88,7 +88,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-04
-spec_version: 43
+spec_version: 44
 ---
 
 # Model Catalog Domain Spec

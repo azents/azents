@@ -14,6 +14,7 @@ import {
 import { IconArrowDown, IconMessageOff } from "@tabler/icons-react";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
 import { isCompactionInProgressMarker } from "../compactionPresentation";
+import { ChatInputContainer } from "../containers/ChatInputContainer";
 import {
   type ChatViewContainerOutput,
   isBoundaryMessage,
@@ -26,7 +27,6 @@ import {
 } from "./activityRowPresentation";
 import { AgentRunIndicator } from "./AgentRunIndicator";
 import { AuthorizationRequestBubble } from "./AuthorizationRequestBubble";
-import { ChatInput } from "./ChatInput";
 import { CompactionDivider } from "./CompactionDivider";
 import { CompactionIndicator } from "./CompactionIndicator";
 import { MessageBubble } from "./MessageBubble";
@@ -477,7 +477,7 @@ function ChatViewPresentation(output: ChatViewContainerOutput): ReactElement {
           {/* input area */}
           <Box px="md" py="sm">
             <Box maw={rem(920)} mx="auto">
-              <ChatInput
+              <ChatInputContainer
                 agentId={activeAgent?.id ?? null}
                 sessionId={sessionId}
                 isMobile={isMobile}

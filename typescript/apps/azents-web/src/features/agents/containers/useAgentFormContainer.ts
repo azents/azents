@@ -9,20 +9,20 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
-import { trpc } from "@/trpc/client";
 import {
   buildProviderIntegrationOptions,
   fallbackSelectableModelLabel,
   modelSelectionValue,
   selectableModelOptionInputsFromFormValues,
-} from "../model-selection";
+} from "@/shared/model-options/model-selection";
+import { trpc } from "@/trpc/client";
+import type { AgentFormValues } from "../schemas";
+import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type {
   ModelCatalogState,
   ModelSelectionOption,
   ProviderIntegrationOption,
-} from "../model-selection";
-import type { AgentFormValues } from "../schemas";
-import type { AdminListState, AgentFormState, MutationState } from "../types";
+} from "@/shared/model-options/model-selection";
 import type {
   AgentAdminResponse,
   LlmProviderIntegrationResponse,

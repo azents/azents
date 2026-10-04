@@ -6,8 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: []
 code_paths:
-  - typescript/apps/azents-web/src/features/agents/model-option-editor.ts
-  - typescript/apps/azents-web/src/features/agents/image-generation-config.ts
+  - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.ts
   - python/apps/azents/src/azents/api/public/chat/v1/validation_audit_test.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/validation_audit_test.py
@@ -16,11 +16,12 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitManagementSection.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/components/SelectableModelOptionsEditor.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.stories.tsx
+  - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.stories.tsx
+  - typescript/apps/azents-web/src/features/llm-settings/components/WorkspaceModelSettingsCard.stories.tsx
   - typescript/apps/azents-web/src/features/toolkits/components/ToolkitForm.stories.tsx
-  - typescript/apps/azents-web/src/features/agents/image-generation-config.test.mts
-  - typescript/apps/azents-web/src/features/agents/model-selection.test.mts
+  - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
+  - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
   - .claude/skills/e2e-ci-optimization/**
   - .claude/skills/technical-feature-design/SKILL.md

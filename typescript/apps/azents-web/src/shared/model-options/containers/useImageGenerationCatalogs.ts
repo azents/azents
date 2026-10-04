@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { supportedBuiltinTools } from "@/shared/lib/model-capability-support";
-import { trpc } from "@/trpc/client";
+import type { UseImageCatalogTransport } from "../catalog-query";
 import type {
   ImageGenerationCatalogState,
   SelectableModelOptionFormValue,
@@ -42,19 +42,14 @@ function imageCatalogIntegrationIds(
 export function useImageGenerationCatalogs(
   handle: string,
   options: SelectableModelOptionFormValue[],
+  useCatalogTransport: UseImageCatalogTransport,
   reasoningEffort: ModelReasoningEffort | null = null,
 ): ImageGenerationCatalogsOutput {
   const integrationIds = useMemo(
     () => imageCatalogIntegrationIds(options, reasoningEffort),
     [options, reasoningEffort],
   );
-  const utils = trpc.useUtils();
-  const query = trpc.llmProviderIntegration.imageCatalogs.useQuery(
-    { handle, integrationIds },
-    { enabled: integrationIds.length > 0 },
-  );
-  const syncMutation =
-    trpc.llmProviderIntegration.syncImageCatalog.useMutation();
+  const { query, sync } = useCatalogTransport(handle, integrationIds);
 
   const states = useMemo(() => {
     const next = new Map<string, ImageGenerationCatalogState>();
@@ -95,18 +90,9 @@ export function useImageGenerationCatalogs(
 
   const onSync = useCallback(
     async (integrationId: string): Promise<void> => {
-      await syncMutation.mutateAsync({ handle, integrationId });
-      await utils.llmProviderIntegration.imageCatalogs.invalidate({
-        handle,
-        integrationIds,
-      });
+      await sync(integrationId);
     },
-    [
-      handle,
-      integrationIds,
-      syncMutation,
-      utils.llmProviderIntegration.imageCatalogs,
-    ],
+    [sync],
   );
 
   return { states, onSync };

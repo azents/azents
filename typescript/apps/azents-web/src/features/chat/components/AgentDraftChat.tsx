@@ -17,10 +17,10 @@ import {
 import { IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { ChatInput } from "@/features/chat/components/ChatInput";
 import { WorkspaceDirectoryPickerModal } from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
 import { AgentSettingsHeader } from "@/shared/agent-session/AgentSettingsHeader";
 import { ComposerSubscriptionUsagePopoverWithBoundary } from "@/shared/subscription-usage/ComposerSubscriptionUsage";
+import { ChatInputContainer } from "../containers/ChatInputContainer";
 import styles from "./AgentChatTab.module.css";
 import { NewSessionProjectSelector } from "./NewSessionProjectSelector";
 import { NewSessionScopeSelector } from "./NewSessionScopeSelector";
@@ -166,7 +166,7 @@ export function AgentDraftChat(
       </Box>
       <Box px="md" pb="sm" style={{ flexShrink: 0 }}>
         <Box maw={rem(920)} mx="auto">
-          <ChatInput
+          <ChatInputContainer
             agentId={agent.id}
             sessionId={null}
             isMobile={isMobile}

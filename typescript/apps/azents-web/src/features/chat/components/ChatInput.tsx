@@ -29,14 +29,10 @@ import {
 } from "@tabler/icons-react";
 import { memo, useId } from "react";
 import { AttachmentPreviewBarContainer } from "../containers/AttachmentPreviewBarContainer";
-import { useChatInputContainer } from "../containers/useChatInputContainer";
 import classes from "./ChatInput.module.css";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import { TokenUsageDetails, TokenUsageIndicator } from "./TokenUsageIndicator";
-import type {
-  ChatInputContainer,
-  ChatInputProps,
-} from "../containers/useChatInputContainer";
+import type { ChatInputContainer } from "../containers/useChatInputContainer";
 import type * as React from "react";
 
 function HighlightedKeyword({
@@ -65,13 +61,7 @@ function HighlightedKeyword({
   );
 }
 
-export const ChatInput = memo(function ChatInput(
-  props: ChatInputProps,
-): React.ReactElement {
-  return <ChatInputView view={useChatInputContainer(props)} />;
-});
-
-function ChatInputView({
+export const ChatInput = memo(function ChatInput({
   view,
 }: {
   view: ChatInputContainer;
@@ -1287,4 +1277,4 @@ function ChatInputView({
       </Stack>
     </>
   );
-}
+});
