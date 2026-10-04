@@ -29,7 +29,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/workspace_user/**
   - python/apps/azents/src/azents/api/admin/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
+  - python/apps/azents/src/azents/repos/workspace_invitation/**
   - python/apps/azents/src/azents/services/workspace_join_request/**
+  - python/apps/azents/src/azents/repos/workspace_join_request/**
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/core/auth/permissions.py
@@ -150,8 +152,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-04
-spec_version: 92
+last_verified_at: 2026-10-05
+spec_version: 93
 ---
 
 # Workspace & Membership
@@ -703,6 +705,15 @@ to direct demotion or deletion.
 
 `WorkspaceInvitationService.create()` handles duplicate invitations naturally through `create_or_reinvite` repository method.
 
+Invitation reads and mutations run through completed database-only repository
+operations. Invitation creation keeps pending-request autoapproval, membership
+creation, request deletion, and invitation insertion/re-invitation in one atomic
+transaction. Acceptance keeps membership creation and the status transition
+atomic; an absent final invitation row rolls back membership creation.
+Signup-token preparation and invitation email delivery occur only after these
+repository scopes finish. Delivery failures propagate without undoing the
+committed invitation or membership.
+
 1. Normalize input email with `lower().strip()`.
 2. Check whether User with same email is already workspace member → fail with `AlreadyMember` if exists.
 3. If pending JoinRequest from same User exists, **automatically approve while creating invitation**: create `WorkspaceUser` immediately and delete JoinRequest.
@@ -727,6 +738,13 @@ Behavior of `WorkspaceJoinRequestService.request_join()`:
 5. If new request, create and send notification based on `NOTIFICATION_COOLDOWN = 24h`. Send and update `last_notified_at` only if `last_notified_at` is absent or cooldown elapsed.
 
 Approval (`approve`) creates WorkspaceUser (role=MEMBER) and deletes request. Rejection (`reject`) simply deletes request. `mute()` transitions only status to MUTED and stops future notifications.
+
+Join-request reads and mutations run through completed database-only repository
+operations. New-request creation and notification timestamp update commit
+together; membership creation and request deletion on approval are atomic.
+Notification and approval emails run after the relevant repository scopes
+finish. A delivery failure leaves the committed request, notification timestamp,
+or approved membership intact. Muted re-requests still suppress notifications.
 
 ### Ownership Transfer
 
@@ -985,6 +1003,12 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-10-05 (spec_version=93)** — Moved invitation and join-request reads and
+  atomic membership mutations into completed repository operations, keeping
+  signup-token preparation and email delivery after commit with unchanged
+  ownership validation, statuses, notification cooldown, and delivery failure
+  propagation.
 
 - **2026-10-02 (spec_version=91)** — Moved Workspace administration and HTTP
   membership admission into completed repository operations, retaining atomic
