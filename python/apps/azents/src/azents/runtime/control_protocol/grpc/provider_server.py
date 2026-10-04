@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import grpc
+from azcommon.logging import bind_extra
 from azents_runtime_control.grpc_provider_client import (
     json_value_from_struct,
     operational_diagnostics_from_message,
@@ -239,16 +240,16 @@ class RuntimeProviderControlGrpcServicer(
         command_block_ms: int = _DEFAULT_COMMAND_BLOCK_MS,
     ) -> None:
         """Initialize the Provider Control gRPC servicer."""
-        self._control_protocol = control_protocol
-        self._report_sink = report_sink
-        self._observe_completion_handler = observe_completion_handler
+        self.control_protocol = control_protocol
+        self.report_sink = report_sink
+        self.observe_completion_handler = observe_completion_handler
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
         self._auth = RuntimeProviderCredentialGrpcAuth(credential_authenticator)
-        self._connection_tracker = connection_tracker
-        self._connection_registrar = connection_registrar
-        self._contract_proposer = contract_proposer
-        self._runner_credential_issuer = runner_credential_issuer
+        self.connection_tracker = connection_tracker
+        self.connection_registrar = connection_registrar
+        self.contract_proposer = contract_proposer
+        self.runner_credential_issuer = runner_credential_issuer
         self._command_block_ms = command_block_ms
 
     async def ConnectProvider(
@@ -285,7 +286,7 @@ class RuntimeProviderControlGrpcServicer(
             )
             raise AssertionError("unreachable")
         try:
-            await self._contract_proposer.propose_contract(
+            await self.contract_proposer.propose_contract(
                 provider_resource_id=authentication.provider_resource_id,
                 provider_type=registration.provider_type,
                 protocol_version=registration.protocol_version,
@@ -306,7 +307,7 @@ class RuntimeProviderControlGrpcServicer(
         )
         now = datetime.now(UTC)
         try:
-            accepted = await self._connection_registrar.register_provider(
+            accepted = await self.connection_registrar.register_provider(
                 bound_registration,
                 authentication=authentication,
                 registered_at=now,
@@ -323,14 +324,17 @@ class RuntimeProviderControlGrpcServicer(
                 f"Provider registration was not accepted: {error.code}",
             )
             raise AssertionError("unreachable") from None
-        _LOGGER.info(
-            "Runtime Provider connected",
-            extra={
+        L = bind_extra(
+            _LOGGER,
+            {
                 "provider_id": accepted.provider_id,
                 "connection_id": accepted.connection_id,
-                "provider_generation": accepted.generation,
                 "owner_replica_id": self._owner_replica_id,
             },
+        )
+        L.info(
+            "Runtime Provider connected",
+            extra={"provider_generation": accepted.generation},
         )
         outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue(
             maxsize=_MAX_OUTBOUND_MESSAGES
@@ -375,7 +379,7 @@ class RuntimeProviderControlGrpcServicer(
                 outbound,
                 inbound_task,
                 command_task,
-                control_protocol=self._control_protocol,
+                control_protocol=self.control_protocol,
             ):
                 yield message
         finally:
@@ -388,6 +392,7 @@ class RuntimeProviderControlGrpcServicer(
                     commands_by_request_id=commands_by_request_id,
                     inbound_task=inbound_task,
                     command_task=command_task,
+                    log=L,
                 ),
                 name=(
                     "runtime-provider-stream-cleanup:"
@@ -410,16 +415,17 @@ class RuntimeProviderControlGrpcServicer(
         commands_by_request_id: dict[str, _RelayedProviderCommand],
         inbound_task: asyncio.Task[None],
         command_task: asyncio.Task[None],
+        log: logging.LoggerAdapter[logging.Logger],
     ) -> None:
         """Revoke Provider authority even when gRPC cancels its stream handler."""
         commands_by_request_id.clear()
         for task in (inbound_task, command_task):
             task.cancel()
-        await self._control_protocol.revoke_provider(
+        await self.control_protocol.revoke_provider(
             provider_id=provider_id,
             generation=generation,
         )
-        await self._connection_tracker.disconnect_connection(
+        await self.connection_tracker.disconnect_connection(
             authentication=authentication,
             generation=generation,
             disconnected_at=datetime.now(UTC),
@@ -427,14 +433,9 @@ class RuntimeProviderControlGrpcServicer(
         for task in (inbound_task, command_task):
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-        _LOGGER.info(
+        log.info(
             "Runtime Provider stream closed",
-            extra={
-                "provider_id": provider_id,
-                "connection_id": connection_id,
-                "provider_generation": generation,
-                "owner_replica_id": self._owner_replica_id,
-            },
+            extra={"provider_generation": generation},
         )
 
     async def _consume_provider_messages(
@@ -533,7 +534,7 @@ class RuntimeProviderControlGrpcServicer(
                         _error(message.request_id, "INVALID_PROVIDER_REPORT")
                     )
                     return
-                await self._report_sink.record_provider_report(
+                await self.report_sink.record_provider_report(
                     validated_report.report,
                     configuration_acknowledgement_allowed=(
                         validated_report.configuration_acknowledgement_allowed
@@ -630,7 +631,7 @@ class RuntimeProviderControlGrpcServicer(
                 commands_by_request_id.pop(message.command_completion.request_id)
                 if validated_report is not None:
                     report = validated_report.report
-                    await self._report_sink.record_provider_report(
+                    await self.report_sink.record_provider_report(
                         report,
                         configuration_acknowledgement_allowed=(
                             validated_report.configuration_acknowledgement_allowed
@@ -641,13 +642,13 @@ class RuntimeProviderControlGrpcServicer(
                         is RuntimeProviderCommandType.RESTART
                         and message.command_completion.success
                     ):
-                        await self._report_sink.complete_restart_handoff(report)
+                        await self.report_sink.complete_restart_handoff(report)
                     if (
                         correlated_command.command_type
                         is RuntimeProviderCommandType.OBSERVE
                         and message.command_completion.success
                     ):
-                        handler = self._observe_completion_handler
+                        handler = self.observe_completion_handler
                         await handler.reconcile_observe_completion(report)
                 command_slot.set()
 
@@ -662,12 +663,12 @@ class RuntimeProviderControlGrpcServicer(
         operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         heartbeat_at = datetime.now(UTC)
-        current = await self._control_protocol.heartbeat_provider(
+        current = await self.control_protocol.heartbeat_provider(
             provider_id=provider_id,
             generation=generation,
             heartbeat_at=heartbeat_at,
         )
-        persisted = await self._connection_tracker.heartbeat_connection(
+        persisted = await self.connection_tracker.heartbeat_connection(
             authentication=authentication,
             generation=generation,
             heartbeat_at=heartbeat_at,
@@ -693,13 +694,13 @@ class RuntimeProviderControlGrpcServicer(
     ) -> None:
         while True:
             await command_slot.wait()
-            if not await self._connection_tracker.connection_active(
+            if not await self.connection_tracker.connection_active(
                 authentication=authentication,
                 generation=generation,
                 now=datetime.now(UTC),
             ):
                 return
-            envelope = await self._control_protocol.claim_next_provider_request(
+            envelope = await self.control_protocol.claim_next_provider_request(
                 provider_id=provider_id,
                 generation=generation,
                 consumer_id=self._consumer_id,
@@ -708,7 +709,7 @@ class RuntimeProviderControlGrpcServicer(
             if envelope is None:
                 await asyncio.sleep(max(self._command_block_ms, 1) / 1000)
                 continue
-            if not await self._connection_tracker.connection_active(
+            if not await self.connection_tracker.connection_active(
                 authentication=authentication,
                 generation=generation,
                 now=datetime.now(UTC),
@@ -719,34 +720,36 @@ class RuntimeProviderControlGrpcServicer(
                     envelope,
                     provider_id=provider_id,
                 )
-                await self._control_protocol.ack_claimed_request(envelope)
+                await self.control_protocol.ack_claimed_request(envelope)
                 continue
+            L = bind_extra(
+                _LOGGER,
+                {
+                    "provider_id": provider_id,
+                    "request_id": envelope.request_id,
+                    "runtime_id": envelope.runtime_id,
+                },
+            )
             try:
                 command = _provider_command(
                     envelope,
-                    runner_credential_issuer=self._runner_credential_issuer,
+                    runner_credential_issuer=self.runner_credential_issuer,
                 )
             except InvalidRuntimeProviderCommandPayload as exc:
-                _LOGGER.warning(
+                L.warning(
                     "Runtime Provider command payload invalid",
                     extra={
-                        "provider_id": provider_id,
                         "provider_generation": generation,
-                        "request_id": envelope.request_id,
-                        "runtime_id": envelope.runtime_id,
                         "error_code": exc.code,
                     },
                 )
                 await outbound.put(_error(envelope.request_id, exc.code, str(exc)))
-                await self._control_protocol.ack_claimed_request(envelope)
+                await self.control_protocol.ack_claimed_request(envelope)
                 continue
-            _LOGGER.info(
+            L.info(
                 "Runtime Provider command relayed",
                 extra={
-                    "provider_id": provider_id,
                     "provider_generation": generation,
-                    "request_id": envelope.request_id,
-                    "runtime_id": envelope.runtime_id,
                     "operation_type": envelope.operation_type,
                 },
             )
@@ -782,7 +785,7 @@ class RuntimeProviderControlGrpcServicer(
                 "operation_type": envelope.operation_type,
             },
         )
-        await self._control_protocol.append_reply_event(
+        await self.control_protocol.append_reply_event(
             RuntimeReplyEvent(
                 request_id=envelope.request_id,
                 runtime_id=envelope.runtime_id,
@@ -820,7 +823,7 @@ class RuntimeProviderControlGrpcServicer(
         }
         if completion.report.runtime_id:
             payload["provider_observed_state"] = completion.report.observed_state
-        await self._control_protocol.append_operation_reply_event(
+        await self.control_protocol.append_operation_reply_event(
             RuntimeReplyEvent(
                 request_id=completion.request_id,
                 runtime_id=completion.runtime_id,

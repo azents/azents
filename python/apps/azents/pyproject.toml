@@ -111,6 +111,7 @@ select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003
 
 [tool.ty.environment]
 python-version = "3.14"
+extra-paths = ["typings/botocore-public"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

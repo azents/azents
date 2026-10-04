@@ -5,7 +5,7 @@ import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, assert_never
 
 import grpc
 from azents_runtime_control.grpc_runner_terminal_client import (
@@ -35,6 +35,10 @@ from azents_runtime_control.runner_terminal import (
     RunnerTerminalTerminationReason,
 )
 
+from azents_runtime_runner.diagnostics import (
+    RunnerDiagnosticReason,
+    runner_exception_diagnostic,
+)
 from azents_runtime_runner.terminal import (
     RunnerTerminal,
     RunnerTerminalRegistry,
@@ -119,12 +123,12 @@ class RunnerTerminalStreamManager:
         client_factory: RunnerTerminalClientFactory,
     ) -> None:
         """Initialize one Runner-control-generation Terminal manager."""
-        self._registry = registry
+        self.registry = registry
         self._runtime_id = runtime_id
         self._workspace_root = workspace_root
         self._environment = environment
-        self._accepted_generation = accepted_generation
-        self._client_factory = client_factory
+        self.accepted_generation = accepted_generation
+        self.client_factory = client_factory
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._clients: dict[str, RunnerTerminalClient] = {}
         self._terminations: dict[str, asyncio.Future[_TerminalFinal]] = {}
@@ -202,7 +206,7 @@ class RunnerTerminalStreamManager:
                 _TerminalFinal(reason=intent.reason, exit_code=None),
             )
             return
-        cleanup = await self._registry.invalidate(
+        cleanup = await self.registry.invalidate(
             terminal_id=intent.identity.terminal_id
         )
         asyncio.create_task(
@@ -222,7 +226,7 @@ class RunnerTerminalStreamManager:
     ) -> None:
         terminal_id = intent.identity.terminal_id
         try:
-            terminal = await self._registry.open(
+            terminal = await self.registry.open(
                 TerminalSpec(
                     terminal_id=terminal_id,
                     runtime_id=intent.identity.runtime_id,
@@ -242,14 +246,19 @@ class RunnerTerminalStreamManager:
             await self._run_terminal(terminal, intent, termination)
         except asyncio.CancelledError:
             raise
-        except TerminalAdmissionError, OSError:
+        except (TerminalAdmissionError, OSError) as exc:
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.TERMINAL_ADMISSION_FAILED
+            )
             _LOGGER.warning(
                 "Runtime Runner Terminal open intent rejected",
+                exc_info=diagnostic.exc_info,
                 extra={
                     "terminal_id": terminal_id,
                     "runtime_id": intent.identity.runtime_id,
                     "runner_generation": intent.identity.runner_generation,
                     "reason": "local_admission_failed",
+                    **diagnostic.log_fields(),
                 },
             )
         except Exception:
@@ -262,7 +271,7 @@ class RunnerTerminalStreamManager:
                 },
             )
         finally:
-            cleanup = await self._registry.invalidate(terminal_id=terminal_id)
+            cleanup = await self.registry.invalidate(terminal_id=terminal_id)
             if cleanup is not None:
                 await cleanup
             current = asyncio.current_task()
@@ -274,7 +283,7 @@ class RunnerTerminalStreamManager:
 
     async def invalidate_runtime(self) -> tuple[asyncio.Task[PtyTerminalExit], ...]:
         """Fence PTYs, then close all data streams before returning authority."""
-        cleanup_tasks = await self._registry.invalidate_runtime(
+        cleanup_tasks = await self.registry.invalidate_runtime(
             runtime_id=self._runtime_id
         )
         async with self._lock:
@@ -342,7 +351,7 @@ class RunnerTerminalStreamManager:
         final: _TerminalFinal | None = None
         try:
             while final is None:
-                if self._accepted_generation() != intent.identity.runner_generation:
+                if self.accepted_generation() != intent.identity.runner_generation:
                     final = _TerminalFinal(
                         RunnerTerminalTerminationReason.RUNNER_REPLACED,
                         None,
@@ -356,7 +365,7 @@ class RunnerTerminalStreamManager:
                     final = _deadline_final(deadline)
                     break
                 terminal.begin_stream_recovery()
-                client = self._client_factory()
+                client = self.client_factory()
                 async with self._lock:
                     if self._tasks.get(terminal.terminal_id) is asyncio.current_task():
                         self._clients[terminal.terminal_id] = client
@@ -532,6 +541,8 @@ class RunnerTerminalStreamManager:
                                 termination,
                                 RuntimeRunnerTerminalStreamClosed(code.value),
                             )
+                    case _:
+                        assert_never(frame)
             except (TerminalError, ValueError) as error:
                 _set_future_exception(termination, error)
 
@@ -655,7 +666,7 @@ class RunnerTerminalStreamManager:
     def _identity_current(self, identity: RunnerTerminalIdentity) -> bool:
         if identity.runtime_id != self._runtime_id:
             return False
-        return self._accepted_generation() == identity.runner_generation
+        return self.accepted_generation() == identity.runner_generation
 
 
 async def _pump_output(

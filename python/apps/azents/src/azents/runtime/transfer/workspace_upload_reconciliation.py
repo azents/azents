@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from azcommon.uuid import uuid7
@@ -36,6 +37,14 @@ from azents.runtime.transfer.workspace_upload_coordinator import (
 )
 from azents.runtime.transfer.workspace_upload_object import WorkspaceUploadObjectStore
 from azents.runtime.transfer.workspace_upload_store import WorkspaceUploadStore
+
+
+@dataclass(frozen=True)
+class WorkspaceUploadAttemptAdmission:
+    """Immutable record and delivery identity after one successful admission."""
+
+    record: WorkspaceUploadRecord
+    attempt: WorkspaceUploadDeliveryAttempt
 
 
 class WorkspaceUploadRuntimeReconciliationHandler(WorkspaceUploadReconciliationHandler):
@@ -90,9 +99,11 @@ class WorkspaceUploadRuntimeReconciliationHandler(WorkspaceUploadReconciliationH
             or current.source_handle is None
         ):
             return
-        current, attempt = await self._ensure_attempt(current)
-        if current is None or attempt is None:
+        admission = await self._ensure_attempt(current)
+        if admission is None:
             return
+        current = admission.record
+        attempt = admission.attempt
 
         runtime_record = await self.transfer_coordinator.state_store.get(
             attempt.transfer_id
@@ -247,12 +258,12 @@ class WorkspaceUploadRuntimeReconciliationHandler(WorkspaceUploadReconciliationH
     async def _ensure_attempt(
         self,
         record: WorkspaceUploadRecord,
-    ) -> tuple[WorkspaceUploadRecord | None, WorkspaceUploadDeliveryAttempt | None]:
+    ) -> WorkspaceUploadAttemptAdmission | None:
         """Append the first immutable delivery child after source verification."""
         if record.delivery_attempts:
             latest = record.delivery_attempts[-1]
             if latest.completed_at is None:
-                return record, latest
+                return WorkspaceUploadAttemptAdmission(record=record, attempt=latest)
         attempt = WorkspaceUploadDeliveryAttempt(
             number=len(record.delivery_attempts) + 1,
             attempt_id=self.delivery_attempt_id_factory(),
@@ -276,8 +287,8 @@ class WorkspaceUploadRuntimeReconciliationHandler(WorkspaceUploadReconciliationH
             attempt=attempt,
         )
         if appended is None:
-            return None, None
-        return appended, attempt
+            return None
+        return WorkspaceUploadAttemptAdmission(record=appended, attempt=attempt)
 
     async def _prepare(
         self,

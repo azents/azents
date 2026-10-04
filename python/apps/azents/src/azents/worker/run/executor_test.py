@@ -2187,7 +2187,7 @@ def _executor(
         dynamic_worktree_toolkit_provider=Mock(
             spec=run_executor_module.DynamicWorktreeToolkitProvider
         ),
-        broadcast=Mock(spec=run_executor_module.WebSocketBroadcast),
+        broadcast=Mock(spec=run_executor_module.BaseWebSocketBroadcast),
     )
 
 

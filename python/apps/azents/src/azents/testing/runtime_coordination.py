@@ -1,7 +1,7 @@
 """Test-only Runtime coordination publication helpers."""
 
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Protocol, TypedDict, Unpack
 
 from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
 from azents_runtime_control.transfer import (
@@ -13,10 +13,14 @@ from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProviderRegistration,
     RuntimeProviderRegistrationAccepted,
+    RuntimeRequestIdFactory,
     RuntimeRunnerRegistration,
     RuntimeRunnerRegistrationAccepted,
 )
-from azents.runtime.control_protocol.service import RuntimeControlProtocolService
+from azents.runtime.control_protocol.service import (
+    RuntimeControlProtocolService,
+    RuntimeRunnerGenerationObserver,
+)
 from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeConnectionKind,
@@ -126,11 +130,26 @@ async def publish_next_test_connection(
     )
 
 
+class _RuntimeControlProtocolOptions(TypedDict, total=False):
+    """Explicit supported options for the test-local protocol composition."""
+
+    request_id_factory: RuntimeRequestIdFactory | None
+    heartbeat_interval_seconds: int
+    connection_ttl_seconds: int
+    operation_ttl_seconds: int
+    request_reclaim_idle_seconds: float
+    runner_generation_observer: RuntimeRunnerGenerationObserver | None
+
+
 class FakeRuntimeControlProtocolService(RuntimeControlProtocolService):
     """Control protocol test double with explicit volatile publication only."""
 
-    def __init__(self, store: RuntimeCoordinationStore, **kwargs: object) -> None:
-        super().__init__(store, **kwargs)  # ty: ignore[invalid-argument-type]
+    def __init__(
+        self,
+        store: RuntimeCoordinationStore,
+        **kwargs: Unpack[_RuntimeControlProtocolOptions],
+    ) -> None:
+        super().__init__(store, **kwargs)
         self.store = store
         self._test_store = store
         self._test_generations: dict[tuple[RuntimeConnectionKind, str], int] = {}
@@ -211,7 +230,7 @@ class FakeRuntimeControlProtocolService(RuntimeControlProtocolService):
                 "metadata": registration.metadata,
             },
         )
-        observer = self._runner_generation_observer
+        observer = self.runner_generation_observer
         if previous is not None and observer is not None:
             await observer.on_runner_replaced(
                 runtime_id=registration.runtime_id,

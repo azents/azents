@@ -7,6 +7,7 @@ import logging
 from typing import Annotated
 from uuid import uuid4
 
+from azcommon.logging import bind_extra
 from fastapi import Depends
 
 from azents.job_runtime.deps import get_job_runtime
@@ -38,7 +39,8 @@ class SchedulerService:
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Run scheduler loop until shutdown."""
-        logger.info("Scheduler starting", extra={"scheduler_id": self.scheduler_id})
+        L = bind_extra(logger, {"scheduler_id": self.scheduler_id})
+        L.info("Scheduler starting")
         await self.ensure_registered_states()
         try:
             while not shutdown_event.is_set():
@@ -52,7 +54,7 @@ class SchedulerService:
                 except asyncio.TimeoutError:
                     continue
         finally:
-            logger.info("Scheduler stopped", extra={"scheduler_id": self.scheduler_id})
+            L.info("Scheduler stopped")
 
     async def ensure_registered_states(self) -> None:
         """Ensure DB state rows exist for all registered task definitions."""
@@ -112,6 +114,9 @@ class SchedulerService:
         definition: ScheduledTaskDefinition,
         now: datetime.datetime,
     ) -> ScheduledTaskState | None:
+        L = bind_extra(
+            logger, {"task_key": definition.key, "scheduler_id": self.scheduler_id}
+        )
         lease_until = now + definition.timeout + datetime.timedelta(seconds=30)
         state = await self.repository.claim_due(
             task_key=definition.key,
@@ -120,15 +125,9 @@ class SchedulerService:
             lease_until=lease_until,
         )
         if state is None:
-            logger.debug(
-                "Scheduled task not claimed",
-                extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
-            )
+            L.debug("Scheduled task not claimed")
             return None
-        logger.info(
-            "Scheduled task claimed",
-            extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
-        )
+        L.info("Scheduled task claimed")
         return state
 
     async def _execute_claimed(
@@ -136,6 +135,9 @@ class SchedulerService:
         definition: ScheduledTaskDefinition,
         state: ScheduledTaskState,
     ) -> None:
+        L = bind_extra(
+            logger, {"task_key": definition.key, "scheduler_id": self.scheduler_id}
+        )
         attempt_started_at = state.last_started_at
         if attempt_started_at is None:
             raise RuntimeError("Claimed scheduled task is missing its start timestamp.")
@@ -168,7 +170,7 @@ class SchedulerService:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            await self._record_failure(definition, state, exc)
+            await self._record_failure(definition, state, exc, log=L)
             return
         finished_at = _utcnow()
         next_run_at = finished_at + definition.interval
@@ -179,16 +181,15 @@ class SchedulerService:
             next_run_at=next_run_at,
             result_summary=result.summary,
         )
-        logger.info(
-            "Scheduled task succeeded",
-            extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
-        )
+        L.info("Scheduled task succeeded")
 
     async def _record_failure(
         self,
         definition: ScheduledTaskDefinition,
         state: ScheduledTaskState,
         exc: Exception,
+        *,
+        log: logging.LoggerAdapter[logging.Logger],
     ) -> None:
         finished_at = _utcnow()
         next_run_at = compute_failure_next_run_at(
@@ -209,10 +210,7 @@ class SchedulerService:
             ),
             error_message=str(exc),
         )
-        logger.exception(
-            "Scheduled task failed",
-            extra={"task_key": definition.key, "scheduler_id": self.scheduler_id},
-        )
+        log.exception("Scheduled task failed")
 
 
 def _get_definition(task_key: str) -> ScheduledTaskDefinition | None:

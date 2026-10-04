@@ -991,13 +991,27 @@ class RunnerWebSessionDispatcher:
             )
             await self._reset(stream_id, stream.close_reason, stream=stream)
             raise
-        except TimeoutError:
+        except TimeoutError as exc:
             stream.close_reason = CloseReason.DEADLINE
-            _LOGGER.info("Runtime Web Runner stream deadline reached")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_DEADLINE
+            )
+            _LOGGER.info(
+                "Runtime Web Runner stream deadline reached",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(stream_id, CloseReason.DEADLINE, stream=stream)
-        except OSError, httpcore.NetworkError, httpcore.ProtocolError:
+        except (OSError, httpcore.NetworkError, httpcore.ProtocolError) as exc:
             stream.close_reason = CloseReason.APPLICATION_UNAVAILABLE
-            _LOGGER.exception("Runtime Web Runner loopback stream failed")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_LOOPBACK_FAILED
+            )
+            _LOGGER.error(
+                "Runtime Web Runner loopback stream failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.APPLICATION_UNAVAILABLE,
@@ -1042,9 +1056,16 @@ class RunnerWebSessionDispatcher:
             RuntimeError,
             ValueError,
             UnicodeError,
-        ):
+        ) as exc:
             stream.close_reason = CloseReason.PROTOCOL_VIOLATION
-            _LOGGER.exception("Runtime Web Runner stream protocol failed")
+            diagnostic = runner_exception_diagnostic(
+                exc, RunnerDiagnosticReason.WEB_PROTOCOL_FAILED
+            )
+            _LOGGER.error(
+                "Runtime Web Runner stream protocol failed",
+                exc_info=diagnostic.exc_info,
+                extra=diagnostic.log_fields(),
+            )
             await self._reset(
                 stream_id,
                 CloseReason.PROTOCOL_VIOLATION,

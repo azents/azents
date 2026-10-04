@@ -5,6 +5,7 @@ import logging
 
 import grpc
 import pytest
+from azents_runtime_control.grpc_runner_client import RuntimeRunnerControlStreamClosed
 
 from azents_runtime_runner.diagnostics import (
     RunnerDiagnosticReason,
@@ -14,6 +15,7 @@ from azents_runtime_runner.diagnostics import (
 from azents_runtime_runner.main import (
     StructuredLogFormatter,
     _log_control_client_close_timeout,
+    _log_control_stream_closed,
 )
 from azents_runtime_runner.transfer import _bounded_grpc_failure_reason
 
@@ -104,6 +106,31 @@ def test_arbitrary_rpc_failure_details_are_not_log_reasons() -> None:
         None,
     )
     assert _bounded_grpc_failure_reason(error) == "grpc_request_failed"
+
+
+def test_control_stream_closed_preserves_safe_origin(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The reconnect warning excludes original content and source text."""
+    logger = logging.getLogger("runner-stream-close-test")
+    try:
+        raise RuntimeRunnerControlStreamClosed("STREAM_PRIVATE_VALUE") from ValueError(
+            "STREAM_PRIVATE_CAUSE"
+        )
+    except RuntimeRunnerControlStreamClosed as error:
+        _log_control_stream_closed(logger, error)
+    record = caplog.records[-1]
+    rendered = StructuredLogFormatter().format(record)
+    assert record.__dict__["error_type"] == "RuntimeRunnerControlStreamClosed"
+    assert record.__dict__["error_frames"][-1]["function"] == (
+        "test_control_stream_closed_preserves_safe_origin"
+    )
+    assert "runner_control_stream_failed" in rendered
+    assert "STREAM_PRIVATE_VALUE" not in rendered
+    assert "STREAM_PRIVATE_CAUSE" not in rendered
+    assert "raise RuntimeRunnerControlStreamClosed" not in rendered
+    assert record.exc_info is not None
+    assert record.exc_info[2] is None
 
 
 def _timeout_with_sensitive_cause() -> TimeoutError:

@@ -328,13 +328,18 @@ async def _stage(
     return finalized
 
 
+@dataclass(frozen=True)
+class _DispatchedReconciliation:
+    """Named owned task and upload evidence at the observed dispatch boundary."""
+
+    task: asyncio.Task[WorkspaceUploadReconcileResult]
+    upload: WorkspaceUploadRecord
+
+
 async def _start_until_dispatch(
     harness: _Harness,
     upload_id: str = "upload",
-) -> tuple[
-    asyncio.Task[WorkspaceUploadReconcileResult],
-    WorkspaceUploadRecord,
-]:
+) -> _DispatchedReconciliation:
     """Run reconciliation until the metadata-only Runner intent is enqueued."""
     await _publish_runner_generation(harness, connection_id="runner-1")
     task = asyncio.create_task(
@@ -362,7 +367,7 @@ async def _start_until_dispatch(
         agent_id="agent",
     )
     assert current is not None
-    return task, current
+    return _DispatchedReconciliation(task=task, upload=current)
 
 
 async def _runtime_for_upload(
@@ -457,7 +462,9 @@ async def test_successful_copy_dispatch_and_runner_commit_settle_upload() -> Non
     """Verified source copy and Runner commit project one successful upload."""
     harness = _harness()
     await _stage(harness)
-    task, upload = await _start_until_dispatch(harness)
+    dispatched = await _start_until_dispatch(harness)
+    task = dispatched.task
+    upload = dispatched.upload
     runtime = await _runtime_for_upload(harness, upload)
 
     await _complete_download(harness, runtime)
@@ -494,7 +501,9 @@ async def test_conflict_projection_requires_exact_precondition() -> None:
     """Conflict evidence is projected safely and exact evidence fences overwrite."""
     harness = _harness()
     await _stage(harness)
-    task, upload = await _start_until_dispatch(harness)
+    dispatched = await _start_until_dispatch(harness)
+    task = dispatched.task
+    upload = dispatched.upload
     runtime = await _runtime_for_upload(harness, upload)
     conflict = RuntimeTransferDestinationConflictEvidence(
         kind="file",
@@ -564,7 +573,9 @@ async def test_cancellation_before_runtime_commit_projects_cancelled_attempt() -
     """Workspace cancellation fences an enqueued Runtime attempt before commit."""
     harness = _harness()
     await _stage(harness)
-    task, upload = await _start_until_dispatch(harness)
+    dispatched = await _start_until_dispatch(harness)
+    task = dispatched.task
+    upload = dispatched.upload
 
     cancelled = await harness.workspace_coordinator.cancel(
         "upload",
@@ -594,7 +605,9 @@ async def test_successful_runtime_commit_wins_over_later_workspace_cancellation(
     """A cancellation observed after the Runtime commit cannot overwrite success."""
     harness = _harness(status_poll_interval=timedelta(hours=1))
     await _stage(harness)
-    task, upload = await _start_until_dispatch(harness)
+    dispatched = await _start_until_dispatch(harness)
+    task = dispatched.task
+    upload = dispatched.upload
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -624,7 +637,7 @@ async def test_runner_generation_replacement_fences_delivery_and_stale_cas() -> 
     """A replaced Runner generation yields retryable fencing."""
     harness = _harness()
     await _stage(harness)
-    task, upload = await _start_until_dispatch(harness)
+    task = (await _start_until_dispatch(harness)).task
     await _publish_runner_generation(harness, connection_id="runner-2")
 
     observed = await harness.transfer_coordinator.reconcile_generations(page_size=2)
@@ -687,7 +700,7 @@ async def test_runtime_deadline_expiry_projects_expired_upload() -> None:
             deadline_offset=timedelta(seconds=5),
         ),
     )
-    task, _ = await _start_until_dispatch(harness)
+    task = (await _start_until_dispatch(harness)).task
     harness.clock.now = _NOW + timedelta(seconds=10)
 
     await asyncio.wait_for(task, timeout=2)

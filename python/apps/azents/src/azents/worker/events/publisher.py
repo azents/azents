@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import BaseWebSocketBroadcast
 from azents.broker.serialization import serialize_event
 from azents.broker.types import PublishedEvent, SessionBroker
 from azents.engine.events.engine_events import (
@@ -55,7 +55,7 @@ class WorkerEventPublisher:
     """Publish Worker runtime event to live projection and WebSocket."""
 
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
 
     async def dispatch_event(

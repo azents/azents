@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -88,12 +88,20 @@ def _admission() -> WorkspaceUploadAdmission:
     )
 
 
+@dataclass(frozen=True)
+class _CoordinatorSetup:
+    """Named facade and object-storage fixtures for one coordinated upload."""
+
+    coordinator: WorkspaceUploadCoordinator
+    object_store: WorkspaceUploadObjectStore
+
+
 def _coordinator(
     store: InMemoryWorkspaceUploadStore,
     clock: _Clock,
     s3: _S3,
     reconciler: _Reconciler,
-) -> tuple[WorkspaceUploadCoordinator, WorkspaceUploadObjectStore]:
+) -> _CoordinatorSetup:
     """Build one fully injected direct-object coordinator facade."""
     object_store = WorkspaceUploadObjectStore(
         s3_service=s3,
@@ -105,8 +113,8 @@ def _coordinator(
         multipart_part_size=3,
         clock=clock,
     )
-    return (
-        WorkspaceUploadCoordinator(
+    return _CoordinatorSetup(
+        coordinator=WorkspaceUploadCoordinator(
             store=store,
             object_store=object_store,
             reconciliation_handler=reconciler,
@@ -116,7 +124,7 @@ def _coordinator(
             clock=clock,
             terminal_ttl=timedelta(minutes=1),
         ),
-        object_store,
+        object_store=object_store,
     )
 
 
@@ -144,7 +152,9 @@ async def test_cancelled_ingress_is_cleaned_after_operation_expiry() -> None:
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
     reconciler = _Reconciler()
-    coordinator, object_store = _coordinator(store, clock, s3, reconciler)
+    setup = _coordinator(store, clock, s3, reconciler)
+    coordinator = setup.coordinator
+    object_store = setup.object_store
     created = await coordinator.create(_admission())
     assert created is not None
     assert created.ingress_handle is not None
@@ -190,7 +200,7 @@ async def test_retry_without_source_is_rejected() -> None:
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
     reconciler = _Reconciler()
-    coordinator, _object_store = _coordinator(store, clock, s3, reconciler)
+    coordinator = _coordinator(store, clock, s3, reconciler).coordinator
     created = await coordinator.create(_admission())
     assert created is not None
     retryable = await store.compare_and_set(
@@ -223,7 +233,9 @@ async def test_finalize_claims_direct_ingress_and_reconcile_starts_delivery() ->
     store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
     s3 = _S3(now=clock.now)
     reconciler = _Reconciler()
-    coordinator, object_store = _coordinator(store, clock, s3, reconciler)
+    setup = _coordinator(store, clock, s3, reconciler)
+    coordinator = setup.coordinator
+    object_store = setup.object_store
     created = await _create_and_seed(coordinator, object_store, s3)
 
     finalized = await coordinator.finalize(

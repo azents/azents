@@ -220,10 +220,10 @@ class RunnerTransferManager:
         """Initialize independent data-task admission and result ownership."""
         if max_active_transfers <= 0 or max_tombstones <= 0:
             raise ValueError("Runner transfer limits must be positive")
-        self._control = control
-        self._transfer = transfer
-        self._accepted_generation = accepted_generation
-        self._workspace = workspace
+        self.control = control
+        self.transfer = transfer
+        self.accepted_generation = accepted_generation
+        self.workspace = workspace
         self._http_proxy = http_proxy
         self._http_ssl_context = http_ssl_context
         self._max_active_transfers = max_active_transfers
@@ -251,7 +251,7 @@ class RunnerTransferManager:
         identity_key = _identity_key(intent)
         invalid_reason = _validate_intent_reason(
             intent,
-            self._accepted_generation(),
+            self.accepted_generation(),
         )
         result: RunnerTransferResult | None = None
         failure_reason: str | None = None
@@ -363,9 +363,11 @@ class RunnerTransferManager:
                     source="grpc",
                     reason=_bounded_grpc_failure_reason(exc),
                     grpc_status=exc.code().name,
-                    diagnostic=None,
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_FAILED
+                    ),
                 )
-            except aiohttp.ClientError:
+            except aiohttp.ClientError as exc:
                 result = _failed(intent, RunnerTransferFailure.STREAM_FAILED)
                 _log_failure(
                     intent,
@@ -373,9 +375,11 @@ class RunnerTransferManager:
                     source="direct_http",
                     reason="http_request_failed",
                     grpc_status=None,
-                    diagnostic=None,
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_FAILED
+                    ),
                 )
-            except TimeoutError:
+            except TimeoutError as exc:
                 result = _failed(
                     intent,
                     (
@@ -390,7 +394,9 @@ class RunnerTransferManager:
                     source="direct_http",
                     reason="http_request_timeout",
                     grpc_status=None,
-                    diagnostic=None,
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_FAILED
+                    ),
                 )
             except _TransferFailure as exc:
                 result = _failed(
@@ -408,10 +414,12 @@ class RunnerTransferManager:
                     diagnostic=(
                         exc.diagnostic
                         if isinstance(exc, _TransferDiagnosticFailure)
-                        else None
+                        else runner_exception_diagnostic(
+                            exc, RunnerDiagnosticReason.TRANSFER_FAILED
+                        )
                     ),
                 )
-            except OSError:
+            except OSError as exc:
                 result = _failed(intent, _local_io_failure(intent))
                 _log_failure(
                     intent,
@@ -419,9 +427,11 @@ class RunnerTransferManager:
                     source="local_io",
                     reason="os_error",
                     grpc_status=None,
-                    diagnostic=None,
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_FAILED
+                    ),
                 )
-            except ValueError:
+            except ValueError as exc:
                 result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
                 _log_failure(
                     intent,
@@ -429,7 +439,9 @@ class RunnerTransferManager:
                     source="runner",
                     reason="unexpected_value_error",
                     grpc_status=None,
-                    diagnostic=None,
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_FAILED
+                    ),
                 )
             self._remember(intent, result)
             if not await self._enqueue_terminal_result(result):
@@ -489,7 +501,7 @@ class RunnerTransferManager:
                 RunnerTransferFailure.PROTOCOL_VIOLATION,
                 reason="download_manifest_missing",
             )
-        destination_path = self._workspace.resolve_lexical(
+        destination_path = self.workspace.resolve_lexical(
             intent.runtime_path,
             write=True,
         )
@@ -508,7 +520,7 @@ class RunnerTransferManager:
             offset = 0
             digest = hashlib.sha256()
             complete: RunnerDownloadComplete | None = None
-            async for frame in self._transfer.download(
+            async for frame in self.transfer.download(
                 intent.identity,
                 timeout=_remaining_timeout(intent),
             ):
@@ -622,7 +634,7 @@ class RunnerTransferManager:
                 RunnerTransferFailure.PROTOCOL_VIOLATION,
                 reason="direct_download_manifest_missing",
             )
-        destination_path = self._workspace.resolve_lexical(
+        destination_path = self.workspace.resolve_lexical(
             intent.runtime_path,
             write=True,
         )
@@ -642,7 +654,7 @@ class RunnerTransferManager:
             claim_id = _direct_claim_id(intent)
             reacquisitions = 0
             while True:
-                ticket = await self._transfer.claim_direct_object(
+                ticket = await self.transfer.claim_direct_object(
                     intent.identity,
                     dispatch_id=intent.dispatch_id,
                     claim_id=claim_id,
@@ -694,7 +706,7 @@ class RunnerTransferManager:
                     ):
                         reacquisitions += 1
                         ticket = await lease.wait_for(
-                            self._transfer.claim_direct_object(
+                            self.transfer.claim_direct_object(
                                 intent.identity,
                                 dispatch_id=intent.dispatch_id,
                                 claim_id=claim_id,
@@ -797,7 +809,7 @@ class RunnerTransferManager:
                     )
                 reacquisitions += 1
                 ticket = await lease.wait_for(
-                    self._transfer.claim_direct_object(
+                    self.transfer.claim_direct_object(
                         intent.identity,
                         dispatch_id=intent.dispatch_id,
                         claim_id=claim_id,
@@ -897,14 +909,14 @@ class RunnerTransferManager:
                 await asyncio.sleep(min(STREAM_OWNER_RENEWAL_SECONDS, remaining))
                 self._check_direct_stop(intent, cancelled)
                 if upload:
-                    await self._transfer.renew_direct_upload(
+                    await self.transfer.renew_direct_upload(
                         intent.identity,
                         dispatch_id=intent.dispatch_id,
                         claim_id=claim_id,
                         timeout=_remaining_timeout(intent),
                     )
                 else:
-                    renewed = await self._transfer.claim_direct_object(
+                    renewed = await self.transfer.claim_direct_object(
                         intent.identity,
                         dispatch_id=intent.dispatch_id,
                         claim_id=claim_id,
@@ -925,9 +937,12 @@ class RunnerTransferManager:
             failed.set()
         except grpc.aio.AioRpcError as exc:
             error.append(
-                _TransferFailure(
+                _TransferDiagnosticFailure(
                     runner_transfer_failure_from_grpc(exc),
                     reason="direct_claim_renewal_grpc_failed",
+                    diagnostic=runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_RENEWAL_FAILED
+                    ),
                 )
             )
             failed.set()
@@ -961,7 +976,7 @@ class RunnerTransferManager:
     ) -> None:
         """Check cancellation, deadline, and current Runner generation."""
         _check_stop(intent, cancelled)
-        if self._accepted_generation() != intent.identity.runner_generation:
+        if self.accepted_generation() != intent.identity.runner_generation:
             raise _TransferFailure(
                 RunnerTransferFailure.UNAVAILABLE,
                 reason="runner_generation_fenced",
@@ -980,7 +995,7 @@ class RunnerTransferManager:
                 RunnerTransferFailure.PROTOCOL_VIOLATION,
                 reason="upload_expected_size_missing",
             )
-        source_path = self._workspace.resolve_lexical(
+        source_path = self.workspace.resolve_lexical(
             intent.runtime_path,
             write=False,
         )
@@ -1075,7 +1090,7 @@ class RunnerTransferManager:
                 finally:
                     os.close(snapshot_read)
 
-            authoritative = await self._transfer.upload(
+            authoritative = await self.transfer.upload(
                 intent.identity,
                 frames(),
                 timeout=_remaining_timeout(intent),
@@ -1124,7 +1139,7 @@ class RunnerTransferManager:
         """PUT only the stable bounded snapshot, then request trusted promotion."""
         self._check_direct_stop(intent, cancelled)
         claim_id = _direct_claim_id(intent)
-        ticket = await self._transfer.claim_direct_upload(
+        ticket = await self.transfer.claim_direct_upload(
             intent.identity,
             dispatch_id=intent.dispatch_id,
             claim_id=claim_id,
@@ -1208,7 +1223,7 @@ class RunnerTransferManager:
         self._check_direct_stop(intent, cancelled)
         await lease.close()
         direct_claim_lease[0] = None
-        authoritative = await self._transfer.complete_direct_upload(
+        authoritative = await self.transfer.complete_direct_upload(
             intent.identity,
             dispatch_id=intent.dispatch_id,
             claim_id=claim_id,
@@ -1293,14 +1308,18 @@ class RunnerTransferManager:
             pending = await self._results.get()
             try:
                 try:
-                    await self._control.append_runner_transfer_result(pending.result)
+                    await self.control.append_runner_transfer_result(pending.result)
                 except asyncio.CancelledError:
                     _set_result_delivery(pending, delivered=False)
                     raise
-                except Exception:
+                except Exception as exc:
+                    diagnostic = runner_exception_diagnostic(
+                        exc, RunnerDiagnosticReason.TRANSFER_DELIVERY_FAILED
+                    )
                     _LOGGER.warning(
                         "Runner transfer result delivery became unavailable",
-                        exc_info=True,
+                        exc_info=diagnostic.exc_info,
+                        extra=diagnostic.log_fields(),
                     )
                     _set_result_delivery(pending, delivered=False)
                 else:
