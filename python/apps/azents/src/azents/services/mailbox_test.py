@@ -107,6 +107,10 @@ from azents.repos.mailbox.promotion import MailboxPromotionRepository
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.model_file.data import ModelFile
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
+from azents.repos.scheduled_task.definition import (
+    RDBScheduledTaskAuthorityValidator,
+    ScheduledTaskDefinitionRepository,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
@@ -127,10 +131,6 @@ from azents.services.model_file import (
     ModelFileInvalidImage,
     ModelFileOversized,
     ModelFileService,
-)
-from azents.services.scheduled_task.service import (
-    RDBScheduledTaskAuthorityValidator,
-    ScheduledTaskService,
 )
 from azents.services.turn_action import (
     TurnActionCapabilityRegistry,
@@ -1083,9 +1083,9 @@ def _turn_action_capabilities(
     )
 
 
-def _scheduled_task_service() -> ScheduledTaskService:
+def _scheduled_task_service() -> ScheduledTaskDefinitionRepository:
     """Create the Scheduled Task mutation service for integration tests."""
-    return ScheduledTaskService(
+    return ScheduledTaskDefinitionRepository(
         repository=ScheduledTaskRepository(),
         cycle_repository=ScheduledTaskCycleRepository(
             toolkit_state_repository=ToolkitStateRepository(),

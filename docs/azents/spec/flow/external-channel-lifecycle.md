@@ -12,6 +12,9 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
   - python/apps/azents/src/azents/core/external_channel_ingestion.py
   - python/apps/azents/src/azents/core/session_lifecycle_registry.py
+  - python/apps/azents/src/azents/core/session_lifecycle_schema.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_schema.py
+  - python/apps/azents/src/azents/services/session_lifecycle/schema.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/discord_connection_dependencies.py
   - python/apps/azents/src/azents/repos/external_channel/access_operations.py
@@ -56,7 +59,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 48
+spec_version: 49
 ---
 
 # External Channel Lifecycle
@@ -302,6 +305,15 @@ managers must establish new provider state explicitly.
 
 ## Permanent Session Purge
 
+Installed lifecycle ownership diagnostics read the PostgreSQL foreign-key and
+referential-trigger graph through the completed
+`PostgreSQLSessionLifecycleGraphRepository` native read-only operation. Detached
+graph contracts are defined in `core/session_lifecycle_schema.py`; the service
+schema validator performs only pure ownership and reachable-delete-path checks
+after the repository scope closes. This ownership boundary preserves existing
+manifest classifications and complete violation paths and does not change purge
+or parent-delete authority.
+
 Newly fenced jobs include the participant in their immutable purge snapshot. Jobs
 that were already fenced before the participant was registered retain their
 earlier snapshot and do not retroactively add or execute it. Restrictive
@@ -367,6 +379,10 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-05 (spec_version49)** — Integrated completed channel action/revocation
+  and Scheduled Channel effects with selection/scheduled/lease ownership, retaining
+  exact owner, configuration and claim fences at atomic mutation boundaries.
 
 - **2026-10-05** (spec_version 48) — Made authenticated Slack revocation a
   completed repository operation with atomic conditional terminal/purge mutation,

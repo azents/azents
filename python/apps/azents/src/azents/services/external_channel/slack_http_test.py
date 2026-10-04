@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelTransport,
 )
+from azents.core.scheduled_task_control import ScheduledTaskEditInput
 from azents.services.external_channel.slack_endpoint import (
     slack_api_base_url,
     slack_file_url_allowed,
@@ -40,7 +41,6 @@ from azents.services.external_channel.slack_http import (
     verify_slack_signature,
 )
 from azents.services.scheduled_task.control import (
-    ScheduledTaskEditInput,
     build_scheduled_task_control_locator,
     build_scheduled_task_slack_edit_metadata,
 )

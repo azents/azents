@@ -11,18 +11,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.config import Config
 from azents.core.enums import ExternalChannelResourceType, ScheduledTaskScheduleType
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.scheduled_task_control import (
+    ScheduledTaskControlLocator,
+    _provider_context_matches_binding,
+)
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.scheduled_task.control_operations import (
+    ScheduledTaskProviderControlRepository,
+)
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.definition import (
+    ScheduledTaskDefinitionRepository,
+    ScheduledTaskMutationTarget,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.services.scheduled_task.control import (
-    ScheduledTaskControlLocator,
     ScheduledTaskProviderControlService,
-    _provider_context_matches_binding,
     build_scheduled_task_control_locator,
     parse_scheduled_task_control_locator,
     render_scheduled_task_discord_controls,
@@ -30,10 +39,6 @@ from azents.services.scheduled_task.control import (
     render_scheduled_task_discord_registration,
     render_scheduled_task_slack_deletion,
     render_scheduled_task_slack_registration,
-)
-from azents.services.scheduled_task.service import (
-    ScheduledTaskMutationTarget,
-    ScheduledTaskService,
 )
 
 _NOW = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
@@ -153,15 +158,17 @@ async def test_provider_mutation_authorizes_binding_before_scheduled_locks(
     task_repository = _ControlTaskRepository(task, calls)
     task_service = _ControlTaskService(task, calls)
     service = ScheduledTaskProviderControlService(
-        session_manager=cast(
-            SessionManager[WriteSession],
-            _ControlSessionManager(calls),
-        ),
-        external_repository=cast(ExternalChannelRepository, object()),
-        task_repository=cast(ScheduledTaskRepository, task_repository),
-        cycle_repository=cast(ScheduledTaskCycleRepository, object()),
-        mailbox_repository=cast(MailboxRepository, object()),
         config=cast(Config, object()),
+        operations=ScheduledTaskProviderControlRepository(
+            session_manager=cast(
+                SessionManager[WriteSession],
+                _ControlSessionManager(calls),
+            ),
+            external_repository=cast(ExternalChannelRepository, object()),
+            task_repository=cast(ScheduledTaskRepository, task_repository),
+            cycle_repository=cast(ScheduledTaskCycleRepository, object()),
+            mailbox_repository=cast(MailboxRepository, object()),
+        ),
     )
 
     async def authorize(
@@ -174,12 +181,12 @@ async def test_provider_mutation_authorizes_binding_before_scheduled_locks(
         return cast(ExternalChannelInteraction, object())
 
     monkeypatch.setattr(
-        ScheduledTaskProviderControlService,
-        "_task_service",
-        lambda control_service: cast(ScheduledTaskService, task_service),
+        ScheduledTaskProviderControlRepository,
+        "_definition_repository",
+        lambda control_service: cast(ScheduledTaskDefinitionRepository, task_service),
     )
     monkeypatch.setattr(
-        ScheduledTaskProviderControlService,
+        ScheduledTaskProviderControlRepository,
         "_authorize",
         authorize,
     )
