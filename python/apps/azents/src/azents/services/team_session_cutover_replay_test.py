@@ -3,13 +3,25 @@
 import dataclasses
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import AgentRunStatus, AgentSessionKind, AgentSessionRunState
+from azents.broker.types import (
+    BrokerMessage,
+    SessionActivity,
+    SessionBroker,
+    SessionWakeUp,
+    WorkerSignal,
+)
+from azents.core.enums import (
+    AgentRunPhase,
+    AgentRunStatus,
+    AgentSessionKind,
+    AgentSessionRunState,
+)
+from azents.engine.run.emit import PublishedEvent
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -152,28 +164,68 @@ class _Broker:
         """Record broker/ownership state discard."""
         self.calls.append(("purge", session_id))
 
-    async def send_message(self, message: SessionWakeUp) -> None:
+    async def send_message(self, message: BrokerMessage) -> None:
         """Record one pure Session routing signal."""
+        assert isinstance(message, SessionWakeUp)
         if message.session_id == self.fail_wake_session_id:
             self.fail_wake_session_id = None
             raise RuntimeError("simulated broker interruption")
         self.calls.append(("wake", message))
 
+    async def receive_messages(self) -> list[WorkerSignal]:
+        """Reject worker consumption outside the replay contract."""
+        raise AssertionError("Replay must not receive worker signals")
 
-class _Session:
-    """Transaction-capable AsyncSession double."""
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Reject mailbox notifications outside the replay contract."""
+        raise AssertionError("Replay must not notify mailbox activity")
 
-    async def commit(self) -> None:
-        """Commit the deterministic replay fence."""
+    async def publish_event(self, session_id: str, event: PublishedEvent) -> None:
+        """Reject event publication outside the replay contract."""
+        raise AssertionError("Replay must not publish events")
 
-    async def rollback(self) -> None:
-        """Rollback a rejected replay fence."""
+    async def renew_session_ttl(self, session_id: str) -> None:
+        """Reject live-owner TTL changes outside the replay contract."""
+        raise AssertionError("Replay must not renew live-owner TTLs")
+
+    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
+        """Reject live-owner heartbeat changes outside the replay contract."""
+        raise AssertionError("Replay must not renew owner heartbeats")
+
+    async def release_session_lock(self, session_id: str) -> None:
+        """Reject live-owner lock changes outside the replay contract."""
+        raise AssertionError("Replay must not release owner locks")
+
+    async def set_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+        phase: AgentRunPhase | None = None,
+    ) -> bool:
+        """Reject activity mutation outside the replay contract."""
+        raise AssertionError("Replay must not set session activity")
+
+    async def clear_session_activity(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> bool:
+        """Reject activity mutation outside the replay contract."""
+        raise AssertionError("Replay must not clear session activity")
+
+    async def get_session_activity(self, session_id: str) -> SessionActivity | None:
+        """Reject transient activity reads outside the replay contract."""
+        raise AssertionError("Replay must not read transient session activity")
 
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
-    """Yield a fake database session for deterministic service tests."""
-    yield ReadWriteSession(cast(AsyncSession, _Session()))
+    """Own an unbound native session for deterministic repository doubles."""
+    async with AsyncSession() as session:
+        yield ReadWriteSession(session)
 
 
 def _candidate(
@@ -260,7 +312,7 @@ def _service(
 
     async def provide_broker() -> SessionBroker:
         broker_provider_calls.append(None)
-        return cast(SessionBroker, broker)
+        return broker
 
     service = TeamSessionCutoverReplayService(
         operations=TeamSessionCutoverReplayOperationsRepository(
@@ -396,7 +448,7 @@ async def test_mid_batch_broker_interruption_releases_barrier_and_retries() -> N
     broker = _Broker(fail_wake_session_id="session-2")
 
     async def provide_broker() -> SessionBroker:
-        return cast(SessionBroker, broker)
+        return broker
 
     service = TeamSessionCutoverReplayService(
         operations=TeamSessionCutoverReplayOperationsRepository(
@@ -453,7 +505,7 @@ async def test_lost_barrier_aborts_before_broker_mutation() -> None:
     broker = _Broker(renew_result=False)
 
     async def provide_broker() -> SessionBroker:
-        return cast(SessionBroker, broker)
+        return broker
 
     service = TeamSessionCutoverReplayService(
         operations=TeamSessionCutoverReplayOperationsRepository(
@@ -484,9 +536,10 @@ async def test_candidate_repository_rejects_unbounded_batch_size(
     """Repository rejects batch sizes outside the fixed operator bound."""
     repository = SessionCutoverReplayRepository()
 
-    with pytest.raises(ValueError, match="batch_size"):
-        await repository.read_candidate_batch(
-            ReadWriteSession(cast(AsyncSession, object())),
-            batch_size=batch_size,
-            after_session_id=None,
-        )
+    async with AsyncSession() as session:
+        with pytest.raises(ValueError, match="batch_size"):
+            await repository.read_candidate_batch(
+                ReadWriteSession(session),
+                batch_size=batch_size,
+                after_session_id=None,
+            )
