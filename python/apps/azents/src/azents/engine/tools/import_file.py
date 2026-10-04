@@ -13,7 +13,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorSourceTransport,
     CoordinatorTransferFailure,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.run.types import FunctionTool, FunctionToolError
@@ -88,6 +88,8 @@ class ImportFileStagingConfiguration:
 
 class ImportFileInput(BaseModel):
     """import_file tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     uri: str = Field(
         description=(

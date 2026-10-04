@@ -955,7 +955,6 @@ class TestKubernetesToolkitLifecycle:
 
         staging_lightkube = MagicMock()
         staging_lightkube.close = AsyncMock()
-        staging_lightkube._client._client = MagicMock()
         staging_exec = MagicMock()
         staging_exec.close = AsyncMock()
 
@@ -997,7 +996,6 @@ class TestKubernetesToolkitLifecycle:
         )
         toolkit = KubernetesToolkit(config=config, credentials=credentials)
         lightkube_client = MagicMock()
-        lightkube_client._client._client = MagicMock()
         exec_client = MagicMock()
         cache = MagicMock(spec=ResourceDiscoveryCache)
         cache.discover = AsyncMock()

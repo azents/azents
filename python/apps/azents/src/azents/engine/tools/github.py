@@ -13,10 +13,10 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from textwrap import dedent
-from typing import Protocol
+from typing import Protocol, assert_never
 
 from mcp.types import Tool as McpBaseTool
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from azents.core.engine_tool_state import McpToolSnapshotState
 from azents.core.github_auth import (
@@ -47,6 +47,11 @@ from azents.core.tools import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
+from azents.engine.tools.background_discovery import (
+    DISCOVERY_ERRORS,
+    observe_discovery_failure,
+    require_expected_discovery_failure,
+)
 from azents.engine.tools.mcp import McpToolkit
 from azents.engine.tools.mcp_base import wrap_mcp_tool
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
@@ -57,6 +62,7 @@ from azents.repos.toolkit_state.engine import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +184,8 @@ _SAFE_TOOL_SEGMENT = re.compile(r"[^a-zA-Z0-9_]")
 
 class GitHubSwitchInstallationInput(BaseModel):
     """Input for selecting the default GitHub installation."""
+
+    model_config = ConfigDict(extra="forbid")
 
     installation: str = Field(
         min_length=1,
@@ -521,6 +529,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             and self._lazy_mcp_task is None
         ):
             self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
+            self._lazy_mcp_task.add_done_callback(
+                observe_discovery_failure(logger, toolkit="github")
+            )
         return self
 
     async def __aexit__(self, *exc: object) -> None:
@@ -550,6 +561,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         ):
             binding.lazy_mcp_task = asyncio.create_task(
                 self._prepare_installation_mcp(binding)
+            )
+            binding.lazy_mcp_task.add_done_callback(
+                observe_discovery_failure(logger, toolkit="github")
             )
 
     async def _exit_installation_binding(
@@ -596,15 +610,21 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             binding.lazy_mcp_error = None
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except (*DISCOVERY_ERRORS, ExceptionGroup) as exc:
+            require_expected_discovery_failure(exc)
             logger.exception(
                 "Failed to prepare GitHub MCP toolkit",
                 extra={
                     "installation_id": binding.target.installation_id,
                     "account_login": binding.target.account_login,
                 },
+                exc_info=sanitized_exception_info(
+                    exc, message="GitHub MCP preparation failed"
+                ),
             )
-            binding.lazy_mcp_error = f"GitHub toolkit preparation failed: {exc}"
+            binding.lazy_mcp_error = (
+                f"GitHub toolkit preparation failed: {type(exc).__name__}"
+            )
 
     async def _installation_update_context(
         self,
@@ -725,9 +745,17 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             self._lazy_mcp_error = None
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            logger.exception("Failed to prepare GitHub MCP toolkit")
-            self._lazy_mcp_error = f"GitHub toolkit preparation failed: {exc}"
+        except (*DISCOVERY_ERRORS, ExceptionGroup) as exc:
+            require_expected_discovery_failure(exc)
+            logger.exception(
+                "Failed to prepare GitHub MCP toolkit",
+                exc_info=sanitized_exception_info(
+                    exc, message="GitHub MCP preparation failed"
+                ),
+            )
+            self._lazy_mcp_error = (
+                f"GitHub toolkit preparation failed: {type(exc).__name__}"
+            )
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Fetch tools from GitHub MCP server and filter by toolset.
@@ -822,6 +850,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
                 and self._lazy_mcp_task is None
             ):
                 self._lazy_mcp_task = asyncio.create_task(self._prepare_lazy_mcp())
+                self._lazy_mcp_task.add_done_callback(
+                    observe_discovery_failure(logger, toolkit="github")
+                )
             if self._lazy_mcp_task is not None and not self._lazy_mcp_task.done():
                 return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
             if self._lazy_mcp_error is not None:
@@ -941,8 +972,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     platform.private_key,
                     first.installation_id,
                 )
-            case _:
-                return None
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def validate_credentials(
         self,
@@ -1031,8 +1062,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     context,
                     proxy_url=proxy_url,
                 )
-            case _:
-                raise ValueError(f"Unknown GitHub secret type: {type(secrets)}")
+            case _ as unreachable:
+                assert_never(unreachable)
 
     def _resolve_pat(
         self,

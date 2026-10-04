@@ -1228,7 +1228,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                     ),
                     make_read_image_tool(
                         session_storage=file_ss,
-                        model_file_service=self.model_file_service,
                         authority=authority,
                         runtime_image_read_service=self.runtime_image_read_service,
                         resolve_runtime_target=resolve_image_target,

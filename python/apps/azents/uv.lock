@@ -381,6 +381,7 @@ dependencies = [
     { name = "google-analytics-admin" },
     { name = "google-analytics-data" },
     { name = "google-auth" },
+    { name = "google-cloud-container" },
     { name = "google-genai" },
     { name = "grpcio" },
     { name = "httpx" },
@@ -444,6 +445,7 @@ requires-dist = [
     { name = "google-analytics-admin", specifier = "==0.30.1" },
     { name = "google-analytics-data", specifier = "==0.23.2" },
     { name = "google-auth", specifier = "==2.57.1" },
+    { name = "google-cloud-container", specifier = "==2.67.0" },
     { name = "google-genai", specifier = "==2.25.0" },
     { name = "grpcio", specifier = "==1.83.1" },
     { name = "httpx", specifier = "==0.28.1" },
@@ -1252,6 +1254,22 @@ wheels = [
 [package.optional-dependencies]
 requests = [
     { name = "requests" },
+]
+
+[[package]]
+name = "google-cloud-container"
+version = "2.67.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f7/02/8bfb3310d8e281e971ac8e85c3002b3a9948719ec6feaf4f60f52074276a/google_cloud_container-2.67.0.tar.gz", hash = "sha256:7277535fffd7fb4e97c7a94373c1b123d0c7fae678e108dec5d7ced72182c6a5", size = 415422, upload-time = "2026-10-01T18:15:48.812Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/f5/32a928c74ea2fbbe48e89dffcd58dbb1747531f41e6cebf5cfd1b977f427/google_cloud_container-2.67.0-py3-none-any.whl", hash = "sha256:9fbcb0ff85ee76cc1e0fd89503109cac944cec5640a2a76fac999adccb48afba", size = 359324, upload-time = "2026-10-01T18:09:19.905Z" },
 ]
 
 [[package]]

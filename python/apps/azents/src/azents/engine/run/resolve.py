@@ -660,6 +660,8 @@ async def resolve_invoke_input_with_model_source(
                     integration_id=main_selection.llm_provider_integration_id,
                 )
             )
+        case _ as unreachable:
+            assert_never(unreachable)
 
     lightweight_integration = integration
     if loaded_lightweight_integration.id != integration.id:
@@ -679,6 +681,8 @@ async def resolve_invoke_input_with_model_source(
                         ),
                     )
                 )
+            case _ as unreachable:
+                assert_never(unreachable)
 
     model = main_selection.model_identifier
     credential_kwargs = build_credential_kwargs(integration)

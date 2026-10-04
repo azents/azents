@@ -25,8 +25,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-02
-spec_version: 9
+last_verified_at: 2026-10-04
+spec_version: 10
 ---
 
 # MCP OAuth Flow
@@ -296,6 +296,13 @@ Toolkit config responses include `oauth_connection` when a toolkit has a connect
 Runtime `list_tools` failure is not a run-startup failure. If a previous successful snapshot exists,
 the old snapshot remains model-visible. If no snapshot exists, no MCP tools are exposed and no MCP
 loading/error prompt or retry pseudo-tool is added to the model-visible surface.
+
+Expected authentication and transport failures retain that nonfatal snapshot
+behavior. Unexpected programming/invariant errors are observed once at the
+background task boundary with sanitized origin evidence rather than classified
+as remote unavailability. Mixed exception groups retain unexpected leaves, and
+cancellation remains cancellation. AWS, GCP and GitHub share this distinction
+without adding model-visible loading/error text or retry pseudo-tools.
 
 ## Cryptography
 

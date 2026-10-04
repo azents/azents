@@ -1,7 +1,7 @@
 """Session-scoped todo Toolkit State tools."""
 
 from collections.abc import Awaitable, Callable
-from typing import Literal, Self
+from typing import Literal, Self, assert_never
 
 from pydantic import BaseModel, Field
 
@@ -239,6 +239,8 @@ def apply_todo_update(_current: TodoState, update: UpdateTodoInput) -> TodoState
             return TodoState()
         case "replace":
             return TodoState(items=[_to_item(item) for item in update.items])
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _to_item(item: TodoUpdateItem) -> TodoItem:
