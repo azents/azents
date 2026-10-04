@@ -66,6 +66,28 @@ from azents.services.session_git_worktree.service_test import (
     _create_agent_worktree_session,
     _RunnerOperations,
 )
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
+
+
+@pytest_asyncio.fixture
+async def committed_fixture_metadata(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> sa.MetaData:
+    """Reflect the actual FK graph once for this module's committed test seeds."""
+    del latest_db_schema
+    metadata = sa.MetaData()
+    async with rdb_engine.connect() as connection:
+        await connection.run_sync(metadata.reflect)
+    return metadata
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def cleanup_committed_fixture_graph(
+    rdb_engine: AsyncEngine, committed_fixture_metadata: sa.MetaData
+) -> AsyncGenerator[None, None]:
+    """Always release only identities created by this committed evidence case."""
+    async with committed_fixture_graph(rdb_engine, committed_fixture_metadata):
+        yield
 
 
 @dataclass
@@ -176,8 +198,8 @@ async def worktree_operations(
         read_manager=observed_read,
         sessions=sessions,
     )
-    # Unique committed graphs live only in the owning disposable PostgreSQL
-    # container; deleting parents here would bypass the product's RESTRICT graph.
+    # Independent commits remain genuine evidence. The autouse graph fixture
+    # releases this test's exact owned rows in FK order after every outcome.
     yield fixture
 
 
