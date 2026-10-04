@@ -1,13 +1,17 @@
 """Availability projection follows quota health, not raw control compatibility."""
 
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.inference_profile import SessionAppliedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.rdb.session_capabilities import ReadOnlySession, ReadSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
@@ -15,16 +19,22 @@ from azents.repos.model_candidate_health.data import (
     ModelCandidateHealthObservation,
     ModelCandidateHealthStatus,
 )
-from azents.repos.session_model_profile.repository import SessionModelProfileRepository
-from azents.services.model_availability import (
-    SessionModelAvailabilityService,
+from azents.repos.session_model_availability import (
+    SessionModelAvailabilityRepository,
     _AuthorizedAvailabilityContext,
 )
+from azents.repos.session_model_profile.repository import SessionModelProfileRepository
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
 )
 from azents.worker.run import executor_test as fixtures
+
+
+@asynccontextmanager
+async def _read_scope() -> AsyncIterator[ReadSession]:
+    async with AsyncSession() as session:
+        yield ReadOnlySession(session)
 
 
 @pytest.mark.parametrize("requested_effort", [None, ModelReasoningEffort.HIGH])
@@ -74,10 +84,10 @@ async def test_projection_reports_first_healthy_fallback_despite_raw_controls(
     )
     health = AsyncMock(spec=ModelCandidateHealthRepository)
     now = datetime.datetime.now(datetime.UTC)
-    health.snapshot.return_value = ModelCandidateHealthObservation(
+    health.snapshot_in_session.return_value = ModelCandidateHealthObservation(
         server_time=now, status=ModelCandidateHealthStatus.COOLDOWN, health=None
     )
-    health.snapshot_for_background.side_effect = [
+    health.snapshot_for_background_in_session.side_effect = [
         ModelCandidateHealthObservation(
             server_time=now, status=first_status, health=None
         ),
@@ -85,7 +95,8 @@ async def test_projection_reports_first_healthy_fallback_despite_raw_controls(
             server_time=now, status=ModelCandidateHealthStatus.AVAILABLE, health=None
         ),
     ]
-    service = SessionModelAvailabilityService(
+    repository = SessionModelAvailabilityRepository(
+        read_session_manager=_read_scope,
         session_manager=Mock(),
         agent_repository=AsyncMock(spec=AgentRepository),
         agent_session_repository=AsyncMock(spec=AgentSessionRepository),
@@ -93,7 +104,7 @@ async def test_projection_reports_first_healthy_fallback_despite_raw_controls(
         health_repository=health,
     )
 
-    result = await service._project(context)
+    result = await repository._project(context)
 
     first_available = first_status is ModelCandidateHealthStatus.AVAILABLE
     assert result.first_usable_fallback_display_name == (
@@ -103,8 +114,8 @@ async def test_projection_reports_first_healthy_fallback_despite_raw_controls(
     assert result.primary.model_identifier == "primary"
     assert session.applied_inference_profile == profile
     assert [
-        call.args[0].model_identifier
-        for call in health.snapshot_for_background.await_args_list
+        call.args[1].model_identifier
+        for call in health.snapshot_for_background_in_session.await_args_list
     ] == (
         ["first-fallback"] if first_available else ["first-fallback", "second-fallback"]
     )
