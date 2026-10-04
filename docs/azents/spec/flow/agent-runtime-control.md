@@ -110,7 +110,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-05
-spec_version: 96
+spec_version: 97
 ---
 
 # Agent Runtime Control
@@ -483,6 +483,17 @@ and safe transfer/attempt or aggregate artifact fields. It never logs storage
 keys, raw provider upload IDs, raw exception text, hashes, credentials,
 endpoints, or bytes. State-independent orphan repair additionally reports
 bounded listed/deleted/aborted/failed/skipped counters.
+
+Direct-object Runner capability, PUT grant, HEAD, and immutable-copy boundaries
+classify only SDK connection, HTTP transport, and service response failures as
+ordinary storage unavailability. Workspace Upload finalization also handles its
+explicit object-validation failures; its state-independent orphan repair counts
+only expected storage failures. Programming and SDK argument-validation failures
+propagate to the owning error boundary instead of becoming an outage response or
+cleanup counter. Cancellation propagates unchanged, and reserved ingress/source
+handles and pending immutable-copy cleanup evidence remain available for repair.
+The managed Runner session reader closes its queue on every exit and leaves
+exception logging to the handling boundary.
 
 Runtime-to-Server transfer cleanup uses bounded abandon, status-recovery, and
 cancellation-confirmation attempts after the transfer result is fixed. A
@@ -1278,6 +1289,10 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 97) — Narrowed direct-object storage failure
+  classification while preserving cancellation and durable cleanup evidence;
+  removed duplicate logging from the managed Runner session reader.
 
 - **2026-10-05** (spec_version 96) — Recorded completed read-only Workspace
   access authority before Runtime and Runner orchestration.
