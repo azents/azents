@@ -2,9 +2,11 @@
 
 import asyncio
 import datetime
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 import sqlalchemy as sa
 from azcommon.result import Success
 from pytest import MonkeyPatch
@@ -71,6 +73,7 @@ from azents.repos.session_lifecycle_finalizer import (
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_selection_dict,
@@ -79,6 +82,20 @@ from azents.testing.model_selection import (
 )
 
 from . import AgentSessionRepository
+
+
+@pytest_asyncio.fixture
+async def isolated_stop_fixture_graph(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> AsyncIterator[None]:
+    """Release only graph identities committed by a concurrent Stop test."""
+    del latest_db_schema
+    metadata = sa.MetaData()
+    async with rdb_engine.connect() as connection:
+        await connection.run_sync(metadata.reflect)
+    async with committed_fixture_graph(rdb_engine, metadata):
+        yield
 
 
 async def _create_workspace(session: WriteSession, handle: str) -> str:
@@ -2336,10 +2353,10 @@ class TestAgentSessionRepository:
     async def test_subtree_stop_lock_serializes_concurrent_child_creation(
         self,
         rdb_engine: AsyncEngine,
-        latest_db_schema: None,
+        isolated_stop_fixture_graph: None,
     ) -> None:
         """A child cannot commit outside a concurrently captured stop subtree."""
-        del latest_db_schema
+        del isolated_stop_fixture_graph
         suffix = uuid4().hex[:8]
         repo = AgentSessionRepository()
         async with AsyncSession(
@@ -2428,10 +2445,10 @@ class TestAgentSessionRepository:
     async def test_parent_stop_lock_serializes_concurrent_nested_child_creation(
         self,
         rdb_engine: AsyncEngine,
-        latest_db_schema: None,
+        isolated_stop_fixture_graph: None,
     ) -> None:
         """A nested child cannot commit after its parent stop fence."""
-        del latest_db_schema
+        del isolated_stop_fixture_graph
         suffix = uuid4().hex[:8]
         repo = AgentSessionRepository()
         async with AsyncSession(
