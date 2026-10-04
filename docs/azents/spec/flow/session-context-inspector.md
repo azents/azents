@@ -5,13 +5,14 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-10-04
-spec_version: 27
+last_verified_at: 2026-10-05
+spec_version: 28
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/services/chat/context.py
+  - python/apps/azents/src/azents/repos/chat_context_snapshot.py
   - python/apps/azents/src/azents/api/public/chat/v1/__init__.py
   - python/apps/azents/src/azents/api/public/chat/v1/data.py
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
@@ -63,6 +64,13 @@ Behavior:
 6. Build event stats, approximate prompt-token breakdown, and raw events from events.
 
 `limit` minimum is 1, maximum is 500. Default is 300.
+
+The snapshot repository completes one read-only database operation for the exact active
+AgentSession, Workspace membership, recent non-reverted events and current prompt snapshot.
+It preserves the existing missing-session and non-member failures and returns detached domain
+evidence with events ordered by ascending physical ID. The service renders usage, breakdown,
+statistics and raw events only after the database scope has closed. This descriptive read
+does not lock rows or claim globally latest multi-read authority.
 
 ## Empty Transcript
 
@@ -174,6 +182,8 @@ cd typescript && corepack pnpm --filter @azents/web typecheck
 
 ## Changelog
 
+- **2026-10-05** — v28. Moved the authorized Context snapshot read into a
+  completed read-only repository operation before service rendering.
 - **2026-10-03** — v27. Switched local estimate capture to saved candidate prices
   and physical call time, preserving historical costs without current-source lookup.
 - **2026-10-03** — v26. Reflected captured data-only pricing authority and

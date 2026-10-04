@@ -13,7 +13,7 @@ from azents.core.chat_data import (
     NotWorkspaceMember,
     SessionNotFound,
 )
-from azents.core.enums import AgentSessionStatus, EventKind
+from azents.core.enums import EventKind
 from azents.core.json_value import JSONValue
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
@@ -43,15 +43,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     public_event_payload,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session_system_prompt_snapshot import (
-    AgentSessionSystemPromptSnapshotRepository,
-)
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.chat_context_snapshot import SessionContextSnapshotRepository
 
 ContextBreakdownKey = Literal["system", "user", "assistant", "tool", "other"]
 
@@ -202,21 +194,8 @@ class SessionContext(BaseModel):
 class SessionContextService:
     """AgentSession context inspector service."""
 
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository, Depends(WorkspaceUserRepository)
-    ]
-    transcript_repository: Annotated[
-        EventTranscriptRepository, Depends(EventTranscriptRepository)
-    ]
-    system_prompt_snapshot_repository: Annotated[
-        AgentSessionSystemPromptSnapshotRepository,
-        Depends(AgentSessionSystemPromptSnapshotRepository),
-    ]
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
+    snapshot_repository: Annotated[
+        SessionContextSnapshotRepository, Depends(SessionContextSnapshotRepository)
     ]
 
     async def get_session_context(
@@ -228,38 +207,22 @@ class SessionContextService:
         limit: int,
     ) -> Result[SessionContext, SessionNotFound | NotWorkspaceMember]:
         """Fetch context of an AgentSession accessible by user."""
-        bounded_limit = max(1, min(limit, 500))
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
+        result = await self.snapshot_repository.read(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            limit=limit,
+        )
+        if isinstance(result, Failure):
+            return Failure(result.error)
+        snapshot = result.value
+        return Success(
+            _build_context(
+                snapshot.session,
+                list(snapshot.events),
+                snapshot.system_prompt,
             )
-            if (
-                agent_session is None
-                or agent_session.agent_id != agent_id
-                or agent_session.status != AgentSessionStatus.ACTIVE
-            ):
-                return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
-            )
-            if workspace_user is None:
-                return Failure(NotWorkspaceMember())
-
-            events = await self.transcript_repository.list_recent_by_session_id(
-                session,
-                agent_session.id,
-                limit=bounded_limit,
-            )
-            system_prompt = await self.system_prompt_snapshot_repository.get(
-                session,
-                session_id=agent_session.id,
-            )
-            return Success(_build_context(agent_session, events, system_prompt))
+        )
 
 
 def _build_context(
