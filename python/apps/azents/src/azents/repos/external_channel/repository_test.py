@@ -2,20 +2,46 @@
 
 import dataclasses
 import datetime
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import Literal, Protocol, runtime_checkable
-from unittest.mock import AsyncMock, MagicMock, create_autospec
+from collections.abc import (
+    AsyncGenerator,
+)
+from contextlib import (
+    asynccontextmanager,
+)
+from types import (
+    SimpleNamespace,
+)
+from typing import (
+    Literal,
+    Protocol,
+    runtime_checkable,
+)
+from unittest.mock import (
+    AsyncMock,
+    MagicMock,
+    create_autospec,
+)
 
 import pytest
 import sqlalchemy as sa
-from azcommon.result import Success
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from azcommon.result import (
+    Success,
+)
+from sqlalchemy.dialects import (
+    postgresql,
+)
+from sqlalchemy.exc import (
+    DBAPIError,
+    IntegrityError,
+)
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+)
 
-from azents.core.agent_session_data import AgentSessionCreate
+from azents.core.agent_session_data import (
+    AgentSessionCreate,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRunStatus,
@@ -41,7 +67,6 @@ from azents.core.enums import (
 from azents.core.external_model_settings import (
     ExternalModelActorContext,
     ExternalModelApplied,
-    ExternalModelBusy,
     ExternalModelEditorReady,
     ExternalModelStale,
     ExternalModelTargetContext,
@@ -50,12 +75,24 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     validate_requested_profile_against_options,
 )
-from azents.core.workspace import WorkspaceCreate
-from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.agent_run import RDBAgentRun
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
-from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.external_account_link import RDBExternalAccountLink
+from azents.core.workspace import (
+    WorkspaceCreate,
+)
+from azents.rdb.models.agent import (
+    RDBAgent,
+)
+from azents.rdb.models.agent_run import (
+    RDBAgentRun,
+)
+from azents.rdb.models.agent_runtime import (
+    RDBAgentRuntime,
+)
+from azents.rdb.models.agent_session import (
+    RDBAgentSession,
+)
+from azents.rdb.models.external_account_link import (
+    RDBExternalAccountLink,
+)
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAgentRoute,
@@ -70,27 +107,49 @@ from azents.rdb.models.external_model_settings import (
     RDBExternalModelDraft,
     RDBExternalModelMutation,
 )
-from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.toolkit_state import RDBToolkitState
-from azents.rdb.models.user import RDBUser
+from azents.rdb.models.llm_provider_integration import (
+    RDBLLMProviderIntegration,
+)
+from azents.rdb.models.toolkit_state import (
+    RDBToolkitState,
+)
+from azents.rdb.models.user import (
+    RDBUser,
+)
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
-from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.rdb.session import (
+    SessionManager,
+)
+from azents.rdb.session_capabilities import (
+    ReadWriteSession,
+    WriteSession,
+)
+from azents.repos.active_model_capabilities import (
+    ActiveModelCapabilitiesRepository,
+)
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     CapturedProfileAdmission,
 )
-from azents.repos.agent import AgentRepository
-from azents.repos.agent.data import Agent
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.chat_write_request import ChatWriteRequestRepository
-from azents.repos.external_account_link import ExternalAccountLinkRepository
+from azents.repos.agent import (
+    AgentRepository,
+)
+from azents.repos.agent.data import (
+    Agent,
+)
+from azents.repos.agent_session import (
+    AgentSessionRepository,
+)
+from azents.repos.chat_write_request import (
+    ChatWriteRequestRepository,
+)
+from azents.repos.external_account_link import (
+    ExternalAccountLinkRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrantCreate,
     ExternalChannelAgentRouteCreate,
     ExternalChannelBindingCreate,
-    ExternalChannelBlockCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationPosition,
     ExternalChannelResourceCreate,
@@ -109,16 +168,30 @@ from azents.repos.external_channel.work_state import (
     ChannelWorkState,
     channel_work_state_name,
 )
-from azents.repos.llm_catalog import LLMCatalogRepository
-from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.llm_catalog import (
+    LLMCatalogRepository,
+)
+from azents.repos.model_metadata_source import (
+    ModelMetadataSourceRepository,
+)
 from azents.repos.session_model_profile.repository import (
     SessionModelProfileRepository,
 )
-from azents.repos.user import UserRepository
-from azents.repos.user.data import UserCreate
-from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
-from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.repos.user import (
+    UserRepository,
+)
+from azents.repos.user.data import (
+    UserCreate,
+)
+from azents.repos.workspace import (
+    WorkspaceRepository,
+)
+from azents.repos.workspace_user import (
+    WorkspaceUserRepository,
+)
+from azents.repos.workspace_user.data import (
+    WorkspaceUserCreate,
+)
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -873,12 +946,12 @@ class TestExternalChannelRepository:
             )
             assert acquired_after_release is True
 
-    async def test_native_model_authorization_fences_user_disable_both_orders(
+    async def test_native_model_authorization_uses_committed_disable_state(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """User disable conflicts before and after native authorization."""
+        """Ordinary authorization observes committed rows without holding User locks."""
         del latest_db_schema
         async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_setup:
             setup = ReadWriteSession(_raw_setup)
@@ -1025,95 +1098,39 @@ class TestExternalChannelRepository:
                 offset=0,
                 limit=10,
             )
-            assert isinstance(busy, ExternalModelBusy)
+            assert isinstance(busy, ExternalModelEditorReady)
             await disabling.write_session.rollback()
 
         async with (
-            AsyncSession(rdb_engine) as _raw_authorized_session,
-            AsyncSession(rdb_engine) as _raw_disabling,
+            AsyncSession(rdb_engine) as raw_authorized,
+            AsyncSession(rdb_engine) as raw_disabling,
         ):
-            authorized_session = ReadWriteSession(_raw_authorized_session)
-            disabling = ReadWriteSession(_raw_disabling)
             authorization = await repository._authorize(
-                authorized_session,
+                ReadWriteSession(raw_authorized),
                 actor=actor,
                 target=target,
             )
             assert authorization.target is not None
-            await disabling.write_session.execute(
-                sa.text("SET LOCAL lock_timeout = '100ms'")
+            await raw_disabling.execute(sa.text("SET LOCAL lock_timeout = '500ms'"))
+            await raw_disabling.execute(
+                sa.update(RDBUser)
+                .where(RDBUser.id == user.id)
+                .values(access_disabled_at=_at(1))
             )
-            with pytest.raises(DBAPIError) as raised:
-                await disabling.write_session.execute(
-                    sa.update(RDBUser)
-                    .where(RDBUser.id == user.id)
-                    .values(access_disabled_at=_at(2))
-                )
-            assert _dbapi_sqlstate(raised.value) == "55P03"
-            await disabling.write_session.rollback()
-            await disabling.write_session.execute(
-                sa.text("SET LOCAL lock_timeout = '100ms'")
+            await raw_disabling.commit()
+            denied = await repository._authorize(
+                ReadWriteSession(raw_authorized),
+                actor=actor,
+                target=target,
             )
-            with pytest.raises(DBAPIError) as block_conflict:
-                await external_repository.create_block_idempotent(
-                    disabling,
-                    ExternalChannelBlockCreate(
-                        agent_id=fixture.agent_id,
-                        principal_id=principal.id,
-                        blocked_by_user_id=user.id,
-                        reason=None,
-                        removed_by_user_id=None,
-                        removed_at=None,
-                    ),
-                )
-            assert _dbapi_sqlstate(block_conflict.value) == "55P03"
-            await disabling.write_session.rollback()
-            await disabling.write_session.execute(
-                sa.text("SET LOCAL lock_timeout = '100ms'")
+            assert denied.rejection is not None
+
+        async with session_manager() as resetting:
+            await resetting.write_session.execute(
+                sa.update(RDBUser)
+                .where(RDBUser.id == user.id)
+                .values(access_disabled_at=None)
             )
-            with pytest.raises(DBAPIError) as grant_conflict:
-                await external_repository.delete_access_grant(
-                    disabling,
-                    grant_id=grant.id,
-                )
-            assert _dbapi_sqlstate(grant_conflict.value) == "55P03"
-            await disabling.write_session.rollback()
-            await disabling.write_session.execute(
-                sa.text("SET LOCAL lock_timeout = '100ms'")
-            )
-            with pytest.raises(DBAPIError) as member_conflict:
-                await disabling.write_session.execute(
-                    sa.delete(RDBWorkspaceUser).where(
-                        RDBWorkspaceUser.workspace_id == connection.workspace_id,
-                        RDBWorkspaceUser.user_id == user.id,
-                    )
-                )
-            assert _dbapi_sqlstate(member_conflict.value) == "55P03"
-            await disabling.write_session.rollback()
-            await disabling.write_session.execute(
-                sa.text("SET LOCAL lock_timeout = '100ms'")
-            )
-            with pytest.raises(DBAPIError) as link_conflict:
-                await disabling.write_session.execute(
-                    sa.update(RDBExternalAccountLink)
-                    .where(
-                        RDBExternalAccountLink.workspace_id == connection.workspace_id,
-                        RDBExternalAccountLink.user_id == user.id,
-                    )
-                    .values(revoked_at=_at(2))
-                )
-            assert _dbapi_sqlstate(link_conflict.value) == "55P03"
-            await disabling.write_session.rollback()
-            await disabling.write_session.execute(
-                sa.text("SET LOCAL lock_timeout = '100ms'")
-            )
-            with pytest.raises(DBAPIError) as archive_conflict:
-                await disabling.write_session.execute(
-                    sa.update(RDBAgentSession)
-                    .where(RDBAgentSession.id == fixture.agent_session_id)
-                    .values(status=AgentSessionStatus.ARCHIVED)
-                )
-            assert _dbapi_sqlstate(archive_conflict.value) == "55P03"
 
         opened = await repository.open_editor(
             actor=actor,
@@ -1125,14 +1142,14 @@ class TestExternalChannelRepository:
         )
         assert isinstance(opened, ExternalModelEditorReady)
         async with session_manager() as changing:
-            await agent_session_repository.set_applied_inference_profile(
+            await AgentSessionRepository().set_applied_inference_profile(
                 changing,
                 session_id=fixture.agent_session_id,
                 model_target_label="temporary",
                 reasoning_effort=None,
                 enabled_execution_options=[],
             )
-            await agent_session_repository.set_applied_inference_profile(
+            await AgentSessionRepository().set_applied_inference_profile(
                 changing,
                 session_id=fixture.agent_session_id,
                 model_target_label="default",
@@ -1251,7 +1268,7 @@ class TestExternalChannelRepository:
         assert isinstance(repeated_removed.result, ExternalModelStale)
         assert repeated_removed.notice_plan is None
         async with session_manager() as verify_unchanged:
-            unchanged = await agent_session_repository.get_by_id(
+            unchanged = await AgentSessionRepository().get_by_id(
                 verify_unchanged,
                 fixture.agent_session_id,
             )

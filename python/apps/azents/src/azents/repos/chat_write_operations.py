@@ -638,12 +638,10 @@ class ChatWriteOperationsRepository:
         )
         if root is None or root.agent_session_id != locked.id:
             raise ValueError("AgentSession root lineage is invalid")
-        workspace_user = (
-            await self.workspace_user_repository.lock_by_workspace_and_user(
-                session,
-                workspace_id=locked.workspace_id,
-                user_id=user_id,
-            )
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=locked.workspace_id,
+            user_id=user_id,
         )
         if workspace_user is None:
             raise ValueError("Requester does not have session access")

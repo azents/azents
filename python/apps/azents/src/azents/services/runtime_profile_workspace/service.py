@@ -209,7 +209,7 @@ class RuntimeProfileWorkspaceService:
                 profile_id=explicit_profile_id,
             )
             return explicit_profile_id
-        workspace = await self.workspace_repository.get_by_id_for_update(
+        workspace = await self.workspace_repository.get_by_id(
             session,
             workspace_id,
         )
@@ -589,7 +589,6 @@ class RuntimeProfileWorkspaceService:
         provider = await self.provider_repository.get_by_id(
             session,
             provider_id=profile.provider_id,
-            for_update=False,
         )
         if provider is None:
             raise AssertionError("Workspace Runtime Profile Provider is missing.")
@@ -728,7 +727,6 @@ class RuntimeProfileWorkspaceService:
         provider = await self.provider_repository.get_by_id(
             session,
             provider_id=infrastructure.provider_id,
-            for_update=False,
         )
         if (
             provider is None
@@ -771,7 +769,6 @@ class RuntimeProfileWorkspaceService:
         provider = await self.provider_repository.get_by_id(
             session,
             provider_id=infrastructure.provider_id,
-            for_update=False,
         )
         if provider is None:
             raise RuntimeProfileWorkspaceUnavailable(

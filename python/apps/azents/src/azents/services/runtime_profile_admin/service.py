@@ -515,7 +515,6 @@ class RuntimeProfileAdminService:
             provider = await self.provider_repository.get_by_id(
                 session,
                 provider_id=profile.provider_id,
-                for_update=False,
             )
             if (
                 infrastructure is None
@@ -547,7 +546,6 @@ class RuntimeProfileAdminService:
         provider = await self.provider_repository.get_by_provider_id(
             session,
             provider_logical_id=provider_logical_id,
-            for_update=False,
         )
         if provider is None:
             raise RuntimeProfileAdminUnavailable(

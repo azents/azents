@@ -547,6 +547,26 @@ class SessionWorkspaceProjectRepository:
             return None
         return self._build_project(rdb, session_id=session_id)
 
+    async def get_project_in_context(
+        self,
+        session: ReadSession,
+        *,
+        project_id: str,
+        context_id: str,
+        session_id: str,
+    ) -> SessionWorkspaceProject | None:
+        """Read one exact Project within the selected Session context."""
+        result = await session.read_session.execute(
+            sa.select(RDBSessionAgentContextProject).where(
+                RDBSessionAgentContextProject.id == project_id,
+                RDBSessionAgentContextProject.session_agent_context_id == context_id,
+            )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build_project(rdb, session_id=session_id)
+
     async def lock_project_by_id(
         self,
         session: WriteSession,

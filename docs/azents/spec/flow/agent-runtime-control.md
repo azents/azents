@@ -96,7 +96,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-04
-spec_version: 93
+spec_version: 94
 ---
 
 # Agent Runtime Control
@@ -192,6 +192,14 @@ Runner connection generations as canonical fixed-width decimal strings. It does 
 read or migrate the retired volatile namespace.
 
 ## Runtime Web Exposure
+
+Service descriptions use ordinary reads without a hidden row-lock mode.
+Metadata, Off, reset and delete mutate with exact service/revision predicates;
+reset additionally requires current On state, so a stale reset cannot revive an
+Off service. Active service quota is protected only at actual slot admission.
+Identity/ticket issuance retains its configuration-finalization guard, including
+same-mode revocation ordering; ordinary configuration/identity projection does
+not inherit this mutation fence.
 
 Runtime Web gives one Agent and numeric loopback port one stable opaque HTTPS
 service URL. PostgreSQL stores the service's selected 1-, 6-, or 24-hour duration,

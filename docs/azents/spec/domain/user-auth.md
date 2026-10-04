@@ -123,8 +123,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-10-03
-spec_version: 25
+last_verified_at: 2026-10-04
+spec_version: 26
 ---
 
 # User & Authentication
@@ -599,6 +599,14 @@ and existing foreign-key failure semantics are unchanged.
 - `[admin-bootstrap-secret-hash-only]` — configured setup-token plaintext is never stored or logged; generated plaintext is emitted only once after hash persistence.
 - `[system-admin-live-lookup]` — Admin authorization reads the persisted role for every protected request rather than trusting JWT role claims.
 - `[system-admin-final-assignment]` — role revoke and User deletion cannot leave the instance with zero system administrators.
+
+Ordinary role reads and grants do not acquire the global administrator-removal
+advisory gate. Actual role grant holds only exact active-User eligibility through
+commit; disable/revocation cannot leave a newly granted role after its sweep.
+Final-admin counting includes enabled Users only, so a disabled legacy assignment
+cannot authorize removal of the last enabled administrator. Actual Session
+issuance likewise retains its exact active-User mutation fence; ordinary User and
+Session lookup does not inherit it.
 - `[system-admin-distinct-from-workspace]` — OWNER/MANAGER Workspace roles do not grant Admin API access.
 - `[system-admin-existing-install-cli]` — users-first installations and recovery require explicit exact-email CLI grant; no automatic promotion path exists.
 - `[system-settings-existing-admin-boundary]` — System Settings uses the same live persisted `system_admin` dependency and does not change bootstrap, promotion, revoke, or final-admin behavior.

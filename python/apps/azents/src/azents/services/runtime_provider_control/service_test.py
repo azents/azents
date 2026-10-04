@@ -83,7 +83,6 @@ async def _create_bootstrap_issued_token_binding(
     declaration = await provider_repository.get_bootstrap_declaration_by_provider_id(
         session,
         provider_id=provider_id,
-        for_update=False,
     )
     assert declaration is not None
     binding = await binding_repository.create(

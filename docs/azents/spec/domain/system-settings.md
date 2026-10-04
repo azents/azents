@@ -177,6 +177,22 @@ serialized transaction. It still requires `expected_version`, increments the Adm
 version, and appends the normal activation audit event, but it creates no candidate,
 confirmation, or health workflow.
 
+Ordinary current/candidate/state descriptions use independent read-only scopes;
+an expired candidate is absent in the description without cleanup writes.
+Current publication is conditioned on its existing version, candidate replacement
+is atomic at the unique Section, and activation consumes the exact candidate ID
+before current-version publication in the same transaction. A replaced candidate
+or stale current version cannot win activation; failure rolls back consumption.
+Generic Section advisory serialization is not inherited by these reads.
+
+Slack/Discord identity OAuth publication retains the same narrow Section fence
+as exact callback claim and link finalization, including environment-backed
+absent current rows. Optional platform default initialization and pending
+PLATFORM_RUNTIME candidate creation share only their actual initialization claim;
+ordinary administrator current writes retain version CAS. A losing optional
+initializer leaves the concurrently configured default and provider reconciliation
+intact.
+
 ### Health and audit
 
 Health checks validate the current effective Section without mutating the Admin base. A result is stored

@@ -191,7 +191,6 @@ class IssuedTokenProviderAuthVerifier:
             binding = await self.binding_repository.get_by_id(
                 session,
                 binding_id=credential.binding_id,
-                for_update=False,
             )
             if (
                 binding is None
@@ -204,7 +203,6 @@ class IssuedTokenProviderAuthVerifier:
             provider = await self.provider_repository.get_by_id(
                 session,
                 provider_id=binding.provider_id,
-                for_update=False,
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderCredentialUnavailable("provider_unavailable")
@@ -298,7 +296,6 @@ class KubernetesServiceAccountProviderAuthVerifier:
             provider = await self.provider_repository.get_by_id(
                 session,
                 provider_id=binding.provider_id,
-                for_update=False,
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderCredentialUnavailable("provider_unavailable")

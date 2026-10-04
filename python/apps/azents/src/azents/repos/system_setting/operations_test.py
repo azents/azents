@@ -96,6 +96,7 @@ def _service(
     return SystemSettingsService(
         repository=SystemSettingsRepository(
             session_manager=manager,
+            read_session_manager=manager,
             repository=query,
             payloads=SystemSettingPayloadResolver(
                 registry=SystemSettingRegistry(
@@ -730,7 +731,7 @@ async def test_external_validation_failure_and_cancellation_leave_no_open_db(
     ).total == 1
 
 
-async def test_section_lock_serializes_competing_mutations_with_version_fence(
+async def test_conditional_current_write_rejects_competing_expected_version(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
 ) -> None:
@@ -743,17 +744,18 @@ async def test_section_lock_serializes_competing_mutations_with_version_fence(
         def __init__(self) -> None:
             self.calls = 0
 
-        async def acquire_section_lock(
-            self, session: WriteSession, *, section: SystemSettingSection
-        ) -> None:
+        async def write_current(
+            self, session: WriteSession, *, write: SystemSettingCurrentWrite
+        ) -> StoredSystemSetting:
             self.calls += 1
             attempt = self.calls
             if attempt == 2:
                 second_started.set()
-            await super().acquire_section_lock(session, section=section)
+            result = await super().write_current(session, write=write)
             if attempt == 1:
                 first_locked.set()
                 await release_first.wait()
+            return result
 
     @asynccontextmanager
     async def independent_manager() -> AsyncIterator[WriteSession]:

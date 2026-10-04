@@ -131,7 +131,6 @@ async def test_advertisement_is_immediately_authoritative_and_idempotent(
         provider = await RuntimeProviderRepository().get_by_id(
             session,
             provider_id=provider_resource_id,
-            for_update=False,
         )
     assert provider is not None
     assert provider.current_contract_revision_id == first.id
@@ -169,7 +168,6 @@ async def test_new_advertisement_moves_current_and_preserves_history(
         provider = await RuntimeProviderRepository().get_by_id(
             session,
             provider_id=provider_resource_id,
-            for_update=False,
         )
     assert provider is not None
     assert provider.current_contract_revision_id == latest.id
@@ -215,7 +213,6 @@ async def test_restored_advertisement_appends_new_revision(
         provider = await RuntimeProviderRepository().get_by_id(
             session,
             provider_id=provider_resource_id,
-            for_update=False,
         )
     assert provider is not None
     assert provider.current_contract_revision_id == restored.id
@@ -283,7 +280,6 @@ async def test_advertisement_rejects_invalid_profile_contract_declarations(
         provider = await RuntimeProviderRepository().get_by_id(
             session,
             provider_id=provider_resource_id,
-            for_update=False,
         )
     assert provider is not None
     assert provider.current_contract_revision_id is None

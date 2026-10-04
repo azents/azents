@@ -226,10 +226,9 @@ class _WorkspaceUserRepository(WorkspaceUserRepository):
         self.allowed = allowed
         self.calls: list[tuple[str, str]] = []
 
-    async def lock_by_workspace_and_user(
+    async def get_by_workspace_and_user(
         self,
-        session: WriteSession,
-        *,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -499,10 +498,9 @@ class _ControlWorkspaceUserRepository(WorkspaceUserRepository):
         self.allowed = allowed
         self.calls = 0
 
-    async def lock_by_workspace_and_user(
+    async def get_by_workspace_and_user(
         self,
-        session: WriteSession,
-        *,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:

@@ -142,7 +142,7 @@ class ToolkitOperationsRepository:
     ) -> Result[ToolkitWithOAuth, PlatformAuthorityRejected]:
         """Atomically create a Toolkit, Workspace scope, and response snapshot."""
         async with self.session_manager() as session:
-            workspace = await self.workspace_repository.get_by_id_for_update(
+            workspace = await self.workspace_repository.get_by_id(
                 session,
                 create.workspace_id,
             )
@@ -257,8 +257,12 @@ class ToolkitOperationsRepository:
                 )
                 if authority_error is not None:
                     return Failure(authority_error)
-            toolkit = await self.toolkit_repository.get_shared_by_id_for_update(
-                session, toolkit_id
+            toolkit = (
+                await self.toolkit_repository.claim_shared_namespace_mutation(
+                    session, toolkit_id
+                )
+                if "slug" in update or slug_reset_canonical_name is not None
+                else await self.toolkit_repository.get_shared_by_id(session, toolkit_id)
             )
             if toolkit is None:
                 return Failure(NotFound(toolkit_id=toolkit_id))
@@ -281,8 +285,6 @@ class ToolkitOperationsRepository:
                     )
                 )
                 agent_ids.sort()
-                for agent_id in agent_ids:
-                    await self.agent_repository.lock_by_id(session, agent_id)
             update_result = await self.toolkit_repository.update_by_id(
                 session,
                 toolkit_id,
@@ -439,14 +441,14 @@ class ToolkitOperationsRepository:
     ) -> Result[AgentToolkit, AgentToolkitAttachError]:
         """Atomically revalidate availability and attach one Toolkit."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repository.get_shared_by_id_for_update(
+            toolkit = await self.toolkit_repository.claim_shared_namespace_mutation(
                 session, toolkit_id
             )
             if toolkit is None:
                 return Failure(NotFound(toolkit_id=toolkit_id))
             if toolkit.workspace_id != workspace_id:
                 return Failure(ToolkitWorkspaceMismatch(toolkit_id=toolkit_id))
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
+            agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None or agent.workspace_id != workspace_id:
                 return Failure(AgentWorkspaceMismatch(agent_id=agent_id))
             available = await self.toolkit_repository.list_available_for_workspace_user(

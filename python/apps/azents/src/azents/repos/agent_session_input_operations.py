@@ -1544,12 +1544,10 @@ class AgentSessionInputOperationsRepository:
         user_id: str,
     ) -> bool:
         """Lock and validate current Workspace membership for admission."""
-        workspace_user = (
-            await self.workspace_user_repository.lock_by_workspace_and_user(
-                session,
-                workspace_id=workspace_id,
-                user_id=user_id,
-            )
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=workspace_id,
+            user_id=user_id,
         )
         return workspace_user is not None
 

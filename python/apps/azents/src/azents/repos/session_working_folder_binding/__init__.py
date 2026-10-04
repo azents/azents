@@ -49,60 +49,70 @@ class SessionWorkingFolderBindingRepository:
     ) -> SessionWorkingFolderAuthority | None:
         """Read an existing BOUND folder without locking or binding pending state."""
         async with self.read_session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
-                or agent.runtime_capability_version
-                != target.capability_snapshot_version
-                or target.runtime_target_capability_version
-                != target.capability_snapshot_version
-            ):
-                return None
-            context = await (
-                self.agent_session_repository.get_working_folder_context_by_session_id(
-                    session, session_id=session_id
-                )
+            return await self.project_bound_authority_in_session(
+                session, agent_id=agent_id, session_id=session_id, target=target
             )
-            root = await (
-                self.agent_session_repository.get_root_session_agent_by_session_id(
-                    session, session_id
-                )
+
+    async def project_bound_authority_in_session(
+        self,
+        session: ReadSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        target: SessionWorkingFolderTarget,
+    ) -> SessionWorkingFolderAuthority | None:
+        """Describe retained BOUND evidence within an ordinary caller read scope."""
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if (
+            agent is None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            or agent.runtime_capability_version != target.capability_snapshot_version
+            or target.runtime_target_capability_version
+            != target.capability_snapshot_version
+        ):
+            return None
+        context = await (
+            self.agent_session_repository.get_working_folder_context_by_session_id(
+                session, session_id=session_id
             )
-            if (
-                context is None
-                or root is None
-                or context.agent_id != agent_id
-                or root.context_id != context.id
-            ):
-                return None
-            root_session = await self.agent_session_repository.get_by_id(
-                session, root.agent_session_id
-            )
-            if (
-                root_session is None
-                or root_session.agent_id != agent_id
-                or root_session.workspace_id != agent.workspace_id
-                or root_session.status is not AgentSessionStatus.ACTIVE
-            ):
-                return None
-            expected_path = build_session_working_folder_path(
-                root_session.handle, workspace_root=target.workspace_path
-            )
-            if (
-                context.binding_state is not SessionWorkingFolderBindingState.BOUND
-                or context.agent_runtime_id != target.id
-                or context.working_folder_path != expected_path
-            ):
-                return None
-            return SessionWorkingFolderAuthority(
-                context_id=context.id,
-                agent_id=agent_id,
-                agent_runtime_id=target.id,
-                working_folder_path=expected_path,
-                runtime_capability_version=target.capability_snapshot_version,
-            )
+        )
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session, session_id
+        )
+        if (
+            context is None
+            or root is None
+            or context.agent_id != agent_id
+            or root.context_id != context.id
+        ):
+            return None
+        root_session = await self.agent_session_repository.get_by_id(
+            session, root.agent_session_id
+        )
+        if (
+            root_session is None
+            or root_session.agent_id != agent_id
+            or root_session.workspace_id != agent.workspace_id
+            or root_session.status is not AgentSessionStatus.ACTIVE
+        ):
+            return None
+        expected_path = build_session_working_folder_path(
+            root_session.handle, workspace_root=target.workspace_path
+        )
+        if (
+            context.binding_state is not SessionWorkingFolderBindingState.BOUND
+            or context.agent_runtime_id != target.id
+            or context.working_folder_path != expected_path
+        ):
+            return None
+        return SessionWorkingFolderAuthority(
+            context_id=context.id,
+            agent_id=agent_id,
+            agent_runtime_id=target.id,
+            working_folder_path=expected_path,
+            runtime_capability_version=target.capability_snapshot_version,
+        )
 
     async def require_bindable_context(
         self,

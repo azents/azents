@@ -102,37 +102,29 @@ class RuntimeProviderRepository:
 
     async def get_by_provider_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider_logical_id: str,
-        for_update: bool,
     ) -> RuntimeProvider | None:
         """Fetch one aggregate by stable logical ID."""
         statement = sa.select(RDBRuntimeProvider).where(
             RDBRuntimeProvider.provider_id == provider_logical_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_provider(rdb) if rdb is not None else None
 
     async def get_by_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider_id: str,
-        for_update: bool,
     ) -> RuntimeProvider | None:
         """Fetch one aggregate by internal ID."""
         statement = sa.select(RDBRuntimeProvider).where(
             RDBRuntimeProvider.id == provider_id
         )
-        if for_update:
-            # Provider identities are immutable. Serialize mutable Provider
-            # state without blocking configuration revision FK references.
-            statement = statement.with_for_update(key_share=True)
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_provider(rdb) if rdb is not None else None
 
@@ -209,20 +201,20 @@ class RuntimeProviderRepository:
     ) -> RuntimeProvider | None:
         """Replace mutable Provider policy and advance its Admin version."""
         result = await session.write_session.execute(
-            sa.select(RDBRuntimeProvider)
+            sa.update(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == provider_id)
-            .with_for_update()
+            .values(
+                enabled=enabled,
+                lifecycle_state=lifecycle_state,
+                availability_mode=availability_mode,
+                admin_version=RDBRuntimeProvider.admin_version + 1,
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBRuntimeProvider)
+            .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        rdb.enabled = enabled
-        rdb.lifecycle_state = lifecycle_state
-        rdb.availability_mode = availability_mode
-        rdb.admin_version += 1
-        await session.write_session.flush()
-        await session.write_session.refresh(rdb)
-        return self._build_provider(rdb)
+        return self._build_provider(rdb) if rdb is not None else None
 
     async def replace_workspace_availability(
         self,
@@ -232,10 +224,17 @@ class RuntimeProviderRepository:
         workspace_ids: set[str],
     ) -> RuntimeProvider | None:
         """Replace selected-Workspace membership and advance Admin version."""
+        # Advance the revision at the actual replacement boundary. The UPDATE
+        # serializes competing whole-set replacements, not descriptive reads.
         result = await session.write_session.execute(
-            sa.select(RDBRuntimeProvider)
+            sa.update(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == provider_id)
-            .with_for_update()
+            .values(
+                admin_version=RDBRuntimeProvider.admin_version + 1,
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBRuntimeProvider)
+            .execution_options(populate_existing=True)
         )
         provider = result.scalar_one_or_none()
         if provider is None:
@@ -254,7 +253,6 @@ class RuntimeProviderRepository:
                 for workspace_id in sorted(workspace_ids)
             ]
         )
-        provider.admin_version += 1
         await session.write_session.flush()
         await session.write_session.refresh(provider)
         return self._build_provider(provider)
@@ -274,19 +272,6 @@ class RuntimeProviderRepository:
             )
         )
         return result.scalar_one_or_none() is not None
-
-    async def get_by_provider_id_for_update(
-        self,
-        session: WriteSession,
-        *,
-        provider_logical_id: str,
-    ) -> RuntimeProvider | None:
-        """Fetch a Provider by logical ID while holding its row lock."""
-        return await self.get_by_provider_id(
-            session,
-            provider_logical_id=provider_logical_id,
-            for_update=True,
-        )
 
     async def get_or_create_bootstrap_source(
         self,
@@ -359,37 +344,31 @@ class RuntimeProviderRepository:
 
     async def get_bootstrap_declaration(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         source_id: str,
         declaration_key: str,
-        for_update: bool,
     ) -> RuntimeProviderBootstrapDeclaration | None:
         """Fetch one declaration by immutable source-local identity."""
         statement = sa.select(RDBRuntimeProviderBootstrapDeclaration).where(
             RDBRuntimeProviderBootstrapDeclaration.source_id == source_id,
             RDBRuntimeProviderBootstrapDeclaration.declaration_key == declaration_key,
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_declaration(rdb) if rdb is not None else None
 
     async def get_bootstrap_declaration_by_provider_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider_id: str,
-        for_update: bool,
     ) -> RuntimeProviderBootstrapDeclaration | None:
         """Fetch a successfully linked bootstrap declaration for one aggregate."""
         statement = sa.select(RDBRuntimeProviderBootstrapDeclaration).where(
             RDBRuntimeProviderBootstrapDeclaration.provider_id == provider_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_declaration(rdb) if rdb is not None else None
 
@@ -511,6 +490,70 @@ class RuntimeProviderRepository:
         rdb.created_at = create.created_at
         session.write_session.add(rdb)
         await session.write_session.flush()
+
+    async def lock_by_provider_id_for_authority(
+        self,
+        session: WriteSession,
+        *,
+        provider_logical_id: str,
+    ) -> RuntimeProvider | None:
+        """Fetch one aggregate by stable logical ID."""
+        statement = sa.select(RDBRuntimeProvider).where(
+            RDBRuntimeProvider.provider_id == provider_logical_id
+        )
+        statement = statement.with_for_update()
+        result = await session.write_session.execute(statement)
+        rdb = result.scalar_one_or_none()
+        return self._build_provider(rdb) if rdb is not None else None
+
+    async def lock_by_id_for_authority(
+        self,
+        session: WriteSession,
+        *,
+        provider_id: str,
+    ) -> RuntimeProvider | None:
+        """Fetch one aggregate by internal ID."""
+        statement = sa.select(RDBRuntimeProvider).where(
+            RDBRuntimeProvider.id == provider_id
+        )
+        # Provider identities are immutable. Serialize mutable Provider
+        # state without blocking configuration revision FK references.
+        statement = statement.with_for_update(key_share=True)
+        result = await session.write_session.execute(statement)
+        rdb = result.scalar_one_or_none()
+        return self._build_provider(rdb) if rdb is not None else None
+
+    async def lock_bootstrap_declaration_for_authority(
+        self,
+        session: WriteSession,
+        *,
+        source_id: str,
+        declaration_key: str,
+    ) -> RuntimeProviderBootstrapDeclaration | None:
+        """Fetch one declaration by immutable source-local identity."""
+        statement = sa.select(RDBRuntimeProviderBootstrapDeclaration).where(
+            RDBRuntimeProviderBootstrapDeclaration.source_id == source_id,
+            RDBRuntimeProviderBootstrapDeclaration.declaration_key == declaration_key,
+        )
+        statement = statement.with_for_update()
+        result = await session.write_session.execute(statement)
+        rdb = result.scalar_one_or_none()
+        return self._build_declaration(rdb) if rdb is not None else None
+
+    async def lock_bootstrap_declaration_by_provider_id_for_authority(
+        self,
+        session: WriteSession,
+        *,
+        provider_id: str,
+    ) -> RuntimeProviderBootstrapDeclaration | None:
+        """Fetch a successfully linked bootstrap declaration for one aggregate."""
+        statement = sa.select(RDBRuntimeProviderBootstrapDeclaration).where(
+            RDBRuntimeProviderBootstrapDeclaration.provider_id == provider_id
+        )
+        statement = statement.with_for_update()
+        result = await session.write_session.execute(statement)
+        rdb = result.scalar_one_or_none()
+        return self._build_declaration(rdb) if rdb is not None else None
 
     @staticmethod
     def _build_provider(rdb: RDBRuntimeProvider) -> RuntimeProvider:

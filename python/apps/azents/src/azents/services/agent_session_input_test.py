@@ -200,10 +200,9 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
 class _WorkspaceUserRepositoryDouble(WorkspaceUserRepository):
     """Workspace membership repository for admission unit tests."""
 
-    async def lock_by_workspace_and_user(
+    async def get_by_workspace_and_user(
         self,
         session: ReadSession,
-        *,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser:

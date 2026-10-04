@@ -1,9 +1,11 @@
 """System User role repository."""
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert
 
 from azents.core.enums import SystemUserRole
 from azents.rdb.models.system_user_role import RDBSystemUserRole
+from azents.rdb.models.user import RDBUser
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
@@ -19,7 +21,7 @@ class SystemUserRoleRepository:
     """Instance-wide User role assignment repository."""
 
     async def acquire_mutation_lock(self, session: WriteSession) -> None:
-        """Serialize system role mutations for final-admin enforcement.
+        """Serialize only final-administrator removal and account deletion (E3).
 
         :param session: Database session
         """
@@ -130,7 +132,8 @@ class SystemUserRoleRepository:
         result = await session.read_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBSystemUserRole)
-            .where(RDBSystemUserRole.role == role)
+            .join(RDBUser, RDBUser.id == RDBSystemUserRole.user_id)
+            .where(RDBSystemUserRole.role == role, RDBUser.access_disabled_at.is_(None))
         )
         return result.scalar_one()
 
@@ -154,6 +157,47 @@ class SystemUserRoleRepository:
         await session.write_session.flush()
         await session.write_session.refresh(rdb_assignment)
         return self._build(rdb_assignment)
+
+    async def claim_assignment_mutation(
+        self,
+        session: WriteSession,
+        user_id: str,
+        role: SystemUserRole,
+    ) -> None:
+        """Coordinate only grant/revoke of this exact assignment result (E3)."""
+        key = f"system-role-assignment:{user_id}:{role.value}"
+        await session.write_session.execute(
+            sa.select(sa.func.pg_advisory_xact_lock(sa.func.hashtextextended(key, 0)))
+        )
+
+    async def admit_active_user_grant(
+        self, session: WriteSession, user_id: str
+    ) -> bool:
+        """Fence actual role issuance against concurrent disable-and-role-sweep (E3)."""
+        row = await session.write_session.scalar(
+            sa.select(RDBUser.id)
+            .where(RDBUser.id == user_id, RDBUser.access_disabled_at.is_(None))
+            .with_for_update(read=True)
+        )
+        return row is not None
+
+    async def create_if_absent(
+        self, session: WriteSession, create: SystemUserRoleAssignmentCreate
+    ) -> SystemUserRoleAssignment | None:
+        """Use assignment uniqueness for ordinary grants, without a revoke gate."""
+        row = await session.write_session.scalar(
+            insert(RDBSystemUserRole)
+            .values(
+                user_id=create.user_id,
+                role=create.role,
+                granted_by_user_id=create.granted_by_user_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[RDBSystemUserRole.user_id, RDBSystemUserRole.role]
+            )
+            .returning(RDBSystemUserRole)
+        )
+        return None if row is None else self._build(row)
 
     async def delete(
         self,

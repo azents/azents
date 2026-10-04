@@ -42,7 +42,7 @@ class SessionRepository:
         session: WriteSession,
         create: SessionCreate,
     ) -> Result[Session, NotFound]:
-        """Create Session only when the User currently has access.
+        """Fence only actual Session issuance against access-disable/revocation (E3).
 
         :param session: Database session
         :param create: Create data

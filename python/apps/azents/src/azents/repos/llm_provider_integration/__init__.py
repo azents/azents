@@ -18,9 +18,7 @@ from azents.core.credentials import (
     XaiOAuthSecrets,
 )
 from azents.core.crypto import CredentialCipher
-from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
@@ -261,32 +259,17 @@ class LLMProviderIntegrationRepository:
         :param integration_id: Integration ID
         :param workspace_id: Owning Workspace ID
         """
-        await session.write_session.execute(
-            sa.select(RDBWorkspace.id)
-            .where(RDBWorkspace.id == workspace_id)
-            .with_for_update()
-        )
-        catalog_result = await session.write_session.execute(
-            sa.select(RDBLLMCatalog.id)
-            .where(RDBLLMCatalog.provider_integration_id == integration_id)
-            .order_by(RDBLLMCatalog.id)
-            .with_for_update()
-        )
-        catalog_result.scalars().all()
-        await session.write_session.execute(
-            sa.select(RDBLLMProviderIntegration.id)
+        # DELETE owns only the exact target mutation; FK cascades retain catalog
+        # cleanup and PostgreSQL serializes competing target writes naturally.
+        result = await session.write_session.execute(
+            sa.delete(RDBLLMProviderIntegration)
             .where(
                 RDBLLMProviderIntegration.id == integration_id,
                 RDBLLMProviderIntegration.workspace_id == workspace_id,
             )
-            .with_for_update()
+            .returning(RDBLLMProviderIntegration.id)
         )
-        await session.write_session.execute(
-            sa.delete(RDBLLMProviderIntegration).where(
-                RDBLLMProviderIntegration.id == integration_id,
-                RDBLLMProviderIntegration.workspace_id == workspace_id,
-            )
-        )
+        result.scalar_one_or_none()
 
     def _build(self, rdb: RDBLLMProviderIntegration) -> LLMProviderIntegration:
         """Convert RDB model to domain model, excluding secrets."""

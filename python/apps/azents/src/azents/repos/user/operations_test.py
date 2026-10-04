@@ -388,10 +388,10 @@ async def test_grant_rechecks_disabled_user_after_email_lookup(
 
 
 class _FailingRoleCreate(SystemUserRoleRepository):
-    async def create(
+    async def create_if_absent(
         self, session: WriteSession, create: SystemUserRoleAssignmentCreate
-    ) -> SystemUserRoleAssignment:
-        await super().create(session, create)
+    ) -> SystemUserRoleAssignment | None:
+        await super().create_if_absent(session, create)
         raise _PersistenceFailure("Injected failure after assignment creation")
 
 

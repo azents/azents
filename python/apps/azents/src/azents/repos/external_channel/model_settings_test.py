@@ -26,6 +26,7 @@ from azents.core.external_model_settings import (
     ExternalModelNoticeOutcome,
     ExternalModelRejected,
     ExternalModelSettingsRejectionCode,
+    ExternalModelTargetContext,
 )
 from azents.core.inference_profile import SessionAppliedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -79,6 +80,19 @@ _ACTOR = ExternalModelActorContext(
 )
 
 
+class _ProjectionRepository(ExternalModelSettingsRepository):
+    """Keep projection unit tests isolated from DB authority-fence integration."""
+
+    async def _authorize_for_apply(
+        self,
+        session: WriteSession,
+        *,
+        actor: ExternalModelActorContext,
+        target: ExternalModelTargetContext,
+    ) -> _AuthorizationResult:
+        return await self._authorize(session, actor=actor, target=target)
+
+
 def _snapshot(
     execution_options: list[dict[str, object]],
 ) -> dict[str, object]:
@@ -126,7 +140,7 @@ def _replay_fixture(
     agent_repository = AsyncMock(spec=AgentRepository)
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     active_repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
-    repository = ExternalModelSettingsRepository(
+    repository = _ProjectionRepository(
         session_manager=sessions,
         external_channel_repository=AsyncMock(spec=ExternalChannelRepository),
         external_account_link_repository=AsyncMock(spec=ExternalAccountLinkRepository),
@@ -295,7 +309,13 @@ async def test_live_editor_projects_exact_metadata_without_agent_writes(
     if action == "reopen":
         fixture.raw_session.scalar.return_value = fixture.draft
     with (
-        patch.object(repository, "_lock_draft", AsyncMock(return_value=fixture.draft)),
+        patch.object(repository, "_get_draft", AsyncMock(return_value=fixture.draft)),
+        patch.object(
+            repository, "_lock_draft_for_apply", AsyncMock(return_value=fixture.draft)
+        ),
+        patch.object(
+            repository, "_persist_live_draft", AsyncMock(return_value=fixture.draft)
+        ),
         patch.object(
             repository,
             "_authorize",
@@ -370,7 +390,13 @@ async def test_update_validates_the_projected_support(unsupported: str) -> None:
     fixture = _active_fixture()
     repository = fixture.repository
     with (
-        patch.object(repository, "_lock_draft", AsyncMock(return_value=fixture.draft)),
+        patch.object(repository, "_get_draft", AsyncMock(return_value=fixture.draft)),
+        patch.object(
+            repository, "_lock_draft_for_apply", AsyncMock(return_value=fixture.draft)
+        ),
+        patch.object(
+            repository, "_persist_live_draft", AsyncMock(return_value=fixture.draft)
+        ),
         patch.object(
             repository,
             "_authorize",
@@ -433,7 +459,11 @@ async def test_fresh_apply_validates_projected_options_and_freezes_saved_result(
     )
     original_agent = fixture.authorized.agent.model_dump(mode="json")
     with (
-        patch.object(repository, "_lock_draft", AsyncMock(return_value=draft)),
+        patch.object(repository, "_get_draft", AsyncMock(return_value=draft)),
+        patch.object(
+            repository, "_lock_draft_for_apply", AsyncMock(return_value=draft)
+        ),
+        patch.object(repository, "_persist_live_draft", AsyncMock(return_value=draft)),
         patch.object(
             repository,
             "_authorize",
@@ -482,7 +512,13 @@ async def test_unauthorized_model_controls_do_not_capture_metadata(action: str) 
     )
     original_snapshot = deepcopy(fixture.draft.options_snapshot)
     with (
-        patch.object(repository, "_lock_draft", AsyncMock(return_value=fixture.draft)),
+        patch.object(repository, "_get_draft", AsyncMock(return_value=fixture.draft)),
+        patch.object(
+            repository, "_lock_draft_for_apply", AsyncMock(return_value=fixture.draft)
+        ),
+        patch.object(
+            repository, "_persist_live_draft", AsyncMock(return_value=fixture.draft)
+        ),
         patch.object(
             repository,
             "_authorize",
@@ -549,7 +585,17 @@ async def test_applied_draft_without_matching_mutation_stays_frozen() -> None:
     snapshot = deepcopy(fixture.draft.options_snapshot)
     with (
         patch.object(
-            fixture.repository, "_lock_draft", AsyncMock(return_value=fixture.draft)
+            fixture.repository, "_get_draft", AsyncMock(return_value=fixture.draft)
+        ),
+        patch.object(
+            fixture.repository,
+            "_lock_draft_for_apply",
+            AsyncMock(return_value=fixture.draft),
+        ),
+        patch.object(
+            fixture.repository,
+            "_persist_live_draft",
+            AsyncMock(return_value=fixture.draft),
         ),
         patch.object(
             fixture.repository,
@@ -606,7 +652,11 @@ async def test_applied_fast_snapshot_replay_preserves_immutable_result(
         mutation.resulting_generation,
     )
     with (
-        patch.object(repository, "_lock_draft", AsyncMock(return_value=draft)),
+        patch.object(repository, "_get_draft", AsyncMock(return_value=draft)),
+        patch.object(
+            repository, "_lock_draft_for_apply", AsyncMock(return_value=draft)
+        ),
+        patch.object(repository, "_persist_live_draft", AsyncMock(return_value=draft)),
         patch.object(
             repository,
             "_authorize",
@@ -887,7 +937,11 @@ async def test_replay_keeps_existing_expiry_actor_and_fingerprint_guards(
     else:
         fingerprint = "0" * 16
     with (
-        patch.object(repository, "_lock_draft", AsyncMock(return_value=draft)),
+        patch.object(repository, "_get_draft", AsyncMock(return_value=draft)),
+        patch.object(
+            repository, "_lock_draft_for_apply", AsyncMock(return_value=draft)
+        ),
+        patch.object(repository, "_persist_live_draft", AsyncMock(return_value=draft)),
         patch.object(
             repository,
             "_authorize",

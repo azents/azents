@@ -248,7 +248,7 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
 
     commit_mock.side_effect = commit
     repository = AsyncMock()
-    repository.get_multi_connection.return_value = connection
+    repository.lock_multi_connection_for_transition.return_value = connection
     first_plan = make_provider_effect_plan("default-cleanup-1")
     second_plan = make_provider_effect_plan("default-cleanup-2")
 
@@ -326,7 +326,7 @@ async def test_replace_same_multi_default_preserves_connection_generation() -> N
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     repository = AsyncMock()
-    repository.get_multi_connection.return_value = connection
+    repository.lock_multi_connection_for_transition.return_value = connection
     repository.replace_multi_channel_default.return_value = SimpleNamespace(
         channel_default=_channel_default(),
         changed=False,
@@ -1017,7 +1017,9 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     raw_session.commit = commit_mock
     session = ReadWriteSession(raw_session)
     repository = ExternalChannelManagementRepository()
-    repository.get_connection = AsyncMock(return_value=(connection, route))
+    repository.lock_connection_for_transition = AsyncMock(
+        return_value=(connection, route)
+    )
 
     result = await repository.replace_discord_configuration(
         session,
@@ -1300,7 +1302,9 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
     flush_mock = AsyncMock()
     raw_session.flush = flush_mock
     repository = ExternalChannelManagementRepository()
-    repository.get_connection = AsyncMock(return_value=(connection, route))
+    repository.lock_connection_for_transition = AsyncMock(
+        return_value=(connection, route)
+    )
     now = datetime.datetime.now(datetime.UTC)
 
     cleanup_ids = await repository.begin_connection_disconnect(
@@ -1313,12 +1317,11 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
 
     assert cleanup_ids == ()
     assert connection.status is ExternalChannelConnectionStatus.DISCONNECTING
-    repository.get_connection.assert_awaited_once_with(
+    repository.lock_connection_for_transition.assert_awaited_once_with(
         session,
         workspace_id="workspace-1",
         agent_id="agent-1",
         connection_id="connection-1",
-        lock=True,
         include_disconnected=True,
     )
     flush_mock.assert_awaited_once()
@@ -1485,7 +1488,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         cleanup_plans=(plan,),
     )
     repository = AsyncMock()
-    repository.get_multi_connection.return_value = connection
+    repository.lock_multi_connection_for_transition.return_value = connection
     lifecycle_repository = AsyncMock()
 
     async def disconnect_multi(*args: object, **kwargs: object) -> object:

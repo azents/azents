@@ -111,7 +111,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-04
-spec_version: 134
+spec_version: 135
 ---
 
 # Toolkit
@@ -146,6 +146,14 @@ explicit External Channel publication remain separate capabilities. Invalid or m
 upstream authorization/quota failures produce safe failures without revealing keys.
 
 ### Team Session execution boundary
+
+Ordinary Toolkit/Agent management authorization uses scoped reads without
+parent/admin read locks. Durable namespace claim is separate: shared slug change
+and attachment coordinate only their actual Toolkit allocation, and missing or
+changed reservations allocate under the exact Agent/sequence identity claim.
+Reuse of an already-valid reservation is an ordinary read and does not acquire
+that Agent allocation fence. Concurrent different Toolkits with the same base
+slug retain distinct durable executable namespaces.
 
 Resolved Session Toolkits bind a narrow PostgreSQL execution owner
 (`session_id`, `owner_generation`) before Toolkit lifecycle entry. This covers

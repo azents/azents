@@ -121,14 +121,12 @@ class TestRuntimeProviderBootstrapService:
         provider = await repository.get_by_provider_id(
             rdb_session,
             provider_logical_id="system-kubernetes",
-            for_update=False,
         )
         assert provider is not None
         declaration = await repository.get_bootstrap_declaration(
             rdb_session,
             source_id=first.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id == provider.id
@@ -239,7 +237,6 @@ class TestRuntimeProviderBootstrapService:
             rdb_session,
             source_id=result.source_id,
             declaration_key="admin-provider-claim",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id is None
@@ -302,7 +299,6 @@ class TestRuntimeProviderBootstrapService:
             await repository.get_by_provider_id(
                 rdb_session,
                 provider_logical_id="system-kubernetes",
-                for_update=False,
             )
             is None
         )
@@ -376,7 +372,6 @@ class TestRuntimeProviderBootstrapService:
             rdb_session,
             source_id=second.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id is None
@@ -406,14 +401,12 @@ class TestRuntimeProviderBootstrapService:
         provider = await repository.get_by_provider_id(
             rdb_session,
             provider_logical_id="system-kubernetes",
-            for_update=False,
         )
         assert provider is not None
         declaration = await repository.get_bootstrap_declaration(
             rdb_session,
             source_id=initial.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.provider_id == provider.id
@@ -460,7 +453,6 @@ class TestRuntimeProviderBootstrapService:
             rdb_session,
             source_id=initial.source_id,
             declaration_key="runtime-provider-kubernetes",
-            for_update=False,
         )
         assert declaration is not None
         assert declaration.state == RuntimeProviderBootstrapDeclarationState.CONFLICT

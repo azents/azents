@@ -539,13 +539,13 @@ class AgentOperationsRepository:
         | AgentOperationWorkspaceMismatch
         | AgentOperationNotAdmin,
     ]:
-        """Lock and revalidate current Workspace and Agent mutation authority."""
-        agent = await self.agent_repository.lock_by_id(session, agent_id)
+        """Read exact Workspace and Agent mutation permissions without parent locks."""
+        agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None:
             return Failure(AgentOperationNotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
             return Failure(AgentOperationWorkspaceMismatch(agent_id=agent_id))
-        workspace_user = await self.workspace_user_repository.get_for_update(
+        workspace_user = await self.workspace_user_repository.get(
             session,
             workspace_user_id,
         )
@@ -553,7 +553,7 @@ class AgentOperationsRepository:
             return Failure(AgentOperationNotAdmin(agent_id=agent_id))
         if workspace_user.role is WorkspaceUserRole.OWNER:
             return Success(agent)
-        admin = await self.admin_repository.is_admin_for_update(
+        admin = await self.admin_repository.is_admin(
             session,
             agent_id,
             workspace_user_id,

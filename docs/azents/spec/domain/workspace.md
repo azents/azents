@@ -150,8 +150,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-10-02
-spec_version: 91
+last_verified_at: 2026-10-04
+spec_version: 92
 ---
 
 # Workspace & Membership
@@ -273,6 +273,20 @@ erDiagram
 ## Behavior
 
 ### Workspace Administration and Membership Admission
+
+Ordinary Workspace/member/Agent/Toolkit authorization descriptions use scoped
+reads without parent, membership or administrative-row read locks. Existing
+tenant and permission checks remain. Non-owner member update/delete carries the
+non-OWNER condition in the actual SQL mutation, so an obsolete ordinary request
+cannot demote or delete a newly transferred OWNER. Initial OWNER creation and
+ownership transfer retain only their coherent security-mutation exclusion;
+ordinary member creation and inspection do not inherit it.
+
+Already-BOUND Project access uses retained read-only context and exact
+Agent/Session/Workspace/path identity without Agent/context locks. Actual PENDING
+binding and registry insertion versus overlapping destructive worktree cleanup
+keep separate exact-target/path claim mutation protection. Registry deletion
+still removes only the selected record and does not delete filesystem folders.
 
 Workspace create, handle lookup, update, global list, owner creation, and
 User-scoped list execute as completed database-only repository operations.

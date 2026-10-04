@@ -104,7 +104,7 @@ async def test_create_owner_rejects_existing_owner_under_workspace_lock() -> Non
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
     workspace_repository.resolve_id.return_value = "workspace-1"
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
     user_repository.get_owner_by_workspace.return_value = _workspace_user(
         role=WorkspaceUserRole.OWNER
     )
@@ -122,63 +122,44 @@ async def test_create_owner_rejects_existing_owner_under_workspace_lock() -> Non
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOwnerAlreadyExists)
-    workspace_repository.get_by_id_for_update.assert_awaited_once()
+    workspace_repository.acquire_ownership_mutation.assert_awaited_once()
     user_repository.create_with_conflict.assert_not_awaited()
 
 
-async def test_update_role_rechecks_owner_after_workspace_lock() -> None:
-    """A concurrent transfer cannot be overwritten by a role update."""
-    user_repository = AsyncMock(spec=WorkspaceUserRepository)
-    workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    user_repository.get.side_effect = [
-        _workspace_user(role=WorkspaceUserRole.MEMBER),
-        _workspace_user(role=WorkspaceUserRole.OWNER),
-    ]
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    repository = _repository(
-        user_repository=user_repository,
-        workspace_repository=workspace_repository,
+async def test_update_role_rejects_owner_from_conditional_mutation() -> None:
+    """A conditional update losing to transfer returns the existing OwnerLocked."""
+    users = AsyncMock(spec=WorkspaceUserRepository)
+    workspace = AsyncMock(spec=WorkspaceRepository)
+    users.update_non_owner_role.return_value = None
+    users.get.return_value = _workspace_user(role=WorkspaceUserRole.OWNER)
+    repo = _repository(user_repository=users, workspace_repository=workspace)
+    result = await repo.update_non_owner_role(
+        workspace_user_id="workspace-user-1", role=WorkspaceUserRole.MANAGER
     )
-
-    result = await repository.update_non_owner_role(
-        workspace_user_id="workspace-user-1",
-        role=WorkspaceUserRole.MANAGER,
-    )
-
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOwnerLocked)
-    user_repository.update_role.assert_not_awaited()
+    workspace.acquire_ownership_mutation.assert_not_awaited()
 
 
-async def test_delete_rechecks_owner_after_workspace_lock() -> None:
-    """A concurrent transfer cannot make deletion remove the new Owner."""
-    user_repository = AsyncMock(spec=WorkspaceUserRepository)
-    workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    user_repository.get.side_effect = [
-        _workspace_user(role=WorkspaceUserRole.MEMBER),
-        _workspace_user(role=WorkspaceUserRole.OWNER),
-    ]
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    repository = _repository(
-        user_repository=user_repository,
-        workspace_repository=workspace_repository,
-    )
-
-    result = await repository.delete_non_owner(workspace_user_id="workspace-user-1")
-
+async def test_delete_rejects_owner_from_conditional_mutation() -> None:
+    """A conditional delete cannot remove a newly transferred Owner."""
+    users = AsyncMock(spec=WorkspaceUserRepository)
+    workspace = AsyncMock(spec=WorkspaceRepository)
+    users.delete_non_owner.return_value = None
+    users.get.return_value = _workspace_user(role=WorkspaceUserRole.OWNER)
+    repo = _repository(user_repository=users, workspace_repository=workspace)
+    result = await repo.delete_non_owner(workspace_user_id="workspace-user-1")
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOwnerLocked)
-    user_repository.delete.assert_not_awaited()
+    workspace.acquire_ownership_mutation.assert_not_awaited()
 
 
 async def test_transfer_ownership_rejects_member_from_another_workspace() -> None:
     """Ownership transfer target must belong to the locked Workspace."""
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    user_repository.get_for_update.return_value = _workspace_user(
-        workspace_id="workspace-2"
-    )
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
+    user_repository.get.return_value = _workspace_user(workspace_id="workspace-2")
     repository = _repository(
         user_repository=user_repository,
         workspace_repository=workspace_repository,
@@ -191,7 +172,7 @@ async def test_transfer_ownership_rejects_member_from_another_workspace() -> Non
 
     assert isinstance(result, Failure)
     assert isinstance(result.error, WorkspaceUserOutsideWorkspace)
-    user_repository.get_owner_by_workspace_for_update.assert_not_awaited()
+    user_repository.get_owner_by_workspace.assert_not_awaited()
 
 
 async def test_transfer_ownership_to_current_owner_is_idempotent() -> None:
@@ -199,9 +180,9 @@ async def test_transfer_ownership_to_current_owner_is_idempotent() -> None:
     owner = _workspace_user(role=WorkspaceUserRole.OWNER)
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    user_repository.get_for_update.return_value = owner
-    user_repository.get_owner_by_workspace_for_update.return_value = owner
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
+    user_repository.get.return_value = owner
+    user_repository.get_owner_by_workspace.return_value = owner
     repository = _repository(
         user_repository=user_repository,
         workspace_repository=workspace_repository,
@@ -234,9 +215,9 @@ async def test_transfer_ownership_rolls_back_when_promotion_fails() -> None:
     session = ReadWriteSession(_raw_session)
     user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = _workspace()
-    user_repository.get_for_update.return_value = new_owner
-    user_repository.get_owner_by_workspace_for_update.return_value = current_owner
+    workspace_repository.acquire_ownership_mutation.return_value = _workspace()
+    user_repository.get.return_value = new_owner
+    user_repository.get_owner_by_workspace.return_value = current_owner
     user_repository.update_role.side_effect = [
         Success(
             _workspace_user(

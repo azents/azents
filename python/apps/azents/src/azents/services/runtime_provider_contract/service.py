@@ -87,10 +87,9 @@ class RuntimeProviderContractService:
             )
         canonical = canonicalize_runtime_provider_contract(contract)
         async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_id(
+            provider = await self.provider_repository.lock_by_id_for_authority(
                 session,
                 provider_id=provider_resource_id,
-                for_update=True,
             )
             if provider is None:
                 raise RuntimeProviderContractUnavailable(
@@ -143,7 +142,6 @@ class RuntimeProviderContractService:
             provider = await self.provider_repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_logical_id,
-                for_update=False,
             )
             if provider is None:
                 raise RuntimeProviderContractUnavailable(

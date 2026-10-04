@@ -115,6 +115,7 @@ def _service(
     return SystemSettingsService(
         repository=SystemSettingsRepository(
             session_manager=session_manager,
+            read_session_manager=session_manager,
             repository=SystemSettingRepository(),
             payloads=SystemSettingPayloadResolver(
                 registry=SystemSettingRegistry(

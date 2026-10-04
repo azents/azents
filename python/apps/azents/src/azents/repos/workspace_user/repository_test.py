@@ -4,6 +4,7 @@ import asyncio
 from contextlib import suppress
 from uuid import uuid4
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -11,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.models.workspace_user import RDBWorkspaceUser
+from azents.rdb.session_capabilities import (
+    ReadOnlySession,
+    ReadWriteSession,
+    WriteSession,
+)
 from azents.repos.user import UserRepository as UserRepo
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -66,12 +72,12 @@ async def _cleanup_committed_membership_fixture(
 class TestWorkspaceUserRepository:
     """WorkspaceUserRepository tests."""
 
-    async def test_lock_waits_for_concurrent_delete_and_observes_revocation(
+    async def test_read_tolerates_uncommitted_delete_without_waiting(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """Admission cannot pass a membership deletion that already owns the row."""
+        """An ordinary read tolerates lag without waiting for a held writer."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repo = WorkspaceUserRepository()
@@ -124,7 +130,7 @@ class TestWorkspaceUserRepository:
                 )
                 assert isinstance(delete_pid, int)
                 async with AsyncSession(
-                    rdb_engine,
+                    rdb_engine.execution_options(postgresql_readonly=True),
                     expire_on_commit=False,
                 ) as _raw_admission_session:
                     admission_session = ReadWriteSession(_raw_admission_session)
@@ -134,37 +140,26 @@ class TestWorkspaceUserRepository:
                     assert isinstance(admission_pid, int)
                     assert delete_pid != admission_pid
 
-                    async def lock_membership() -> object:
-                        return await repo.lock_by_workspace_and_user(
-                            admission_session,
+                    reader = ReadOnlySession(admission_session.read_session)
+                    admitted = await asyncio.wait_for(
+                        repo.get_by_workspace_and_user(
+                            reader,
                             workspace_id=workspace_id,
                             user_id=user_id,
-                        )
-
-                    admission_task = asyncio.create_task(lock_membership())
-                    try:
-                        async with asyncio.timeout(5):
-                            async with AsyncSession(rdb_engine) as _raw_observer:
-                                observer = ReadWriteSession(_raw_observer)
-                                while True:
-                                    blockers = await observer.read_session.scalar(
-                                        sa.text("SELECT pg_blocking_pids(:pid)"),
-                                        {"pid": admission_pid},
-                                    )
-                                    if delete_pid in blockers:
-                                        break
-                                    assert not admission_task.done()
-                        assert not admission_task.done()
-                        await delete_session.write_session.commit()
-                        admitted = await asyncio.wait_for(admission_task, timeout=5)
-                        await admission_session.write_session.commit()
-                    finally:
-                        if not admission_task.done():
-                            admission_task.cancel()
-                            with suppress(asyncio.CancelledError):
-                                await admission_task
-
-            assert admitted is None
+                        ),
+                        timeout=5,
+                    )
+                    # A deletion not yet committed may lag in the reader's MVCC view.
+                    assert admitted is not None
+                    await admission_session.write_session.rollback()
+                    await delete_session.write_session.commit()
+                    after_commit = await repo.get_by_workspace_and_user(
+                        reader,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                    )
+                    assert after_commit is None
+                    await admission_session.write_session.rollback()
         finally:
             async with AsyncSession(
                 rdb_engine,
@@ -442,3 +437,88 @@ class TestWorkspaceUserRepository:
         # Then: None when fetching
         user = await repo.get(rdb_session, user_id)
         assert user is None
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+async def test_non_owner_write_loses_to_committed_owner_transfer(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    operation: str,
+) -> None:
+    """Actual SQL predicates reject an obsolete writer after its row wait."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    repo = WorkspaceUserRepository()
+    workspace_id: str | None = None
+    user_id: str | None = None
+    task: asyncio.Task[object] | None = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+            setup = ReadWriteSession(raw)
+            workspace_id = await _create_workspace(setup)
+            user_id = await _create_user(
+                setup, email=f"owner-race-{suffix}@example.com"
+            )
+            result = await repo.create(
+                setup,
+                WorkspaceUserCreate(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    name="Race member",
+                    role=WorkspaceUserRole.MEMBER,
+                ),
+            )
+            assert isinstance(result, Success)
+            membership_id = result.value.id
+            await raw.commit()
+        async with (
+            AsyncSession(rdb_engine) as owner_raw,
+            AsyncSession(rdb_engine) as writer_raw,
+        ):
+            writer = ReadWriteSession(writer_raw)
+            # Simulate the obsolete ordinary description before promotion.
+            stale = await repo.get(writer, membership_id)
+            assert stale is not None and stale.role is WorkspaceUserRole.MEMBER
+            await owner_raw.execute(
+                sa.update(RDBWorkspaceUser)
+                .where(RDBWorkspaceUser.id == membership_id)
+                .values(role=WorkspaceUserRole.OWNER)
+            )
+            owner_pid = await owner_raw.scalar(sa.text("SELECT pg_backend_pid()"))
+            writer_pid = await writer_raw.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(owner_pid, int) and isinstance(writer_pid, int)
+
+            async def obsolete_mutation() -> object:
+                if operation == "update":
+                    return await repo.update_non_owner_role(
+                        writer, membership_id, WorkspaceUserRole.MANAGER
+                    )
+                return await repo.delete_non_owner(writer, membership_id)
+
+            task = asyncio.create_task(obsolete_mutation())
+            async with asyncio.timeout(5), AsyncSession(rdb_engine) as observer:
+                while True:
+                    blockers = await observer.scalar(
+                        sa.text("SELECT pg_blocking_pids(:pid)"), {"pid": writer_pid}
+                    )
+                    if owner_pid in blockers:
+                        break
+                    assert not task.done()
+            await owner_raw.commit()
+            assert await asyncio.wait_for(task, timeout=5) is None
+            await writer_raw.commit()
+        async with AsyncSession(rdb_engine) as raw:
+            current = await repo.get(ReadOnlySession(raw), membership_id)
+            assert current is not None and current.role is WorkspaceUserRole.OWNER
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        async with AsyncSession(rdb_engine) as raw:
+            await _cleanup_committed_membership_fixture(
+                ReadWriteSession(raw),
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            await raw.commit()

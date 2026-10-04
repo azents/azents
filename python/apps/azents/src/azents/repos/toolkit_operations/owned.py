@@ -84,7 +84,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -140,7 +139,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -176,7 +174,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -216,7 +213,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Preserve Toolkit-before-Agent locking and final namespace mutation."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(session, toolkit_id)
+            toolkit = await self.toolkit_repo.get_by_id(session, toolkit_id)
             if (
                 toolkit is None
                 or toolkit.owner_agent_id != agent_id
@@ -229,7 +226,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             if isinstance(access, Failure):
                 return Failure(access.error)
@@ -279,7 +275,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
         match access:
             case Success():
@@ -308,7 +303,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             match access:
                 case Failure(error):
@@ -345,7 +339,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=False,
             )
             match access:
                 case Failure(error):
@@ -388,7 +381,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Persist OAuth state only while Agent ownership and authority remain valid."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(
+            toolkit = await self.toolkit_repo.get_by_id(
                 session,
                 toolkit_id,
             )
@@ -404,7 +397,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             match access:
                 case Failure(error):
@@ -451,7 +443,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Delete OAuth state only for the currently authorized Agent-owned Toolkit."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(
+            toolkit = await self.toolkit_repo.get_by_id(
                 session,
                 toolkit_id,
             )
@@ -467,7 +459,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             match access:
                 case Failure(error):
@@ -496,7 +487,7 @@ class AgentToolkitOperationsRepository:
     ]:
         """Delete one ToolkitConfig owned by the exact managed Agent."""
         async with self.session_manager() as session:
-            toolkit = await self.toolkit_repo.get_by_id_for_update(
+            toolkit = await self.toolkit_repo.get_by_id(
                 session,
                 toolkit_id,
             )
@@ -512,7 +503,6 @@ class AgentToolkitOperationsRepository:
                 workspace_id=workspace_id,
                 workspace_user_id=workspace_user_id,
                 role=role,
-                for_update=True,
             )
             match access:
                 case Failure(error):
@@ -532,14 +522,9 @@ class AgentToolkitOperationsRepository:
         workspace_id: str,
         workspace_user_id: str,
         role: WorkspaceUserRole,
-        for_update: bool,
     ) -> Result[Agent, AgentWorkspaceMismatch | AgentManagementDenied]:
         """Load an active Agent and verify Owner or explicit AgentAdmin authority."""
-        agent = (
-            await self.agent_repo.lock_by_id(session, agent_id)
-            if for_update
-            else await self.agent_repo.get_by_id(session, agent_id)
-        )
+        agent = await self.agent_repo.get_by_id(session, agent_id)
         if (
             agent is None
             or agent.workspace_id != workspace_id

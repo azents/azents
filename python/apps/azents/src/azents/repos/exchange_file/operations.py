@@ -398,7 +398,7 @@ class ExchangeFileOperationRepository:
             return Failure(ExchangeUploadError.NOT_FOUND)
         if workspace_id is not None and agent.workspace_id != workspace_id:
             return Failure(ExchangeUploadError.ACCESS_DENIED)
-        membership = await self.workspace_user_repository.lock_by_workspace_and_user(
+        membership = await self.workspace_user_repository.get_by_workspace_and_user(
             session, workspace_id=agent.workspace_id, user_id=user_id
         )
         if membership is None:

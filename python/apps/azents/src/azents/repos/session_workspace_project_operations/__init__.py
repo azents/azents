@@ -13,9 +13,9 @@ from azents.core.session_workspace_project import (
     SessionWorkspaceProject,
     SessionWorkspaceProjectCreate,
 )
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -57,8 +57,8 @@ ProjectDeleteDatabaseError = ProjectAccessDatabaseError | ProjectMissing
 
 
 @dataclasses.dataclass(frozen=True)
-class _LockedProjectContext:
-    """Agent-first locked Project mutation context."""
+class _ProjectContext:
+    """Detached scoped Project registry context."""
 
     agent: Agent
     session: AgentSession
@@ -101,6 +101,10 @@ class SessionWorkspaceProjectOperationsRepository:
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
+
     async def load_project_context(
         self,
         *,
@@ -127,7 +131,7 @@ class SessionWorkspaceProjectOperationsRepository:
         user_id: str,
     ) -> ProjectDatabaseContext | None:
         """Load detached authorization context before Runtime work."""
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -159,7 +163,7 @@ class SessionWorkspaceProjectOperationsRepository:
     ) -> Result[ProjectMutationResult, ProjectCreateDatabaseError]:
         """Revalidate and create one Project in a repository-owned transaction."""
         async with self.session_manager() as session:
-            locked = await self._lock_context(
+            locked = await self._read_context(
                 session,
                 context=context,
                 user_id=None,
@@ -167,13 +171,22 @@ class SessionWorkspaceProjectOperationsRepository:
             if locked is None:
                 return Failure(ProjectContextUnavailable())
             try:
-                await self.binding_repository.resolve_locked_authority_in_session(
-                    session,
-                    agent=locked.agent,
-                    session_id=context.session_id,
-                    target=target,
-                    bind_pending=True,
+                bound = (
+                    await self.binding_repository.project_bound_authority_in_session(
+                        session,
+                        agent_id=locked.agent.id,
+                        session_id=context.session_id,
+                        target=target,
+                    )
                 )
+                if bound is None:
+                    await self.binding_repository.resolve_authority_in_session(
+                        session,
+                        agent_id=locked.agent.id,
+                        session_id=context.session_id,
+                        target=target,
+                        bind_pending=True,
+                    )
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             create_result = await self._create_project_in_session(
@@ -199,7 +212,7 @@ class SessionWorkspaceProjectOperationsRepository:
     ) -> Result[ProjectMutationResult, ProjectCreateDatabaseError]:
         """Atomically reauthorize and register Project, preset, and catalog state."""
         async with self.session_manager() as session:
-            locked = await self._lock_context(
+            locked = await self._read_context(
                 session,
                 context=context,
                 user_id=user_id,
@@ -207,13 +220,16 @@ class SessionWorkspaceProjectOperationsRepository:
             if locked is None:
                 return Failure(ProjectContextUnavailable())
             try:
-                await self.binding_repository.resolve_locked_authority_in_session(
-                    session,
-                    agent=locked.agent,
-                    session_id=context.session_id,
-                    target=target,
-                    bind_pending=False,
+                authority = (
+                    await self.binding_repository.project_bound_authority_in_session(
+                        session,
+                        agent_id=locked.agent.id,
+                        session_id=context.session_id,
+                        target=target,
+                    )
                 )
+                if authority is None:
+                    return Failure(ProjectBindingUnavailable())
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             create_result = await self._create_project_in_session(
@@ -235,7 +251,7 @@ class SessionWorkspaceProjectOperationsRepository:
         session_id: str,
     ) -> list[SessionWorkspaceProject]:
         """List Projects in one completed read transaction."""
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.project_repository.list_projects(
                 session,
                 session_id=session_id,
@@ -264,7 +280,7 @@ class SessionWorkspaceProjectOperationsRepository:
     ) -> Result[list[SessionWorkspaceProject], ProjectAccessDatabaseError]:
         """Reauthorize and list Projects under current bound Runtime authority."""
         async with self.session_manager() as session:
-            locked = await self._lock_context(
+            locked = await self._read_context(
                 session,
                 context=context,
                 user_id=user_id,
@@ -272,13 +288,16 @@ class SessionWorkspaceProjectOperationsRepository:
             if locked is None:
                 return Failure(ProjectContextUnavailable())
             try:
-                await self.binding_repository.resolve_locked_authority_in_session(
-                    session,
-                    agent=locked.agent,
-                    session_id=context.session_id,
-                    target=target,
-                    bind_pending=False,
+                authority = (
+                    await self.binding_repository.project_bound_authority_in_session(
+                        session,
+                        agent_id=locked.agent.id,
+                        session_id=context.session_id,
+                        target=target,
+                    )
                 )
+                if authority is None:
+                    return Failure(ProjectBindingUnavailable())
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
             return Success(
@@ -313,7 +332,7 @@ class SessionWorkspaceProjectOperationsRepository:
     ) -> Result[None, ProjectDeleteDatabaseError]:
         """Atomically reauthorize, delete Project, and invalidate Skill state."""
         async with self.session_manager() as session:
-            locked = await self._lock_context(
+            locked = await self._read_context(
                 session,
                 context=context,
                 user_id=user_id,
@@ -321,19 +340,19 @@ class SessionWorkspaceProjectOperationsRepository:
             if locked is None:
                 return Failure(ProjectContextUnavailable())
             try:
-                resolve_authority = (
-                    self.binding_repository.resolve_locked_authority_in_session
+                authority = (
+                    await self.binding_repository.project_bound_authority_in_session(
+                        session,
+                        agent_id=locked.agent.id,
+                        session_id=context.session_id,
+                        target=target,
+                    )
                 )
-                authority = await resolve_authority(
-                    session,
-                    agent=locked.agent,
-                    session_id=context.session_id,
-                    target=target,
-                    bind_pending=False,
-                )
+                if authority is None:
+                    return Failure(ProjectBindingUnavailable())
             except SessionWorkingFolderBindingError:
                 return Failure(ProjectBindingUnavailable())
-            project = await self.project_repository.lock_project_by_id(
+            project = await self.project_repository.get_project_in_context(
                 session,
                 project_id=project_id,
                 context_id=authority.context_id,
@@ -359,21 +378,21 @@ class SessionWorkspaceProjectOperationsRepository:
                 )
             return Success(None)
 
-    async def _lock_context(
+    async def _read_context(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         context: ProjectDatabaseContext,
         user_id: str | None,
-    ) -> _LockedProjectContext | None:
-        """Lock Agent, Session, and optional membership in canonical order."""
-        agent = await self.agent_repository.lock_by_id(
+    ) -> _ProjectContext | None:
+        """Read exact Agent, Session and optional Workspace membership evidence."""
+        agent = await self.agent_repository.get_by_id(
             session,
             context.agent_id,
         )
         if agent is None:
             return None
-        agent_session = await self.agent_session_repository.lock_by_id(
+        agent_session = await self.agent_session_repository.get_by_id(
             session,
             context.session_id,
         )
@@ -384,16 +403,14 @@ class SessionWorkspaceProjectOperationsRepository:
         ):
             return None
         if user_id is not None:
-            membership = (
-                await self.workspace_user_repository.lock_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            membership = await self.workspace_user_repository.get_by_workspace_and_user(
+                session,
+                workspace_id=agent_session.workspace_id,
+                user_id=user_id,
             )
             if membership is None:
                 return None
-        return _LockedProjectContext(agent=agent, session=agent_session)
+        return _ProjectContext(agent=agent, session=agent_session)
 
     async def _create_project_in_session(
         self,
@@ -407,11 +424,7 @@ class SessionWorkspaceProjectOperationsRepository:
         SessionWorkspaceProject,
         ProjectConflict | ProjectCleanupInProgress,
     ]:
-        """Create Project and related rows after authority is locked."""
-        await self.project_repository.acquire_runtime_path_coordination_lock(
-            session,
-            runtime_id=target.id,
-        )
+        """Create Project and related scoped registry rows."""
         existing = await self.project_repository.get_project_by_path(
             session,
             session_id=context.session_id,

@@ -114,7 +114,7 @@ class RuntimeProviderBindingAdminService:
         """List bindings for one stable logical Provider ID."""
         async with self.session_manager() as session:
             provider = await self.provider_repository.get_by_provider_id(
-                session, provider_logical_id=provider_id, for_update=False
+                session, provider_logical_id=provider_id
             )
             if provider is None:
                 raise RuntimeProviderBindingAdminUnavailable("provider_not_found")
@@ -131,7 +131,7 @@ class RuntimeProviderBindingAdminService:
         """Get one safe binding projection."""
         async with self.session_manager() as session:
             binding = await self.binding_repository.get_by_id(
-                session, binding_id=binding_id, for_update=False
+                session, binding_id=binding_id
             )
             if binding is None:
                 raise RuntimeProviderBindingAdminUnavailable("binding_not_found")
@@ -156,7 +156,7 @@ class RuntimeProviderBindingAdminService:
             raise RuntimeProviderBindingAdminUnavailable("binding_config_invalid")
         async with self.session_manager() as session:
             provider = await self.provider_repository.get_by_provider_id(
-                session, provider_logical_id=provider_id, for_update=True
+                session, provider_logical_id=provider_id
             )
             if provider is None:
                 raise RuntimeProviderBindingAdminUnavailable("provider_not_found")
@@ -306,7 +306,7 @@ class RuntimeProviderBindingAdminService:
         """List metadata-only binding audit history."""
         async with self.session_manager() as session:
             binding = await self.binding_repository.get_by_id(
-                session, binding_id=binding_id, for_update=False
+                session, binding_id=binding_id
             )
             if binding is None:
                 raise RuntimeProviderBindingAdminUnavailable("binding_not_found")
@@ -318,7 +318,7 @@ class RuntimeProviderBindingAdminService:
         self, session: WriteSession, binding_id: str
     ) -> RuntimeProviderAuthBinding:
         binding = await self.binding_repository.get_by_id(
-            session, binding_id=binding_id, for_update=True
+            session, binding_id=binding_id
         )
         if binding is None:
             raise RuntimeProviderBindingAdminUnavailable("binding_not_found")
@@ -373,7 +373,6 @@ class RuntimeProviderBindingAdminService:
         provider = await self.provider_repository.get_by_id(
             session,
             provider_id=provider_id,
-            for_update=False,
         )
         if provider is None:
             raise RuntimeProviderBindingAdminUnavailable("provider_not_found")

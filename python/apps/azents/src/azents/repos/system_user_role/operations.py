@@ -28,7 +28,7 @@ from azents.repos.user.data import User
 
 @dataclasses.dataclass
 class SystemUserRoleOperationRepository:
-    """Own role reads and grants/revocations under one advisory lock."""
+    """Own ordinary role reads/grants and narrowly fenced administrator removal."""
 
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
@@ -67,14 +67,16 @@ class SystemUserRoleOperationRepository:
         *,
         granted_by_user_id: str | None,
     ) -> Result[SystemUserRoleGrantOutcome, SystemUserNotFound]:
-        """Validate enabled User and create or retain a role under one lock."""
+        """Grant by assignment uniqueness without the administrator removal gate."""
         async with self.session_manager() as session:
-            await self.system_role_repository.acquire_mutation_lock(session)
-            user = await self.user_repository.get(session, user_id)
-            if user is None or user.access_disabled_at is not None:
+            if not await self.system_role_repository.admit_active_user_grant(
+                session, user_id
+            ):
                 return Failure(SystemUserNotFound(user_id=user_id))
-            existing = await self.system_role_repository.get(session, user_id, role)
-            assignment = existing or await self.system_role_repository.create(
+            await self.system_role_repository.claim_assignment_mutation(
+                session, user_id, role
+            )
+            inserted = await self.system_role_repository.create_if_absent(
                 session,
                 SystemUserRoleAssignmentCreate(
                     user_id=user_id,
@@ -82,9 +84,15 @@ class SystemUserRoleOperationRepository:
                     granted_by_user_id=granted_by_user_id,
                 ),
             )
+            assignment = inserted or await self.system_role_repository.get(
+                session, user_id, role
+            )
+            if assignment is None:
+                raise RuntimeError("Role assignment disappeared during grant")
             return Success(
                 SystemUserRoleGrantOutcome(
-                    assignment=assignment, created=existing is None
+                    assignment=assignment,
+                    created=inserted is not None,
                 )
             )
 
@@ -94,6 +102,9 @@ class SystemUserRoleOperationRepository:
         """Remove an exact assignment while preserving the final administrator."""
         async with self.session_manager() as session:
             await self.system_role_repository.acquire_mutation_lock(session)
+            await self.system_role_repository.claim_assignment_mutation(
+                session, user_id, role
+            )
             assignment = await self.system_role_repository.get(session, user_id, role)
             if assignment is None:
                 return Failure(SystemRoleAssignmentNotFound(user_id=user_id, role=role))

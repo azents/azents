@@ -252,11 +252,10 @@ class RuntimeProviderBootstrapOperations:
             session,
             provider_logical_id=declaration.provider_logical_id,
         )
-        existing = await self.repository.get_bootstrap_declaration(
+        existing = await self.repository.lock_bootstrap_declaration_for_authority(
             session,
             source_id=source.id,
             declaration_key=declaration.declaration_key,
-            for_update=True,
         )
         if existing is not None and (
             existing.provider_logical_id != declaration.provider_logical_id
@@ -279,10 +278,9 @@ class RuntimeProviderBootstrapOperations:
                 conflicted_declaration_key=declaration.declaration_key,
             )
 
-        provider = await self.repository.get_by_provider_id(
+        provider = await self.repository.lock_by_provider_id_for_authority(
             session,
             provider_logical_id=declaration.provider_logical_id,
-            for_update=True,
         )
         if existing is not None and existing.provider_id is not None:
             return await self._reconcile_linked_declaration(
@@ -296,12 +294,12 @@ class RuntimeProviderBootstrapOperations:
             )
 
         if provider is not None:
-            linked_declaration = (
-                await self.repository.get_bootstrap_declaration_by_provider_id(
-                    session,
-                    provider_id=provider.id,
-                    for_update=True,
-                )
+            lock_declaration = (
+                self.repository.lock_bootstrap_declaration_by_provider_id_for_authority
+            )
+            linked_declaration = await lock_declaration(
+                session,
+                provider_id=provider.id,
             )
             conflict_code = self._existing_provider_conflict_code(
                 provider=provider,
@@ -499,12 +497,12 @@ class RuntimeProviderBootstrapOperations:
         authentication = declaration.authentication
         if authentication is None:
             return
-        declaration_binding = (
-            await self.binding_repository.get_by_bootstrap_declaration_id(
-                session,
-                bootstrap_declaration_id=declaration_id,
-                for_update=True,
-            )
+        lock_binding = (
+            self.binding_repository.lock_by_bootstrap_declaration_id_for_authority
+        )
+        declaration_binding = await lock_binding(
+            session,
+            bootstrap_declaration_id=declaration_id,
         )
         if declaration_binding is not None:
             expected_config = self._binding_config(declaration)
@@ -617,10 +615,12 @@ class RuntimeProviderBootstrapOperations:
         revoked_at: datetime.datetime,
     ) -> None:
         """Revoke only the bootstrap-owned binding represented by a declaration."""
-        binding = await self.binding_repository.get_by_bootstrap_declaration_id(
+        lock_binding = (
+            self.binding_repository.lock_by_bootstrap_declaration_id_for_authority
+        )
+        binding = await lock_binding(
             session,
             bootstrap_declaration_id=declaration.id,
-            for_update=True,
         )
         if (
             binding is None
@@ -676,10 +676,6 @@ class RuntimeProviderBootstrapOperations:
         if not creation_seed.set_as_platform_default_when_unset:
             return
         section = SystemSettingSection.PLATFORM_RUNTIME
-        await self.system_setting_repository.acquire_section_lock(
-            session,
-            section=section,
-        )
         current = await self.system_setting_repository.get_current(
             session,
             section=section,
@@ -700,26 +696,30 @@ class RuntimeProviderBootstrapOperations:
         config = PlatformRuntimeConfig(
             default_provider_id=declaration.provider_logical_id
         )
-        await self.system_setting_repository.write_current(
-            session,
-            write=SystemSettingCurrentWrite(
-                section=section,
-                schema_version=definition.schema_version,
-                version=next_version,
-                config=config.model_dump(mode="json"),
-                encrypted_secrets=(
-                    current.encrypted_secrets if current is not None else None
+        initialized = (
+            await self.system_setting_repository.initialize_current_if_unchanged(
+                session,
+                write=SystemSettingCurrentWrite(
+                    section=section,
+                    schema_version=definition.schema_version,
+                    version=next_version,
+                    config=config.model_dump(mode="json"),
+                    encrypted_secrets=(
+                        current.encrypted_secrets if current is not None else None
+                    ),
+                    secret_metadata=(
+                        current.secret_metadata if current is not None else {}
+                    ),
+                    validation_status=None,
+                    validated_generation=None,
+                    validation_metadata=None,
+                    validated_at=None,
+                    updated_by_user_id=None,
                 ),
-                secret_metadata=(
-                    current.secret_metadata if current is not None else {}
-                ),
-                validation_status=None,
-                validated_generation=None,
-                validation_metadata=None,
-                validated_at=None,
-                updated_by_user_id=None,
-            ),
+            )
         )
+        if initialized is None:
+            return
         await self.system_setting_repository.append_audit_event(
             session,
             create=SystemSettingAuditEventCreate(

@@ -83,7 +83,6 @@ class TestRuntimeProviderAuthBindingRepository:
         healthy = await repository.get_by_id(
             rdb_session,
             binding_id=binding.id,
-            for_update=False,
         )
         assert healthy is not None
         assert healthy.admin_version == 1
