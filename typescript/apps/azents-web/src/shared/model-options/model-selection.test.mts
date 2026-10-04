@@ -77,7 +77,7 @@ void test("label select data keeps first-seen order without duplicate values or 
   assert.equal(JSON.stringify(rows), before);
 });
 
-void test("stored v2 capability evidence and omitted settings survive form loading unchanged", () => {
+void test("stored final capabilities and request constraints survive form loading unchanged", () => {
   const stored: SelectableModelOption[] = [
     {
       label: "default",
@@ -133,7 +133,7 @@ void test("stored v2 capability evidence and omitted settings survive form loadi
   ]);
 });
 
-void test("v2 explicit model reselection respects conditional tool evidence", () => {
+void test("model reselection exposes conditional tool configuration without a partial request", () => {
   const pending = selectCandidateIntegration(candidate("new"), "integration-a");
   const model = {
     provider: "openai",
@@ -143,12 +143,20 @@ void test("v2 explicit model reselection respects conditional tool evidence", ()
   };
   assert.deepEqual(selectCandidateModel(pending, model).builtin_tools, [
     "web_search",
+    "image_generation",
   ]);
-  assert.deepEqual(
-    selectCandidateModel(pending, model, { reasoningEffort: "max" })
-      .builtin_tools,
-    ["web_search", "image_generation"],
-  );
+  const target = selectCandidateModel(pending, model);
+  const primary = {
+    ...target,
+    builtin_tools: ["image_generation"],
+    builtin_tool_configs: { image_generation: { quality: "high" } },
+  };
+  const copied = copyCompatiblePrimarySettings(primary, target);
+  assert.deepEqual(copied.candidate.builtin_tools, ["image_generation"]);
+  assert.deepEqual(copied.candidate.builtin_tool_configs, {
+    image_generation: { quality: "high" },
+  });
+  assert.deepEqual(copied.omitted, []);
 });
 
 void test("model replacement preserves every shared capability preference", () => {

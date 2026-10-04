@@ -39,7 +39,6 @@ from azents.core.exchange_file_errors import (
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
     normalize_historical_inference_profile_payload,
-    validate_requested_profile_against_options,
 )
 from azents.core.json_value import JSONValue
 from azents.core.mailbox_data import MailboxItem
@@ -66,6 +65,11 @@ from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    ActiveProfileCaptureRequired,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -145,6 +149,9 @@ class AgentSessionInputOperationsRepository:
     mailbox_admission_repository: Annotated[
         MailboxAdmissionRepository, Depends(MailboxAdmissionRepository)
     ]
+    active_profile_repository: Annotated[
+        ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -215,73 +222,126 @@ class AgentSessionInputOperationsRepository:
         client_request_id: str | None,
     ) -> Result[BufferedAgentSessionInputResult, AgentSessionInputError]:
         """Authorize and durably admit one Human input in a single transaction."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session, agent_session_id
-            )
-            if agent_session is None:
-                return Failure(AgentSessionInputSessionNotFound())
-            if agent_session.agent_id != agent_id:
-                return Failure(AgentSessionInputWrongAgent())
-            if agent_session.status != AgentSessionStatus.ACTIVE:
-                return Failure(AgentSessionInputInactiveSession())
-            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                return Failure(AgentSessionInputSubagentReadOnly())
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or agent.workspace_id != agent_session.workspace_id
-            ):
-                return Failure(AgentSessionInputInactiveSession())
-            if not await self._lock_workspace_access(
-                session,
-                workspace_id=agent_session.workspace_id,
-                user_id=requester_user_id,
-            ):
-                return Failure(AgentSessionInputSessionNotFound())
-
-            canonical_request_payload = {
-                **request_payload,
-                "sender_user_id": requester_user_id,
-            }
-            if client_request_id is not None:
-                existing = (
-                    await self.chat_write_request_repository.get_by_client_request_id(
-                        session,
-                        session_id=agent_session.id,
-                        requester_user_id=requester_user_id,
-                        client_request_id=client_request_id,
+        captured_admission: CapturedProfileAdmission | None = None
+        for _phase in range(2):
+            try:
+                write_request_repository = self.chat_write_request_repository
+                async with self.session_manager() as session:
+                    agent_session = await self.agent_session_repository.lock_by_id(
+                        session, agent_session_id
                     )
-                )
-                if existing is not None:
-                    if existing.write_type != write_type:
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another write type"
-                            )
-                        )
-                    if not _idempotency_payloads_match(
-                        existing.payload,
-                        canonical_request_payload,
-                    ):
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another payload"
-                            )
-                        )
-                    mailbox_item = await self.mailbox_repository.get_by_id(
-                        session,
-                        buffer_id=existing.accepted_id,
-                    )
+                    if agent_session is None:
+                        return Failure(AgentSessionInputSessionNotFound())
+                    if agent_session.agent_id != agent_id:
+                        return Failure(AgentSessionInputWrongAgent())
+                    if agent_session.status != AgentSessionStatus.ACTIVE:
+                        return Failure(AgentSessionInputInactiveSession())
+                    if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                        return Failure(AgentSessionInputSubagentReadOnly())
+                    agent = await self.agent_repository.lock_by_id(session, agent_id)
                     if (
-                        mailbox_item is not None
-                        and mailbox_item.session_id != agent_session.id
+                        agent is None
+                        or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                        or agent.workspace_id != agent_session.workspace_id
                     ):
-                        raise RuntimeError(
-                            "Human input idempotency record resolved outside "
-                            "its Session"
+                        return Failure(AgentSessionInputInactiveSession())
+                    if not await self._lock_workspace_access(
+                        session,
+                        workspace_id=agent_session.workspace_id,
+                        user_id=requester_user_id,
+                    ):
+                        return Failure(AgentSessionInputSessionNotFound())
+
+                    canonical_request_payload = {
+                        **request_payload,
+                        "sender_user_id": requester_user_id,
+                    }
+                    if client_request_id is not None:
+                        existing = (
+                            await write_request_repository.get_by_client_request_id(
+                                session,
+                                session_id=agent_session.id,
+                                requester_user_id=requester_user_id,
+                                client_request_id=client_request_id,
+                            )
                         )
+                        if existing is not None:
+                            if existing.write_type != write_type:
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID "
+                                        "already used for another write type"
+                                    )
+                                )
+                            if not _idempotency_payloads_match(
+                                existing.payload,
+                                canonical_request_payload,
+                            ):
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID "
+                                        "already used for another payload"
+                                    )
+                                )
+                            mailbox_item = await self.mailbox_repository.get_by_id(
+                                session,
+                                buffer_id=existing.accepted_id,
+                            )
+                            if (
+                                mailbox_item is not None
+                                and mailbox_item.session_id != agent_session.id
+                            ):
+                                raise RuntimeError(
+                                    "Human input idempotency record resolved outside "
+                                    "its Session"
+                                )
+                            runtime_result = await self._resolve_runtime_for_input(
+                                session,
+                                agent=agent,
+                                runtime_dependent=False,
+                            )
+                            match runtime_result:
+                                case Success(runtime):
+                                    pass
+                                case Failure(error):
+                                    return Failure(error)
+                                case _:
+                                    assert_never(runtime_result)
+                            if runtime is not None:
+                                await self._enqueue_working_folder_adoption_if_needed(
+                                    session,
+                                    agent_session=agent_session,
+                                )
+                            await self._reapply_existing_mailbox_wake(
+                                session,
+                                mailbox_item,
+                            )
+                            return Success(
+                                BufferedAgentSessionInputResult(
+                                    agent_runtime_id=(
+                                        runtime.id if runtime is not None else None
+                                    ),
+                                    agent_session_id=agent_session.id,
+                                    accepted_mailbox_item_id=existing.accepted_id,
+                                    mailbox_item=mailbox_item,
+                                    created=False,
+                                )
+                            )
+
+                    if isinstance(agent, Agent):
+                        try:
+                            await self.active_profile_repository.validate_in_session(
+                                session,
+                                agent=agent,
+                                profile=inference_profile,
+                                captured=captured_admission,
+                            )
+                        except ValueError as error:
+                            return Failure(
+                                AgentSessionInputInvalidInferenceProfile(
+                                    reason=str(error)
+                                )
+                            )
                     runtime_result = await self._resolve_runtime_for_input(
                         session,
                         agent=agent,
@@ -299,132 +359,100 @@ class AgentSessionInputOperationsRepository:
                             session,
                             agent_session=agent_session,
                         )
-                    await self._reapply_existing_mailbox_wake(
+                    result = await self.mailbox_admission_repository.enqueue_in_session(
                         session,
-                        mailbox_item,
-                    )
-                    return Success(
-                        BufferedAgentSessionInputResult(
-                            agent_runtime_id=(
-                                runtime.id if runtime is not None else None
+                        MailboxEnqueue(
+                            session_id=agent_session.id,
+                            kind=kind,
+                            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                            requested_model_target_label=inference_profile.model_target_label,
+                            requested_reasoning_effort=inference_profile.reasoning_effort,
+                            requested_enabled_execution_options=(
+                                inference_profile.enabled_execution_options
                             ),
-                            agent_session_id=agent_session.id,
-                            accepted_mailbox_item_id=existing.accepted_id,
-                            mailbox_item=mailbox_item,
-                            created=False,
+                            sender_user_id=requester_user_id,
+                            order_group=None,
+                            order_sequence=0,
+                            content=message.text,
+                            idempotency_key=(
+                                _human_mailbox_item_idempotency_key(
+                                    requester_user_id=requester_user_id,
+                                    client_request_id=client_request_id,
+                                )
+                                if client_request_id is not None
+                                else None
+                            ),
+                            metadata=message.metadata,
+                            action=action,
+                            attachments=message.attachments,
+                            file_parts=message.file_parts,
+                            payload=None,
+                        ),
+                    )
+                    claim = (
+                        await self.attachment_claim_repository.claim_input_attachments(
+                            session,
+                            agent_id=agent_session.agent_id,
+                            session_id=agent_session.id,
+                            user_id=requester_user_id,
+                            attachment_uris=result.mailbox_item.attachments,
                         )
                     )
-
-            if isinstance(agent, Agent):
-                try:
-                    validate_requested_profile_against_options(
-                        agent.selectable_model_options,
-                        inference_profile,
-                    )
-                except ValueError as error:
-                    return Failure(
-                        AgentSessionInputInvalidInferenceProfile(reason=str(error))
-                    )
-            runtime_result = await self._resolve_runtime_for_input(
-                session,
-                agent=agent,
-                runtime_dependent=False,
-            )
-            match runtime_result:
-                case Success(runtime):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(runtime_result)
-            if runtime is not None:
-                await self._enqueue_working_folder_adoption_if_needed(
-                    session,
-                    agent_session=agent_session,
-                )
-            result = await self.mailbox_admission_repository.enqueue_in_session(
-                session,
-                MailboxEnqueue(
-                    session_id=agent_session.id,
-                    kind=kind,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                    requested_model_target_label=inference_profile.model_target_label,
-                    requested_reasoning_effort=inference_profile.reasoning_effort,
-                    requested_enabled_execution_options=(
-                        inference_profile.enabled_execution_options
-                    ),
-                    sender_user_id=requester_user_id,
-                    order_group=None,
-                    order_sequence=0,
-                    content=message.text,
-                    idempotency_key=(
-                        _human_mailbox_item_idempotency_key(
-                            requester_user_id=requester_user_id,
-                            client_request_id=client_request_id,
+                    match claim:
+                        case Success():
+                            pass
+                        case Failure(error):
+                            await session.rollback()
+                            return Failure(error)
+                        case _:
+                            assert_never(claim)
+                    if client_request_id is not None:
+                        (
+                            record,
+                            created,
+                        ) = await self.chat_write_request_repository.create_idempotent(
+                            session,
+                            ChatWriteRequestCreate(
+                                session_id=agent_session.id,
+                                requester_user_id=requester_user_id,
+                                creation_agent_id=None,
+                                client_request_id=client_request_id,
+                                write_type=write_type,
+                                accepted_type=write_type,
+                                accepted_id=result.mailbox_item.id,
+                                history_reload_required=False,
+                                payload=canonical_request_payload,
+                            ),
                         )
-                        if client_request_id is not None
-                        else None
-                    ),
-                    metadata=message.metadata,
-                    action=action,
-                    attachments=message.attachments,
-                    file_parts=message.file_parts,
-                    payload=None,
-                ),
-            )
-            claim = await self.attachment_claim_repository.claim_input_attachments(
-                session,
-                agent_id=agent_session.agent_id,
-                session_id=agent_session.id,
-                user_id=requester_user_id,
-                attachment_uris=result.mailbox_item.attachments,
-            )
-            match claim:
-                case Success():
-                    pass
-                case Failure(error):
-                    await session.rollback()
-                    return Failure(error)
-                case _:
-                    assert_never(claim)
-            if client_request_id is not None:
-                (
-                    record,
-                    created,
-                ) = await self.chat_write_request_repository.create_idempotent(
-                    session,
-                    ChatWriteRequestCreate(
+                        if not created or record.accepted_id != result.mailbox_item.id:
+                            raise RuntimeError(
+                                "Session-locked Human input admission lost "
+                                "idempotency ownership"
+                            )
+                    await self.agent_session_repository.set_applied_inference_profile(
+                        session,
                         session_id=agent_session.id,
-                        requester_user_id=requester_user_id,
-                        creation_agent_id=None,
-                        client_request_id=client_request_id,
-                        write_type=write_type,
-                        accepted_type=write_type,
-                        accepted_id=result.mailbox_item.id,
-                        history_reload_required=False,
-                        payload=canonical_request_payload,
-                    ),
-                )
-                if not created or record.accepted_id != result.mailbox_item.id:
-                    raise RuntimeError(
-                        "Session-locked Human input admission lost "
-                        "idempotency ownership"
+                        model_target_label=inference_profile.model_target_label,
+                        reasoning_effort=inference_profile.reasoning_effort,
+                        enabled_execution_options=inference_profile.enabled_execution_options,
                     )
-            await self.agent_session_repository.set_applied_inference_profile(
-                session,
-                session_id=agent_session.id,
-                model_target_label=inference_profile.model_target_label,
-                reasoning_effort=inference_profile.reasoning_effort,
-                enabled_execution_options=inference_profile.enabled_execution_options,
-            )
 
-        return Success(
-            BufferedAgentSessionInputResult(
-                agent_runtime_id=runtime.id if runtime is not None else None,
-                agent_session_id=agent_session.id,
-                accepted_mailbox_item_id=result.mailbox_item.id,
-                mailbox_item=result.mailbox_item,
-                created=True,
+                return Success(
+                    BufferedAgentSessionInputResult(
+                        agent_runtime_id=runtime.id if runtime is not None else None,
+                        agent_session_id=agent_session.id,
+                        accepted_mailbox_item_id=result.mailbox_item.id,
+                        mailbox_item=result.mailbox_item,
+                        created=True,
+                    )
+                )
+            except ActiveProfileCaptureRequired as needed:
+                captured_admission = await self.active_profile_repository.capture(
+                    needed.choice
+                )
+        return Failure(
+            AgentSessionInputInvalidInferenceProfile(
+                reason="Model metadata changed before input admission"
             )
         )
 
@@ -441,71 +469,136 @@ class AgentSessionInputOperationsRepository:
         client_request_id: str | None = None,
     ) -> Result[CreatedAgentSessionInputResult, AgentSessionInputError]:
         """Create a non-primary team AgentSession and store first user input."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if agent is None:
-                return Failure(AgentSessionInputSessionNotFound())
-            if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
-                return Failure(AgentSessionInputSessionNotFound())
-            if not await self._lock_workspace_access(
-                session,
-                workspace_id=agent.workspace_id,
-                user_id=user_id,
-            ):
-                return Failure(AgentSessionInputSessionNotFound())
-            canonical_request_payload = {
-                **request_payload,
-                "sender_user_id": user_id,
-            }
-            if client_request_id is not None:
-                write_requests = self.chat_write_request_repository
-                existing = await (
-                    write_requests.get_by_session_creation_client_request_id(
+        captured_admission: CapturedProfileAdmission | None = None
+        for _phase in range(2):
+            try:
+                async with self.session_manager() as session:
+                    agent = await self.agent_repository.lock_by_id(session, agent_id)
+                    if agent is None:
+                        return Failure(AgentSessionInputSessionNotFound())
+                    if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+                        return Failure(AgentSessionInputSessionNotFound())
+                    if not await self._lock_workspace_access(
                         session,
-                        agent_id=agent_id,
-                        requester_user_id=user_id,
-                        client_request_id=client_request_id,
-                    )
-                )
-                if existing is not None:
-                    if existing.write_type is not ChatWriteRequestType.MESSAGE:
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another write type"
+                        workspace_id=agent.workspace_id,
+                        user_id=user_id,
+                    ):
+                        return Failure(AgentSessionInputSessionNotFound())
+                    canonical_request_payload = {
+                        **request_payload,
+                        "sender_user_id": user_id,
+                    }
+                    if client_request_id is not None:
+                        write_requests = self.chat_write_request_repository
+                        existing = await (
+                            write_requests.get_by_session_creation_client_request_id(
+                                session,
+                                agent_id=agent_id,
+                                requester_user_id=user_id,
+                                client_request_id=client_request_id,
                             )
                         )
-                    if not _idempotency_payloads_match(
-                        existing.payload,
-                        canonical_request_payload,
-                    ):
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another payload"
+                        if existing is not None:
+                            if existing.write_type is not ChatWriteRequestType.MESSAGE:
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID "
+                                        "already used for another write type"
+                                    )
+                                )
+                            if not _idempotency_payloads_match(
+                                existing.payload,
+                                canonical_request_payload,
+                            ):
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID "
+                                        "already used for another payload"
+                                    )
+                                )
+                            agent_session = (
+                                await self.agent_session_repository.get_by_id(
+                                    session,
+                                    existing.session_id,
+                                )
                             )
-                        )
-                    agent_session = await self.agent_session_repository.get_by_id(
-                        session,
-                        existing.session_id,
-                    )
-                    if (
-                        agent_session is None
-                        or agent_session.agent_id != agent_id
-                        or agent_session.workspace_id != agent.workspace_id
-                    ):
-                        raise RuntimeError(
-                            "Session creation idempotency record resolved outside "
-                            "its Agent boundary"
-                        )
-                    if (
-                        agent_session.product_mode is not AgentSessionProductMode.TEAM
-                        or agent_session.associated_user_id is not None
-                    ):
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another "
-                                "session product mode"
+                            if (
+                                agent_session is None
+                                or agent_session.agent_id != agent_id
+                                or agent_session.workspace_id != agent.workspace_id
+                            ):
+                                raise RuntimeError(
+                                    "Session creation "
+                                    "idempotency record resolved outside "
+                                    "its Agent boundary"
+                                )
+                            if (
+                                agent_session.product_mode
+                                is not AgentSessionProductMode.TEAM
+                                or agent_session.associated_user_id is not None
+                            ):
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID already used for another "
+                                        "session product mode"
+                                    )
+                                )
+                            runtime_result = await self._resolve_runtime_for_input(
+                                session,
+                                agent=agent,
+                                runtime_dependent=bool(
+                                    existing_project_paths or setup_actions
+                                ),
                             )
-                        )
+                            match runtime_result:
+                                case Success(runtime):
+                                    pass
+                                case Failure(error):
+                                    return Failure(error)
+                                case _:
+                                    assert_never(runtime_result)
+                            mailbox_item = await self.mailbox_repository.get_by_id(
+                                session,
+                                buffer_id=existing.accepted_id,
+                            )
+                            if (
+                                mailbox_item is not None
+                                and mailbox_item.session_id != agent_session.id
+                            ):
+                                raise RuntimeError(
+                                    "Session creation "
+                                    "idempotency record resolved an input "
+                                    "outside its Session"
+                                )
+                            await self._reapply_existing_mailbox_wake(
+                                session,
+                                mailbox_item,
+                            )
+                            return Success(
+                                CreatedAgentSessionInputResult(
+                                    agent_runtime_id=(
+                                        runtime.id if runtime is not None else None
+                                    ),
+                                    agent_session=agent_session,
+                                    accepted_mailbox_item_id=existing.accepted_id,
+                                    mailbox_item=mailbox_item,
+                                    created=False,
+                                )
+                            )
+                    if isinstance(agent, Agent):
+                        try:
+                            await self.active_profile_repository.validate_in_session(
+                                session,
+                                agent=agent,
+                                profile=inference_profile,
+                                captured=captured_admission,
+                            )
+                        except ValueError as error:
+                            return Failure(
+                                AgentSessionInputInvalidInferenceProfile(
+                                    reason=str(error)
+                                )
+                            )
                     runtime_result = await self._resolve_runtime_for_input(
                         session,
                         agent=agent,
@@ -518,193 +611,154 @@ class AgentSessionInputOperationsRepository:
                             return Failure(error)
                         case _:
                             assert_never(runtime_result)
-                    mailbox_item = await self.mailbox_repository.get_by_id(
+                    await self.root_session_repository.ensure_team_primary(
                         session,
-                        buffer_id=existing.accepted_id,
+                        workspace_id=agent.workspace_id,
+                        agent_id=agent_id,
                     )
-                    if (
-                        mailbox_item is not None
-                        and mailbox_item.session_id != agent_session.id
-                    ):
-                        raise RuntimeError(
-                            "Session creation idempotency record resolved an input "
-                            "outside its Session"
+                    if existing_project_paths or setup_actions:
+                        if runtime is None or runtime.workspace_path is None:
+                            return Failure(
+                                InvalidProjectPath(
+                                    path="",
+                                    reason=(
+                                        "A current Agent Workspace is required for "
+                                        "Project or worktree setup."
+                                    ),
+                                )
+                            )
+                        workspace_items_result = self._workspace_items_from_request(
+                            existing_project_paths=existing_project_paths,
+                            setup_actions=setup_actions,
+                            workspace_root=normalize_agent_workspace_root(
+                                runtime.workspace_path
+                            ).as_posix(),
                         )
-                    await self._reapply_existing_mailbox_wake(
+                    else:
+                        workspace_items_result = Success([])
+                    match workspace_items_result:
+                        case Success(workspace_items):
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(workspace_items_result)
+                    root_session_creation = self.root_session_repository
+                    root_result = await root_session_creation.create_root_session(
                         session,
-                        mailbox_item,
+                        create=AgentSessionCreate(
+                            workspace_id=agent.workspace_id,
+                            agent_id=agent_id,
+                            title=None,
+                            primary_kind=None,
+                            product_mode=AgentSessionProductMode.TEAM,
+                            associated_user_id=None,
+                        ),
+                        workspace_intent=ExplicitRootWorkspaceIntent(
+                            existing_project_paths=[
+                                item.path
+                                for item in workspace_items
+                                if isinstance(item, ExistingProjectWorkspaceItem)
+                            ],
+                        ),
                     )
-                    return Success(
-                        CreatedAgentSessionInputResult(
-                            agent_runtime_id=(
-                                runtime.id if runtime is not None else None
-                            ),
-                            agent_session=agent_session,
-                            accepted_mailbox_item_id=existing.accepted_id,
-                            mailbox_item=mailbox_item,
-                            created=False,
-                        )
-                    )
-            if isinstance(agent, Agent):
-                try:
-                    validate_requested_profile_against_options(
-                        agent.selectable_model_options,
-                        inference_profile,
-                    )
-                except ValueError as error:
-                    return Failure(
-                        AgentSessionInputInvalidInferenceProfile(reason=str(error))
-                    )
-            runtime_result = await self._resolve_runtime_for_input(
-                session,
-                agent=agent,
-                runtime_dependent=bool(existing_project_paths or setup_actions),
-            )
-            match runtime_result:
-                case Success(runtime):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(runtime_result)
-            await self.root_session_repository.ensure_team_primary(
-                session,
-                workspace_id=agent.workspace_id,
-                agent_id=agent_id,
-            )
-            if existing_project_paths or setup_actions:
-                if runtime is None or runtime.workspace_path is None:
-                    return Failure(
-                        InvalidProjectPath(
-                            path="",
-                            reason=(
-                                "A current Agent Workspace is required for "
-                                "Project or worktree setup."
-                            ),
-                        )
-                    )
-                workspace_items_result = self._workspace_items_from_request(
-                    existing_project_paths=existing_project_paths,
-                    setup_actions=setup_actions,
-                    workspace_root=normalize_agent_workspace_root(
-                        runtime.workspace_path
-                    ).as_posix(),
-                )
-            else:
-                workspace_items_result = Success([])
-            match workspace_items_result:
-                case Success(workspace_items):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(workspace_items_result)
-            root_session_creation = self.root_session_repository
-            root_result = await root_session_creation.create_root_session(
-                session,
-                create=AgentSessionCreate(
-                    workspace_id=agent.workspace_id,
-                    agent_id=agent_id,
-                    title=None,
-                    primary_kind=None,
-                    product_mode=AgentSessionProductMode.TEAM,
-                    associated_user_id=None,
-                ),
-                workspace_intent=ExplicitRootWorkspaceIntent(
-                    existing_project_paths=[
-                        item.path
-                        for item in workspace_items
-                        if isinstance(item, ExistingProjectWorkspaceItem)
-                    ],
-                ),
-            )
-            agent_session = root_result.agent_session
-            workspace_result = await self._create_session_workspace_items(
-                session,
-                agent_id=agent_id,
-                session_id=agent_session.id,
-                session_handle=agent_session.handle,
-                workspace_items=workspace_items,
-                create_direct_projects=False,
-            )
-            match workspace_result:
-                case Success():
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(workspace_result)
-            await self._enqueue_setup_actions(
-                session,
-                agent_session=agent_session,
-                workspace_items=workspace_items,
-                create_session_working_folder=runtime is not None,
-                message=message,
-                inference_profile=inference_profile,
-                user_id=user_id,
-                client_request_id=client_request_id,
-            )
-            enqueue_result = await self._enqueue_user_message(
-                session,
-                agent_session=agent_session,
-                message=message,
-                inference_profile=inference_profile,
-                user_id=user_id,
-                client_request_id=client_request_id,
-            )
-            match enqueue_result:
-                case Success(mailbox_item):
-                    pass
-                case Failure(error):
-                    await session.rollback()
-                    return Failure(error)
-                case _:
-                    assert_never(enqueue_result)
-            if client_request_id is not None:
-                (
-                    record,
-                    created,
-                ) = await self.chat_write_request_repository.create_idempotent(
-                    session,
-                    ChatWriteRequestCreate(
-                        session_id=agent_session.id,
-                        requester_user_id=user_id,
-                        creation_agent_id=agent_id,
-                        client_request_id=client_request_id,
-                        write_type=ChatWriteRequestType.MESSAGE,
-                        accepted_type=ChatWriteRequestType.MESSAGE,
-                        accepted_id=mailbox_item.id,
-                        history_reload_required=False,
-                        payload=canonical_request_payload,
-                    ),
-                )
-                if not created or record.accepted_id != mailbox_item.id:
-                    # Another creator won the Agent-scoped unique key. Discard the
-                    # losing Session tree and return the durable winner.
-                    await session.rollback()
-                    return await self._resolve_existing_session_creation(
+                    agent_session = root_result.agent_session
+                    workspace_result = await self._create_session_workspace_items(
                         session,
                         agent_id=agent_id,
+                        session_id=agent_session.id,
+                        session_handle=agent_session.handle,
+                        workspace_items=workspace_items,
+                        create_direct_projects=False,
+                    )
+                    match workspace_result:
+                        case Success():
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(workspace_result)
+                    await self._enqueue_setup_actions(
+                        session,
+                        agent_session=agent_session,
+                        workspace_items=workspace_items,
+                        create_session_working_folder=runtime is not None,
+                        message=message,
+                        inference_profile=inference_profile,
                         user_id=user_id,
                         client_request_id=client_request_id,
-                        canonical_request_payload=canonical_request_payload,
-                        expected_product_mode=AgentSessionProductMode.TEAM,
                     )
-            await self.agent_session_repository.set_applied_inference_profile(
-                session,
-                session_id=agent_session.id,
-                model_target_label=inference_profile.model_target_label,
-                reasoning_effort=inference_profile.reasoning_effort,
-                enabled_execution_options=inference_profile.enabled_execution_options,
-            )
+                    enqueue_result = await self._enqueue_user_message(
+                        session,
+                        agent_session=agent_session,
+                        message=message,
+                        inference_profile=inference_profile,
+                        user_id=user_id,
+                        client_request_id=client_request_id,
+                    )
+                    match enqueue_result:
+                        case Success(mailbox_item):
+                            pass
+                        case Failure(error):
+                            await session.rollback()
+                            return Failure(error)
+                        case _:
+                            assert_never(enqueue_result)
+                    if client_request_id is not None:
+                        (
+                            record,
+                            created,
+                        ) = await self.chat_write_request_repository.create_idempotent(
+                            session,
+                            ChatWriteRequestCreate(
+                                session_id=agent_session.id,
+                                requester_user_id=user_id,
+                                creation_agent_id=agent_id,
+                                client_request_id=client_request_id,
+                                write_type=ChatWriteRequestType.MESSAGE,
+                                accepted_type=ChatWriteRequestType.MESSAGE,
+                                accepted_id=mailbox_item.id,
+                                history_reload_required=False,
+                                payload=canonical_request_payload,
+                            ),
+                        )
+                        if not created or record.accepted_id != mailbox_item.id:
+                            # Another creator won the Agent-scoped unique key.
+                            # Discard the
+                            # losing Session tree and return the durable winner.
+                            await session.rollback()
+                            return await self._resolve_existing_session_creation(
+                                session,
+                                agent_id=agent_id,
+                                user_id=user_id,
+                                client_request_id=client_request_id,
+                                canonical_request_payload=canonical_request_payload,
+                                expected_product_mode=AgentSessionProductMode.TEAM,
+                            )
+                    await self.agent_session_repository.set_applied_inference_profile(
+                        session,
+                        session_id=agent_session.id,
+                        model_target_label=inference_profile.model_target_label,
+                        reasoning_effort=inference_profile.reasoning_effort,
+                        enabled_execution_options=inference_profile.enabled_execution_options,
+                    )
 
-        return Success(
-            CreatedAgentSessionInputResult(
-                agent_runtime_id=runtime.id if runtime is not None else None,
-                agent_session=agent_session,
-                accepted_mailbox_item_id=mailbox_item.id,
-                mailbox_item=mailbox_item,
-                created=True,
+                return Success(
+                    CreatedAgentSessionInputResult(
+                        agent_runtime_id=runtime.id if runtime is not None else None,
+                        agent_session=agent_session,
+                        accepted_mailbox_item_id=mailbox_item.id,
+                        mailbox_item=mailbox_item,
+                        created=True,
+                    )
+                )
+            except ActiveProfileCaptureRequired as needed:
+                captured_admission = await self.active_profile_repository.capture(
+                    needed.choice
+                )
+        return Failure(
+            AgentSessionInputInvalidInferenceProfile(
+                reason="Model metadata changed before input admission"
             )
         )
 
@@ -721,71 +775,136 @@ class AgentSessionInputOperationsRepository:
         client_request_id: str | None = None,
     ) -> Result[CreatedAgentSessionInputResult, AgentSessionInputError]:
         """Create a non-primary User AgentSession and store first user input."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if agent is None:
-                return Failure(AgentSessionInputSessionNotFound())
-            if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
-                return Failure(AgentSessionInputSessionNotFound())
-            if not await self._lock_workspace_access(
-                session,
-                workspace_id=agent.workspace_id,
-                user_id=user_id,
-            ):
-                return Failure(AgentSessionInputSessionNotFound())
-            canonical_request_payload = {
-                **request_payload,
-                "sender_user_id": user_id,
-            }
-            if client_request_id is not None:
-                write_requests = self.chat_write_request_repository
-                existing = await (
-                    write_requests.get_by_session_creation_client_request_id(
+        captured_admission: CapturedProfileAdmission | None = None
+        for _phase in range(2):
+            try:
+                async with self.session_manager() as session:
+                    agent = await self.agent_repository.lock_by_id(session, agent_id)
+                    if agent is None:
+                        return Failure(AgentSessionInputSessionNotFound())
+                    if agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+                        return Failure(AgentSessionInputSessionNotFound())
+                    if not await self._lock_workspace_access(
                         session,
-                        agent_id=agent_id,
-                        requester_user_id=user_id,
-                        client_request_id=client_request_id,
-                    )
-                )
-                if existing is not None:
-                    if existing.write_type is not ChatWriteRequestType.MESSAGE:
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another write type"
+                        workspace_id=agent.workspace_id,
+                        user_id=user_id,
+                    ):
+                        return Failure(AgentSessionInputSessionNotFound())
+                    canonical_request_payload = {
+                        **request_payload,
+                        "sender_user_id": user_id,
+                    }
+                    if client_request_id is not None:
+                        write_requests = self.chat_write_request_repository
+                        existing = await (
+                            write_requests.get_by_session_creation_client_request_id(
+                                session,
+                                agent_id=agent_id,
+                                requester_user_id=user_id,
+                                client_request_id=client_request_id,
                             )
                         )
-                    if not _idempotency_payloads_match(
-                        existing.payload,
-                        canonical_request_payload,
-                    ):
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another payload"
+                        if existing is not None:
+                            if existing.write_type is not ChatWriteRequestType.MESSAGE:
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID "
+                                        "already used for another write type"
+                                    )
+                                )
+                            if not _idempotency_payloads_match(
+                                existing.payload,
+                                canonical_request_payload,
+                            ):
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID "
+                                        "already used for another payload"
+                                    )
+                                )
+                            agent_session = (
+                                await self.agent_session_repository.get_by_id(
+                                    session,
+                                    existing.session_id,
+                                )
                             )
-                        )
-                    agent_session = await self.agent_session_repository.get_by_id(
-                        session,
-                        existing.session_id,
-                    )
-                    if (
-                        agent_session is None
-                        or agent_session.agent_id != agent_id
-                        or agent_session.workspace_id != agent.workspace_id
-                    ):
-                        raise RuntimeError(
-                            "Session creation idempotency record resolved outside "
-                            "its Agent boundary"
-                        )
-                    if (
-                        agent_session.product_mode is not AgentSessionProductMode.USER
-                        or agent_session.associated_user_id != user_id
-                    ):
-                        return Failure(
-                            AgentSessionInputIdempotencyConflict(
-                                "Client request ID already used for another "
-                                "session product mode"
+                            if (
+                                agent_session is None
+                                or agent_session.agent_id != agent_id
+                                or agent_session.workspace_id != agent.workspace_id
+                            ):
+                                raise RuntimeError(
+                                    "Session creation "
+                                    "idempotency record resolved outside "
+                                    "its Agent boundary"
+                                )
+                            if (
+                                agent_session.product_mode
+                                is not AgentSessionProductMode.USER
+                                or agent_session.associated_user_id != user_id
+                            ):
+                                return Failure(
+                                    AgentSessionInputIdempotencyConflict(
+                                        "Client request ID already used for another "
+                                        "session product mode"
+                                    )
+                                )
+                            runtime_result = await self._resolve_runtime_for_input(
+                                session,
+                                agent=agent,
+                                runtime_dependent=bool(
+                                    existing_project_paths or setup_actions
+                                ),
                             )
-                        )
+                            match runtime_result:
+                                case Success(runtime):
+                                    pass
+                                case Failure(error):
+                                    return Failure(error)
+                                case _:
+                                    assert_never(runtime_result)
+                            mailbox_item = await self.mailbox_repository.get_by_id(
+                                session,
+                                buffer_id=existing.accepted_id,
+                            )
+                            if (
+                                mailbox_item is not None
+                                and mailbox_item.session_id != agent_session.id
+                            ):
+                                raise RuntimeError(
+                                    "Session creation "
+                                    "idempotency record resolved an input "
+                                    "outside its Session"
+                                )
+                            await self._reapply_existing_mailbox_wake(
+                                session,
+                                mailbox_item,
+                            )
+                            return Success(
+                                CreatedAgentSessionInputResult(
+                                    agent_runtime_id=(
+                                        runtime.id if runtime is not None else None
+                                    ),
+                                    agent_session=agent_session,
+                                    accepted_mailbox_item_id=existing.accepted_id,
+                                    mailbox_item=mailbox_item,
+                                    created=False,
+                                )
+                            )
+                    if isinstance(agent, Agent):
+                        try:
+                            await self.active_profile_repository.validate_in_session(
+                                session,
+                                agent=agent,
+                                profile=inference_profile,
+                                captured=captured_admission,
+                            )
+                        except ValueError as error:
+                            return Failure(
+                                AgentSessionInputInvalidInferenceProfile(
+                                    reason=str(error)
+                                )
+                            )
                     runtime_result = await self._resolve_runtime_for_input(
                         session,
                         agent=agent,
@@ -798,193 +917,154 @@ class AgentSessionInputOperationsRepository:
                             return Failure(error)
                         case _:
                             assert_never(runtime_result)
-                    mailbox_item = await self.mailbox_repository.get_by_id(
+                    await self.root_session_repository.ensure_team_primary(
                         session,
-                        buffer_id=existing.accepted_id,
+                        workspace_id=agent.workspace_id,
+                        agent_id=agent_id,
                     )
-                    if (
-                        mailbox_item is not None
-                        and mailbox_item.session_id != agent_session.id
-                    ):
-                        raise RuntimeError(
-                            "Session creation idempotency record resolved an input "
-                            "outside its Session"
+                    if existing_project_paths or setup_actions:
+                        if runtime is None or runtime.workspace_path is None:
+                            return Failure(
+                                InvalidProjectPath(
+                                    path="",
+                                    reason=(
+                                        "A current Agent Workspace is required for "
+                                        "Project or worktree setup."
+                                    ),
+                                )
+                            )
+                        workspace_items_result = self._workspace_items_from_request(
+                            existing_project_paths=existing_project_paths,
+                            setup_actions=setup_actions,
+                            workspace_root=normalize_agent_workspace_root(
+                                runtime.workspace_path
+                            ).as_posix(),
                         )
-                    await self._reapply_existing_mailbox_wake(
+                    else:
+                        workspace_items_result = Success([])
+                    match workspace_items_result:
+                        case Success(workspace_items):
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(workspace_items_result)
+                    root_session_creation = self.root_session_repository
+                    root_result = await root_session_creation.create_root_session(
                         session,
-                        mailbox_item,
+                        create=AgentSessionCreate(
+                            workspace_id=agent.workspace_id,
+                            agent_id=agent_id,
+                            title=None,
+                            primary_kind=None,
+                            product_mode=AgentSessionProductMode.USER,
+                            associated_user_id=user_id,
+                        ),
+                        workspace_intent=ExplicitRootWorkspaceIntent(
+                            existing_project_paths=[
+                                item.path
+                                for item in workspace_items
+                                if isinstance(item, ExistingProjectWorkspaceItem)
+                            ],
+                        ),
                     )
-                    return Success(
-                        CreatedAgentSessionInputResult(
-                            agent_runtime_id=(
-                                runtime.id if runtime is not None else None
-                            ),
-                            agent_session=agent_session,
-                            accepted_mailbox_item_id=existing.accepted_id,
-                            mailbox_item=mailbox_item,
-                            created=False,
-                        )
-                    )
-            if isinstance(agent, Agent):
-                try:
-                    validate_requested_profile_against_options(
-                        agent.selectable_model_options,
-                        inference_profile,
-                    )
-                except ValueError as error:
-                    return Failure(
-                        AgentSessionInputInvalidInferenceProfile(reason=str(error))
-                    )
-            runtime_result = await self._resolve_runtime_for_input(
-                session,
-                agent=agent,
-                runtime_dependent=bool(existing_project_paths or setup_actions),
-            )
-            match runtime_result:
-                case Success(runtime):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(runtime_result)
-            await self.root_session_repository.ensure_team_primary(
-                session,
-                workspace_id=agent.workspace_id,
-                agent_id=agent_id,
-            )
-            if existing_project_paths or setup_actions:
-                if runtime is None or runtime.workspace_path is None:
-                    return Failure(
-                        InvalidProjectPath(
-                            path="",
-                            reason=(
-                                "A current Agent Workspace is required for "
-                                "Project or worktree setup."
-                            ),
-                        )
-                    )
-                workspace_items_result = self._workspace_items_from_request(
-                    existing_project_paths=existing_project_paths,
-                    setup_actions=setup_actions,
-                    workspace_root=normalize_agent_workspace_root(
-                        runtime.workspace_path
-                    ).as_posix(),
-                )
-            else:
-                workspace_items_result = Success([])
-            match workspace_items_result:
-                case Success(workspace_items):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(workspace_items_result)
-            root_session_creation = self.root_session_repository
-            root_result = await root_session_creation.create_root_session(
-                session,
-                create=AgentSessionCreate(
-                    workspace_id=agent.workspace_id,
-                    agent_id=agent_id,
-                    title=None,
-                    primary_kind=None,
-                    product_mode=AgentSessionProductMode.USER,
-                    associated_user_id=user_id,
-                ),
-                workspace_intent=ExplicitRootWorkspaceIntent(
-                    existing_project_paths=[
-                        item.path
-                        for item in workspace_items
-                        if isinstance(item, ExistingProjectWorkspaceItem)
-                    ],
-                ),
-            )
-            agent_session = root_result.agent_session
-            workspace_result = await self._create_session_workspace_items(
-                session,
-                agent_id=agent_id,
-                session_id=agent_session.id,
-                session_handle=agent_session.handle,
-                workspace_items=workspace_items,
-                create_direct_projects=False,
-            )
-            match workspace_result:
-                case Success():
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(workspace_result)
-            await self._enqueue_setup_actions(
-                session,
-                agent_session=agent_session,
-                workspace_items=workspace_items,
-                create_session_working_folder=runtime is not None,
-                message=message,
-                inference_profile=inference_profile,
-                user_id=user_id,
-                client_request_id=client_request_id,
-            )
-            enqueue_result = await self._enqueue_user_message(
-                session,
-                agent_session=agent_session,
-                message=message,
-                inference_profile=inference_profile,
-                user_id=user_id,
-                client_request_id=client_request_id,
-            )
-            match enqueue_result:
-                case Success(mailbox_item):
-                    pass
-                case Failure(error):
-                    await session.rollback()
-                    return Failure(error)
-                case _:
-                    assert_never(enqueue_result)
-            if client_request_id is not None:
-                (
-                    record,
-                    created,
-                ) = await self.chat_write_request_repository.create_idempotent(
-                    session,
-                    ChatWriteRequestCreate(
-                        session_id=agent_session.id,
-                        requester_user_id=user_id,
-                        creation_agent_id=agent_id,
-                        client_request_id=client_request_id,
-                        write_type=ChatWriteRequestType.MESSAGE,
-                        accepted_type=ChatWriteRequestType.MESSAGE,
-                        accepted_id=mailbox_item.id,
-                        history_reload_required=False,
-                        payload=canonical_request_payload,
-                    ),
-                )
-                if not created or record.accepted_id != mailbox_item.id:
-                    # Another creator won the Agent-scoped unique key. Discard the
-                    # losing Session tree and return the durable winner.
-                    await session.rollback()
-                    return await self._resolve_existing_session_creation(
+                    agent_session = root_result.agent_session
+                    workspace_result = await self._create_session_workspace_items(
                         session,
                         agent_id=agent_id,
+                        session_id=agent_session.id,
+                        session_handle=agent_session.handle,
+                        workspace_items=workspace_items,
+                        create_direct_projects=False,
+                    )
+                    match workspace_result:
+                        case Success():
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(workspace_result)
+                    await self._enqueue_setup_actions(
+                        session,
+                        agent_session=agent_session,
+                        workspace_items=workspace_items,
+                        create_session_working_folder=runtime is not None,
+                        message=message,
+                        inference_profile=inference_profile,
                         user_id=user_id,
                         client_request_id=client_request_id,
-                        canonical_request_payload=canonical_request_payload,
-                        expected_product_mode=AgentSessionProductMode.USER,
                     )
-            await self.agent_session_repository.set_applied_inference_profile(
-                session,
-                session_id=agent_session.id,
-                model_target_label=inference_profile.model_target_label,
-                reasoning_effort=inference_profile.reasoning_effort,
-                enabled_execution_options=inference_profile.enabled_execution_options,
-            )
+                    enqueue_result = await self._enqueue_user_message(
+                        session,
+                        agent_session=agent_session,
+                        message=message,
+                        inference_profile=inference_profile,
+                        user_id=user_id,
+                        client_request_id=client_request_id,
+                    )
+                    match enqueue_result:
+                        case Success(mailbox_item):
+                            pass
+                        case Failure(error):
+                            await session.rollback()
+                            return Failure(error)
+                        case _:
+                            assert_never(enqueue_result)
+                    if client_request_id is not None:
+                        (
+                            record,
+                            created,
+                        ) = await self.chat_write_request_repository.create_idempotent(
+                            session,
+                            ChatWriteRequestCreate(
+                                session_id=agent_session.id,
+                                requester_user_id=user_id,
+                                creation_agent_id=agent_id,
+                                client_request_id=client_request_id,
+                                write_type=ChatWriteRequestType.MESSAGE,
+                                accepted_type=ChatWriteRequestType.MESSAGE,
+                                accepted_id=mailbox_item.id,
+                                history_reload_required=False,
+                                payload=canonical_request_payload,
+                            ),
+                        )
+                        if not created or record.accepted_id != mailbox_item.id:
+                            # Another creator won the Agent-scoped unique key.
+                            # Discard the
+                            # losing Session tree and return the durable winner.
+                            await session.rollback()
+                            return await self._resolve_existing_session_creation(
+                                session,
+                                agent_id=agent_id,
+                                user_id=user_id,
+                                client_request_id=client_request_id,
+                                canonical_request_payload=canonical_request_payload,
+                                expected_product_mode=AgentSessionProductMode.USER,
+                            )
+                    await self.agent_session_repository.set_applied_inference_profile(
+                        session,
+                        session_id=agent_session.id,
+                        model_target_label=inference_profile.model_target_label,
+                        reasoning_effort=inference_profile.reasoning_effort,
+                        enabled_execution_options=inference_profile.enabled_execution_options,
+                    )
 
-        return Success(
-            CreatedAgentSessionInputResult(
-                agent_runtime_id=runtime.id if runtime is not None else None,
-                agent_session=agent_session,
-                accepted_mailbox_item_id=mailbox_item.id,
-                mailbox_item=mailbox_item,
-                created=True,
+                return Success(
+                    CreatedAgentSessionInputResult(
+                        agent_runtime_id=runtime.id if runtime is not None else None,
+                        agent_session=agent_session,
+                        accepted_mailbox_item_id=mailbox_item.id,
+                        mailbox_item=mailbox_item,
+                        created=True,
+                    )
+                )
+            except ActiveProfileCaptureRequired as needed:
+                captured_admission = await self.active_profile_repository.capture(
+                    needed.choice
+                )
+        return Failure(
+            AgentSessionInputInvalidInferenceProfile(
+                reason="Model metadata changed before input admission"
             )
         )
 
@@ -1347,7 +1427,8 @@ class AgentSessionInputOperationsRepository:
         )
         if agent_session is None or agent_session.agent_id != agent_id:
             raise RuntimeError(
-                "Session creation idempotency record resolved outside "
+                "Session creation "
+                "idempotency record resolved outside "
                 "its Agent boundary"
             )
         if agent_session.product_mode is not expected_product_mode:
@@ -1391,7 +1472,8 @@ class AgentSessionInputOperationsRepository:
         )
         if mailbox_item is not None and mailbox_item.session_id != agent_session.id:
             raise RuntimeError(
-                "Session creation idempotency record resolved an input "
+                "Session creation "
+                "idempotency record resolved an input "
                 "outside its Session"
             )
         await self._reapply_existing_mailbox_wake(

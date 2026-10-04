@@ -23,6 +23,8 @@ from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.llm_catalog import CatalogEntryWithCatalog, LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     IntegrationCatalogSyncClaim,
@@ -52,6 +54,15 @@ class CatalogReadPage:
     page: LLMCatalogEntryList
     latest_workspace_sync: LLMCatalogSyncStatus | None
     current_projection_version: CatalogProjectionVersion | None
+    active_inputs: CapturedActiveChoiceInputs
+
+
+@dataclasses.dataclass(frozen=True)
+class CapturedSelectableCatalogEntry:
+    """One selected row and current declarations from the same completed read."""
+
+    selected: CatalogEntryWithCatalog
+    active_inputs: CapturedActiveChoiceInputs
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,6 +132,9 @@ class LLMCatalogOperationsRepository:
     source_repository: Annotated[
         ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
     ]
+    active_repository: Annotated[
+        ActiveModelCapabilitiesRepository, Depends(ActiveModelCapabilitiesRepository)
+    ]
 
     async def load_integration(
         self, integration_id: str
@@ -132,9 +146,12 @@ class LLMCatalogOperationsRepository:
 
     async def selectable_entry(
         self, *, integration_id: str, workspace_id: str, model_identifier: str
-    ) -> CatalogEntryWithCatalog | None:
+    ) -> CapturedSelectableCatalogEntry | None:
         async with self.session_manager() as session:
-            return (
+            scope = await self.active_repository.prepare_read_scope_in_session(
+                session, workspace_id=workspace_id, integration_ids=(integration_id,)
+            )
+            selected = (
                 await self.catalog_repository.get_selectable_entry_by_integration_model(
                     session,
                     integration_id=integration_id,
@@ -143,6 +160,17 @@ class LLMCatalogOperationsRepository:
                     purpose=LLMCatalogPurpose.CONVERSATION,
                 )
             )
+            if selected is None:
+                return None
+            active_inputs = (
+                await self.active_repository.capture_current_entries_in_session(
+                    session,
+                    scope=scope,
+                    integration_id=integration_id,
+                    entries=(selected,),
+                )
+            )
+            return CapturedSelectableCatalogEntry(selected, active_inputs)
 
     async def read_page(
         self,
@@ -154,6 +182,9 @@ class LLMCatalogOperationsRepository:
         offset: int,
     ) -> CatalogReadPage | None:
         async with self.session_manager() as session:
+            scope = await self.active_repository.prepare_read_scope_in_session(
+                session, workspace_id=workspace_id, integration_ids=(integration_id,)
+            )
             page = await self.catalog_repository.list_entries_by_integration(
                 session,
                 integration_id=integration_id,
@@ -165,6 +196,17 @@ class LLMCatalogOperationsRepository:
             )
             if page is None:
                 return None
+            active_inputs = (
+                await self.active_repository.capture_current_entries_in_session(
+                    session,
+                    scope=scope,
+                    integration_id=integration_id,
+                    entries=tuple(
+                        CatalogEntryWithCatalog(catalog=page.catalog, entry=entry)
+                        for entry in page.entries
+                    ),
+                )
+            )
             latest = None
             if page.catalog.scope == LLMCatalogScope.INTEGRATION:
                 catalogs = self.catalog_repository
@@ -177,6 +219,7 @@ class LLMCatalogOperationsRepository:
                 current_projection_version=self.catalog_repository.projection_version(
                     page.catalog
                 ),
+                active_inputs=active_inputs,
             )
 
     async def read_system_catalogs(

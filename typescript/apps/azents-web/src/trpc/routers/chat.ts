@@ -64,6 +64,7 @@ import {
 } from "@azents/public-client";
 import { z } from "zod/v4";
 import { getServerConfig } from "@/config/server";
+import { reasoningEffortInputSchema } from "@/shared/lib/reasoning-effort";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
@@ -74,15 +75,7 @@ const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cleanup_orphan_git_worktrees") }),
 ]);
 
-const reasoningEffortSchema = z.enum([
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]);
+const reasoningEffortSchema = reasoningEffortInputSchema;
 
 const inferenceProfileSchema = z.object({
   model_target_label: z.string().min(1),

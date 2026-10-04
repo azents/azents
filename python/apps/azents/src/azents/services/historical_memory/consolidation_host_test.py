@@ -19,6 +19,11 @@ from azents.core.historical_memory_publication import (
     ConsolidationOutputError,
     ValidatedConsolidationOverview,
 )
+from azents.core.llm_catalog import (
+    ModelCapabilities,
+    ModelParameterCapabilities,
+    ModelToolCallingCapabilities,
+)
 from azents.engine.events.model_messages import (
     TransientModelMessage,
     transient_model_message,
@@ -153,6 +158,7 @@ class _ScriptedModel:
             supported_execution_options=(),
             enabled_execution_options=(),
             max_output_tokens=output_tokens,
+            model_capabilities=self.selection.normalized_capabilities,
         ).lower(
             messages,
             native_replay_context=None,
@@ -303,9 +309,15 @@ async def _host(
         work,
         ownership,
     )
-    model = _ScriptedModel(
-        make_test_model_selection(), empty, invalid_final, hard_input
+    selection = make_test_model_selection().model_copy(
+        update={
+            "normalized_capabilities": ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True),
+                parameters=ModelParameterCapabilities(max_output_tokens=True),
+            )
+        }
     )
+    model = _ScriptedModel(selection, empty, invalid_final, hard_input)
     return ConsolidationIterationHost(
         claim,
         model,

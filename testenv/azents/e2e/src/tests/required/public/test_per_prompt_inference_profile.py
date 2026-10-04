@@ -29,7 +29,6 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.model_capabilities import ModelCapabilities
-from azentspublicclient.models.model_capability_contract import ModelCapabilityContract
 from azentspublicclient.models.model_catalog_entry_list_response import (
     ModelCatalogEntryListResponse,
 )
@@ -1698,16 +1697,16 @@ class TestPerPromptInferenceProfile:
 
 
 class TestModelSupportContract:
-    """Exercise the source-backed saved contract through ordinary product APIs."""
+    """Exercise active support and saved pricing through ordinary product APIs."""
 
-    def test_saved_support_and_dispatch_pricing_survive_catalog_refresh(
+    def test_active_support_refresh_preserves_saved_dispatch_pricing(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         openai_proxy_url: str,
     ) -> None:
-        """Keep saved support and prices until explicit reselection."""
+        """Recompile support while preserving identity, settings and saved prices."""
         catalog_api = ModelCatalogV1Api(admin_api_client)
 
         def refresh_source(variant: str) -> None:
@@ -1734,16 +1733,17 @@ class TestModelSupportContract:
             quality = next(option for option in options if option.label == "Quality")
             return quality.candidates[0].model_selection
 
-        def contract(capabilities: ModelCapabilities | None) -> ModelCapabilityContract:
+        def contract(capabilities: ModelCapabilities | None) -> ModelCapabilities:
             assert capabilities is not None
-            descriptor = capabilities.semantic_contract
-            assert descriptor is not None and descriptor.version == 2
-            return descriptor
+            assert capabilities.capability_schema_version == 3
+            return capabilities
 
-        def effort_state(descriptor: ModelCapabilityContract, level: str) -> str:
+        def effort_supported(descriptor: ModelCapabilities, level: str) -> bool:
             reasoning = descriptor.reasoning
-            assert reasoning.completeness == "complete"
-            return next(item.state for item in reasoning.efforts if item.level == level)
+            assert reasoning is not None
+            return reasoning.supported is True and any(
+                item.value == level for item in reasoning.effort_levels or []
+            )
 
         try:
             refresh_source("baseline")
@@ -1792,8 +1792,8 @@ class TestModelSupportContract:
 
             baseline_entry = entries()["gpt-5.5"]
             baseline_contract = contract(baseline_entry.normalized_capabilities)
-            assert effort_state(baseline_contract, "max") == "supported"
-            assert effort_state(baseline_contract, "xhigh") == "supported"
+            assert effort_supported(baseline_contract, "max")
+            assert effort_supported(baseline_contract, "xhigh")
             selection_input = {
                 "llm_provider_integration_id": integration.id,
                 "model_identifier": "gpt-5.5",
@@ -1878,7 +1878,9 @@ class TestModelSupportContract:
                 agent_id=agent_id,
             )
 
-            def saved_selections_unchanged() -> None:
+            def saved_selections_unchanged(
+                expected_capabilities: ModelCapabilities | None,
+            ) -> None:
                 saved_agent = _response_model(
                     requests.get(agent_url, headers=_headers(token), timeout=10),
                     AgentResponse,
@@ -1887,14 +1889,47 @@ class TestModelSupportContract:
                     requests.get(workspace_url, headers=_headers(token), timeout=10),
                     WorkspaceModelSettingsResponse,
                 )
-                assert (
-                    primary_selection(saved_agent.selectable_model_options)
-                    == agent_selection
-                )
-                assert (
-                    primary_selection(saved_workspace.default_selectable_model_options)
-                    == workspace_selection
-                )
+                for options, original_options, original_selection in (
+                    (
+                        saved_agent.selectable_model_options,
+                        created.selectable_model_options,
+                        agent_selection,
+                    ),
+                    (
+                        saved_workspace.default_selectable_model_options,
+                        workspace_settings.default_selectable_model_options,
+                        workspace_selection,
+                    ),
+                ):
+                    assert options is not None and original_options is not None
+                    assert [option.label for option in options] == [
+                        option.label for option in original_options
+                    ]
+                    assert [
+                        candidate.settings
+                        for option in options
+                        for candidate in option.candidates
+                    ] == [
+                        candidate.settings
+                        for option in original_options
+                        for candidate in option.candidates
+                    ]
+                    selected = primary_selection(options)
+                    # Active projection replaces metadata, not the saved selection.
+                    metadata_fields = {
+                        "normalized_capabilities",
+                        "supported_execution_options",
+                        "source_metadata",
+                    }
+                    assert selected.model_dump(exclude=metadata_fields) == (
+                        original_selection.model_dump(exclude=metadata_fields)
+                    )
+                    active = contract(selected.normalized_capabilities)
+                    if expected_capabilities is not None:
+                        assert active == expected_capabilities
+                    else:
+                        assert not effort_supported(active, "max")
+                        assert not effort_supported(active, "xhigh")
 
             def dispatch(effort: str, expected_cost: float | None) -> None:
                 # Independent Sessions keep provenance polling specific to this turn.
@@ -1977,12 +2012,38 @@ class TestModelSupportContract:
                     )
                 )
 
+            def reject_max(expected_detail: str) -> None:
+                rejected_session = _create_profile_session(
+                    server_url=azents_public_server_url, token=token, agent_id=agent_id
+                )
+                rejected_message = f"Unsupported current max {unique()}"
+                _write_invalid_profile(
+                    server_url=azents_public_server_url,
+                    token=token,
+                    agent_id=agent_id,
+                    session_id=rejected_session,
+                    message=rejected_message,
+                    target="Quality",
+                    effort="max",
+                    enabled_execution_options=[],
+                    expected_detail=expected_detail,
+                )
+                assert (
+                    _input_event(
+                        _typed_history(
+                            azents_public_server_url, token, rejected_session
+                        ),
+                        rejected_message,
+                    )
+                    is None
+                )
+
             dispatch("max", 0.000003)
             refresh_source("refreshed")
             refreshed_contract = contract(entries()["gpt-5.5"].normalized_capabilities)
-            assert effort_state(refreshed_contract, "max") == "unsupported"
-            assert effort_state(refreshed_contract, "xhigh") == "supported"
-            saved_selections_unchanged()
+            assert not effort_supported(refreshed_contract, "max")
+            assert effort_supported(refreshed_contract, "xhigh")
+            saved_selections_unchanged(refreshed_contract)
             # Normal saves without model selections preserve embedded prices.
             _response_model(
                 requests.patch(
@@ -2002,14 +2063,15 @@ class TestModelSupportContract:
                 ),
                 WorkspaceModelSettingsResponse,
             )
-            saved_selections_unchanged()
-            dispatch("max", 0.000003)
+            saved_selections_unchanged(refreshed_contract)
+            reject_max("Reasoning effort is not supported by model target")
+            dispatch("xhigh", 0.000003)
 
             refresh_source("missing-model")
             assert "gpt-5.5" not in entries()
-            saved_selections_unchanged()
-            # Removing a current row does not rewrite a previously saved price.
-            dispatch("max", 0.000003)
+            saved_selections_unchanged(None)
+            # Missing current evidence cannot authorize a new dispatch.
+            reject_max("Active model metadata is unavailable: exact_entry_unavailable.")
 
             refresh_source("refreshed")
             reselected_workspace = _response_model(
@@ -2038,28 +2100,7 @@ class TestModelSupportContract:
                 assert contract(selected.normalized_capabilities) == refreshed_contract
                 assert selected.pricing is not None
                 assert selected.pricing != agent_selection.pricing
-            rejected_session = _create_profile_session(
-                server_url=azents_public_server_url, token=token, agent_id=agent_id
-            )
-            rejected_message = f"Reselected unsupported max {unique()}"
-            _write_invalid_profile(
-                server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=rejected_session,
-                message=rejected_message,
-                target="Quality",
-                effort="max",
-                enabled_execution_options=[],
-                expected_detail="Reasoning effort is not supported by model target",
-            )
-            assert (
-                _input_event(
-                    _typed_history(azents_public_server_url, token, rejected_session),
-                    rejected_message,
-                )
-                is None
-            )
+            reject_max("Reasoning effort is not supported by model target")
             dispatch("xhigh", 0.000007)
         finally:
             # This local source fixture is global to the serial required-suite lane.

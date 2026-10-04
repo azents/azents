@@ -3,16 +3,23 @@
 import asyncio
 import dataclasses
 import datetime
-from unittest.mock import Mock
+import json
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import (
+    CapturedStoredChoice,
+    ConfiguredModelIdentity,
+)
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.config import Config
 from azents.core.enums import LLMProvider
 from azents.core.historical_memory_consolidation import ConsolidationUnitKey
+from azents.core.model_catalog_identity import catalog_source_keys
+from azents.core.model_catalog_source import decode_catalog_source
 from azents.engine.events.openai_responses import OpenAIResponsesWebSocketConnection
 from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.providers.model_factory import ProviderModelFactory
@@ -29,6 +36,8 @@ from azents.rdb.models.historical_memory_consolidation import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.historical_memory_consolidation.authority import (
@@ -250,6 +259,7 @@ async def _harness(
         config,
         AgentRepository(),
         ModelCandidateHealthRepository(manager),
+        _active_metadata_repository(structured_output=True),
         EngineModelReadRepository(manager, Mock(spec=LLMProviderIntegrationRepository)),
         ModelMetadataService(
             ModelMetadataReadRepository(manager, ModelMetadataSourceRepository())
@@ -363,3 +373,59 @@ async def test_absolute_claim_deadline_cancels_blocked_setup_or_handoff(
             await task
     assert harness.block.stopped.is_set()
     await _assert_no_dispatch_or_publication(rdb_session_manager, harness)
+
+
+def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
+    """Capture synthetic exact declarations, never the saved capability object."""
+    repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
+
+    async def capture(
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        identities: tuple[ConfiguredModelIdentity, ...],
+    ) -> CapturedActiveChoiceInputs:
+        del session
+        choices = []
+        for identity in identities:
+            key = catalog_source_keys(
+                provider=identity.provider, model_identifier=identity.model_identifier
+            )[0]
+            source = decode_catalog_source(
+                json.dumps(
+                    {
+                        key.source_model_key: {
+                            "litellm_provider": key.provider,
+                            "mode": "chat",
+                            "supported_endpoints": ["/v1/responses"],
+                            "supported_modalities": ["text"],
+                            "supported_output_modalities": ["text"],
+                            "supports_function_calling": True,
+                            "supports_response_schema": structured_output,
+                            "max_input_tokens": 128000,
+                            "max_output_tokens": 16384,
+                        }
+                    }
+                ).encode()
+            ).models[0]
+            choices.append(
+                CapturedStoredChoice(
+                    identity=identity,
+                    source_metadata=None,
+                    source_models=(source,),
+                    supported_execution_options=(),
+                    model_developer=None,
+                    catalog_id="synthetic-local-catalog",
+                )
+            )
+        return CapturedActiveChoiceInputs(
+            workspace_id=workspace_id,
+            choices=tuple(choices),
+            catalog_choices=(),
+            source_metadata=None,
+            source_expectations=(),
+        )
+
+    repository.capture_exact_choices_in_session.side_effect = capture
+    repository.inputs_match_in_session.return_value = True
+    return repository

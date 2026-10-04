@@ -25,7 +25,7 @@ from typing_extensions import Self
 
 class ModelContextWindow(BaseModel):
     """
-    Model context window capability.
+    Saved context limits, independent of supported control membership.
     """ # noqa: E501
     default_input_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None
     max_input_tokens: Optional[Annotated[int, Field(strict=True, ge=1)]] = None

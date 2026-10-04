@@ -24,7 +24,7 @@ from typing_extensions import Self
 
 class ModelParameterCapabilities(BaseModel):
     """
-    Configurable generation parameters supported by the model.
+    Final supported generation controls.
     """ # noqa: E501
     temperature: Optional[StrictBool] = False
     max_output_tokens: Optional[StrictBool] = False

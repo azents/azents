@@ -15,13 +15,17 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
-    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    ActiveProfileCaptureRequired,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
@@ -51,6 +55,9 @@ class SessionModelProfileRepository:
         chat_write_request_repository: Annotated[
             ChatWriteRequestRepository, Depends(ChatWriteRequestRepository)
         ],
+        active_profile_repository: Annotated[
+            ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
+        ],
         session_manager: Annotated[
             SessionManager[AsyncSession], Depends(get_session_manager)
         ],
@@ -60,6 +67,7 @@ class SessionModelProfileRepository:
         self.workspace_user_repository = workspace_user_repository
         self.chat_write_request_repository = chat_write_request_repository
         self.session_manager = session_manager
+        self.active_profile_repository = active_profile_repository
 
     async def replace_web_profile(
         self,
@@ -72,78 +80,90 @@ class SessionModelProfileRepository:
         payload: dict[str, object],
     ) -> WebSessionModelProfileReplacement:
         """Preserve the public web replacement and idempotent replay contract."""
-        async with self.session_manager() as session:
-            locked = await self.lock_writable_root(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                nowait=False,
-            )
-            existing = (
-                await self.chat_write_request_repository.get_by_client_request_id(
-                    session,
-                    session_id=session_id,
-                    requester_user_id=user_id,
-                    client_request_id=client_request_id,
-                )
-            )
-            if existing is not None:
-                self._validate_record(
-                    record_type=existing.write_type,
-                    record_payload=existing.payload,
-                    payload=payload,
-                )
-                return self._replacement_from_record(existing, created=False)
-
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or agent.workspace_id != locked.workspace_id
-            ):
-                raise ValueError("AgentSession is not active")
-            validate_requested_profile_against_options(
-                agent.selectable_model_options,
-                profile,
-            )
-            (
-                record,
-                created,
-            ) = await self.chat_write_request_repository.create_idempotent(
-                session,
-                ChatWriteRequestCreate(
-                    session_id=session_id,
-                    requester_user_id=user_id,
-                    creation_agent_id=None,
-                    client_request_id=client_request_id,
-                    write_type=ChatWriteRequestType.MODEL_PROFILE,
-                    accepted_type=ChatWriteRequestType.MODEL_PROFILE,
-                    accepted_id=session_id,
-                    history_reload_required=False,
-                    payload=payload,
-                ),
-            )
-            self._validate_record(
-                record_type=record.write_type,
-                record_payload=record.payload,
-                payload=payload,
-            )
-            if record.session_id != session_id:
-                raise ValueError("Client request ID already used for another session")
-            if created:
-                updated = (
-                    await self.agent_session_repository.set_applied_inference_profile(
+        captured_admission: CapturedProfileAdmission | None = None
+        for _phase in range(2):
+            try:
+                write_request_repository = self.chat_write_request_repository
+                profiles = self.agent_session_repository
+                async with self.session_manager() as session:
+                    locked = await self.lock_writable_root(
+                        session,
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        user_id=user_id,
+                        nowait=False,
+                    )
+                    existing = await write_request_repository.get_by_client_request_id(
                         session,
                         session_id=session_id,
-                        model_target_label=profile.model_target_label,
-                        reasoning_effort=profile.reasoning_effort,
-                        enabled_execution_options=profile.enabled_execution_options,
+                        requester_user_id=user_id,
+                        client_request_id=client_request_id,
                     )
+                    if existing is not None:
+                        self._validate_record(
+                            record_type=existing.write_type,
+                            record_payload=existing.payload,
+                            payload=payload,
+                        )
+                        return self._replacement_from_record(existing, created=False)
+
+                    agent = await self.agent_repository.lock_by_id(session, agent_id)
+                    if (
+                        agent is None
+                        or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                        or agent.workspace_id != locked.workspace_id
+                    ):
+                        raise ValueError("AgentSession is not active")
+                    await self.active_profile_repository.validate_in_session(
+                        session,
+                        agent=agent,
+                        profile=profile,
+                        captured=captured_admission,
+                    )
+                    (
+                        record,
+                        created,
+                    ) = await self.chat_write_request_repository.create_idempotent(
+                        session,
+                        ChatWriteRequestCreate(
+                            session_id=session_id,
+                            requester_user_id=user_id,
+                            creation_agent_id=None,
+                            client_request_id=client_request_id,
+                            write_type=ChatWriteRequestType.MODEL_PROFILE,
+                            accepted_type=ChatWriteRequestType.MODEL_PROFILE,
+                            accepted_id=session_id,
+                            history_reload_required=False,
+                            payload=payload,
+                        ),
+                    )
+                    self._validate_record(
+                        record_type=record.write_type,
+                        record_payload=record.payload,
+                        payload=payload,
+                    )
+                    if record.session_id != session_id:
+                        raise ValueError(
+                            "Client request ID already used for another session"
+                        )
+                    if created:
+                        updated = await profiles.set_applied_inference_profile(
+                            session,
+                            session_id=session_id,
+                            model_target_label=profile.model_target_label,
+                            reasoning_effort=profile.reasoning_effort,
+                            enabled_execution_options=profile.enabled_execution_options,
+                        )
+                        if updated.id != locked.id:
+                            raise RuntimeError(
+                                "AgentSession model profile target changed"
+                            )
+                    return self._replacement_from_record(record, created=created)
+            except ActiveProfileCaptureRequired as needed:
+                captured_admission = await self.active_profile_repository.capture(
+                    needed.choice
                 )
-                if updated.id != locked.id:
-                    raise RuntimeError("AgentSession model profile target changed")
-            return self._replacement_from_record(record, created=created)
+        raise ValueError("Model metadata changed before input admission")
 
     async def lock_writable_root(
         self,

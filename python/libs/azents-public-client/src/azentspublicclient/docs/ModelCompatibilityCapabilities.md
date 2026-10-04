@@ -1,6 +1,6 @@
 # ModelCompatibilityCapabilities
 
-Provider compatibility capability.
+Descriptive route metadata; never a second feature admission authority.
 
 ## Properties
 

@@ -6,6 +6,10 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -28,7 +32,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
 last_verified_at: 2026-10-04
-spec_version: 7
+spec_version: 8
 ---
 
 # OpenRouter API Key Provider Flow
@@ -103,16 +107,20 @@ Runtime dispatch uses the exact saved provider identifier, for example
 
 ## Capability Projection
 
-Model visibility is broader than capability claims. OpenRouter entries conservatively project only capabilities that Azents can safely normalize from the account listing:
+The account listing preserves architecture modality lists and complete supported
+parameter declarations, including absence, null and explicit empty values. The
+compiler combines those exact declarations with applicable local source facts and
+reviewed implemented-route bounds to produce final schema-3 support fields.
+Original evidence gaps and route exclusions remain diagnostic rather than final
+unknown states.
 
-- text and verified image input;
-- text output;
-- function-tool support;
-- reasoning support and available effort levels;
-- supported standard generation parameters;
-- semantic `web_search` as an effective OpenRouter provider-level capability.
-
-The initial projection does not advertise PDF, audio, video, image output, image generation, prompt caching, or strict structured output. Missing or unverified metadata disables the individual capability without hiding an otherwise valid text-output model.
+Function calling, parallel calls, strict function schemas and structured responses
+remain independent. `structured_outputs` is the explicit account response-schema
+declaration; a generic format flag or strict function support is not equivalent.
+Input/output forms and built-ins are limited to actual implemented product routes.
+Conditional final features stay configurable and are constrained by the actual
+encoded request at dispatch. Literal publisher paths remain identity, not a
+cross-host capability match.
 
 ## Runtime Resolution and Request Lowering
 
@@ -151,7 +159,12 @@ policy. Provider-first lowering applies these dialect rules:
 
 Workspace defaults and Agent model choices resolve through the stored OpenRouter catalog. The resulting snapshot preserves the hosting provider, exact provider model identifier, display name, recognized or neutral developer, family, normalized capabilities, server-owned normalized pricing, source metadata, and refresh time.
 
-Later OpenRouter catalog changes do not mutate existing Agent or Workspace snapshots. Execution can fail when the referenced integration is disabled, deleted, or rejected by OpenRouter; this remains an integration/provider availability failure rather than automatic snapshot replacement.
+Active Agent/Workspace reads and NEW operation preparation compile current exact
+authorized LOCAL declarations for the same configured IDs. Reads and unrelated
+saves preserve user identities, order, settings and independently saved pricing.
+Once an operation exists, retries, quota progression and historical replay retain
+its captured capabilities and cursor. Disabled/deleted integration or provider
+rejection remains an availability failure rather than a model substitution.
 
 ## Security and Verification
 

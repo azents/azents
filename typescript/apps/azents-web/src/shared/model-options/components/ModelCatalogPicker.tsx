@@ -15,9 +15,9 @@ import {
 import { useTranslations } from "next-intl";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import {
+  configurableBuiltinTools,
   modelSupportsFunctionCalling,
   modelSupportsReasoning,
-  supportedBuiltinTools,
 } from "@/shared/lib/model-capability-support";
 import { useLocale } from "@/shared/providers/locale";
 import { modelContextBadgeValue } from "../model-selection";
@@ -112,7 +112,7 @@ function formatCapabilityBadges(
   if (modelSupportsReasoning(capabilities)) {
     badges.push(labels.reasoning);
   }
-  if (supportedBuiltinTools(capabilities).length > 0) {
+  if (configurableBuiltinTools(capabilities).length > 0) {
     badges.push(labels.hostedTools);
   }
   if (modelSupportsFunctionCalling(capabilities)) {

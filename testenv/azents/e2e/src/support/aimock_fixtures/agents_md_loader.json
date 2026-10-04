@@ -160,7 +160,7 @@
         "sequenceIndex": 1
       },
       "response": {
-        "content": "{\"title\":\"Provider title retry recovered\"}"
+        "content": "Provider title retry recovered"
       }
     },
     {

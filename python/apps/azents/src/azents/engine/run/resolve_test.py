@@ -37,9 +37,9 @@ from azents.core.enums import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_capability_contract import (
-    BuiltinToolSupport,
-    CapabilitySupport,
-    SupportPredicate,
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
 )
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
@@ -613,24 +613,18 @@ class TestResolveInvokeInput:
                 ),
             ),
         )
-        assert caps.semantic_contract is not None
-        caps.semantic_contract = caps.semantic_contract.model_copy(
-            update={
-                "built_in_tools": (
-                    BuiltinToolSupport(
-                        tool=builtin,
-                        support=CapabilitySupport(
-                            state="conditional",
-                            origin="explicit",
-                            predicate=SupportPredicate(
-                                reasoning_efforts=("none",), function_tools=None
-                            ),
-                        ),
-                    ),
-                )
-            }
+        caps.built_in_tools.supported = [builtin]
+        caps.request_constraints = ModelRequestConstraints(
+            feature_conditions=(
+                ModelFeatureCondition(
+                    feature=ModelCapabilityFeature.IMAGE_GENERATION
+                    if builtin == "image_generation"
+                    else ModelCapabilityFeature.WEB_SEARCH,
+                    reasoning_efforts=("none",),
+                    function_tools=None,
+                ),
+            )
         )
-        caps.built_in_tools.supported = []
         agent.model_parameters = ModelParameters(
             reasoning_effort=ModelReasoningEffort.HIGH
         )
@@ -755,21 +749,15 @@ class TestResolveInvokeInput:
                 ),
             ),
         )
-        assert caps.semantic_contract is not None
-        caps.semantic_contract = caps.semantic_contract.model_copy(
-            update={
-                "parameters": caps.semantic_contract.parameters.model_copy(
-                    update={
-                        "temperature": CapabilitySupport(
-                            state="conditional",
-                            origin="explicit",
-                            predicate=SupportPredicate(
-                                reasoning_efforts=("none",), function_tools=None
-                            ),
-                        )
-                    }
-                )
-            }
+        caps.parameters.temperature = True
+        caps.request_constraints = ModelRequestConstraints(
+            feature_conditions=(
+                ModelFeatureCondition(
+                    feature=ModelCapabilityFeature.TEMPERATURE,
+                    reasoning_efforts=("none",),
+                    function_tools=None,
+                ),
+            )
         )
         agent.model_parameters = ModelParameters(temperature=0.3)
         agent.model_selection.normalized_capabilities = caps
@@ -1164,6 +1152,7 @@ class TestResolveInvokeInput:
         main_context.max_output_tokens = 8_000
         main_capabilities = main_candidate.model_selection.normalized_capabilities
         main_capabilities.built_in_tools.supported = ["web_search"]
+        main_capabilities.parameters.max_output_tokens = True
         main_candidate.settings = SelectableModelSettings(
             context_window_tokens=32_000,
             max_output_tokens=20_000,
@@ -1983,6 +1972,9 @@ async def test_existing_agent_top_k_reaches_run_and_retry_carrier(
 ) -> None:
     agent = _make_agent()
     agent.model_parameters = ModelParameters(top_k=top_k)
+    for option in agent.selectable_model_options:
+        for candidate in option.candidates:
+            candidate.model_selection.normalized_capabilities.parameters.top_k = True
     before = agent.model_parameters.model_dump_json()
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = agent

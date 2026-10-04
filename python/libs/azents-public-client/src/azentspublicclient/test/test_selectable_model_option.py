@@ -46,6 +46,7 @@ class TestSelectableModelOption(unittest.TestCase):
                             model_developer = 'openai', 
                             model_family = '', 
                             normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
+                                capability_schema_version = 3, 
                                 context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
                                     default_input_tokens = 1.0, 
                                     max_input_tokens = 1.0, 
@@ -81,59 +82,16 @@ class TestSelectableModelOption(unittest.TestCase):
                                     provider_family = '', 
                                     responses_api = True, 
                                     unsupported_media_policy = 'text_substitution', ), 
-                                semantic_contract = azentspublicclient.models.model_capability_contract.ModelCapabilityContract(
-                                    version = 2, 
-                                    reasoning = azentspublicclient.models.reasoning_support.ReasoningSupport(
-                                        support = azentspublicclient.models.capability_support.CapabilitySupport(
-                                            state = 'supported', 
-                                            origin = 'explicit', 
-                                            predicate = azentspublicclient.models.support_predicate.SupportPredicate(
-                                                reasoning_efforts = [
-                                                    'none'
-                                                    ], 
-                                                function_tools = True, ), ), 
-                                        completeness = 'complete', 
-                                        efforts = [
-                                            azentspublicclient.models.effort_declaration.EffortDeclaration(
-                                                level = 'none', 
-                                                state = 'supported', 
-                                                origin = 'explicit', )
-                                            ], 
-                                        default_effort = azentspublicclient.models.default_effort_evidence.DefaultEffortEvidence(
-                                            level = 'none', 
-                                            origin = 'explicit', ), ), 
-                                    reasoning_summaries = azentspublicclient.models.capability_support.CapabilitySupport(
-                                        state = 'supported', 
-                                        origin = , 
-                                        predicate = azentspublicclient.models.support_predicate.SupportPredicate(
+                                structured_response = True, 
+                                request_constraints = azentspublicclient.models.model_request_constraints.ModelRequestConstraints(
+                                    known_default = 'none', 
+                                    feature_conditions = [
+                                        azentspublicclient.models.model_feature_condition.ModelFeatureCondition(
+                                            feature = 'function_calling', 
                                             reasoning_efforts = [
                                                 'none'
                                                 ], 
-                                            function_tools = True, ), ), 
-                                    function_calling = , 
-                                    parallel_function_calls = , 
-                                    strict_function_schema = , 
-                                    structured_response = , 
-                                    parameters = azentspublicclient.models.parameter_support.ParameterSupport(
-                                        temperature = , 
-                                        max_output_tokens = , 
-                                        top_p = , 
-                                        top_k = , 
-                                        stop_sequences = , ), 
-                                    input_modalities = [
-                                        azentspublicclient.models.modality_support.ModalitySupport(
-                                            modality = 'text', 
-                                            support = , )
-                                        ], 
-                                    output_modalities = [
-                                        azentspublicclient.models.modality_support.ModalitySupport(
-                                            modality = 'text', 
-                                            support = , )
-                                        ], 
-                                    built_in_tools = [
-                                        azentspublicclient.models.builtin_tool_support.BuiltinToolSupport(
-                                            tool = 'web_search', 
-                                            support = , )
+                                            function_tools = True, )
                                         ], ), ), 
                             pricing = azentspublicclient.models.model_pricing_definition.ModelPricingDefinition(
                                 rules = azentspublicclient.models.catalog_price_rules.CatalogPriceRules(
@@ -207,6 +165,7 @@ class TestSelectableModelOption(unittest.TestCase):
                             model_developer = 'openai', 
                             model_family = '', 
                             normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
+                                capability_schema_version = 3, 
                                 context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
                                     default_input_tokens = 1.0, 
                                     max_input_tokens = 1.0, 
@@ -242,59 +201,16 @@ class TestSelectableModelOption(unittest.TestCase):
                                     provider_family = '', 
                                     responses_api = True, 
                                     unsupported_media_policy = 'text_substitution', ), 
-                                semantic_contract = azentspublicclient.models.model_capability_contract.ModelCapabilityContract(
-                                    version = 2, 
-                                    reasoning = azentspublicclient.models.reasoning_support.ReasoningSupport(
-                                        support = azentspublicclient.models.capability_support.CapabilitySupport(
-                                            state = 'supported', 
-                                            origin = 'explicit', 
-                                            predicate = azentspublicclient.models.support_predicate.SupportPredicate(
-                                                reasoning_efforts = [
-                                                    'none'
-                                                    ], 
-                                                function_tools = True, ), ), 
-                                        completeness = 'complete', 
-                                        efforts = [
-                                            azentspublicclient.models.effort_declaration.EffortDeclaration(
-                                                level = 'none', 
-                                                state = 'supported', 
-                                                origin = 'explicit', )
-                                            ], 
-                                        default_effort = azentspublicclient.models.default_effort_evidence.DefaultEffortEvidence(
-                                            level = 'none', 
-                                            origin = 'explicit', ), ), 
-                                    reasoning_summaries = azentspublicclient.models.capability_support.CapabilitySupport(
-                                        state = 'supported', 
-                                        origin = , 
-                                        predicate = azentspublicclient.models.support_predicate.SupportPredicate(
+                                structured_response = True, 
+                                request_constraints = azentspublicclient.models.model_request_constraints.ModelRequestConstraints(
+                                    known_default = 'none', 
+                                    feature_conditions = [
+                                        azentspublicclient.models.model_feature_condition.ModelFeatureCondition(
+                                            feature = 'function_calling', 
                                             reasoning_efforts = [
                                                 'none'
                                                 ], 
-                                            function_tools = True, ), ), 
-                                    function_calling = , 
-                                    parallel_function_calls = , 
-                                    strict_function_schema = , 
-                                    structured_response = , 
-                                    parameters = azentspublicclient.models.parameter_support.ParameterSupport(
-                                        temperature = , 
-                                        max_output_tokens = , 
-                                        top_p = , 
-                                        top_k = , 
-                                        stop_sequences = , ), 
-                                    input_modalities = [
-                                        azentspublicclient.models.modality_support.ModalitySupport(
-                                            modality = 'text', 
-                                            support = , )
-                                        ], 
-                                    output_modalities = [
-                                        azentspublicclient.models.modality_support.ModalitySupport(
-                                            modality = 'text', 
-                                            support = , )
-                                        ], 
-                                    built_in_tools = [
-                                        azentspublicclient.models.builtin_tool_support.BuiltinToolSupport(
-                                            tool = 'web_search', 
-                                            support = , )
+                                            function_tools = True, )
                                         ], ), ), 
                             pricing = azentspublicclient.models.model_pricing_definition.ModelPricingDefinition(
                                 rules = azentspublicclient.models.catalog_price_rules.CatalogPriceRules(

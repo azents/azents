@@ -194,6 +194,7 @@ from azents.repos.session_execution import (
 )
 from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
+from azents.repos.worker_executor_model_data import agent_model_configuration_signature
 from azents.repos.worker_executor_read import WorkerExecutorReadRepository
 from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.runtime.types import RuntimeDomainConfig
@@ -310,6 +311,7 @@ class FreshTurnPreparation:
     inference_state: SessionInferenceState
     profile: RequestedInferenceProfile
     source: InferenceProfileSource
+    configuration_signature: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -853,6 +855,12 @@ class RunExecutor:
         session_state = await self.read_repository.get_session(snapshot.session_id)
         if session_state is None:
             raise ValueError("AgentSession not found")
+        configured_agent = await self.read_repository.get_agent(snapshot.agent_id)
+        turn_configuration_signature = (
+            agent_model_configuration_signature(configured_agent)
+            if configured_agent is not None
+            else None
+        )
         if (
             recoverable_run is not None
             and recoverable_run.status == AgentRunStatus.RUNNING
@@ -944,6 +952,7 @@ class RunExecutor:
                     agent_id=snapshot.agent_id,
                     session_id=snapshot.session_id,
                     explicit_profile=explicit_profile,
+                    run_id=recoverable_run.id if recoverable_run is not None else None,
                 )
             turn_inference_state = None
 
@@ -1171,6 +1180,7 @@ class RunExecutor:
             prepared_value = prepared.value
             run_request = prepared_value.run_request
             turn_inference_state = prepared_value.inference_state
+            turn_configuration_signature = prepared_value.configuration_signature
             selected_profile = RequestedProfileSelection(
                 profile=prepared_value.profile,
                 source=prepared_value.source,
@@ -1613,6 +1623,7 @@ class RunExecutor:
             """Replace the active request with one freshly prepared model turn."""
             nonlocal inference_profile, run_request, selected_profile
             nonlocal turn_inference_state
+            nonlocal turn_configuration_signature
             current_request = run_request
             if current_request is None:
                 raise RuntimeError("Active model request is not prepared")
@@ -1635,6 +1646,7 @@ class RunExecutor:
                 inference_state=next_inference_state,
             )
             turn_inference_state = next_inference_state
+            turn_configuration_signature = prepared_value.configuration_signature
             selected_profile = RequestedProfileSelection(
                 profile=prepared_value.profile,
                 source=prepared_value.source,
@@ -1982,6 +1994,7 @@ class RunExecutor:
                             model=run_request.model,
                             requested_inference_profile=selected_profile.profile,
                             prepared_inference_state=turn_inference_state,
+                            configuration_signature=turn_configuration_signature,
                             run_id=run_id,
                             poll_fn=poll_fn,
                             owner_generation=owner_generation,
@@ -2569,12 +2582,14 @@ class RunExecutor:
         agent_id: str,
         session_id: str,
         explicit_profile: RequestedInferenceProfile | None,
+        run_id: str | None = None,
     ) -> RequestedProfileSelection:
         """Delegate the completed model-operation phase."""
         return await self.model_operation_repository.select_requested_profile(
             agent_id=agent_id,
             session_id=session_id,
             explicit_profile=explicit_profile,
+            run_id=run_id,
         )
 
     async def _advance_model_operation_after_quota(
@@ -2709,7 +2724,11 @@ class RunExecutor:
         for _attempt in range(3):
             snapshot = (
                 await self.model_operation_repository.load_fresh_profile_snapshot(
-                    agent_id=agent_id, session_id=session_id
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    override=override,
+                    replace_operation=replace_operation,
                 )
             )
             session_state = snapshot.session
@@ -2741,6 +2760,7 @@ class RunExecutor:
                 selected=selected,
                 override=override,
                 replace_operation=replace_operation,
+                prepared_snapshot=snapshot,
             )
             if prepared.failure:
                 return Failure(prepared.error)
@@ -2889,6 +2909,7 @@ class RunExecutor:
                     inference_state=inference_state,
                     profile=selected.profile,
                     source=selected.source,
+                    configuration_signature=prepared.value.configuration_signature,
                 )
             )
         raise CanonicalExecutionWorkDriftError(
@@ -2986,6 +3007,7 @@ class RunExecutor:
         session_id: str,
         requested_profile: RequestedInferenceProfile,
         prepared_inference_state: SessionInferenceState,
+        configuration_signature: str | None = None,
     ) -> bool:
         """Return whether current model intent or label mapping supersedes a turn."""
         snapshot = await self.read_repository.model_configuration_snapshot(
@@ -3015,6 +3037,12 @@ class RunExecutor:
         )
         if current_profile not in (requested_profile, prepared_profile):
             return True
+        if (
+            configuration_signature is not None
+            and agent_model_configuration_signature(current_agent)
+            != configuration_signature
+        ):
+            return True
 
         current_option = next(
             (
@@ -3032,8 +3060,12 @@ class RunExecutor:
             return True
         current_candidate = current_option.candidates[candidate_ordinal - 1]
         return (
-            current_candidate.model_selection
-            != prepared_inference_state.model_selection
+            current_candidate.model_selection.llm_provider_integration_id
+            != prepared_inference_state.model_selection.llm_provider_integration_id
+            or current_candidate.model_selection.provider
+            != prepared_inference_state.model_selection.provider
+            or current_candidate.model_selection.model_identifier
+            != prepared_inference_state.model_selection.model_identifier
             or current_candidate.settings != prepared_inference_state.model_settings
         )
 
@@ -3050,6 +3082,7 @@ class RunExecutor:
         tool_admission_barrier: ToolAdmissionBarrier,
         mark_context_invalidated: Callable[[], None],
         dispatch_event: Callable[[str, PublishedEvent], Awaitable[None]],
+        configuration_signature: str | None = None,
     ) -> PollMessages:
         """Combine model-call boundary polling with turn action processing."""
         # AgentRunExecution polls before its first model call and before later turns.
@@ -3082,6 +3115,7 @@ class RunExecutor:
                     session_id=snapshot.session_id,
                     requested_profile=requested_inference_profile,
                     prepared_inference_state=prepared_inference_state,
+                    configuration_signature=configuration_signature,
                 )
             )
             if result.context_invalidated:

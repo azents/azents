@@ -186,7 +186,6 @@ export function AgentFormContainer(props: AgentFormProps): React.ReactElement {
     props.handle,
     form.values.selectable_model_options,
     useImageCatalogTransport,
-    form.values.reasoning_effort ?? null,
   );
 
   return (

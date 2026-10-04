@@ -945,26 +945,25 @@ class AgentEngineAdapter:
                         "tool_count": len(provider_visible_tool_names),
                     },
                 )
-            if request.model_capabilities.semantic_contract is not None:
-                builtin_context = resolve_model_support_context(
+            builtin_context = resolve_model_support_context(
+                request.model_capabilities,
+                requested_effort=request.reasoning_effort,
+                function_tools=any(
+                    catalog.wire_dialects[name] in {"json_function", "plaintext_custom"}
+                    for name in provider_visible_tool_names
+                ),
+            )
+            for tool in resolved_builtin_tools.client_executed:
+                # The saved row is projected for this provider's execution
+                # owner; hosted image denial cannot override a client row.
+                if not saved_builtin_tool_allowed(
                     request.model_capabilities,
-                    requested_effort=request.reasoning_effort,
-                    function_tools=any(
-                        catalog.wire_dialects[name] == "json_function"
-                        for name in provider_visible_tool_names
-                    ),
-                )
-                for tool in resolved_builtin_tools.client_executed:
-                    # The saved row is projected for this provider's execution
-                    # owner; hosted image denial cannot override a client row.
-                    if not saved_builtin_tool_allowed(
-                        request.model_capabilities,
-                        tool=tool.name,
-                        context=builtin_context,
-                    ):
-                        raise UnsupportedRequiredBuiltinToolError(
-                            f"Required builtin tool is not supported: {tool.name}"
-                        )
+                    tool=tool.name,
+                    context=builtin_context,
+                ):
+                    raise UnsupportedRequiredBuiltinToolError(
+                        f"Required builtin tool is not supported: {tool.name}"
+                    )
             system_prompt_result = build_system_prompt(
                 agent_prompt=request.agent_prompt,
                 static_toolkit_prompts=catalog.static_prompt_fragment_inputs_for(

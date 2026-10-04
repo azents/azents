@@ -17,6 +17,11 @@ from azents.core.inference_profile import (
     validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
+from azents.core.model_capability_contract import (
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
+)
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
@@ -288,20 +293,21 @@ def test_profile_selection_keeps_conditional_effort_potential() -> None:
             reasoning=CatalogFact(state="value", value=True),
             reasoning_efforts=CatalogFact(
                 state="value",
-                value=(ModelReasoningEffort.NONE, ModelReasoningEffort.HIGH),
+                value=(ModelReasoningEffort.HIGH,),
             ),
         ),
         model_developer=LLMModelDeveloper.OPENAI,
     )
-    payload = caps.model_dump(mode="json")
-    payload["semantic_contract"]["reasoning"]["support"] = {
-        "state": "conditional",
-        "origin": "explicit",
-        "predicate": {"reasoning_efforts": ["high"], "function_tools": True},
-    }
-    payload["reasoning"]["supported"] = False
-    payload["reasoning"]["effort_levels"] = []
-    caps = ModelCapabilities.model_validate(payload)
+    caps.request_constraints = ModelRequestConstraints(
+        known_default=None,
+        feature_conditions=(
+            ModelFeatureCondition(
+                feature=ModelCapabilityFeature.REASONING,
+                reasoning_efforts=("high",),
+                function_tools=True,
+            ),
+        ),
+    )
     before = caps.model_dump_json()
     options = make_test_selectable_model_options(
         _selection().model_copy(update={"normalized_capabilities": caps}),

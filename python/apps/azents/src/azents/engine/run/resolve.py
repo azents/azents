@@ -368,13 +368,6 @@ def _resolve_reasoning_effort(
     """Return reasoning effort based on model selection capability contract."""
     if params is None or params.reasoning_effort is None:
         return None
-    if selection.normalized_capabilities.semantic_contract is not None:
-        return params.reasoning_effort
-    reasoning = selection.normalized_capabilities.reasoning
-    if not reasoning.supported:
-        return None
-    if params.reasoning_effort not in reasoning.effort_levels:
-        return None
     return params.reasoning_effort
 
 
@@ -725,7 +718,6 @@ async def resolve_invoke_input_with_model_source(
         and resolved_model_selection is None
         and params is not None
         and params.reasoning_effort is not None
-        and main_selection.normalized_capabilities.semantic_contract is not None
         and params.reasoning_effort
         not in main_selection.normalized_capabilities.configurable_reasoning_efforts()
     ):

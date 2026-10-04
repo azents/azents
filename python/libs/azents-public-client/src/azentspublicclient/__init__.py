@@ -169,9 +169,6 @@ __all__ = [
     "AwsConfig",
     "AwsSecrets",
     "BuiltinToolConfig",
-    "BuiltinToolSupport",
-    "BuiltinToolValue",
-    "CapabilitySupport",
     "CatalogOffPeakRule",
     "CatalogPriceIssue",
     "CatalogPriceRate",
@@ -212,7 +209,6 @@ __all__ = [
     "CreateWorkspaceRequest",
     "CreateWorkspaceResponse",
     "CurrentMemberResponse",
-    "DefaultEffortEvidence",
     "Detail",
     "DiscordConnectionConfiguration",
     "DiscordConnectionCredentials",
@@ -223,13 +219,10 @@ __all__ = [
     "DockerContainerProfileSpecV1",
     "DockerContainerProfileSpecV2",
     "DockerContainerResources",
-    "EffortCompleteness",
-    "EffortDeclaration",
     "ElevateResponse",
     "ElevateWithEmailRequest",
     "ElevateWithPasswordRequest",
     "EventKind",
-    "EvidenceOrigin",
     "ExistingProjectWorkspaceItemResponse",
     "ExternalAccountLinkState",
     "ExternalAccountOAuthEffectiveStatus",
@@ -355,12 +348,10 @@ __all__ = [
     "MemoryResponse",
     "MemoryScope",
     "MemoryUpdateRequest",
-    "ModalitySupport",
-    "ModalityValue",
     "ModelBuiltInToolCapabilities",
     "ModelCandidateIdentity",
     "ModelCapabilities",
-    "ModelCapabilityContract",
+    "ModelCapabilityFeature",
     "ModelCatalogEntryListResponse",
     "ModelCatalogEntryResponse",
     "ModelCatalogSyncResponse",
@@ -369,6 +360,7 @@ __all__ = [
     "ModelContextWindow",
     "ModelExecutionOptionDefinition",
     "ModelExecutionOptionId",
+    "ModelFeatureCondition",
     "ModelModalities",
     "ModelModality",
     "ModelParameterCapabilities",
@@ -377,6 +369,7 @@ __all__ = [
     "ModelPricingUnavailableReason",
     "ModelReasoningCapabilities",
     "ModelReasoningEffort",
+    "ModelRequestConstraints",
     "ModelToolCallingCapabilities",
     "MultiChannelDefaultRequest",
     "MultiDiscordThreadAutoArchiveDurationRequest",
@@ -387,7 +380,6 @@ __all__ = [
     "OAuthAuthorizeResponse",
     "OAuthExchangeRequest",
     "OpenRouterSubscriptionFinancialDetailsResponse",
-    "ParameterSupport",
     "PartialHistoryResponse",
     "PasswordLoginRequest",
     "PasswordLoginResponse",
@@ -419,7 +411,6 @@ __all__ = [
     "ProjectBrowserManifestResponse",
     "ProjectBrowserModeResponse",
     "ReasoningEffortValue",
-    "ReasoningSupport",
     "ReceivedInvitationListResponse",
     "ReceivedInvitationResponse",
     "RedeemPasswordResetTokenRequest",
@@ -544,8 +535,6 @@ __all__ = [
     "SubscriptionUsageLimitResponse",
     "SubscriptionUsageUnavailableReason",
     "SubscriptionUsageUnavailableResponse",
-    "SupportPredicate",
-    "SupportState",
     "SystemUserRole",
     "TestConnectionRequest",
     "TestConnectionResponse",
@@ -770,9 +759,6 @@ from azentspublicclient.models.avatar_upload_ticket_response import AvatarUpload
 from azentspublicclient.models.aws_config import AwsConfig as AwsConfig
 from azentspublicclient.models.aws_secrets import AwsSecrets as AwsSecrets
 from azentspublicclient.models.builtin_tool_config import BuiltinToolConfig as BuiltinToolConfig
-from azentspublicclient.models.builtin_tool_support import BuiltinToolSupport as BuiltinToolSupport
-from azentspublicclient.models.builtin_tool_value import BuiltinToolValue as BuiltinToolValue
-from azentspublicclient.models.capability_support import CapabilitySupport as CapabilitySupport
 from azentspublicclient.models.catalog_off_peak_rule import CatalogOffPeakRule as CatalogOffPeakRule
 from azentspublicclient.models.catalog_price_issue import CatalogPriceIssue as CatalogPriceIssue
 from azentspublicclient.models.catalog_price_rate import CatalogPriceRate as CatalogPriceRate
@@ -813,7 +799,6 @@ from azentspublicclient.models.create_session_working_folder_action import Creat
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest as CreateWorkspaceRequest
 from azentspublicclient.models.create_workspace_response import CreateWorkspaceResponse as CreateWorkspaceResponse
 from azentspublicclient.models.current_member_response import CurrentMemberResponse as CurrentMemberResponse
-from azentspublicclient.models.default_effort_evidence import DefaultEffortEvidence as DefaultEffortEvidence
 from azentspublicclient.models.detail import Detail as Detail
 from azentspublicclient.models.discord_connection_configuration import DiscordConnectionConfiguration as DiscordConnectionConfiguration
 from azentspublicclient.models.discord_connection_credentials import DiscordConnectionCredentials as DiscordConnectionCredentials
@@ -824,13 +809,10 @@ from azentspublicclient.models.discord_url_preview_suppression_request import Di
 from azentspublicclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
 from azentspublicclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2 as DockerContainerProfileSpecV2
 from azentspublicclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
-from azentspublicclient.models.effort_completeness import EffortCompleteness as EffortCompleteness
-from azentspublicclient.models.effort_declaration import EffortDeclaration as EffortDeclaration
 from azentspublicclient.models.elevate_response import ElevateResponse as ElevateResponse
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest
 from azentspublicclient.models.event_kind import EventKind as EventKind
-from azentspublicclient.models.evidence_origin import EvidenceOrigin as EvidenceOrigin
 from azentspublicclient.models.existing_project_workspace_item_response import ExistingProjectWorkspaceItemResponse as ExistingProjectWorkspaceItemResponse
 from azentspublicclient.models.external_account_link_state import ExternalAccountLinkState as ExternalAccountLinkState
 from azentspublicclient.models.external_account_o_auth_effective_status import ExternalAccountOAuthEffectiveStatus as ExternalAccountOAuthEffectiveStatus
@@ -956,12 +938,10 @@ from azentspublicclient.models.memory_list_response import MemoryListResponse as
 from azentspublicclient.models.memory_response import MemoryResponse as MemoryResponse
 from azentspublicclient.models.memory_scope import MemoryScope as MemoryScope
 from azentspublicclient.models.memory_update_request import MemoryUpdateRequest as MemoryUpdateRequest
-from azentspublicclient.models.modality_support import ModalitySupport as ModalitySupport
-from azentspublicclient.models.modality_value import ModalityValue as ModalityValue
 from azentspublicclient.models.model_built_in_tool_capabilities import ModelBuiltInToolCapabilities as ModelBuiltInToolCapabilities
 from azentspublicclient.models.model_candidate_identity import ModelCandidateIdentity as ModelCandidateIdentity
 from azentspublicclient.models.model_capabilities import ModelCapabilities as ModelCapabilities
-from azentspublicclient.models.model_capability_contract import ModelCapabilityContract as ModelCapabilityContract
+from azentspublicclient.models.model_capability_feature import ModelCapabilityFeature as ModelCapabilityFeature
 from azentspublicclient.models.model_catalog_entry_list_response import ModelCatalogEntryListResponse as ModelCatalogEntryListResponse
 from azentspublicclient.models.model_catalog_entry_response import ModelCatalogEntryResponse as ModelCatalogEntryResponse
 from azentspublicclient.models.model_catalog_sync_response import ModelCatalogSyncResponse as ModelCatalogSyncResponse
@@ -970,6 +950,7 @@ from azentspublicclient.models.model_compatibility_capabilities import ModelComp
 from azentspublicclient.models.model_context_window import ModelContextWindow as ModelContextWindow
 from azentspublicclient.models.model_execution_option_definition import ModelExecutionOptionDefinition as ModelExecutionOptionDefinition
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId as ModelExecutionOptionId
+from azentspublicclient.models.model_feature_condition import ModelFeatureCondition as ModelFeatureCondition
 from azentspublicclient.models.model_modalities import ModelModalities as ModelModalities
 from azentspublicclient.models.model_modality import ModelModality as ModelModality
 from azentspublicclient.models.model_parameter_capabilities import ModelParameterCapabilities as ModelParameterCapabilities
@@ -978,6 +959,7 @@ from azentspublicclient.models.model_pricing_definition import ModelPricingDefin
 from azentspublicclient.models.model_pricing_unavailable_reason import ModelPricingUnavailableReason as ModelPricingUnavailableReason
 from azentspublicclient.models.model_reasoning_capabilities import ModelReasoningCapabilities as ModelReasoningCapabilities
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort as ModelReasoningEffort
+from azentspublicclient.models.model_request_constraints import ModelRequestConstraints as ModelRequestConstraints
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest as MultiChannelDefaultRequest
 from azentspublicclient.models.multi_discord_thread_auto_archive_duration_request import MultiDiscordThreadAutoArchiveDurationRequest as MultiDiscordThreadAutoArchiveDurationRequest
@@ -988,7 +970,6 @@ from azentspublicclient.models.my_system_roles_response import MySystemRolesResp
 from azentspublicclient.models.o_auth_authorize_response import OAuthAuthorizeResponse as OAuthAuthorizeResponse
 from azentspublicclient.models.o_auth_exchange_request import OAuthExchangeRequest as OAuthExchangeRequest
 from azentspublicclient.models.open_router_subscription_financial_details_response import OpenRouterSubscriptionFinancialDetailsResponse as OpenRouterSubscriptionFinancialDetailsResponse
-from azentspublicclient.models.parameter_support import ParameterSupport as ParameterSupport
 from azentspublicclient.models.partial_history_response import PartialHistoryResponse as PartialHistoryResponse
 from azentspublicclient.models.password_login_request import PasswordLoginRequest as PasswordLoginRequest
 from azentspublicclient.models.password_login_response import PasswordLoginResponse as PasswordLoginResponse
@@ -1020,7 +1001,6 @@ from azentspublicclient.models.project_browser_manifest_preview_request import P
 from azentspublicclient.models.project_browser_manifest_response import ProjectBrowserManifestResponse as ProjectBrowserManifestResponse
 from azentspublicclient.models.project_browser_mode_response import ProjectBrowserModeResponse as ProjectBrowserModeResponse
 from azentspublicclient.models.reasoning_effort_value import ReasoningEffortValue as ReasoningEffortValue
-from azentspublicclient.models.reasoning_support import ReasoningSupport as ReasoningSupport
 from azentspublicclient.models.received_invitation_list_response import ReceivedInvitationListResponse as ReceivedInvitationListResponse
 from azentspublicclient.models.received_invitation_response import ReceivedInvitationResponse as ReceivedInvitationResponse
 from azentspublicclient.models.redeem_password_reset_token_request import RedeemPasswordResetTokenRequest as RedeemPasswordResetTokenRequest
@@ -1145,8 +1125,6 @@ from azentspublicclient.models.subscription_usage_external_response import Subsc
 from azentspublicclient.models.subscription_usage_limit_response import SubscriptionUsageLimitResponse as SubscriptionUsageLimitResponse
 from azentspublicclient.models.subscription_usage_unavailable_reason import SubscriptionUsageUnavailableReason as SubscriptionUsageUnavailableReason
 from azentspublicclient.models.subscription_usage_unavailable_response import SubscriptionUsageUnavailableResponse as SubscriptionUsageUnavailableResponse
-from azentspublicclient.models.support_predicate import SupportPredicate as SupportPredicate
-from azentspublicclient.models.support_state import SupportState as SupportState
 from azentspublicclient.models.system_user_role import SystemUserRole as SystemUserRole
 from azentspublicclient.models.test_connection_request import TestConnectionRequest as TestConnectionRequest
 from azentspublicclient.models.test_connection_response import TestConnectionResponse as TestConnectionResponse

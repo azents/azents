@@ -969,14 +969,14 @@ class TestModelStreamWatchdog:
             message=f"provider title retry did not recover: {observed!r}",
         )
 
-    def test_session_title_unknown_capability_falls_back_to_plain_text(
+    def test_session_title_unsupported_schema_uses_plain_text(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
     ) -> None:
-        """Typed Structured Output rejection changes only the title envelope."""
+        """Absent structured support selects plain text without changing the run."""
         del azents_engine_worker_container
         workspace = setup_workspace(
             public_api_client,

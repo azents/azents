@@ -103,7 +103,7 @@ def test_system_inventory_uses_source_facts_not_model_names_or_price_keys(
         ModelReasoningEffort.XHIGH,
         ModelReasoningEffort.MAX,
     ]
-    assert caps.semantic_contract is not None
+    assert caps.capability_schema_version == 3
     assert MODEL_METADATA_PROJECTION_SCHEMA_VERSION == "2"
     assert "genai_prices" not in json.dumps(
         entries["opaque-preview-name"].source_metadata

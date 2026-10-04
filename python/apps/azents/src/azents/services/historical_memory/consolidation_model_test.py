@@ -200,6 +200,7 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
 
     selection = make_test_model_selection()
     selection.normalized_capabilities.tool_calling.supported = True
+    selection.normalized_capabilities.parameters.max_output_tokens = True
     model = bind_consolidation_provider_model(
         selection=selection,
         settings=make_test_model_settings(),

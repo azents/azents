@@ -38,6 +38,7 @@ from azents.core.llm_catalog import (
     ModelModality,
     ModelReasoningEffort,
 )
+from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import (
@@ -786,16 +787,13 @@ async def test_chatgpt_web_search_survives_final_catalog_projection(
         capabilities = ModelCapabilities.model_validate_json(
             json.dumps(entry.normalized_capabilities)
         )
-        assert "web_search" in capabilities.built_in_tools.supported
-        assert capabilities.semantic_contract is not None
-        [web] = [
-            declaration
-            for declaration in capabilities.semantic_contract.built_in_tools
-            if declaration.tool == "web_search"
-        ]
-        assert web.support.state == "supported"
-        assert web.support.origin == "contract_derived"
-        assert web.support.predicate is None
+        assert (
+            ModelCapabilityFeature.WEB_SEARCH in capabilities.supported_features()
+        ) is (source_kind != "denial")
+        assert all(
+            condition.feature != ModelCapabilityFeature.WEB_SEARCH
+            for condition in capabilities.request_constraints.feature_conditions
+        )
 
 
 class _FakeKimiAsyncClient:
@@ -978,7 +976,7 @@ async def test_list_openrouter_models_projects_account_metadata_without_allowlis
     ]
     assert known.normalized_capabilities.tool_calling.supported is True
     assert known.normalized_capabilities.tool_calling.parallel_tool_calls is True
-    assert known.normalized_capabilities.tool_calling.strict_json_schema is None
+    assert known.normalized_capabilities.tool_calling.strict_json_schema is False
     assert known.normalized_capabilities.reasoning.effort_levels == []
     assert known.normalized_capabilities.built_in_tools.supported == ["web_search"]
     assert known.normalized_capabilities.parameters.temperature is True
@@ -1385,7 +1383,7 @@ def test_openrouter_structured_response_preserves_complete_parameter_presence(
         ),
     ],
 )
-def test_openrouter_structured_response_source_enriches_only_absent_declaration(
+def test_openrouter_structured_response_source_supplements_missing_knowledge(
     declaration: dict[str, object], provider_state: str, source_support: bool
 ) -> None:
     candidate = providers._candidate_from_openrouter_model(
@@ -1417,14 +1415,16 @@ def test_openrouter_structured_response_source_enriches_only_absent_declaration(
     capabilities = ModelCapabilities.model_validate(entry.normalized_capabilities)
     assert entry.projection_metadata is not None
     assert entry.projection_metadata["matched"] is True
-    assert capabilities.semantic_contract is not None
-    expected_state = (
-        ("supported" if source_support else "unsupported")
-        if provider_state == "absent"
-        else provider_state
+    expected_support = (
+        source_support if provider_state == "absent" else provider_state == "supported"
     )
-    assert capabilities.semantic_contract.structured_response.state == expected_state
-    assert not capabilities.semantic_contract.strict_function_schema.enabled
+    assert (
+        ModelCapabilityFeature.STRUCTURED_RESPONSE in capabilities.supported_features()
+    ) is expected_support
+    assert (
+        ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA
+        not in capabilities.supported_features()
+    )
 
 
 def test_openrouter_explicit_empty_modalities_and_nested_null_survive_replay() -> None:
@@ -2047,9 +2047,7 @@ def test_xai_oauth_disabled_controls_win_over_conflicting_presets() -> None:
     )
     caps = ModelCapabilities.model_validate(entry.normalized_capabilities)
     assert caps.reasoning.effort_levels == []
-    assert caps.semantic_contract is not None
-    assert caps.semantic_contract.reasoning.completeness == "complete"
-    assert caps.semantic_contract.reasoning.default_effort is None
+    assert caps.request_constraints.known_default is None
 
 
 def _oauth_candidate_from_declared_payload(
@@ -2401,3 +2399,34 @@ async def test_xai_oauth_inconsistent_context_is_retryable_provider_response() -
         )
     assert caught.value.failure_code == "XaiInvalidProviderResponse"
     assert caught.value.automatic_retry_blocked is False
+
+
+@pytest.mark.parametrize("current", [None, False, True])
+def test_chatgpt_current_summary_parameter_survives_listing_and_replay(
+    current: bool | None,
+) -> None:
+    candidate = providers._candidate_from_chatgpt_model(
+        providers._ChatGPTModelPayload.model_validate(
+            {
+                "slug": "gpt-6-astra",
+                "visibility": "list",
+                "supported_in_api": True,
+                "supports_reasoning_summaries": True,
+                "supports_reasoning_summary_parameter": current,
+                "default_reasoning_summary": "none",
+                "supports_search_tool": True,
+                "web_search_tool_type": "text_and_image",
+            }
+        ),
+        fetched_at=datetime.datetime.now(datetime.UTC),
+    )
+    evidence = _replayed_evidence(candidate)
+    assert evidence.reasoning_summaries == CatalogFact(
+        state="null" if current is None else "value", value=current
+    )
+    assert candidate is not None
+    assert candidate.normalized_capabilities.reasoning.summaries is (current is True)
+    assert candidate.source_metadata is not None
+    assert candidate.source_metadata["supports_reasoning_summary_parameter"] is current
+    assert candidate.source_metadata["supports_search_tool"] is True
+    assert evidence.web_search.state == "absent"

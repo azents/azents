@@ -1,6 +1,6 @@
 # ModelParameterCapabilities
 
-Configurable generation parameters supported by the model.
+Final supported generation controls.
 
 ## Properties
 

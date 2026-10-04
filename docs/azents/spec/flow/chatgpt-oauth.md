@@ -6,6 +6,10 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, user-auth, workspace]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/core/model_provider_declarations.py
+  - python/apps/azents/src/azents/services/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
@@ -39,7 +43,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-04
-spec_version: 31
+spec_version: 32
 ---
 
 # ChatGPT OAuth Flow
@@ -170,7 +174,16 @@ result; ChatGPT OAuth has no system-catalog fallback. Failed synchronization pre
 last-success time, current entries, and their prices. Responses expose latest sync state
 without a catalog snapshot/data generation or current work identifier.
 
-Catalog refresh does not mutate Agent or Workspace model selection snapshots. ChatGPT OAuth execution uses the standard Responses contract independently of catalog metadata copied into a saved model selection.
+Catalog refresh preserves configured Agent/Workspace identities and settings.
+Active reads and NEW operations compile exact account-scoped LOCAL declarations
+and source facts into one final schema-3 support contract. Existing operations
+retain captured candidates, conditions and replay metadata. Native OpenAI twins
+do not provide account support. Request normalization uses the actual Responses
+envelope, including strictness and output-tool shape.
+
+Account effort arrays remain original source evidence. Canonical controls contain
+only `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; `ultra` is
+excluded with the pre-Pydantic handling rather than mapped to another effort.
 
 ## Runtime Refresh and Execution
 
@@ -243,10 +256,10 @@ Rules:
   Native OpenAI source records are not borrowed by model name or alias. No exact
   ChatGPT price match at selection means an unavailable definition. Historical selections
   without embedded prices remain read-only and produce unavailable local estimates;
-  neither reads nor execution fill them from a newer catalog. Saved v2 account support
-  preserves complete efforts/conditions independently from source pricing; native
-  ChatGPT does not consult Pydantic profiles for capability authority. Historical
-  descriptor absence keeps the previously saved behavior.
+  neither reads nor execution fill them from a newer catalog. Final compiled
+  account support and captured request conditions remain independent of source
+  pricing. Native ChatGPT codecs do not use Pydantic model profiles as feature
+  authority. Historical operation metadata remains captured.
 
 ## Processing-speed execution options
 

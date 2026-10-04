@@ -10,6 +10,11 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import BaseModel, Field
 
+from azents.core.active_model_capabilities import (
+    apply_to_selection,
+    compile_capture,
+    require_selection,
+)
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
 from azents.core.enums import (
     LLMCatalogEntryVisibility,
@@ -332,40 +337,21 @@ class ModelCatalogReadService:
         self, *, workspace_id: str, selection_input: AgentModelSelectionInput
     ) -> Result[AgentModelSelection, CatalogNotFound]:
         """Copy coherent exact entry facts and prices through existing predicates."""
-        result = await self.operations.selectable_entry(
+        captured = await self.operations.selectable_entry(
             integration_id=selection_input.llm_provider_integration_id,
             workspace_id=workspace_id,
             model_identifier=selection_input.model_identifier,
         )
-        if result is None:
+        if captured is None:
             return Failure(CatalogNotFound(selection_input.llm_provider_integration_id))
-        entry = result.entry
-        return Success(
-            AgentModelSelection(
-                llm_provider_integration_id=selection_input.llm_provider_integration_id,
-                provider=entry.provider,
-                model_identifier=entry.provider_model_identifier,
-                model_display_name=entry.display_name,
-                model_developer=_developer_from_entry(entry),
-                model_family=entry.family,
-                normalized_capabilities=ModelCapabilities.model_validate(
-                    entry.normalized_capabilities
-                ),
-                supported_execution_options=[
-                    ModelExecutionOptionId(option)
-                    for option in entry.supported_execution_options
-                ],
-                pricing=entry.pricing,
-                model_snapshot={
-                    "source": "stored_catalog_projection",
-                    "catalog_id": result.catalog.id,
-                    "entry_id": entry.id,
-                    "lifecycle_status": entry.lifecycle_status.value,
-                },
-                source_metadata=entry.source_metadata,
-                last_refreshed_at=entry.updated_at,
-            )
+        selection = _selection_identity_from_entry(
+            entry=captured.selected.entry,
+            integration_id=selection_input.llm_provider_integration_id,
+            catalog_id=captured.selected.catalog.id,
         )
+        compiled = compile_capture(captured.active_inputs, selections=[selection])
+        require_selection(compiled, selection)
+        return Success(apply_to_selection(selection, compiled))
 
     async def list_entries_by_integration(
         self,
@@ -386,6 +372,14 @@ class ModelCatalogReadService:
         if captured is None:
             return Failure(CatalogNotFound(integration_id))
         page = captured.page
+        selections = [
+            _selection_identity_from_entry(
+                entry=entry, integration_id=integration_id, catalog_id=page.catalog.id
+            )
+            for entry in page.entries
+        ]
+        compiled = compile_capture(captured.active_inputs, selections=selections)
+        active = [apply_to_selection(selection, compiled) for selection in selections]
         policy = evaluate_integration_catalog_sync_policy(
             IntegrationCatalogSyncPolicyInput(
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
@@ -417,14 +411,53 @@ class ModelCatalogReadService:
                     else None
                 ).automatic_retry_blocked,
                 entries=[
-                    ModelCatalogEntryOutput.convert_from(entry)
-                    for entry in page.entries
+                    ModelCatalogEntryOutput(
+                        id=entry.id,
+                        provider=entry.provider,
+                        provider_model_identifier=entry.provider_model_identifier,
+                        display_name=entry.display_name,
+                        normalized_capabilities=selection.normalized_capabilities,
+                        supported_execution_options=selection.supported_execution_options,
+                        lifecycle_status=entry.lifecycle_status,
+                        visibility_status=entry.visibility_status,
+                        publisher=entry.publisher,
+                        family=entry.family,
+                        pricing=entry.pricing,
+                        source_metadata=selection.source_metadata,
+                        projection_metadata=entry.projection_metadata,
+                    )
+                    for entry, selection in zip(page.entries, active, strict=True)
                 ],
                 total=page.total,
                 limit=limit,
                 offset=offset,
             )
         )
+
+
+def _selection_identity_from_entry(
+    *, entry: LLMCatalogEntry, integration_id: str, catalog_id: str
+) -> AgentModelSelection:
+    """Create an identity carrier; stored normalized booleans are not evidence."""
+    return AgentModelSelection(
+        llm_provider_integration_id=integration_id,
+        provider=entry.provider,
+        model_identifier=entry.provider_model_identifier,
+        model_display_name=entry.display_name,
+        model_developer=_developer_from_entry(entry),
+        model_family=entry.family,
+        normalized_capabilities=ModelCapabilities(),
+        supported_execution_options=[],
+        pricing=entry.pricing,
+        model_snapshot={
+            "source": "stored_catalog_projection",
+            "catalog_id": catalog_id,
+            "entry_id": entry.id,
+            "lifecycle_status": entry.lifecycle_status.value,
+        },
+        source_metadata=entry.source_metadata,
+        last_refreshed_at=entry.updated_at,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -871,7 +904,7 @@ def project_deterministic_integration_entries(
     listing: ModelListingOutput,
     source: ModelMetadataSource | None,
 ) -> list[LLMCatalogEntryCreate]:
-    """Preserve fixture capabilities while exercising normal exact pricing copies."""
+    """Publish authored fixture declarations through the normal capability compiler."""
     entries = project_integration_replacement_entries(
         integration_id=integration_id,
         provider=provider,
@@ -882,9 +915,6 @@ def project_deterministic_integration_entries(
     return [
         dataclasses.replace(
             entry,
-            normalized_capabilities=candidate.normalized_capabilities.model_dump(
-                mode="json"
-            ),
             projection_metadata={
                 **(entry.projection_metadata or {}),
                 "testenv_fixture": True,

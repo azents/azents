@@ -6,8 +6,11 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, external-channel, memory]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/engine/events/model_support_contract.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
@@ -44,7 +47,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-04
-spec_version: 49
+spec_version: 50
 ---
 
 # Context Compaction
@@ -154,13 +157,21 @@ boundary because it does not change the model-input head. See
 Summary generation is routed by provider from `engine/context/compaction.py`. OpenAI API-key and
 ChatGPT OAuth use an operation-scoped official OpenAI SDK client; the other eight provider identities
 use the public Pydantic AI model/official SDK boundary through `engine/responses.py`.
-The compaction model is resolved from the current candidate in the frozen
-Agent lightweight chain. Its model-scoped context cap participates in the effective input window, while its
+A NEW compaction operation compiles exact authorized LOCAL metadata for the
+configured Lightweight chain before normalizing controls and freezing candidates.
+An existing compaction operation resolves its current captured candidate without
+mutable metadata lookup; retries and quota progression retain that capture.
+Its model-scoped context cap participates in the effective input window, while its
 model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
 
 Compaction summary generation is not user-facing streaming output, although the transport uses a
 stream so the common watchdog can enforce parsed-event idle and absolute attempt deadlines. The
-standard OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
+shared effective-request normalizer validates final feature membership and
+conditions after provider-specific encoding. Genuine effort omission can use a
+known captured default for condition evaluation; cleared, budget-only, disabled
+and adaptive thinking keep their encoded kinds. Native structured output and
+synthetic function output are admitted independently. The standard
+OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
 `max_output_tokens`; it does not use sampling continuation. ChatGPT OAuth also uses complete input,
 `store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
 Pydantic AI routes receive the dynamic summary token budget through provider-specific model settings

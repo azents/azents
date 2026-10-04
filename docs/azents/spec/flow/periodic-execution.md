@@ -4,11 +4,14 @@ created: 2026-06-20
 tags: [backend, engine, infra]
 spec_type: flow
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/engine/events/model_support_contract.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/chat_projection.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
   - python/apps/azents/src/azents/repos/chat_operations.py
@@ -63,7 +66,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-04
-spec_version: 26
+spec_version: 27
 ---
 
 # Periodic Execution Flow Spec
@@ -320,6 +323,14 @@ the stale token cannot settle the new claim. Agent deletion clears only the
 optional diagnostic Agent ID and cannot remove the cleanup snapshot.
 
 ## Historical Memory discovery and preparation
+
+NEW preparation and consolidation model operations compile current exact local
+declarations for their configured identities through the central capability
+capture. They use the same final schema-3 fields and encoded-request admission
+as foreground calls. Existing attempt operations, retries and quota cursors keep
+their captured candidates. Missing required metadata produces typed preparation
+diagnostics rather than a model substitution, source fetch or permissive unknown
+support state. This does not change Job Runtime routing, capacity or leases.
 
 `historical_memory_discovery` is enabled by default and runs every five minutes
 with a two-minute discovery timeout and bounded one-to-thirty-minute retry.

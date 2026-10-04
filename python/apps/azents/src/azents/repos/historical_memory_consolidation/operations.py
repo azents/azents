@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
+from azents.core.active_model_capabilities import (
+    apply_to_options,
+    compile_capture,
+    identities_for_options,
+    require_selection,
+)
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.model_operation import (
@@ -21,6 +27,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
@@ -82,6 +89,7 @@ class ConsolidationModelOperationRepository:
     session_manager: SessionManager[AsyncSession]
     agent_repository: AgentRepository
     health_repository: ModelCandidateHealthRepository
+    active_capabilities_repository: ActiveModelCapabilitiesRepository
 
     async def begin(
         self, principal: ConsolidationJobPrincipal
@@ -122,7 +130,22 @@ class ConsolidationModelOperationRepository:
                     owner.attempt.model_operation_state
                 )
             )
+            metadata_repository = self.active_capabilities_repository
+            captured = None
+            compiled = None
             if operation is None:
+                captured = await metadata_repository.capture_exact_choices_in_session(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    identities=identities_for_options([option]),
+                )
+                compiled = compile_capture(
+                    captured,
+                    selections=[
+                        candidate.model_selection for candidate in option.candidates
+                    ],
+                )
+                option = apply_to_options([option], compiled)[0]
                 operation = build_model_operation(
                     option=option,
                     profile=RequestedInferenceProfile(
@@ -152,9 +175,22 @@ class ConsolidationModelOperationRepository:
                     reservation=None,
                 )
                 updated = selected.operation
+                if compiled is not None:
+                    require_selection(
+                        compiled, updated.current_candidate.model_selection
+                    )
             except ModelOperationChainExhaustedError as exhausted:
                 updated = exhausted.operation
                 selection_error = exhausted
+            if (
+                captured is not None
+                and not await metadata_repository.inputs_match_in_session(
+                    session, captured=captured
+                )
+            ):
+                raise ConsolidationAuthorityError(
+                    "Consolidation model metadata changed before preparation."
+                )
             owner.attempt.model_operation_state = updated.model_dump(mode="json")
             await require_commit_owner(session, owner)
         if selection_error is not None:

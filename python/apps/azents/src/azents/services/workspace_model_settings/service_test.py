@@ -2,12 +2,22 @@
 
 import asyncio
 import dataclasses
+from collections.abc import Sequence
 from typing import Literal
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import (
+    ActiveModelMetadataUnavailable,
+    CompiledActiveChoice,
+    CompiledActiveChoices,
+    ConfiguredModelIdentity,
+    apply_to_options,
+    apply_to_selection,
+)
 from azents.core.agent import (
     AgentModelSelection,
     AgentModelSelectionInput,
@@ -16,8 +26,10 @@ from azents.core.agent import (
     SelectableModelSettings,
     SelectableModelSettingsInput,
 )
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.rdb.models.workspace_model_settings import RDBWorkspaceModelSettings
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog.data import CatalogNotFound
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_model_settings.data import (
@@ -37,6 +49,7 @@ from azents.repos.workspace_model_settings.operations_test import (
     marker_state,
     selection,
 )
+from azents.services.active_model_capabilities import ActiveModelCapabilitiesService
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.workspace_model_settings import WorkspaceModelSettingsService
@@ -46,6 +59,114 @@ from azents.services.workspace_model_settings.data import (
     ModelSelectionNotFound,
     WorkspaceModelSettingsUpdateInput,
 )
+from azents.testing.types import require_instance
+
+
+async def test_active_workspace_read_and_label_save_keep_raw_settings(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Read capabilities are active; label changes never persist their projection."""
+    fixture = await _fixture(
+        rdb_session_manager,
+        "active-default-read",
+        missing=set(),
+        image_errors=[],
+        catalog_error=None,
+        image_error=None,
+    )
+    await fixture.operations.update(fixture.workspace_id, full_update())
+    stored = await fixture.operations.get(fixture.workspace_id)
+    assert stored is not None
+    before = stored.model_dump_json()
+    active = dataclasses.replace(
+        fixture.active,
+        replacement=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        calls=[],
+    )
+    fixture.service.active_model_capabilities_service = active
+    output = await fixture.service.get(fixture.workspace_id)
+    assert len(active.calls) == 1
+    assert len(active.calls[0].selections) == 3
+    assert output.default_model_selection is not None
+    assert output.default_model_selection.normalized_capabilities.tool_calling.supported
+    assert output.default_selectable_model_options is not None
+    assert stored.default_selectable_model_options is not None
+    for actual, raw in zip(
+        output.default_selectable_model_options,
+        stored.default_selectable_model_options,
+        strict=True,
+    ):
+        assert actual.label == raw.label
+        assert [candidate.settings for candidate in actual.candidates] == [
+            candidate.settings for candidate in raw.candidates
+        ]
+        assert [
+            candidate.model_selection.model_identifier
+            for candidate in actual.candidates
+        ] == [
+            candidate.model_selection.model_identifier for candidate in raw.candidates
+        ]
+    after_read = await fixture.operations.get(fixture.workspace_id)
+    assert after_read is not None
+    assert after_read.model_dump_json() == before
+
+    changed = await fixture.service.update(
+        fixture.workspace_id,
+        WorkspaceModelSettingsUpdateInput(default_main_model_label="Quick"),
+    )
+    assert isinstance(changed, Success)
+    assert changed.value.default_model_selection is not None
+    selected = changed.value.default_model_selection
+    assert selected.normalized_capabilities.tool_calling.supported
+    after_save = await fixture.operations.get(fixture.workspace_id)
+    assert after_save is not None
+    assert after_save.default_main_model_label == "Quick"
+    assert (
+        after_save.default_selectable_model_options
+        == stored.default_selectable_model_options
+    )
+    fixture.manager.assert_closed()
+
+
+async def test_active_workspace_missing_metadata_retains_default_identity(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Missing metadata produces diagnostics instead of changing the user's model."""
+    fixture = await _fixture(
+        rdb_session_manager,
+        "active-default-missing",
+        missing=set(),
+        image_errors=[],
+        catalog_error=None,
+        image_error=None,
+    )
+    await fixture.operations.update(fixture.workspace_id, full_update())
+    stored = await fixture.operations.get(fixture.workspace_id)
+    assert stored is not None and stored.default_model_selection is not None
+    before = stored.model_dump_json()
+    model_id = stored.default_model_selection.model_identifier
+    fixture.service.active_model_capabilities_service = dataclasses.replace(
+        fixture.active, missing=frozenset({model_id}), calls=[]
+    )
+    output = await fixture.service.get(fixture.workspace_id)
+    primary = output.default_model_selection
+    assert primary is not None
+    assert primary.model_identifier == model_id
+    assert (
+        primary.llm_provider_integration_id
+        == stored.default_model_selection.llm_provider_integration_id
+    )
+    assert primary.normalized_capabilities == ModelCapabilities()
+    assert primary.source_metadata is not None
+    assert (
+        primary.source_metadata["active_capabilities"]["reason"]
+        == "exact_entry_unavailable"
+    )
+    after = await fixture.operations.get(fixture.workspace_id)
+    assert after is not None
+    assert after.model_dump_json() == before
 
 
 @dataclasses.dataclass(frozen=True)
@@ -126,6 +247,55 @@ class _Images(ImageGenerationCatalogService):
 
 
 @dataclasses.dataclass(frozen=True)
+class _ActiveCall:
+    workspace_id: str
+    selections: tuple[AgentModelSelection, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class _ActiveCapabilities(ActiveModelCapabilitiesService):
+    """Check metadata preparation stays outside default-setting transactions."""
+
+    manager: ObservedDefaultsManager
+    replacement: ModelCapabilities | None
+    missing: frozenset[str]
+    calls: list[_ActiveCall] = dataclasses.field(default_factory=list)
+
+    def compile_selections(
+        self, selections: Sequence[AgentModelSelection]
+    ) -> CompiledActiveChoices:
+        return CompiledActiveChoices(
+            tuple(
+                ActiveModelMetadataUnavailable(
+                    ConfiguredModelIdentity.from_selection(selection),
+                    "exact_entry_unavailable",
+                )
+                if selection.model_identifier in self.missing
+                else CompiledActiveChoice(
+                    identity=ConfiguredModelIdentity.from_selection(selection),
+                    capabilities=(
+                        self.replacement
+                        if self.replacement is not None
+                        else selection.normalized_capabilities
+                    ).model_copy(deep=True),
+                    supported_execution_options=tuple(
+                        selection.supported_execution_options
+                    ),
+                    catalog_id="active-catalog",
+                )
+                for selection in selections
+            )
+        )
+
+    async def capture_and_compile(
+        self, *, workspace_id: str, selections: Sequence[AgentModelSelection]
+    ) -> CompiledActiveChoices:
+        self.manager.assert_closed()
+        self.calls.append(_ActiveCall(workspace_id, tuple(selections)))
+        return self.compile_selections(selections)
+
+
+@dataclasses.dataclass(frozen=True)
 class _Fixture:
     workspace_id: str
     manager: ObservedDefaultsManager
@@ -133,6 +303,7 @@ class _Fixture:
     service: WorkspaceModelSettingsService
     catalog: _Catalog
     images: _Images
+    active: _ActiveCapabilities
 
 
 async def _fixture(
@@ -151,12 +322,22 @@ async def _fixture(
     )
     catalog = _Catalog(observed, missing, catalog_error)
     images = _Images(observed, image_errors, image_error)
+    active = _ActiveCapabilities(
+        repository=require_instance(
+            AsyncMock(spec=ActiveModelCapabilitiesRepository),
+            ActiveModelCapabilitiesRepository,
+        ),
+        manager=observed,
+        replacement=None,
+        missing=frozenset(),
+    )
     service = WorkspaceModelSettingsService(
         repository=operations,
         model_catalog_read_service=catalog,
         image_generation_catalog_service=images,
+        active_model_capabilities_service=active,
     )
-    return _Fixture(id, observed, operations, service, catalog, images)
+    return _Fixture(id, observed, operations, service, catalog, images, active)
 
 
 def _inputs() -> list[SelectableModelOptionInput]:
@@ -233,11 +414,22 @@ async def test_normalizers_see_closed_current_scope_and_final_snapshot_is_exact(
     expected = full_update()
     options = expected["default_selectable_model_options"]
     assert options is not None
-    assert result.value.default_selectable_model_options == options
-    assert result.value.default_model_selection == expected["default_model_selection"]
-    assert (
-        result.value.default_lightweight_model_selection
-        == expected["default_lightweight_model_selection"]
+    compiled = fixture.active.compile_selections(
+        [
+            candidate.model_selection
+            for option in options
+            for candidate in option.candidates
+        ]
+    )
+    assert result.value.default_selectable_model_options == apply_to_options(
+        options, compiled
+    )
+    main = expected["default_model_selection"]
+    lightweight = expected["default_lightweight_model_selection"]
+    assert main is not None and lightweight is not None
+    assert result.value.default_model_selection == apply_to_selection(main, compiled)
+    assert result.value.default_lightweight_model_selection == apply_to_selection(
+        lightweight, compiled
     )
     assert result.value.default_main_model_label == "Quality"
     assert result.value.default_lightweight_model_label == "Quick"
@@ -272,9 +464,10 @@ async def test_get_creates_empty_row_without_catalog_and_preserves_lightweight_f
     await fixture.operations.update(fixture.workspace_id, update)
     fallback = await fixture.service.get(fixture.workspace_id)
     assert fallback.default_lightweight_model_selection is None
-    assert (
-        fallback.effective_default_lightweight_model_selection
-        == update["default_model_selection"]
+    main = update["default_model_selection"]
+    assert main is not None
+    assert fallback.effective_default_lightweight_model_selection == apply_to_selection(
+        main, fixture.active.compile_selections([main])
     )
     assert fixture.catalog.calls == []
     assert fixture.images.calls == []
@@ -424,9 +617,17 @@ async def test_configured_label_only_matrix_preserves_options_without_catalog_re
     assert isinstance(result, Success)
     assert result.value.default_main_model_label == main
     assert result.value.default_lightweight_model_label == lightweight
-    assert (
-        result.value.default_selectable_model_options
-        == configured["default_selectable_model_options"]
+    options = configured["default_selectable_model_options"]
+    assert options is not None
+    compiled = fixture.active.compile_selections(
+        [
+            candidate.model_selection
+            for option in options
+            for candidate in option.candidates
+        ]
+    )
+    assert result.value.default_selectable_model_options == apply_to_options(
+        options, compiled
     )
     assert fixture.catalog.calls == [] and fixture.images.calls == []
     fixture.manager.assert_closed()

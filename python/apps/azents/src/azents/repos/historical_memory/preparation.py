@@ -8,6 +8,12 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.active_model_capabilities import (
+    apply_to_options,
+    compile_capture,
+    identities_for_options,
+    require_selection,
+)
 from azents.core.historical_memory import (
     HistoricalMemoryDueSource,
     HistoricalMemoryFailure,
@@ -24,6 +30,7 @@ from azents.core.model_operation import (
 from azents.engine.run.provider_failure import ModelProviderFailure
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
@@ -46,6 +53,9 @@ class HistoricalMemoryPreparationRepository:
     health_repository: Annotated[
         ModelCandidateHealthRepository,
         Depends(ModelCandidateHealthRepository),
+    ]
+    active_capabilities_repository: Annotated[
+        ActiveModelCapabilitiesRepository, Depends(ActiveModelCapabilitiesRepository)
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -116,12 +126,27 @@ class HistoricalMemoryPreparationRepository:
                 await session.commit()
                 return None
             operation = source.model_operation_state
+            metadata_repository = self.active_capabilities_repository
+            captured = None
+            compiled = None
             if (
                 operation is None
                 or operation.kind is not ModelOperationKind.HISTORICAL_MEMORY
                 or operation.semantic_label != option.label
                 or operation.terminal_reason is not None
             ):
+                captured = await metadata_repository.capture_exact_choices_in_session(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    identities=identities_for_options([option]),
+                )
+                compiled = compile_capture(
+                    captured,
+                    selections=[
+                        candidate.model_selection for candidate in option.candidates
+                    ],
+                )
+                option = apply_to_options([option], compiled)[0]
                 operation = build_model_operation(
                     option=option,
                     profile=RequestedInferenceProfile(
@@ -144,6 +169,13 @@ class HistoricalMemoryPreparationRepository:
                     reservation=None,
                 )
             except ModelOperationChainExhaustedError as exc:
+                if (
+                    captured is not None
+                    and not await metadata_repository.inputs_match_in_session(
+                        session, captured=captured
+                    )
+                ):
+                    return None
                 await self._record_failure_in_session(
                     session,
                     source_session_id=source.source_session_id,
@@ -153,6 +185,17 @@ class HistoricalMemoryPreparationRepository:
                     operation=exc.operation,
                 )
                 await session.commit()
+                return None
+            if compiled is not None:
+                require_selection(
+                    compiled, selected.operation.current_candidate.model_selection
+                )
+            if (
+                captured is not None
+                and not await metadata_repository.inputs_match_in_session(
+                    session, captured=captured
+                )
+            ):
                 return None
             persist_operation = (
                 self.historical_repository.persist_preparation_operation_in_session

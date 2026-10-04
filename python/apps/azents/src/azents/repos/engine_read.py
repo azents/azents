@@ -176,9 +176,7 @@ class EngineInvokeReadRepository:
                 if requested_effort is not None:
                     capabilities = main_selection.normalized_capabilities
                     if (
-                        capabilities.semantic_contract is None
-                        and not capabilities.reasoning.supported
-                        or requested_effort
+                        requested_effort
                         not in capabilities.configurable_reasoning_efforts()
                     ):
                         return Failure(

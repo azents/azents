@@ -4,6 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import NamedTuple
+from unittest.mock import create_autospec
 
 import pytest
 import sqlalchemy as sa
@@ -33,6 +34,7 @@ from azents.core.exchange_file_errors import (
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
+    validate_requested_profile_against_options,
 )
 from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -55,6 +57,10 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session import SessionManager
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -269,8 +275,12 @@ def _service(
                 agent_session_repository=agent_session_repository,
                 workspace_user_repository=effective_workspace_user_repository,
                 chat_write_request_repository=chat_write_request_repository,
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
+                ),
                 session_manager=rdb_session_manager,
             ),
+            active_profile_repository=_active_profile_repository(rdb_session_manager),
             session_manager=rdb_session_manager,
         )
     )
@@ -590,7 +600,13 @@ def _control_service(
                 agent_session_repository=agent_session_repository,
                 workspace_user_repository=workspace_user_repository,
                 chat_write_request_repository=write_repository,
+                active_profile_repository=_active_profile_repository(
+                    _session_manager_double
+                ),
                 session_manager=_session_manager_double,
+            ),
+            active_profile_repository=_active_profile_repository(
+                _session_manager_double
             ),
             session_manager=_session_manager_double,
         )
@@ -1128,7 +1144,13 @@ class TestChatWriteService:
                     agent_session_repository=AgentSessionRepository(),
                     workspace_user_repository=WorkspaceUserRepository(),
                     chat_write_request_repository=ChatWriteRequestRepository(),
+                    active_profile_repository=_active_profile_repository(
+                        _session_manager_double
+                    ),
                     session_manager=_session_manager_double,
+                ),
+                active_profile_repository=_active_profile_repository(
+                    _session_manager_double
                 ),
                 session_manager=_session_manager_double,
             )
@@ -1176,7 +1198,13 @@ class TestChatWriteService:
                     agent_session_repository=AgentSessionRepository(),
                     workspace_user_repository=WorkspaceUserRepository(),
                     chat_write_request_repository=ChatWriteRequestRepository(),
+                    active_profile_repository=_active_profile_repository(
+                        _session_manager_double
+                    ),
                     session_manager=_session_manager_double,
+                ),
+                active_profile_repository=_active_profile_repository(
+                    rdb_session_manager
                 ),
                 session_manager=rdb_session_manager,
             )
@@ -1618,3 +1646,26 @@ class TestChatWriteService:
         assert result.request.created is True
         assert result.request.session_id == second.id
         assert result.command_id is not None
+
+
+def _active_profile_repository(
+    manager: SessionManager[AsyncSession],
+) -> ActiveProfileAdmissionRepository:
+    """Keep these lifecycle-only fixtures scoped to their declared option contract."""
+    del manager
+    repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
+
+    async def validate(
+        session: AsyncSession,
+        *,
+        agent: Agent,
+        profile: RequestedInferenceProfile,
+        captured: CapturedProfileAdmission | None,
+    ) -> None:
+        del session, captured
+        validate_requested_profile_against_options(
+            agent.selectable_model_options, profile
+        )
+
+    repository.validate_in_session.side_effect = validate
+    return repository

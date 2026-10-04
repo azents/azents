@@ -1,6 +1,6 @@
 # ModelBuiltInToolCapabilities
 
-Represents provider built-in tool capability.
+Supported route-projected built-in tools.
 
 ## Properties
 

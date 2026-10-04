@@ -13,11 +13,15 @@ from pydantic import BaseModel, ConfigDict
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_execution_options,
 )
 from azents.core.type_guards import is_string_object_dict
+from azents.engine.events.effective_model_request import (
+    normalize_effective_model_request,
+)
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
     render_external_channel_turn,
@@ -30,10 +34,7 @@ from azents.engine.events.file_parts import (
 from azents.engine.events.model_messages import ModelTranscriptMessage
 from azents.engine.events.model_support_contract import (
     ModelSupportContext,
-    decode_model_support_options,
-    model_support_allowed,
-    model_support_request_from_options,
-    resolve_model_support_context,
+    effective_model_support_context,
     saved_builtin_tool_allowed,
     validate_saved_model_request,
 )
@@ -282,16 +283,7 @@ class ResponsesRequestLowerer:
         self._prompt_cache_scope = prompt_cache_scope
         self._model_developer = model_developer
         self._model_capabilities = model_capabilities or ModelCapabilities()
-        self._file_part_capabilities = (
-            FilePartLoweringCapabilities.from_model_capabilities(
-                self._model_capabilities,
-                context=resolve_model_support_context(
-                    self._model_capabilities,
-                    requested_effort=self._reasoning_effort,
-                    function_tools=bool(self._tools),
-                ),
-            )
-        )
+        self._file_part_capabilities = FilePartLoweringCapabilities()
         self.model_file_resolver = model_file_resolver
         self._historical_plaintext_custom_supported = (
             historical_plaintext_custom_supported
@@ -313,14 +305,22 @@ class ResponsesRequestLowerer:
         system_prompt: str | None = None,
     ) -> NativeModelRequest:
         """Convert Event transcript to a provider-native Responses request."""
-        if (
-            self._model_capabilities.semantic_contract is not None
-            and model != self.model
-        ):
+        if model != self.model:
             raise ValueError("Lowerer model identity differs from the selected model")
         input_items: list[dict[str, object]] = []
         kwargs = self._lower_model_kwargs()
-        context = self._resolve_support_context(kwargs)
+        context = self._resolve_support_context(kwargs, tools=self._tools)
+        hosted = _lower_hosted_tools(
+            self._hosted_tools,
+            provider=self.provider,
+            provider_id=self._provider_id,
+            model_developer=self._model_developer,
+            model_capabilities=self._model_capabilities,
+            request_context=context,
+        )
+        tools = [*self._tools, *hosted.tools]
+        kwargs.update(hosted.kwargs)
+        context = self._resolve_support_context(kwargs, tools=tools)
         self._file_part_capabilities = (
             FilePartLoweringCapabilities.from_model_capabilities(
                 self._model_capabilities, context=context
@@ -412,15 +412,6 @@ class ResponsesRequestLowerer:
             # remain stable across turns.
             input_items = _omit_response_item_ids_for_unstored_request(input_items)
         input_items = _drop_orphan_tool_outputs(input_items)
-        hosted = _lower_hosted_tools(
-            self._hosted_tools,
-            provider=self.provider,
-            provider_id=self._provider_id,
-            model_developer=self._model_developer,
-            model_capabilities=self._model_capabilities,
-            request_context=context,
-        )
-        tools = [*self._tools, *hosted.tools]
         prompt_cache_inputs = _apply_provider_prompt_cache_hints(
             input_items,
             tools,
@@ -439,45 +430,39 @@ class ResponsesRequestLowerer:
         )
 
     def _resolve_support_context(
-        self, kwargs: dict[str, object]
+        self, kwargs: dict[str, object], *, tools: Sequence[dict[str, object]]
     ) -> ModelSupportContext:
         """Validate controls and resolve the same context used for rich input."""
-        contract = self._model_capabilities.semantic_contract
-        if contract is None:
-            return ModelSupportContext(
-                reasoning_effort=self._reasoning_effort, function_tools=None
-            )
-        decoded_tools = [
-            _ToolSupportOptions.model_validate(tool) for tool in self._tools
-        ]
-        function_tools = any(tool.type == "function" for tool in decoded_tools)
-        request = model_support_request_from_options(
-            decode_model_support_options(kwargs),
-            selected_effort=self._reasoning_effort,
-            function_tools=function_tools,
-            strict_function_schema=any(
-                tool.type == "function"
-                and (
-                    tool.strict is True
-                    or tool.function is not None
-                    and tool.function.strict is True
-                )
-                for tool in decoded_tools
-            ),
-        )
-        validate_saved_model_request(self._model_capabilities, request=request)
-        context = resolve_model_support_context(
-            self._model_capabilities,
-            requested_effort=request.reasoning_effort,
-            function_tools=function_tools,
-        )
+        options = {
+            key: value
+            for key, value in kwargs.items()
+            if key
+            not in {
+                "api_key",
+                "base_url",
+                "api_base",
+                "extra_headers",
+                "vertex_credentials",
+                "aws_secret_access_key",
+                "custom_llm_provider",
+            }
+        }
         if (
-            "parallel_tool_calls" not in kwargs
-            and model_support_allowed(contract.parallel_function_calls, context=context)
-            is False
+            "parallel_tool_calls" not in options
+            and not self._model_capabilities.supports(
+                ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS
+            )
         ):
             kwargs["parallel_tool_calls"] = False
-        return context
+            options["parallel_tool_calls"] = False
+        effective = normalize_effective_model_request(
+            dialect="native_responses",
+            options=options,
+            parameters=None,
+            native_tools=tools,
+        )
+        validate_saved_model_request(self._model_capabilities, request=effective)
+        return effective_model_support_context(self._model_capabilities, effective)
 
     def _lower_model_kwargs(self) -> dict[str, object]:
         """Lower RunRequest model options to provider-native Responses kwargs."""
@@ -518,21 +503,8 @@ class ResponsesRequestLowerer:
             kwargs["stop"] = self._stop
         if self._reasoning_effort is not None:
             reasoning: dict[str, object] = {"effort": self._reasoning_effort}
-            contract = self._model_capabilities.semantic_contract
-            if (
-                contract is None
-                or model_support_allowed(
-                    contract.reasoning_summaries,
-                    context=resolve_model_support_context(
-                        self._model_capabilities,
-                        requested_effort=self._reasoning_effort,
-                        function_tools=any(
-                            _ToolSupportOptions.model_validate(tool).type == "function"
-                            for tool in self._tools
-                        ),
-                    ),
-                )
-                is not False
+            if self._model_capabilities.supports(
+                ModelCapabilityFeature.REASONING_SUMMARIES
             ):
                 reasoning["summary"] = "auto"
             kwargs["reasoning"] = reasoning

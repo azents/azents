@@ -12,13 +12,12 @@ from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.bedrock import BedrockModelProfile, BedrockProvider
 
 from azents.core.enums import LLMModelDeveloper, LLMProvider
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog import ModelCapabilities, ModelParameterCapabilities
 from azents.core.model_capability_contract import (
-    CapabilitySupport,
-    SupportPredicate,
-    SupportState,
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
 )
-from azents.core.model_capability_projection import project_capabilities
 from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.pydantic_ai_adapter import PydanticAIModelAdapter
 from azents.engine.events.pydantic_ai_adapter_test import (
@@ -37,7 +36,6 @@ from azents.engine.providers.model_factory import (
     ProviderModelFactory,
     ProviderTransports,
 )
-from azents.engine.providers.observation_state import InternalModelExecutionError
 from azents.testing.provider_native_envelopes import (
     NativeFixtureProtocol,
     core_native_response,
@@ -131,15 +129,11 @@ async def test_actual_factory_sdk_sends_all_selected_sampling_controls(
             lambda _: AnthropicModelProfile(anthropic_disallows_sampling_settings=True)
         ),
     )
-    capabilities = (
-        ModelCapabilities()
-        if historical
-        else project_capabilities(
-            provider=provider,
-            exact_model=model,
-            source_model=None,
-            evidence=None,
-            model_developer=developer,
+    capabilities = ModelCapabilities(
+        parameters=ModelParameterCapabilities(
+            temperature=True,
+            top_p=True,
+            top_k=True,
         )
     )
     before = capabilities.model_dump_json()
@@ -265,14 +259,12 @@ async def test_actual_bedrock_wrapper_sends_family_top_k_and_sampling(
         provider=LLMProvider.AWS_BEDROCK,
         model=model,
         developer=developer,
-        capabilities=ModelCapabilities()
-        if historical
-        else project_capabilities(
-            provider=LLMProvider.AWS_BEDROCK,
-            exact_model=model,
-            source_model=None,
-            evidence=None,
-            model_developer=developer,
+        capabilities=ModelCapabilities(
+            parameters=ModelParameterCapabilities(
+                temperature=True,
+                top_p=True,
+                top_k=True,
+            )
         ),
         top_k=37,
         options={"bedrock_additional_model_requests_fields": additional},
@@ -288,20 +280,20 @@ async def test_actual_bedrock_wrapper_sends_family_top_k_and_sampling(
     assert config["topP"] == 0.35
 
 
-async def test_bedrock_without_top_k_mapping_fails_before_http() -> None:
+async def test_bedrock_without_top_k_feature_fails_before_http() -> None:
     model = "meta.llama3-8b-instruct-v1:0"
-    request = _request(
-        provider=LLMProvider.AWS_BEDROCK,
-        model=model,
-        developer=LLMModelDeveloper.META,
-        capabilities=ModelCapabilities(),
-        top_k=37,
-        options=None,
-    )
     call = bedrock_call(model=model, chunks=[])
-    with pytest.raises(InternalModelExecutionError) as error:
-        await collect_request(call, request)
-    assert error.value.origin_type == "ValueError"
+    with pytest.raises(ValueError, match="top_k"):
+        _request(
+            provider=LLMProvider.AWS_BEDROCK,
+            model=model,
+            developer=LLMModelDeveloper.META,
+            capabilities=ModelCapabilities(
+                parameters=ModelParameterCapabilities(temperature=True, top_p=True)
+            ),
+            top_k=37,
+            options=None,
+        )
     assert not call.boundary.paths
 
 
@@ -354,33 +346,26 @@ def test_compatible_codec_cannot_silently_drop_canonical_top_k(
     ],
 )
 def test_selected_top_k_keeps_saved_support_predicates(
-    state: SupportState, requires_functions: bool
+    state: str, requires_functions: bool
 ) -> None:
-    capabilities = project_capabilities(
-        provider=LLMProvider.GOOGLE_GEMINI,
-        exact_model="opaque-google",
-        source_model=None,
-        evidence=None,
-        model_developer=LLMModelDeveloper.GOOGLE,
-    )
-    contract = capabilities.semantic_contract
-    assert contract is not None
-    support = (
-        CapabilitySupport(
-            state="conditional",
-            origin="explicit",
-            predicate=SupportPredicate(
-                reasoning_efforts=None, function_tools=requires_functions
-            ),
-        )
-        if state == "conditional"
-        else CapabilitySupport(state=state, origin="explicit", predicate=None)
-    )
-    capabilities.semantic_contract = contract.model_copy(
-        update={"parameters": contract.parameters.model_copy(update={"top_k": support})}
+    capabilities = ModelCapabilities(
+        parameters=ModelParameterCapabilities(
+            temperature=True, top_p=True, top_k=state != "unsupported"
+        ),
+        request_constraints=ModelRequestConstraints(
+            feature_conditions=(
+                ModelFeatureCondition(
+                    feature=ModelCapabilityFeature.TOP_K,
+                    reasoning_efforts=None,
+                    function_tools=requires_functions,
+                ),
+            )
+            if state == "conditional"
+            else ()
+        ),
     )
     if state == "unsupported" or state == "conditional" and requires_functions:
-        with pytest.raises(ValueError, match="top-k"):
+        with pytest.raises(ValueError, match="top_k"):
             _request(
                 provider=LLMProvider.GOOGLE_GEMINI,
                 model="opaque-google",
@@ -401,52 +386,17 @@ def test_selected_top_k_keeps_saved_support_predicates(
         assert request.settings["top_k"] == 37
 
 
-async def test_actual_chat_codec_rejects_top_k_after_historical_developer_hint() -> (
-    None
-):
-    request = _request(
-        provider=LLMProvider.KIMI_OAUTH,
-        model="opaque-kimi",
-        developer=LLMModelDeveloper.ANTHROPIC,
-        capabilities=ModelCapabilities(),
-        top_k=37,
-        options=None,
-    )
-    assert request.settings["top_k"] == 37
-    attempts: list[httpx2.Request] = []
-
-    def poison(wire: httpx2.Request) -> httpx2.Response:
-        attempts.append(wire)
-        pytest.fail("An unrepresentable canonical top-k reached HTTP.")
-
-    adapter = PydanticAIModelAdapter(
-        factory=ProviderModelFactory(
+def test_actual_chat_codec_rejects_top_k_after_historical_developer_hint() -> None:
+    with pytest.raises(ValueError, match="top-k"):
+        _request(
             provider=LLMProvider.KIMI_OAUTH,
-            credential_kwargs={"api_key": "synthetic-key"},
-            sdk_failure_mapper=map_model_provider_error,
-            sdk_error_types=SDK_PROVIDER_ERRORS,
-            transports=ProviderTransports(httpx2=httpx2.MockTransport(poison)),
+            model="opaque-kimi",
+            developer=LLMModelDeveloper.ANTHROPIC,
+            capabilities=ModelCapabilities(
+                parameters=ModelParameterCapabilities(
+                    temperature=True, top_p=True, top_k=True
+                )
+            ),
+            top_k=37,
+            options=None,
         )
-    )
-    clock = ControlledClock()
-    policy = ModelStreamTimeoutPolicy(
-        connect_timeout_seconds=2,
-        parsed_event_idle_timeout_seconds=50,
-        absolute_attempt_timeout_seconds=100,
-    )
-    with pytest.raises(InternalModelExecutionError) as error:
-        _ = [
-            event
-            async for event in adapter.stream(
-                request,
-                watchdog=watchdog_for_test(clock, policy),
-                timeout_policy=policy,
-                call_context=dataclasses.replace(
-                    context_for_test(), provider="kimi_oauth", model=request.model
-                ),
-            )
-        ]
-    assert error.value.origin_type == "ValueError"
-    assert not attempts
-    assert not adapter.active
-    await adapter.close()

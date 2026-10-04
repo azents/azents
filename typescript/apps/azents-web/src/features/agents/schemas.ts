@@ -1,6 +1,7 @@
 /** Agent form Zod schema */
 
 import { z } from "zod/v4";
+import { reasoningEffortInputSchema } from "@/shared/lib/reasoning-effort";
 import {
   isSubagentGuidanceWithinLimit,
   MAX_SELECTABLE_MODEL_CANDIDATES,
@@ -50,10 +51,7 @@ export const agentFormSchema = z
     runtime_profile_id: z.string().nullable(),
     type: z.enum(["public", "private"]),
     enabled: z.boolean(),
-    reasoning_effort: z
-      .enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
-      .nullable()
-      .optional(),
+    reasoning_effort: reasoningEffortInputSchema.nullable().optional(),
     terminal_enabled: z.boolean().optional(),
     memory_enabled: z.boolean().optional(),
     tool_search_enabled: z.boolean(),

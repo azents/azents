@@ -1,6 +1,6 @@
 # ModelReasoningCapabilities
 
-Represents reasoning capability.
+Final reasoning support and the supported selectable effort list.
 
 ## Properties
 
@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **supported** | **bool** |  | [optional] [default to False]
 **effort_levels** | [**List[ModelReasoningEffort]**](ModelReasoningEffort.md) |  | [optional] 
-**summaries** | **bool** |  | [optional] 
+**summaries** | **bool** |  | [optional] [default to False]
 
 ## Example
 

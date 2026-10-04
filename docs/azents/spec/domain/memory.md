@@ -6,10 +6,13 @@ spec_type: domain
 domain: memory
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/engine/events/model_support_contract.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
   - python/apps/azents/src/azents/core/memory_scope.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
@@ -46,7 +49,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/events/iteration.py
-  - python/apps/azents/src/azents/engine/events/transient_adapters.py
   - python/apps/azents/src/azents/engine/events/native_replay.py
   - python/apps/azents/src/azents/engine/events/tools.py
   - python/apps/azents/src/azents/engine/events/responses_lowering.py
@@ -226,6 +228,15 @@ unit's body, inventory, existence hint or pending work. This execution is an
 ephemeral host of the same model/tool iteration core as foreground conversation,
 with RAM-only dialogue and PostgreSQL-backed private files/progress. It creates
 no foreground Session/Run and requires no Runtime, Runner RPC or materialization.
+
+Creating a new internal model operation captures current exact authorized local
+declarations for the configured Lightweight choices and compiles the same final
+schema-3 contract used by foreground execution. Admission uses actual encoded
+request settings and internal function declarations rather than a conservative
+historical display boolean. Missing required metadata preserves identity and
+produces a typed diagnostic, not a quota fallback or permissive support state.
+Existing attempt operations, retries and quota cursors retain their captured
+candidates; metadata refresh does not reinterpret completed or active history.
 
 The Agent reads scoped prepared-source/work inventories and summaries, then
 authors `azents://memory-draft/summary.md` and exact `coverage.json` dispositions

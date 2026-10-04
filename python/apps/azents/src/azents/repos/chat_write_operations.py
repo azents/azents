@@ -36,7 +36,6 @@ from azents.core.exchange_file_errors import (
 )
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
-    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_execution_options import ModelExecutionOptionId
@@ -45,6 +44,11 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
+from azents.repos.active_profile_admission import (
+    ActiveProfileAdmissionRepository,
+    ActiveProfileCaptureRequired,
+    CapturedProfileAdmission,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -114,6 +118,9 @@ class ChatWriteOperationsRepository:
     session_model_profile_repository: Annotated[
         SessionModelProfileRepository, Depends(SessionModelProfileRepository)
     ]
+    active_profile_repository: Annotated[
+        ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -134,134 +141,148 @@ class ChatWriteOperationsRepository:
         payload: dict[str, object],
     ) -> AcceptedEditInput:
         """Accept idle session edit idempotently and create edited buffer."""
-        async with self.session_manager() as session:
-            locked = await self._lock_and_reauthorize_session(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-            )
-            existing = await self._get_existing_idempotent_record(
-                session,
-                session_id=session_id,
-                user_id=user_id,
-                client_request_id=client_request_id,
-                write_type=ChatWriteRequestType.EDIT_MESSAGE,
-                payload=payload,
-            )
-            if existing is not None:
-                return AcceptedEditInput(
-                    request=AcceptedChatWriteRequest(
-                        session_id=existing.session_id,
-                        record=existing,
-                        created=False,
-                    ),
-                    mailbox_item=None,
-                )
-            agent = await self.agent_repository.lock_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or agent.workspace_id != locked.workspace_id
-            ):
-                raise ValueError("AgentSession is not active")
-            validate_requested_profile_against_options(
-                agent.selectable_model_options,
-                inference_profile,
-            )
-            self._validate_idle_control_state(locked)
-            record, created = await self._create_idempotent_record(
-                session,
-                session_id=session_id,
-                user_id=user_id,
-                client_request_id=client_request_id,
-                write_type=ChatWriteRequestType.EDIT_MESSAGE,
-                accepted_type=ChatWriteRequestType.EDIT_MESSAGE,
-                accepted_id=message_id,
-                history_reload_required=True,
-                payload=payload,
-            )
-            if not created:
+        captured_admission: CapturedProfileAdmission | None = None
+        for _phase in range(2):
+            try:
+                async with self.session_manager() as session:
+                    locked = await self._lock_and_reauthorize_session(
+                        session,
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        user_id=user_id,
+                    )
+                    existing = await self._get_existing_idempotent_record(
+                        session,
+                        session_id=session_id,
+                        user_id=user_id,
+                        client_request_id=client_request_id,
+                        write_type=ChatWriteRequestType.EDIT_MESSAGE,
+                        payload=payload,
+                    )
+                    if existing is not None:
+                        return AcceptedEditInput(
+                            request=AcceptedChatWriteRequest(
+                                session_id=existing.session_id,
+                                record=existing,
+                                created=False,
+                            ),
+                            mailbox_item=None,
+                        )
+                    agent = await self.agent_repository.lock_by_id(session, agent_id)
+                    if (
+                        agent is None
+                        or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                        or agent.workspace_id != locked.workspace_id
+                    ):
+                        raise ValueError("AgentSession is not active")
+                    await self.active_profile_repository.validate_in_session(
+                        session,
+                        agent=agent,
+                        profile=inference_profile,
+                        captured=captured_admission,
+                    )
+                    self._validate_idle_control_state(locked)
+                    record, created = await self._create_idempotent_record(
+                        session,
+                        session_id=session_id,
+                        user_id=user_id,
+                        client_request_id=client_request_id,
+                        write_type=ChatWriteRequestType.EDIT_MESSAGE,
+                        accepted_type=ChatWriteRequestType.EDIT_MESSAGE,
+                        accepted_id=message_id,
+                        history_reload_required=True,
+                        payload=payload,
+                    )
+                    if not created:
+                        return AcceptedEditInput(
+                            request=AcceptedChatWriteRequest(
+                                session_id=record.session_id,
+                                record=record,
+                                created=False,
+                            ),
+                            mailbox_item=None,
+                        )
+
+                    target = await self.message_repository.get_by_id(
+                        session, message_id
+                    )
+                    if (
+                        target is None
+                        or target.session_id != session_id
+                        or target.reverted
+                        or target.kind != EventKind.USER_MESSAGE
+                    ):
+                        raise ValueError("Message is not editable")
+                    await self.message_repository.mark_reverted_from_event_id(
+                        session,
+                        session_id,
+                        target.id,
+                    )
+                    await self.mailbox_repository.delete_by_session_id(
+                        session,
+                        session_id,
+                    )
+                    result = await self.mailbox_admission_repository.enqueue_in_session(
+                        session,
+                        MailboxEnqueue(
+                            session_id=session_id,
+                            kind=MailboxItemKind.USER_MESSAGE,
+                            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                            requested_model_target_label=inference_profile.model_target_label,
+                            requested_reasoning_effort=inference_profile.reasoning_effort,
+                            requested_enabled_execution_options=(
+                                inference_profile.enabled_execution_options
+                            ),
+                            sender_user_id=user_id,
+                            order_group=None,
+                            order_sequence=0,
+                            content=text,
+                            idempotency_key=client_request_id,
+                            metadata=metadata,
+                            action=None,
+                            attachments=attachments,
+                            file_parts=file_parts,
+                            payload=None,
+                        ),
+                    )
+                    claim = (
+                        await self.attachment_claim_repository.claim_input_attachments(
+                            session,
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            user_id=user_id,
+                            attachment_uris=result.mailbox_item.attachments,
+                        )
+                    )
+                    match claim:
+                        case Success():
+                            pass
+                        case Failure(error):
+                            _raise_attachment_claim_error(error)
+                        case _:
+                            assert_never(claim)
+                    await self.agent_session_repository.set_applied_inference_profile(
+                        session,
+                        session_id=session_id,
+                        model_target_label=inference_profile.model_target_label,
+                        reasoning_effort=inference_profile.reasoning_effort,
+                        enabled_execution_options=inference_profile.enabled_execution_options,
+                    )
+                    mailbox_item = result.mailbox_item
+
                 return AcceptedEditInput(
                     request=AcceptedChatWriteRequest(
                         session_id=record.session_id,
                         record=record,
-                        created=False,
+                        created=True,
                     ),
-                    mailbox_item=None,
+                    mailbox_item=mailbox_item,
                 )
-
-            target = await self.message_repository.get_by_id(session, message_id)
-            if (
-                target is None
-                or target.session_id != session_id
-                or target.reverted
-                or target.kind != EventKind.USER_MESSAGE
-            ):
-                raise ValueError("Message is not editable")
-            await self.message_repository.mark_reverted_from_event_id(
-                session,
-                session_id,
-                target.id,
-            )
-            await self.mailbox_repository.delete_by_session_id(
-                session,
-                session_id,
-            )
-            result = await self.mailbox_admission_repository.enqueue_in_session(
-                session,
-                MailboxEnqueue(
-                    session_id=session_id,
-                    kind=MailboxItemKind.USER_MESSAGE,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                    requested_model_target_label=inference_profile.model_target_label,
-                    requested_reasoning_effort=inference_profile.reasoning_effort,
-                    requested_enabled_execution_options=(
-                        inference_profile.enabled_execution_options
-                    ),
-                    sender_user_id=user_id,
-                    order_group=None,
-                    order_sequence=0,
-                    content=text,
-                    idempotency_key=client_request_id,
-                    metadata=metadata,
-                    action=None,
-                    attachments=attachments,
-                    file_parts=file_parts,
-                    payload=None,
-                ),
-            )
-            claim = await self.attachment_claim_repository.claim_input_attachments(
-                session,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                attachment_uris=result.mailbox_item.attachments,
-            )
-            match claim:
-                case Success():
-                    pass
-                case Failure(error):
-                    _raise_attachment_claim_error(error)
-                case _:
-                    assert_never(claim)
-            await self.agent_session_repository.set_applied_inference_profile(
-                session,
-                session_id=session_id,
-                model_target_label=inference_profile.model_target_label,
-                reasoning_effort=inference_profile.reasoning_effort,
-                enabled_execution_options=inference_profile.enabled_execution_options,
-            )
-            mailbox_item = result.mailbox_item
-
-        return AcceptedEditInput(
-            request=AcceptedChatWriteRequest(
-                session_id=record.session_id,
-                record=record,
-                created=True,
-            ),
-            mailbox_item=mailbox_item,
-        )
+            except ActiveProfileCaptureRequired as needed:
+                captured_admission = await self.active_profile_repository.capture(
+                    needed.choice
+                )
+        raise ValueError("Model metadata changed before input admission")
 
     async def create_idempotent_pending_command(
         self,

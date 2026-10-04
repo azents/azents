@@ -9,7 +9,12 @@ from pydantic_ai.messages import NativeToolCallPart
 from pydantic_ai.native_tools import WebSearchTool
 
 from azents.core.enums import LLMProvider
-from azents.core.llm_catalog import ModelBuiltInToolCapabilities, ModelCapabilities
+from azents.core.llm_catalog import (
+    ModelBuiltInToolCapabilities,
+    ModelCapabilities,
+    ModelParameterCapabilities,
+    ModelToolCallingCapabilities,
+)
 from azents.core.model_capability_evidence import ProviderCapabilityEvidence
 from azents.core.model_capability_projection import project_capabilities
 from azents.core.model_catalog_source import CatalogFact
@@ -86,6 +91,8 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
             request=request,
         )
 
+    # This wire fixture declares only the features it requests; the fictional
+    # model name does not establish support through a production family rule.
     capabilities = (
         project_capabilities(
             provider=provider,
@@ -93,12 +100,18 @@ async def test_search_wire_preserves_function_tools_and_other_settings(
             source_model=None,
             model_developer=None,
             evidence=ProviderCapabilityEvidence(
-                web_search=CatalogFact(state="value", value=True)
+                web_search=CatalogFact(state="value", value=True),
+                function_calling=CatalogFact(state="value", value=True),
+                temperature=CatalogFact(state="value", value=True),
+                top_p=CatalogFact(state="value", value=True),
+                max_output_parameter=CatalogFact(state="value", value=True),
             ),
         )
         if semantic
         else ModelCapabilities(
-            built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"])
+            built_in_tools=ModelBuiltInToolCapabilities(supported=["web_search"]),
+            tool_calling=ModelToolCallingCapabilities(supported=True),
+            parameters=ModelParameterCapabilities(max_output_tokens=True),
         )
     )
     lowerer = PydanticAILowerer(

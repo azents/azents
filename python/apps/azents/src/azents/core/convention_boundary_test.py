@@ -36,8 +36,6 @@ from azents.core.external_channel_session_presence import (
     session_presence_payload,
     setup_required_payload,
 )
-from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.model_capability_projection import _effort_value
 from azents.core.tools import TurnContext
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.wait import WaitToolkit
@@ -145,12 +143,6 @@ async def test_email_renderer_is_injected_and_cached_per_application_owner() -> 
         assert one.get_template("signup_token_en.txt") is one.get_template(
             "signup_token_en.txt"
         )
-
-
-def test_closed_effort_dispatch_preserves_all_supported_values() -> None:
-    assert [_effort_value(level) for level in ModelReasoningEffort] == [
-        level.value for level in ModelReasoningEffort
-    ]
 
 
 @pytest.mark.parametrize("delivery", [None, "", 7, False, [], {}, "   ", "retained"])

@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel
 
 from azents.core.enums import LLMProvider
-from azents.core.llm_catalog import ModelCapabilities
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
 from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.pydantic_ai_lowering import PydanticAILowerer
 from azents.engine.events.tools import _native_tool_declaration
@@ -153,10 +153,14 @@ async def test_owned_tool_unknown_fields_and_native_schemas(
     assert "oneOf" not in schema
     assert "anyOf" not in schema
     declaration = _native_tool_declaration(tool, "json_function")
+    capabilities = ModelCapabilities(
+        tool_calling=ModelToolCallingCapabilities(supported=True)
+    )
     openai = OpenAIResponsesLowerer(
         provider="openai",
         provider_id=LLMProvider.OPENAI,
         model="gpt-test",
+        model_capabilities=capabilities,
         top_k=None,
         tools=[declaration],
         supported_execution_options=(),
@@ -167,7 +171,7 @@ async def test_owned_tool_unknown_fields_and_native_schemas(
         provider="openai",
         provider_id=LLMProvider.OPENAI,
         model="gpt-test",
-        model_capabilities=ModelCapabilities(),
+        model_capabilities=capabilities,
         top_k=None,
         tools=[declaration],
         supported_execution_options=(),

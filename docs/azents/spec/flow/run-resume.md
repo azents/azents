@@ -6,6 +6,11 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
+  - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
+  - python/apps/azents/src/azents/repos/worker_executor_model.py
+  - python/apps/azents/src/azents/repos/worker_executor_model_data.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
@@ -17,9 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/src/azents/repos/vfs_projection_operations.py
-  - python/apps/azents/src/azents/repos/worker_run_operations.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
-  - python/apps/azents/src/azents/repos/worker_user_stop.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/broker/types.py
@@ -44,8 +47,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-10-02
-spec_version: 38
+last_verified_at: 2026-10-04
+spec_version: 39
 ---
 
 # Run Resume
@@ -348,7 +351,32 @@ worker instead of writing durable failed history.
 
 ## Inference Profile Recovery
 
-Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains the resolved physical selection, effort, effective limits, and resolution time. A pending run independently stores the requested model target label and nullable reasoning effort selected for its first activation. Profile selection is finalized before activation, and the owner-generation-locked activation transaction persists that requested profile with the pending-to-running transition. Recovery uses that durable requested profile to select a recovered pending run's original inference intent; it never reconstructs Session resolved state from it. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. If an accepted pending or retry label is removed from the current Agent option list, recovery and preparation use the Agent main option and replace the active Session intent before dispatch. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next ordinary turn. When recovery observes persisted automatic retry state, it waits for the remaining backoff and then freshly resolves the current Session-applied profile before the next attempt, rebuilding that same run's request and snapshot.
+Capability preparation distinguishes NEW and frozen model operations. A NEW
+operation captures exact authorized LOCAL catalog/source inputs, compiles final
+schema-3 metadata and revalidates those inputs under the existing owner fence.
+Once an operation exists, recovery and quota retries keep its captured choices,
+cursor and capabilities. Current metadata is not a reason to reinterpret or
+reset that operation. Configuration drift compares configured identities, order
+and settings separately from compiled metadata.
+
+Manual retry creates its ordinary new Run while preserving the copied raw
+requested profile. Existing native replay fingerprints, terminal history and
+previous captured operations remain historical evidence.
+
+Pending and running `AgentRun` rows are active recovery sources. Recovery claims
+the existing run and ordered input-event associations. A pending run retains its
+requested target and nullable effort independently of the resolved Session
+snapshot. Owner-generation-locked activation persists requested intent; successful
+NEW preparation atomically captures effective selection/limits with canonical
+events and buffer deletion. The existing removed-label fallback applies when
+preparing a NEW operation, while user configuration drift retains its existing
+fence.
+
+Handled resolution failure preserves the previous snapshot, appends a user-safe
+error, consumes the failed head and completes the run. A later profile change
+updates intent for the next ordinary turn. Automatic retry waits for durable
+backoff and rebuilds from the existing captured operation and cursor; it does not
+freshly recompile that operation from current catalog metadata.
 
 Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations before recovery can claim it, then resolves the current Agent routing once at activation. The first child subagent run is precreated with a parent run id and a complete Session inference snapshot. It uses exact inheritance or a statically resolved non-full-history override for its initial Session state. Later child runs resolve the stored session-last-used label normally.
 

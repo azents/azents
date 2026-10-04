@@ -95,3 +95,21 @@ def test_slack_response_mode_title_request_match_is_specific() -> None:
             ],
         }
     )
+
+
+def test_provider_title_retry_fixture_returns_requested_plain_text() -> None:
+    """Preserve failure and plain-text retry envelopes for absent schema support."""
+    fixture_path = (
+        Path(proxy.__file__).parent / "aimock_fixtures" / "agents_md_loader.json"
+    )
+    document = json.loads(fixture_path.read_text())
+    attempts = {
+        fixture["match"]["sequenceIndex"]: fixture["response"]
+        for fixture in document["fixtures"]
+        if fixture["match"].get("userMessage") == "Provider title retry"
+        and fixture["match"].get("systemMessage")
+        == "Create a brief title from the request"
+    }
+    assert attempts[0]["status"] == 429
+    assert attempts[0]["error"]["type"] == "rate_limit_error"
+    assert attempts[1]["content"] == "Provider title retry recovered"

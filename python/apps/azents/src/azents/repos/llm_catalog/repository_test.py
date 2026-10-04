@@ -25,6 +25,7 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncPolicyDecision,
     IntegrationCatalogSyncTrigger,
 )
+from azents.core.model_capability_projection import CAPABILITY_PROJECTION_REVISION
 from azents.core.model_pricing import normalize_model_pricing
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import RDBLLMCatalog, RDBLLMCatalogEntry
@@ -97,7 +98,9 @@ def _entry(
         publisher=None,
         family=None,
         source_metadata=None,
-        projection_metadata=None,
+        projection_metadata={
+            "capability_compiler_revision": CAPABILITY_PROJECTION_REVISION
+        },
         hidden_reason=None,
         pricing=normalize_model_pricing(
             source_key=None, source_model=None, collected_at=None

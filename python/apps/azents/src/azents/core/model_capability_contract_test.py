@@ -1,7 +1,9 @@
-"""Versioned support semantics and historical saved-capability compatibility."""
+"""Final feature membership and read-only historical descriptor decoding."""
 
+import copy
+import json
 import socket
-from typing import Never
+from typing import Any, Never
 
 import pytest
 from pydantic import ValidationError
@@ -17,352 +19,325 @@ from azents.core.llm_catalog import (
     ModelToolCallingCapabilities,
 )
 from azents.core.model_capability_contract import (
-    BuiltinToolSupport,
-    CapabilitySupport,
-    DefaultEffortEvidence,
-    EffortDeclaration,
-    ModalitySupport,
-    ModelCapabilityContract,
-    ParameterSupport,
-    ReasoningSupport,
-    SupportPredicate,
+    ModelCapabilityFeature,
+    ModelFeatureCondition,
+    ModelRequestConstraints,
 )
 
 
-def _supported() -> CapabilitySupport:
-    return CapabilitySupport(state="supported", origin="explicit", predicate=None)
+def _legacy_support(state: str) -> dict[str, object]:
+    return {
+        "state": state,
+        "origin": None if state == "unknown" else "explicit",
+        "predicate": None,
+    }
 
 
-def _unknown() -> CapabilitySupport:
-    return CapabilitySupport(state="unknown", origin=None, predicate=None)
+def _legacy_contract() -> dict[str, Any]:
+    """Use stored JSON rather than a second public runtime support model."""
+    supported = _legacy_support("supported")
+    unknown = _legacy_support("unknown")
+    unsupported = _legacy_support("unsupported")
+    return {
+        "version": 2,
+        "reasoning": {
+            "support": supported,
+            "completeness": "partial",
+            "efforts": [
+                {"level": "high", "state": "supported", "origin": "explicit"},
+                {"level": "max", "state": "unsupported", "origin": "explicit"},
+            ],
+            "default_effort": {"level": "high", "origin": "explicit"},
+        },
+        "reasoning_summaries": unknown,
+        "function_calling": supported,
+        "parallel_function_calls": unknown,
+        "strict_function_schema": unsupported,
+        "structured_response": supported,
+        "parameters": {
+            "temperature": {
+                "state": "conditional",
+                "origin": "explicit",
+                "predicate": {"reasoning_efforts": ["none"], "function_tools": True},
+            },
+            "max_output_tokens": supported,
+            "top_p": unknown,
+            "top_k": unsupported,
+            "stop_sequences": unsupported,
+        },
+        "input_modalities": [
+            {"modality": "text", "support": supported},
+            {"modality": "image", "support": unknown},
+        ],
+        "output_modalities": [{"modality": "text", "support": supported}],
+        "built_in_tools": [{"tool": "web_search", "support": supported}],
+    }
 
 
-def _contract() -> ModelCapabilityContract:
-    return ModelCapabilityContract(
-        version=2,
-        reasoning=ReasoningSupport(
-            support=_supported(),
-            completeness="partial",
-            efforts=(
-                EffortDeclaration(level="high", state="supported", origin="explicit"),
-                EffortDeclaration(
-                    level="xhigh", state="supported", origin="contract_derived"
-                ),
-                EffortDeclaration(level="max", state="unsupported", origin="explicit"),
-            ),
-            default_effort=None,
-        ),
-        reasoning_summaries=_unknown(),
-        function_calling=_supported(),
-        parallel_function_calls=_unknown(),
-        strict_function_schema=CapabilitySupport(
-            state="unsupported", origin="explicit", predicate=None
-        ),
-        structured_response=_supported(),
-        parameters=ParameterSupport(
-            temperature=CapabilitySupport(
-                state="conditional",
-                origin="explicit",
-                predicate=SupportPredicate(
-                    reasoning_efforts=("none",), function_tools=None
-                ),
-            ),
-            max_output_tokens=_supported(),
-            top_p=_unknown(),
-            top_k=_unknown(),
-            stop_sequences=CapabilitySupport(
-                state="unsupported", origin="contract_derived", predicate=None
-            ),
-        ),
-        input_modalities=(
-            ModalitySupport(modality="text", support=_supported()),
-            ModalitySupport(modality="image", support=_unknown()),
-        ),
-        output_modalities=(ModalitySupport(modality="text", support=_supported()),),
-        built_in_tools=(BuiltinToolSupport(tool="web_search", support=_supported()),),
-    )
+def test_final_defaults_have_no_supported_features_or_second_truth() -> None:
+    capabilities = ModelCapabilities()
+    assert capabilities.supported_features() == frozenset()
+    assert all(not capabilities.supports(feature) for feature in ModelCapabilityFeature)
+    payload = capabilities.model_dump(mode="json")
+    assert "semantic_contract" not in payload
+    assert "supported_features" not in payload
+    assert "state" not in json.dumps(payload)
+    assert payload["capability_schema_version"] == 3
+    schema = json.dumps(ModelCapabilities.model_json_schema())
+    assert "CapabilitySupport" not in schema
+    assert "unknown" not in schema
+    assert "unverified" not in schema
 
 
-def _capabilities(contract: ModelCapabilityContract) -> ModelCapabilities:
-    return ModelCapabilities(
+def test_all_final_feature_keys_derive_from_only_flat_fields() -> None:
+    capabilities = ModelCapabilities(
         modalities=ModelModalities(
-            input=[
-                ModelModality(item.modality)
-                for item in contract.input_modalities
-                if item.support.enabled
-            ],
-            output=[
-                ModelModality(item.modality)
-                for item in contract.output_modalities
-                if item.support.enabled
-            ],
+            input=list(ModelModality), output=list(ModelModality)
         ),
         tool_calling=ModelToolCallingCapabilities(
-            supported=contract.function_calling.enabled,
-            parallel_tool_calls=contract.parallel_function_calls.nullable_enabled,
-            strict_json_schema=contract.strict_function_schema.nullable_enabled,
+            supported=True, parallel_tool_calls=True, strict_json_schema=True
         ),
         reasoning=ModelReasoningCapabilities(
-            supported=contract.reasoning.support.enabled,
-            effort_levels=[
-                ModelReasoningEffort(level)
-                for level in contract.reasoning.enabled_efforts
-            ],
-            summaries=contract.reasoning_summaries.nullable_enabled,
+            supported=True, effort_levels=list(ModelReasoningEffort), summaries=True
         ),
         built_in_tools=ModelBuiltInToolCapabilities(
-            supported=[
-                item.tool for item in contract.built_in_tools if item.support.enabled
-            ]
+            supported=["web_search", "image_generation"]
         ),
         parameters=ModelParameterCapabilities(
-            temperature=contract.parameters.temperature.enabled,
-            max_output_tokens=contract.parameters.max_output_tokens.enabled,
-            top_p=contract.parameters.top_p.enabled,
-            top_k=contract.parameters.top_k.enabled,
-            stop_sequences=contract.parameters.stop_sequences.enabled,
+            temperature=True,
+            max_output_tokens=True,
+            top_p=True,
+            top_k=True,
+            stop_sequences=True,
         ),
-        semantic_contract=contract,
+        structured_response=True,
     )
+    assert capabilities.supported_features() == frozenset(ModelCapabilityFeature)
+    assert all(capabilities.supports(feature) for feature in ModelCapabilityFeature)
+    assert capabilities.configurable_reasoning_efforts() == list(ModelReasoningEffort)
+    capabilities.parameters.temperature = False
+    assert not capabilities.supports(ModelCapabilityFeature.TEMPERATURE)
 
 
-def test_historical_snapshot_retains_exact_serialized_shape() -> None:
-    """Absence of a descriptor remains the unchanged historical contract."""
-    historical = ModelCapabilities(
-        reasoning=ModelReasoningCapabilities(
-            supported=True, effort_levels=[ModelReasoningEffort.MAX]
-        ),
-        parameters=ModelParameterCapabilities(temperature=True, stop_sequences=True),
-    ).model_dump(mode="json")
-    restored = ModelCapabilities.model_validate(historical)
-    assert restored.semantic_contract is None
-    assert "semantic_contract" not in historical
-    assert restored.model_dump(mode="json") == historical
-    assert restored.reasoning.effort_levels == [ModelReasoningEffort.MAX]
-    assert restored.parameters.temperature is True
-    assert restored.parameters.stop_sequences is True
+def test_structured_response_is_independent_from_strict_function_schema() -> None:
+    capabilities = ModelCapabilities(structured_response=True)
+    assert capabilities.supports(ModelCapabilityFeature.STRUCTURED_RESPONSE)
+    assert not capabilities.supports(ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA)
+    assert not capabilities.supports(ModelCapabilityFeature.FUNCTION_CALLING)
 
 
-def test_explicit_null_descriptor_retains_legacy_defaults() -> None:
-    """An explicit historical null does not manufacture evidence or new support."""
-    restored = ModelCapabilities.model_validate({"semantic_contract": None})
-    assert restored == ModelCapabilities()
-    assert restored.model_dump(mode="json") == ModelCapabilities().model_dump(
-        mode="json"
+def test_constraints_cannot_enable_absent_features() -> None:
+    constraint = ModelFeatureCondition(
+        feature=ModelCapabilityFeature.INPUT_IMAGE,
+        reasoning_efforts=("high",),
+        function_tools=None,
     )
-
-
-def test_versioned_contract_roundtrip_preserves_partial_facts_and_conditions() -> None:
-    """Saved semantics keep the exact justified subset and an unknown default."""
-    capabilities = _capabilities(_contract())
-    restored = ModelCapabilities.model_validate_json(capabilities.model_dump_json())
-    assert restored == capabilities
-    assert restored.semantic_contract is not None
-    assert restored.semantic_contract.version == 2
-    assert restored.semantic_contract.reasoning.completeness == "partial"
-    assert restored.semantic_contract.reasoning.default_effort is None
-    assert restored.reasoning.effort_levels == [
-        ModelReasoningEffort.HIGH,
-        ModelReasoningEffort.XHIGH,
-    ]
-    assert restored.semantic_contract.reasoning.efforts[1].origin == "contract_derived"
-    assert restored.semantic_contract.parameters.temperature.state == "conditional"
-    assert restored.parameters.temperature is False
+    with pytest.raises(ValidationError, match="requires a present feature"):
+        ModelCapabilities(
+            request_constraints=ModelRequestConstraints(
+                feature_conditions=(constraint,)
+            )
+        )
+    capabilities = ModelCapabilities(
+        modalities=ModelModalities(input=[ModelModality.IMAGE]),
+        request_constraints=ModelRequestConstraints(feature_conditions=(constraint,)),
+    )
+    assert capabilities.supports(ModelCapabilityFeature.INPUT_IMAGE)
+    assert capabilities.request_constraints.feature_conditions == (constraint,)
     assert (
-        restored.semantic_contract.parameters.temperature.predicate
-        == SupportPredicate(reasoning_efforts=("none",), function_tools=None)
+        ModelCapabilities.model_validate_json(capabilities.model_dump_json())
+        == capabilities
     )
-
-
-def test_structured_response_does_not_enable_strict_function_schemas() -> None:
-    """Strict functions and structured responses remain independent facts."""
-    capabilities = _capabilities(_contract())
-    assert capabilities.semantic_contract is not None
-    assert capabilities.semantic_contract.structured_response.enabled is True
-    assert capabilities.tool_calling.strict_json_schema is False
-
-
-@pytest.mark.parametrize(
-    ("field", "changed"),
-    [
-        ("tool_calling", {"supported": False}),
-        ("tool_calling", {"parallel_tool_calls": True}),
-        ("tool_calling", {"strict_json_schema": True}),
-        ("reasoning", {"supported": False}),
-        ("reasoning", {"summaries": False}),
-        ("reasoning", {"effort_levels": ["high", "xhigh", "max"]}),
-        ("parameters", {"temperature": True}),
-        ("parameters", {"max_output_tokens": False}),
-        ("parameters", {"top_p": True}),
-        ("parameters", {"top_k": True}),
-        ("parameters", {"stop_sequences": True}),
-        ("modalities", {"input": ["text", "image"]}),
-        ("modalities", {"output": []}),
-        ("built_in_tools", {"supported": []}),
-    ],
-)
-def test_legacy_views_cannot_compete_with_semantic_authority(
-    field: str, changed: dict[str, object]
-) -> None:
-    """A decoder rejects stale or independently editable effective views."""
-    payload = _capabilities(_contract()).model_dump(mode="json")
-    payload[field].update(changed)
-    with pytest.raises(ValidationError, match="must match the saved semantic contract"):
-        ModelCapabilities.model_validate(payload)
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"state": "conditional", "origin": "explicit", "predicate": None},
-        {"state": "supported", "origin": None, "predicate": None},
-        {"state": "unsupported", "origin": None, "predicate": None},
-        {"state": "unknown", "origin": "explicit", "predicate": None},
+        {"feature": "input:image", "reasoning_efforts": None, "function_tools": None},
+        {"feature": "input:image", "reasoning_efforts": [], "function_tools": None},
         {
-            "state": "supported",
-            "origin": "explicit",
-            "predicate": {"reasoning_efforts": ["none"], "function_tools": None},
+            "feature": "input:image",
+            "reasoning_efforts": ["low", "low"],
+            "function_tools": None,
         },
-        {"state": "supported", "origin": "explicit"},
+        {
+            "feature": "input:image",
+            "reasoning_efforts": ["ultra"],
+            "function_tools": None,
+        },
+        {
+            "feature": "input:future",
+            "reasoning_efforts": ["low"],
+            "function_tools": None,
+        },
+        {"feature": "input:image", "reasoning_efforts": ["low"]},
+        {
+            "feature": "input:image",
+            "reasoning_efforts": ["low"],
+            "function_tools": None,
+            "state": "unknown",
+        },
     ],
 )
-def test_support_requires_explicit_valid_evidence_shape(
-    payload: dict[str, object],
-) -> None:
-    """Missing evidence fields and condition-free conditional claims are rejected."""
+def test_request_constraints_are_closed_typed_data(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
-        CapabilitySupport.model_validate(payload)
+        ModelFeatureCondition.model_validate(payload)
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"reasoning_efforts": None, "function_tools": None},
-        {"reasoning_efforts": [], "function_tools": None},
-        {"reasoning_efforts": ["none", "none"], "function_tools": None},
-        {"reasoning_efforts": ["ultra"], "function_tools": None},
-        {"reasoning_efforts": ["none"]},
-        {"reasoning_efforts": ["none"], "function_tools": None, "expression": "true"},
-    ],
-)
-def test_condition_is_bounded_and_known(payload: dict[str, object]) -> None:
-    """Only typed effort/function predicates enter saved semantic authorization."""
-    with pytest.raises(ValidationError):
-        SupportPredicate.model_validate(payload)
-
-
-def test_function_tool_condition_remains_conditional() -> None:
-    """Function presence and effort constraints are saved as a conjunction."""
-    predicate = SupportPredicate(
-        reasoning_efforts=("high", "xhigh"), function_tools=True
+def test_duplicate_conditions_are_rejected() -> None:
+    condition = ModelFeatureCondition(
+        feature=ModelCapabilityFeature.FUNCTION_CALLING,
+        reasoning_efforts=None,
+        function_tools=True,
     )
-    support = CapabilitySupport(
-        state="conditional", origin="explicit", predicate=predicate
-    )
-    assert support.enabled is False
-    assert support.nullable_enabled is False
-    assert CapabilitySupport.model_validate_json(support.model_dump_json()) == support
-
-
-@pytest.mark.parametrize("completeness", ["complete", "unknown"])
-def test_empty_effort_set_preserves_completeness(completeness: str) -> None:
-    """An explicit complete empty set is different from missing effort information."""
-    payload = _contract().reasoning.model_dump(mode="json")
-    payload.update(completeness=completeness, efforts=[])
-    reasoning = ReasoningSupport.model_validate(payload)
-    assert reasoning.completeness == completeness
-    assert reasoning.enabled_efforts == ()
-
-
-@pytest.mark.parametrize(
-    "updates",
-    [
-        {"completeness": "unknown"},
-        {"completeness": "partial", "efforts": []},
-        {
-            "efforts": [{"level": "high", "state": "supported", "origin": "explicit"}]
-            * 2
-        },
-        {"default_effort": {"level": "max", "origin": "explicit"}},
-        {
-            "completeness": "complete",
-            "default_effort": {"level": "low", "origin": "explicit"},
-        },
-        {
-            "completeness": "complete",
-            "efforts": [{"level": "high", "state": "unknown", "origin": None}],
-        },
-        {"support": {"state": "unsupported", "origin": "explicit", "predicate": None}},
-    ],
-)
-def test_contradictory_effort_sets_are_rejected(updates: dict[str, object]) -> None:
-    """Completeness and known default assertions cannot contradict individual facts."""
-    payload = _contract().reasoning.model_dump(mode="json")
-    payload.update(updates)
-    with pytest.raises(ValidationError):
-        ReasoningSupport.model_validate(payload)
-
-
-def test_known_default_does_not_fill_an_unknown_effort_set() -> None:
-    """A default declaration is independent from enumerating all accepted efforts."""
-    reasoning = ReasoningSupport(
-        support=_supported(),
-        completeness="unknown",
-        efforts=(),
-        default_effort=DefaultEffortEvidence(level="medium", origin="explicit"),
-    )
-    assert reasoning.enabled_efforts == ()
-    assert reasoning.default_effort is not None
-    assert reasoning.default_effort.level == "medium"
+    with pytest.raises(ValidationError, match="must be unique"):
+        ModelRequestConstraints(feature_conditions=(condition, condition))
 
 
 @pytest.mark.parametrize("level", list(ModelReasoningEffort))
-def test_all_current_effort_wire_values_roundtrip(level: ModelReasoningEffort) -> None:
-    """The descriptor vocabulary matches existing saved effort wire values."""
-    declaration = EffortDeclaration.model_validate(
-        {"level": level.value, "state": "supported", "origin": "explicit"}
+def test_known_default_is_metadata_and_does_not_enable_reasoning(
+    level: ModelReasoningEffort,
+) -> None:
+    capabilities = ModelCapabilities.model_validate(
+        {"request_constraints": {"known_default": level.value}}
     )
-    assert (
-        EffortDeclaration.model_validate_json(declaration.model_dump_json())
-        == declaration
+    assert capabilities.request_constraints.known_default == level.value
+    assert not capabilities.supports(ModelCapabilityFeature.REASONING)
+    assert capabilities.configurable_reasoning_efforts() == []
+
+
+def test_historical_descriptor_converts_once_without_mutating_input() -> None:
+    original = {
+        "semantic_contract": _legacy_contract(),
+        "context_window": {"max_input_tokens": 128000},
+        "parameters": {"temperature": False},
+        "tool_calling": {"supported": False},
+    }
+    frozen = copy.deepcopy(original)
+    capabilities = ModelCapabilities.model_validate(original)
+    assert original == frozen
+    assert capabilities.context_window.max_input_tokens == 128000
+    assert capabilities.supports(ModelCapabilityFeature.FUNCTION_CALLING)
+    assert capabilities.supports(ModelCapabilityFeature.TEMPERATURE)
+    assert capabilities.supports(ModelCapabilityFeature.STRUCTURED_RESPONSE)
+    assert not capabilities.supports(ModelCapabilityFeature.INPUT_IMAGE)
+    assert not capabilities.supports(ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS)
+    assert capabilities.configurable_reasoning_efforts() == [ModelReasoningEffort.HIGH]
+    assert capabilities.request_constraints.known_default == "high"
+    assert capabilities.request_constraints.feature_conditions == (
+        ModelFeatureCondition(
+            feature=ModelCapabilityFeature.TEMPERATURE,
+            reasoning_efforts=("none",),
+            function_tools=True,
+        ),
     )
+    dumped = capabilities.model_dump(mode="json")
+    assert "semantic_contract" not in dumped
+    assert "state" not in json.dumps(dumped)
+    assert ModelCapabilities.model_validate(dumped) == capabilities
+
+
+@pytest.mark.parametrize("state", ["unknown", "unsupported"])
+def test_historical_absence_never_enables_final_support(state: str) -> None:
+    contract = _legacy_contract()
+    contract["function_calling"] = _legacy_support(state)
+    contract["reasoning"]["support"] = _legacy_support(state)
+    contract["reasoning"]["efforts"] = []
+    capabilities = ModelCapabilities.model_validate({"semantic_contract": contract})
+    assert not capabilities.supports(ModelCapabilityFeature.FUNCTION_CALLING)
+    assert not capabilities.supports(ModelCapabilityFeature.REASONING)
+    assert capabilities.request_constraints.known_default == "high"
+
+
+def test_historical_null_flags_are_final_false() -> None:
+    capabilities = ModelCapabilities.model_validate(
+        {
+            "tool_calling": {"parallel_tool_calls": None, "strict_json_schema": None},
+            "reasoning": {"summaries": None},
+            "semantic_contract": None,
+        }
+    )
+    assert capabilities == ModelCapabilities()
+    assert capabilities.tool_calling.parallel_tool_calls is False
+    assert capabilities.tool_calling.strict_json_schema is False
+    assert capabilities.reasoning.summaries is False
+
+
+def test_historical_orphan_function_refinements_remain_readable_without_support() -> (
+    None
+):
+    """Valid v2 conditional refinements cannot enable an absent parent feature."""
+    contract = _legacy_contract()
+    contract["function_calling"] = _legacy_support("unknown")
+    refinement = {
+        "state": "conditional",
+        "origin": "explicit",
+        "predicate": {"reasoning_efforts": None, "function_tools": True},
+    }
+    contract["parallel_function_calls"] = refinement
+    contract["strict_function_schema"] = refinement
+    original = {"semantic_contract": contract}
+    before = copy.deepcopy(original)
+    restored = ModelCapabilities.model_validate(original)
+    assert original == before
+    assert not restored.tool_calling.supported
+    assert not restored.tool_calling.parallel_tool_calls
+    assert not restored.tool_calling.strict_json_schema
+    assert all(
+        condition.feature
+        not in {
+            ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS,
+            ModelCapabilityFeature.STRICT_FUNCTION_SCHEMA,
+        }
+        for condition in restored.request_constraints.feature_conditions
+    )
+
+
+def test_v3_cannot_supply_an_old_authoritative_descriptor() -> None:
+    with pytest.raises(ValidationError, match="cannot contain a semantic descriptor"):
+        ModelCapabilities.model_validate(
+            {"capability_schema_version": 3, "semantic_contract": _legacy_contract()}
+        )
 
 
 @pytest.mark.parametrize(
     "field", ["input_modalities", "output_modalities", "built_in_tools"]
 )
-def test_duplicate_semantic_facts_are_rejected(field: str) -> None:
-    """Repeated declarations cannot obscure a conflicting saved fact."""
-    payload = _contract().model_dump(mode="json")
-    payload[field] = [payload[field][0], payload[field][0]]
+def test_malformed_historical_duplicate_declarations_fail(field: str) -> None:
+    contract = _legacy_contract()
+    contract[field] = [contract[field][0], contract[field][0]]
     with pytest.raises(ValidationError, match="must be unique"):
-        ModelCapabilityContract.model_validate(payload)
+        ModelCapabilities.model_validate({"semantic_contract": contract})
 
 
-def test_version_and_required_descriptor_fields_are_not_defaulted() -> None:
-    """New producers must consciously supply the complete semantic contract."""
-    payload = _contract().model_dump(mode="json")
-    del payload["structured_response"]
+def test_unsupported_capability_versions_fail_instead_of_silent_defaults() -> None:
     with pytest.raises(ValidationError):
-        ModelCapabilityContract.model_validate(payload)
-    payload = _contract().model_dump(mode="json")
-    payload["version"] = 1
+        ModelCapabilities.model_validate({"capability_schema_version": 4})
+    contract = _legacy_contract()
+    contract["version"] = 1
     with pytest.raises(ValidationError):
-        ModelCapabilityContract.model_validate(payload)
+        ModelCapabilities.model_validate({"semantic_contract": contract})
 
 
-def test_contract_roundtrip_does_not_use_network(
+@pytest.mark.parametrize("feature", ["parallel_tool_calls", "strict_json_schema"])
+def test_function_refinements_require_function_support(feature: str) -> None:
+    with pytest.raises(ValidationError, match="require function calling"):
+        ModelCapabilities.model_validate({"tool_calling": {feature: True}})
+
+
+def test_empty_or_absent_legacy_descriptor_is_readable_without_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Saved contract validation is local and independent of mutable source access."""
-
     def fail_connection(*args: object, **kwargs: object) -> Never:
-        raise AssertionError("Capability contract validation must not use network I/O.")
+        raise AssertionError("Capability decoding cannot use network I/O.")
 
     monkeypatch.setattr(socket.socket, "connect", fail_connection)
     monkeypatch.setattr(socket, "create_connection", fail_connection)
-    capabilities = _capabilities(_contract())
     assert (
-        ModelCapabilities.model_validate_json(capabilities.model_dump_json())
-        == capabilities
+        ModelCapabilities.model_validate({"semantic_contract": None})
+        == ModelCapabilities()
     )
+    compiled = ModelCapabilities.model_validate(
+        {"semantic_contract": _legacy_contract()}
+    )
+    assert ModelCapabilities.model_validate_json(compiled.model_dump_json()) == compiled

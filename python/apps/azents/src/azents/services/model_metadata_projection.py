@@ -14,6 +14,7 @@ from azents.core.enums import (
 from azents.core.llm_catalog import model_freshness_rank
 from azents.core.llm_catalog_sync import CatalogProjectionVersion
 from azents.core.model_capability_projection import (
+    CAPABILITY_PROJECTION_REVISION,
     project_capabilities,
 )
 from azents.core.model_catalog_identity import (
@@ -214,6 +215,7 @@ def project_integration_replacement_entries(
                     ),
                 },
                 projection_metadata={
+                    "capability_compiler_revision": CAPABILITY_PROJECTION_REVISION,
                     "matched": source_model is not None,
                     "runtime_dependency_versions": projection_runtime_versions(
                         provider
@@ -315,6 +317,7 @@ def _project_system_model(
             "facts": model.facts.model_dump(mode="json"),
         },
         projection_metadata={
+            "capability_compiler_revision": CAPABILITY_PROJECTION_REVISION,
             "projection_mode": "replacement",
             "runtime_dependency_versions": projection_runtime_versions(provider),
             "freshness_rank": model_freshness_rank(identifier),

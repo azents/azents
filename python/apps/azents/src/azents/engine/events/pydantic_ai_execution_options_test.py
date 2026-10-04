@@ -49,6 +49,7 @@ def _lowerer(
         model_capabilities=ModelCapabilities(
             reasoning=ModelReasoningCapabilities(
                 supported=reasoning,
+                summaries=reasoning,
                 effort_levels=[ModelReasoningEffort.HIGH] if reasoning else [],
             )
         ),

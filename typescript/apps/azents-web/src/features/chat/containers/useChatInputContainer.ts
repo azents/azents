@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import {
+  knownReasoningEffort,
   normalizeReasoningEffortForCapabilities,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
@@ -342,23 +343,6 @@ function normalizeStoredAction(value: unknown): ChatAction | null {
     return { type: "cleanup_orphan_git_worktrees" };
   }
   return null;
-}
-
-function knownReasoningEffort(
-  value: string | null,
-): ModelReasoningEffort | null {
-  switch (value) {
-    case "none":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-    case "max":
-      return value;
-    default:
-      return null;
-  }
 }
 
 function parseComposerDraft(raw: string): ComposerDraft {

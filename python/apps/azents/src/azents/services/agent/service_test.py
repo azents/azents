@@ -12,8 +12,15 @@ from azcommon.result import Failure, Success
 from fastapi import Depends
 from fastapi.dependencies.utils import get_dependant
 
+from azents.core.active_model_capabilities import (
+    ActiveModelMetadataUnavailable,
+    CompiledActiveChoice,
+    CompiledActiveChoices,
+    ConfiguredModelIdentity,
+)
 from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
+    AgentModelSelection,
     AgentModelSelectionInput,
     SelectableModelCandidate,
     SelectableModelCandidateInput,
@@ -27,7 +34,9 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
-from azents.repos.agent.data import Agent
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
+from azents.repos.agent.data import Agent, AgentCreate
 from azents.repos.agent_operations import (
     AgentOperationNotAdmin,
     AgentOperationRuntimeProfileInvalid,
@@ -39,6 +48,8 @@ from azents.repos.model_metadata_source_data import (
     ContextModelRequest,
     ModelMetadataSource,
 )
+from azents.repos.workspace_model_settings.data import WorkspaceModelSettings
+from azents.services.active_model_capabilities import ActiveModelCapabilitiesService
 from azents.services.model_metadata import ModelMetadataService
 from azents.services.terminal_policy.invalidation import (
     NoopTerminalPolicyInvalidationPublisher,
@@ -72,6 +83,325 @@ from .data import (
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+
+
+@dataclasses.dataclass(frozen=True)
+class _ActiveCapture:
+    workspace_id: str
+    selections: tuple[AgentModelSelection, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class _ActiveCapabilities(ActiveModelCapabilitiesService):
+    """Provide compiled local metadata without provider or persistence operations."""
+
+    replacement: ModelCapabilities | None
+    missing: frozenset[str]
+    calls: list[_ActiveCapture] = dataclasses.field(default_factory=list)
+
+    async def capture_and_compile(
+        self, *, workspace_id: str, selections: Sequence[AgentModelSelection]
+    ) -> CompiledActiveChoices:
+        self.calls.append(_ActiveCapture(workspace_id, tuple(selections)))
+        return CompiledActiveChoices(
+            tuple(
+                ActiveModelMetadataUnavailable(
+                    ConfiguredModelIdentity.from_selection(selection),
+                    "exact_entry_unavailable",
+                )
+                if selection.model_identifier in self.missing
+                else CompiledActiveChoice(
+                    identity=ConfiguredModelIdentity.from_selection(selection),
+                    capabilities=(
+                        self.replacement
+                        if self.replacement is not None
+                        else selection.normalized_capabilities
+                    ).model_copy(deep=True),
+                    supported_execution_options=tuple(
+                        selection.supported_execution_options
+                    ),
+                    catalog_id="active-catalog",
+                )
+                for selection in selections
+            )
+        )
+
+
+def _active_capabilities(
+    *, replacement: ModelCapabilities | None, missing: frozenset[str]
+) -> _ActiveCapabilities:
+    return _ActiveCapabilities(
+        repository=require_instance(
+            AsyncMock(spec=ActiveModelCapabilitiesRepository),
+            ActiveModelCapabilitiesRepository,
+        ),
+        replacement=replacement,
+        missing=missing,
+    )
+
+
+def _configured_agent() -> Agent:
+    """Keep an exact ordered fallback chain with explicitly saved user limits."""
+    agent = _make_agent()
+    candidate = agent.selectable_model_options[0].candidates[0]
+    selection = candidate.model_selection.model_copy(
+        update={
+            "normalized_capabilities": ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=False)
+            )
+        }
+    )
+    primary = candidate.model_copy(
+        update={
+            "model_selection": selection,
+            "settings": candidate.settings.model_copy(
+                update={"context_window_tokens": 32_000, "max_output_tokens": 4_000}
+            ),
+        }
+    )
+    fallback = primary.model_copy(
+        update={
+            "model_selection": selection.model_copy(
+                update={"model_identifier": "publisher/exact-fallback:001"}
+            )
+        }
+    )
+    option = agent.selectable_model_options[0].model_copy(
+        update={"candidates": [primary, fallback]}
+    )
+    return agent.model_copy(
+        update={
+            "selectable_model_options": [option],
+            "model_selection": selection,
+            "lightweight_model_selection": selection,
+        }
+    )
+
+
+async def test_active_agent_read_preserves_standalone_alias() -> None:
+    service = _make_service()
+    agent = _configured_agent()
+    alias = make_test_model_selection(model_identifier="legacy/exact-alias:001")
+    agent = agent.model_copy(update={"lightweight_model_selection": alias})
+    before = agent.model_dump_json()
+    active = _active_capabilities(
+        replacement=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        missing=frozenset(),
+    )
+    service.active_model_capabilities_service = active
+    repository = require_instance(service.repository, AsyncMock)
+    repository.get_by_id.return_value = agent
+    result = await service.get_by_id(
+        agent.id,
+        workspace_id=agent.workspace_id,
+        workspace_user_id="owner",
+        role=WorkspaceUserRole.OWNER,
+    )
+    assert isinstance(result, Success)
+    assert len(active.calls) == 1
+    assert len(active.calls[0].selections) == 3
+    projected_alias = result.value.lightweight_model_selection
+    assert projected_alias is not None
+    assert projected_alias.model_identifier == alias.model_identifier
+    assert projected_alias.normalized_capabilities.tool_calling.supported
+    assert agent.model_dump_json() == before
+
+
+async def test_active_agent_detail_preserves_stored_chain() -> None:
+    service = _make_service()
+    agent = _configured_agent()
+    before = agent.model_dump_json()
+    active = _active_capabilities(
+        replacement=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True),
+            structured_response=True,
+        ),
+        missing=frozenset(),
+    )
+    service.active_model_capabilities_service = active
+    repository = require_instance(service.repository, AsyncMock)
+    repository.get_by_id.return_value = agent
+    result = await service.get_by_id(
+        agent.id,
+        workspace_id=agent.workspace_id,
+        workspace_user_id="owner",
+        role=WorkspaceUserRole.OWNER,
+    )
+    assert isinstance(result, Success)
+    projected = result.value.selectable_model_options[0]
+    assert [
+        candidate.model_selection.model_identifier for candidate in projected.candidates
+    ] == [
+        candidate.model_selection.model_identifier
+        for candidate in agent.selectable_model_options[0].candidates
+    ]
+    assert [candidate.settings for candidate in projected.candidates] == [
+        candidate.settings for candidate in agent.selectable_model_options[0].candidates
+    ]
+    assert all(
+        candidate.model_selection.normalized_capabilities.tool_calling.supported
+        and candidate.model_selection.normalized_capabilities.structured_response
+        for candidate in projected.candidates
+    )
+    assert len(active.calls) == 1
+    assert agent.model_dump_json() == before
+    repository.update_by_id.assert_not_awaited()
+
+
+async def test_active_agent_list_batches_all_configured_choices_once() -> None:
+    service = _make_service()
+    first = _configured_agent()
+    second = first.model_copy(update={"id": "agent-2"})
+    before = [agent.model_dump_json() for agent in (first, second)]
+    active = _active_capabilities(
+        replacement=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        missing=frozenset(),
+    )
+    service.active_model_capabilities_service = active
+    repository = require_instance(service.repository, AsyncMock)
+    repository.list_by_workspace.return_value = SimpleNamespace(items=[first, second])
+    result = await service.list_by_workspace(
+        first.workspace_id, workspace_user_id="owner", role=WorkspaceUserRole.OWNER
+    )
+    assert [agent.id for agent in result.items] == [first.id, second.id]
+    assert len(active.calls) == 1
+    assert {selection.model_identifier for selection in active.calls[0].selections} == {
+        "gpt-4o",
+        "publisher/exact-fallback:001",
+    }
+    assert active.calls[0].workspace_id == first.workspace_id
+    assert all(
+        item.selectable_model_options[0]
+        .candidates[0]
+        .model_selection.normalized_capabilities.tool_calling.supported
+        for item in result.items
+    )
+    assert [agent.model_dump_json() for agent in (first, second)] == before
+
+
+async def test_unrelated_agent_patch_persists_raw_settings_not_active_projection() -> (
+    None
+):
+    service = _make_service()
+    agent = _configured_agent()
+    before = agent.model_dump_json()
+    active = _active_capabilities(
+        replacement=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        missing=frozenset(),
+    )
+    service.active_model_capabilities_service = active
+    repository = require_instance(service.repository, AsyncMock)
+    repository.get_by_id.return_value = agent
+    repository.update_by_id.return_value = Success(
+        agent.model_copy(update={"description": "An unrelated user edit"})
+    )
+    result = await service.update_by_id(
+        agent.id,
+        {"description": "An unrelated user edit"},
+        workspace_id=agent.workspace_id,
+        workspace_user_id="owner",
+        role=WorkspaceUserRole.OWNER,
+    )
+    assert isinstance(result, Success)
+    update = repository.update_by_id.await_args
+    assert update is not None
+    stored_update = update.kwargs["update"]
+    assert stored_update["selectable_model_options"] == agent.selectable_model_options
+    assert stored_update["model_selection"] == agent.model_selection
+    assert update.kwargs["model_configuration_changed"] is False
+    assert result.value.model_selection is not None
+    assert result.value.model_selection.normalized_capabilities.tool_calling.supported
+    assert agent.model_dump_json() == before
+
+
+async def test_active_agent_metadata_absence_preserves_identity() -> None:
+    service = _make_service()
+    agent = _configured_agent()
+    primary = agent.selectable_model_options[0].candidates[0].model_selection
+    active = _active_capabilities(
+        replacement=None, missing=frozenset({primary.model_identifier})
+    )
+    service.active_model_capabilities_service = active
+    repository = require_instance(service.repository, AsyncMock)
+    repository.get_by_id.return_value = agent
+    result = await service.get_by_id(
+        agent.id,
+        workspace_id=agent.workspace_id,
+        workspace_user_id="owner",
+        role=WorkspaceUserRole.OWNER,
+    )
+    assert isinstance(result, Success)
+    selection = result.value.model_selection
+    assert selection is not None
+    assert selection.model_identifier == primary.model_identifier
+    assert selection.llm_provider_integration_id == primary.llm_provider_integration_id
+    assert selection.normalized_capabilities == ModelCapabilities()
+    assert selection.source_metadata is not None
+    assert (
+        selection.source_metadata["active_capabilities"]["reason"]
+        == "exact_entry_unavailable"
+    )
+    assert agent.model_selection == primary
+
+
+async def test_new_agent_captures_defaults_without_rewriting_workspace() -> None:
+    service = _make_service()
+    configured = _configured_agent()
+    settings = WorkspaceModelSettings(
+        workspace_id=configured.workspace_id,
+        default_model_selection=configured.model_selection,
+        default_lightweight_model_selection=configured.lightweight_model_selection,
+        default_selectable_model_options=configured.selectable_model_options,
+        default_main_model_label=configured.main_model_label,
+        default_lightweight_model_label=configured.lightweight_model_label,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+    before = settings.model_dump_json()
+    active = _active_capabilities(
+        replacement=ModelCapabilities(
+            tool_calling=ModelToolCallingCapabilities(supported=True)
+        ),
+        missing=frozenset(),
+    )
+    service.active_model_capabilities_service = active
+    repository = require_instance(service.repository, AsyncMock)
+    repository.get_workspace_model_settings.return_value = settings
+
+    async def create_new(
+        value: object, *, creator_workspace_user_id: str
+    ) -> Success[Agent]:
+        assert creator_workspace_user_id == "owner"
+        create = require_instance(value, AgentCreate)
+        assert len(active.calls) == 1
+        assert create.model_selection.normalized_capabilities.tool_calling.supported
+        return Success(
+            configured.model_copy(
+                update={
+                    "model_selection": create.model_selection,
+                    "lightweight_model_selection": create.lightweight_model_selection,
+                    "selectable_model_options": create.selectable_model_options,
+                }
+            )
+        )
+
+    repository.create.side_effect = create_new
+    result = await service.create(
+        AgentCreateInput(
+            workspace_id=configured.workspace_id, name="New default capture"
+        ),
+        creator_workspace_user_id="owner",
+    )
+    assert isinstance(result, Success)
+    assert result.value.model_selection is not None
+    assert result.value.model_selection.normalized_capabilities.tool_calling.supported
+    assert settings.model_dump_json() == before
 
 
 def test_agent_service_dependency_graph_is_valid() -> None:
@@ -260,6 +590,9 @@ def _make_service() -> AgentService:
 
     return AgentService(
         model_metadata_service=make_test_model_metadata_service(source=None),
+        active_model_capabilities_service=_active_capabilities(
+            replacement=None, missing=frozenset()
+        ),
         repository=repository,
         model_catalog_read_service=model_catalog_read_service,
         image_generation_catalog_service=image_generation_catalog_service,

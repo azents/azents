@@ -1,7 +1,6 @@
 """Lower canonical Azents history to the public Pydantic model message layer."""
 
 import base64
-import dataclasses
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal
@@ -39,9 +38,16 @@ from pydantic_ai.tools import ToolDefinition
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
-from azents.core.model_capability_projection import google_lossless_efforts
+from azents.core.model_capability_contract import ModelCapabilityFeature
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.route_capability_constraints import google_lossless_efforts
 from azents.core.type_guards import is_string_object_dict
+from azents.engine.events.effective_model_request import (
+    EffortReasoning,
+    RequestDialect,
+    normalize_effective_model_request,
+    prepare_effective_model_parameters,
+)
 from azents.engine.events.external_channel_rendering import render_external_channel_turn
 from azents.engine.events.file_parts import (
     FilePartLoweringCapabilities,
@@ -51,10 +57,7 @@ from azents.engine.events.file_parts import (
 )
 from azents.engine.events.model_messages import ModelTranscriptMessage
 from azents.engine.events.model_support_contract import (
-    decode_model_support_options,
-    model_support_allowed,
-    model_support_request_from_options,
-    resolve_model_support_context,
+    effective_model_support_context,
     saved_builtin_tool_allowed,
     validate_saved_model_request,
 )
@@ -98,6 +101,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     build_native_compat_key,
 )
+from azents.engine.providers.model_profiles import protocol_for_provider
 from azents.engine.providers.xai_web_search import xai_web_search_declaration
 from azents.engine.run.types import BuiltinToolSpec
 
@@ -208,14 +212,7 @@ class PydanticAILowerer:
             model=model,
             schema_version=self.schema_version,
         )
-        self.file_capabilities = FilePartLoweringCapabilities.from_model_capabilities(
-            self.model_capabilities,
-            context=resolve_model_support_context(
-                self.model_capabilities,
-                requested_effort=self.reasoning_effort,
-                function_tools=bool(self.tools),
-            ),
-        )
+        self.file_capabilities = FilePartLoweringCapabilities()
 
     def lower(
         self,
@@ -229,7 +226,39 @@ class PydanticAILowerer:
         if model != self.model:
             raise ValueError("Lowerer model identity differs from the selected model")
         settings = self._settings()
-        parameters = self._parameters(settings)
+        parameters = prepare_effective_model_parameters(self._parameters())
+        effective = normalize_effective_model_request(
+            dialect=self._request_dialect(),
+            options=settings,
+            parameters=parameters,
+            native_tools=None,
+        )
+        if (
+            effective.dialect == "google"
+            and isinstance(effective.reasoning, EffortReasoning)
+            and effective.reasoning.level
+            not in {
+                effort.value
+                for effort in google_lossless_efforts(
+                    provider=self.provider_id,
+                    model=self.model,
+                )
+            }
+        ):
+            raise ValueError("Selected Google reasoning effort has no lossless mapping")
+        validate_saved_model_request(self.model_capabilities, request=effective)
+        context = effective_model_support_context(self.model_capabilities, effective)
+        for selected in self.hosted_tools:
+            if not saved_builtin_tool_allowed(
+                self.model_capabilities, tool=selected.name, context=context
+            ):
+                raise ValueError(
+                    "Hosted tool is not authorized by the saved capability snapshot"
+                )
+        self.file_capabilities = FilePartLoweringCapabilities.from_model_capabilities(
+            self.model_capabilities,
+            context=context,
+        )
         instructions = system_prompt or _DEFAULT_INSTRUCTIONS
         self.schema_version = native_replay_schema_version(
             instructions, native_replay_context=native_replay_context
@@ -654,74 +683,9 @@ class PydanticAILowerer:
             declarations.append(_DeclaredTool.model_validate(selected))
         return declarations
 
-    def _parameters(self, settings: ModelSettings) -> ModelRequestParameters:
+    def _parameters(self) -> ModelRequestParameters:
         definitions: list[ToolDefinition] = []
         declarations = self._declared_tools()
-        function_tools = any(tool.type == "function" for tool in declarations)
-        context = resolve_model_support_context(
-            self.model_capabilities,
-            requested_effort=self.reasoning_effort,
-            function_tools=function_tools,
-        )
-        strict_supported = self.model_capabilities.tool_calling.strict_json_schema
-        contract = self.model_capabilities.semantic_contract
-        if contract is not None:
-            request = model_support_request_from_options(
-                decode_model_support_options(self.options),
-                selected_effort=self.reasoning_effort,
-                function_tools=function_tools,
-                strict_function_schema=any(
-                    tool.type == "function" and tool.strict is True
-                    for tool in declarations
-                ),
-            )
-            validate_saved_model_request(self.model_capabilities, request=request)
-            actual_request = model_support_request_from_options(
-                decode_model_support_options(settings),
-                selected_effort=self.reasoning_effort,
-                function_tools=function_tools,
-                strict_function_schema=any(
-                    tool.type == "function" and tool.strict is True
-                    for tool in declarations
-                ),
-            )
-            actual_options = decode_model_support_options(settings)
-            if (
-                self.provider_id
-                in {
-                    LLMProvider.OPENAI,
-                    LLMProvider.CHATGPT_OAUTH,
-                    LLMProvider.XAI,
-                    LLMProvider.XAI_OAUTH,
-                    LLMProvider.OPENROUTER,
-                }
-                and actual_options.extra_body is not None
-                and "reasoning" in actual_options.extra_body.model_fields_set
-            ):
-                # The SDK merges extra_body by top-level key, replacing the
-                # entire reasoning object even for null or an empty object.
-                body_reasoning = actual_options.extra_body.reasoning
-                actual_request = dataclasses.replace(
-                    actual_request,
-                    reasoning_effort=(
-                        body_reasoning.effort if body_reasoning is not None else None
-                    ),
-                )
-            validate_saved_model_request(
-                self.model_capabilities, request=actual_request
-            )
-            context = resolve_model_support_context(
-                self.model_capabilities,
-                requested_effort=actual_request.reasoning_effort,
-                function_tools=function_tools,
-            )
-            strict_supported = model_support_allowed(
-                contract.strict_function_schema,
-                context=context,
-            )
-        self.file_capabilities = FilePartLoweringCapabilities.from_model_capabilities(
-            self.model_capabilities, context=context
-        )
         for raw, tool in zip(self.tools, declarations, strict=True):
             nested = raw.get("function")
             selected = (
@@ -756,13 +720,7 @@ class PydanticAILowerer:
                         "name": tool.name,
                         "description": tool.description,
                         "parameters_json_schema": schema,
-                        "strict": (
-                            tool.strict
-                            if contract is not None and tool.strict is not None
-                            else None
-                            if contract is not None and strict_supported is True
-                            else tool.strict is True and strict_supported is True
-                        ),
+                        "strict": tool.strict if tool.strict is not None else False,
                         "metadata": {
                             "azents_wire_dialect": "plaintext_custom"
                             if tool.type == "custom"
@@ -777,28 +735,15 @@ class PydanticAILowerer:
             if self.provider_id in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}
             else 128
             if self.provider_id == LLMProvider.GOOGLE_VERTEX_AI
-            and self.model_developer != LLMModelDeveloper.ANTHROPIC
+            and self._request_dialect() == "google"
             else None
         )
         if limit is not None and len(definitions) > limit:
             raise ValueError("Provider client tool declaration limit exceeded")
         native_tools: list[AbstractNativeTool] = []
         for selected in self.hosted_tools:
-            if not saved_builtin_tool_allowed(
-                self.model_capabilities, tool=selected.name, context=context
-            ):
-                raise ValueError(
-                    "Hosted tool is not authorized by the saved capability snapshot"
-                )
             if selected.name == "image_generation":
-                if (
-                    self.provider_id
-                    not in {
-                        LLMProvider.GOOGLE_GEMINI,
-                        LLMProvider.GOOGLE_VERTEX_AI,
-                    }
-                    or self.model_developer == LLMModelDeveloper.ANTHROPIC
-                ):
+                if self._request_dialect() != "google":
                     raise ValueError(
                         "Selected provider/model route does not support "
                         "hosted image generation"
@@ -821,15 +766,9 @@ class PydanticAILowerer:
         )
 
     def _anthropic_cache_route(self) -> bool:
-        return (
-            self.provider_id == LLMProvider.ANTHROPIC
-            or self.model_developer == LLMModelDeveloper.ANTHROPIC
-            and self.provider_id
-            in {
-                LLMProvider.AWS_BEDROCK,
-                LLMProvider.GOOGLE_VERTEX_AI,
-                LLMProvider.KIMI_OAUTH,
-            }
+        return self._request_dialect() == "anthropic" or (
+            self.provider_id == LLMProvider.AWS_BEDROCK
+            and self.model_developer == LLMModelDeveloper.ANTHROPIC
         )
 
     def _settings(self) -> ModelSettings:
@@ -866,35 +805,14 @@ class PydanticAILowerer:
             values["top_k"] = self.top_k
         if self.stop is not None:
             values["stop_sequences"] = self.stop
-        contract = self.model_capabilities.semantic_contract
-        if contract is None:
-            if self.model_capabilities.tool_calling.parallel_tool_calls is not True:
-                values["parallel_tool_calls"] = False
-        else:
-            declarations = self._declared_tools()
-            request = model_support_request_from_options(
-                decode_model_support_options(values),
-                selected_effort=self.reasoning_effort,
-                function_tools=any(tool.type == "function" for tool in declarations),
-                strict_function_schema=any(
-                    tool.type == "function" and tool.strict is True
-                    for tool in declarations
-                ),
+        if (
+            self._request_dialect() in {"openai_responses", "openai_chat", "anthropic"}
+            and "parallel_tool_calls" not in values
+            and not self.model_capabilities.supports(
+                ModelCapabilityFeature.PARALLEL_FUNCTION_CALLS
             )
-            validate_saved_model_request(self.model_capabilities, request=request)
-            if (
-                "parallel_tool_calls" not in values
-                and model_support_allowed(
-                    contract.parallel_function_calls,
-                    context=resolve_model_support_context(
-                        self.model_capabilities,
-                        requested_effort=request.reasoning_effort,
-                        function_tools=request.function_tools,
-                    ),
-                )
-                is False
-            ):
-                values["parallel_tool_calls"] = False
+        ):
+            values["parallel_tool_calls"] = False
         service_tier = resolve_openai_service_tier(
             provider=self.provider_id,
             supported=self.supported_execution_options,
@@ -909,18 +827,6 @@ class PydanticAILowerer:
             }
         elif service_tier is not None:
             values["openai_service_tier"] = service_tier
-        if (
-            contract is None
-            and self.reasoning_effort is not None
-            and self.reasoning_effort
-            not in [
-                effort.value
-                for effort in self.model_capabilities.reasoning.effort_levels
-            ]
-        ):
-            raise ValueError(
-                "Reasoning effort is not authorized by the saved capability snapshot"
-            )
         if self.provider_id == LLMProvider.AWS_BEDROCK:
             settings = _BedrockSettings.model_validate({"value": values}).value
             if self._anthropic_cache_route():
@@ -935,40 +841,38 @@ class PydanticAILowerer:
                         output_config
                     ):
                         raise ValueError("Bedrock output_config must be an object")
-                    additional["output_config"] = {
-                        **(output_config if output_config is not None else {}),
-                        "effort": self.reasoning_effort,
-                    }
+                    additional.setdefault(
+                        "output_config", {"effort": self.reasoning_effort}
+                    )
                     settings["bedrock_additional_model_requests_fields"] = additional
             return settings
         if self._anthropic_cache_route():
             values["anthropic_cache_instructions"] = True
             values["anthropic_cache_tool_definitions"] = True
             if self.reasoning_effort is not None:
-                values["anthropic_effort"] = self.reasoning_effort
+                values.setdefault("anthropic_effort", self.reasoning_effort)
             return _AnthropicSettings.model_validate({"value": values}).value
         if self.provider_id in {
             LLMProvider.GOOGLE_GEMINI,
             LLMProvider.GOOGLE_VERTEX_AI,
         }:
-            if self.reasoning_effort is not None:
-                if contract is None:
-                    values["google_thinking_config"] = _google_thinking_config(
-                        model=self.model, effort=self.reasoning_effort
-                    )
-                else:
-                    if self.reasoning_effort not in google_lossless_efforts(
+            if (
+                self.reasoning_effort is not None
+                and "google_thinking_config" not in values
+            ):
+                if self.reasoning_effort not in {
+                    effort.value
+                    for effort in google_lossless_efforts(
                         provider=self.provider_id, model=self.model
-                    ):
-                        raise ValueError(
-                            "Selected Google reasoning effort has no lossless mapping"
-                        )
-                    values["google_thinking_config"] = ThinkingConfigDict(
-                        thinking_level=GoogleThinkingLevel(
-                            self.reasoning_effort.upper()
-                        ),
-                        include_thoughts=True,
                     )
+                }:
+                    raise ValueError(
+                        "Selected Google reasoning effort has no lossless mapping"
+                    )
+                values["google_thinking_config"] = ThinkingConfigDict(
+                    thinking_level=GoogleThinkingLevel(self.reasoning_effort.upper()),
+                    include_thoughts=True,
+                )
             return _GoogleSettings.model_validate({"value": values}).value
         if values.get("top_k") is not None:
             raise ValueError("Selected top-k has no mapping in this model codec.")
@@ -986,31 +890,19 @@ class PydanticAILowerer:
             reasoning_options: dict[str, object] = {
                 "effort": self.reasoning_effort,
             }
-            if contract is not None and explicit_reasoning is not None:
-                reasoning_options.update(explicit_reasoning)
-            elif (
-                contract is None
-                or model_support_allowed(
-                    contract.reasoning_summaries,
-                    context=resolve_model_support_context(
-                        self.model_capabilities,
-                        requested_effort=self.reasoning_effort,
-                        function_tools=any(
-                            tool.type == "function" for tool in self._declared_tools()
-                        ),
-                    ),
-                )
-                is not False
-            ):
-                reasoning_options["summary"] = "auto"
-            values["extra_body"] = {
-                **(extra_body if extra_body is not None else {}),
-                "reasoning": reasoning_options,
-            }
+            if "reasoning" not in (extra_body or {}):
+                if self.model_capabilities.supports(
+                    ModelCapabilityFeature.REASONING_SUMMARIES
+                ):
+                    reasoning_options["summary"] = "auto"
+                values["extra_body"] = {
+                    **(extra_body if extra_body is not None else {}),
+                    "reasoning": reasoning_options,
+                }
         if self.provider_id == LLMProvider.OPENROUTER:
             values["openai_include_raw_annotations"] = True
             values["openai_include_web_search_sources"] = True
-        if contract is not None and self.provider_id in {
+        if self.provider_id in {
             LLMProvider.XAI,
             LLMProvider.XAI_OAUTH,
             LLMProvider.OPENROUTER,
@@ -1048,6 +940,21 @@ class PydanticAILowerer:
                 ]
         return settings
 
+    def _request_dialect(self) -> RequestDialect:
+        """Use the same exact model/hosting protocol as the physical factory."""
+        protocol = protocol_for_provider(provider=self.provider_id, model=self.model)
+        match protocol:
+            case "bedrock":
+                return "bedrock"
+            case "anthropic":
+                return "anthropic"
+            case "google":
+                return "google"
+            case "chat_completions":
+                return "openai_chat"
+            case "responses":
+                return "openai_responses"
+
 
 def _object_arguments(value: str) -> bool:
     try:
@@ -1055,43 +962,3 @@ def _object_arguments(value: str) -> bool:
     except json.JSONDecodeError:
         return False
     return isinstance(decoded, dict)
-
-
-def _google_thinking_config(*, model: str, effort: str) -> ThinkingConfigDict:
-    """Preserve the previous authorized Gemini effort-to-wire mapping."""
-    if effort not in {"none", "minimal", "low", "medium", "high"}:
-        raise ValueError("Selected Google reasoning effort has no supported mapping")
-    # Inspect known family tokens without rewriting the selected resource ID.
-    # The retired Gemini mapper distinguishes Gemini 3 from budget-based models.
-    name = model.lower()
-    include_thoughts = effort != "none"
-    if "gemini-3" in name:
-        flash = "flash" in name
-        if effort in {"none", "minimal"}:
-            level = GoogleThinkingLevel.MINIMAL if flash else GoogleThinkingLevel.LOW
-        elif effort == "low":
-            level = GoogleThinkingLevel.LOW
-        elif effort == "medium":
-            level = (
-                GoogleThinkingLevel.MEDIUM
-                if flash or "gemini-3.1-pro-preview" in name
-                else GoogleThinkingLevel.HIGH
-            )
-        else:
-            level = GoogleThinkingLevel.HIGH
-        return ThinkingConfigDict(
-            thinking_level=level, include_thoughts=include_thoughts
-        )
-    if effort == "minimal":
-        budget = (
-            512
-            if "gemini-2.5-flash-lite" in name
-            else 128
-            if "gemini-2.5-pro" in name
-            else 1
-            if "gemini-2.5-flash" in name
-            else 128
-        )
-    else:
-        budget = {"none": 0, "low": 1024, "medium": 2048, "high": 4096}[effort]
-    return ThinkingConfigDict(thinking_budget=budget, include_thoughts=include_thoughts)

@@ -32,6 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_account_oauth.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
   - python/apps/azents/src/azents/core/external_model_settings.py
+  - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
   - python/apps/azents/src/azents/core/external_channel_file.py
@@ -53,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_account_link/**
   - python/apps/azents/src/azents/repos/external_account_oauth/**
   - python/apps/azents/src/azents/repos/external_channel/**
+  - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/external_channel/connection.py
   - python/apps/azents/src/azents/services/external_channel/**
   - python/apps/azents/src/azents/services/external_account_link.py
@@ -629,6 +631,17 @@ participant disclosure. Slack uses private modals for model controls; Discord us
 ephemeral interaction responses for model controls. A provider or delivery path that
 cannot guarantee privacy omits personalization and never falls back to a public
 message, DM, or separate web conversation-settings page.
+
+Authorized private model editors compile current exact local model declarations
+before exposing or validating reasoning and execution controls. Opening or reopening
+an editor, paging, updating a draft and fresh Apply use a detached option view from
+the shared capability capture/compiler. Authorization precedes metadata capture.
+The operation uses local database inputs and deterministic compilation, without
+provider requests or writes to the stored Agent configuration. Existing mutation
+replay and already-applied draft exits return before metadata recapture; their
+immutable effects and captured audit state remain unchanged. Draft refresh and
+generation/fingerprint checks retain the existing explicit Apply boundary for
+Session intent changes.
 
 Existing private model controls consume the public code-owned execution-option
 `exclusive_group` metadata. Discord uses a single-choice select and Slack uses a
