@@ -3,7 +3,7 @@
 import dataclasses
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import NamedTuple, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,11 +20,16 @@ from azents.repos.session_execution.cutover_replay import (
     CutoverReplayCandidateBatch,
     SessionCutoverReplayRepository,
 )
+from azents.repos.session_execution.cutover_replay_data import (
+    TeamSessionCutoverReplayInvariantFailure,
+)
+from azents.repos.session_execution.cutover_replay_operations import (
+    TeamSessionCutoverReplayOperationsRepository,
+)
 from azents.repos.session_execution.data import CanonicalExecutionSnapshot
 
 from .team_session_cutover_replay import (
     TeamSessionCutoverReplayBarrierLostError,
-    TeamSessionCutoverReplayInvariantFailure,
     TeamSessionCutoverReplayService,
 )
 
@@ -230,10 +235,19 @@ def _snapshot(
     )
 
 
+class _ServiceFixture(NamedTuple):
+    """Named collaborators retained by one replay test fixture."""
+
+    service: TeamSessionCutoverReplayService
+    repository: _ReplayRepository
+    broker: _Broker
+    broker_provider_calls: list[None]
+
+
 def _service(
     candidate: CutoverReplayCandidate,
     snapshot: CanonicalExecutionSnapshot | CanonicalExecutionOwnerGenerationStaleError,
-) -> tuple[TeamSessionCutoverReplayService, _ReplayRepository, _Broker, list[None]]:
+) -> _ServiceFixture:
     """Create one service wired only to deterministic durable test doubles."""
     replay_repository = _ReplayRepository(
         CutoverReplayCandidateBatch(
@@ -249,14 +263,16 @@ def _service(
         return cast(SessionBroker, broker)
 
     service = TeamSessionCutoverReplayService(
-        replay_repository=replay_repository,
-        canonical_execution_repository=_CanonicalRepository(
-            {candidate.session_id: snapshot}
+        operations=TeamSessionCutoverReplayOperationsRepository(
+            replay_repository=replay_repository,
+            canonical_execution_repository=_CanonicalRepository(
+                {candidate.session_id: snapshot}
+            ),
+            session_manager=_session_manager,
         ),
-        session_manager=_session_manager,
         broker_provider=provide_broker,
     )
-    return service, replay_repository, broker, broker_provider_calls
+    return _ServiceFixture(service, replay_repository, broker, broker_provider_calls)
 
 
 @pytest.mark.asyncio
@@ -383,14 +399,16 @@ async def test_mid_batch_broker_interruption_releases_barrier_and_retries() -> N
         return cast(SessionBroker, broker)
 
     service = TeamSessionCutoverReplayService(
-        replay_repository=replay_repository,
-        canonical_execution_repository=_CanonicalRepository(
-            {
-                "session-1": _snapshot("session-1"),
-                "session-2": _snapshot("session-2"),
-            }
+        operations=TeamSessionCutoverReplayOperationsRepository(
+            replay_repository=replay_repository,
+            canonical_execution_repository=_CanonicalRepository(
+                {
+                    "session-1": _snapshot("session-1"),
+                    "session-2": _snapshot("session-2"),
+                }
+            ),
+            session_manager=_session_manager,
         ),
-        session_manager=_session_manager,
         broker_provider=provide_broker,
     )
 
@@ -438,9 +456,13 @@ async def test_lost_barrier_aborts_before_broker_mutation() -> None:
         return cast(SessionBroker, broker)
 
     service = TeamSessionCutoverReplayService(
-        replay_repository=replay_repository,
-        canonical_execution_repository=_CanonicalRepository({"session-1": _snapshot()}),
-        session_manager=_session_manager,
+        operations=TeamSessionCutoverReplayOperationsRepository(
+            replay_repository=replay_repository,
+            canonical_execution_repository=_CanonicalRepository(
+                {"session-1": _snapshot()}
+            ),
+            session_manager=_session_manager,
+        ),
         broker_provider=provide_broker,
     )
 
