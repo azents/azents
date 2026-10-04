@@ -231,15 +231,8 @@ class ExternalChannelInteractionOperations:
     ) -> None:
         """Bind a new submission to the current authorized origin snapshot."""
         async with self.read_session_manager() as session:
-            row = await session.read_session.scalar(
-                sa.select(RDBExternalChannelInteraction).where(
-                    RDBExternalChannelInteraction.id == origin_interaction_id
-                )
-            )
-            origin = (
-                ExternalChannelInteraction.model_validate(row)
-                if row is not None
-                else None
+            origin = await self.repository.get_interaction(
+                session, interaction_id=origin_interaction_id
             )
             if (
                 origin is None
