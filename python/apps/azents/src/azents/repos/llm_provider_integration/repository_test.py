@@ -7,7 +7,8 @@ from uuid import uuid4
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.credentials import (
     ApiKeySecrets,
@@ -25,12 +26,26 @@ from azents.core.enums import (
     LLMCatalogPurpose,
     LLMProvider,
 )
+from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
+from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.model_metadata_source import RDBModelMetadataSource
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
+from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
+from azents.repos.llm_catalog.data import IntegrationCatalogSyncClaim
+from azents.repos.llm_catalog_operations import (
+    CatalogPublicationSuperseded,
+    LLMCatalogOperationsRepository,
+)
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.workspace import WorkspaceRepository
 
 from . import LLMProviderIntegrationRepository
@@ -514,131 +529,264 @@ class TestLLMProviderIntegrationRepository:
         integration = await repo.get_by_id(rdb_session, created.id)
         assert integration is None
 
-    async def test_delete_locks_catalog_before_integration(
+    async def test_delete_is_scoped_and_does_not_lock_workspace(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """Catalog synchronization cannot deadlock with integration deletion."""
+        """An unrelated parent writer cannot block exact integration removal."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
-        application_name = f"integration-delete-lock-order-{suffix}"
-        repo = _make_repo()
-        catalog_repo = LLMCatalogRepository()
-        async with AsyncSession(
-            rdb_engine,
-            expire_on_commit=False,
-        ) as _raw_setup_session:
-            setup_session = ReadWriteSession(_raw_setup_session)
+        repo, catalogs = _make_repo(), LLMCatalogRepository()
+        writes = create_read_write_session_manager(rdb_engine)
+        reads = create_read_only_session_manager(rdb_engine)
+        async with writes() as setup:
             workspace_id = await _create_workspace(
-                setup_session,
-                handle=f"llm-integration-delete-lock-order-{suffix}",
+                setup, handle=f"delete-scope-{suffix}"
             )
             integration = await repo.create(
-                setup_session,
+                setup,
                 LLMProviderIntegrationCreate(
                     workspace_id=workspace_id,
                     provider=LLMProvider.OPENAI,
-                    name="Concurrent deletion target",
-                    secrets=ApiKeySecrets(api_key="sk-concurrent-delete"),
+                    name="Removal target",
+                    secrets=ApiKeySecrets(api_key="test"),
                 ),
             )
-            catalog = await catalog_repo.ensure_integration_catalog(
-                setup_session,
+            catalog = await catalogs.ensure_integration_catalog(
+                setup,
                 integration_id=integration.id,
                 provider=integration.provider,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
-            await setup_session.write_session.commit()
+        statements: list[str] = []
 
-        async def delete_integration() -> None:
-            async with AsyncSession(
-                rdb_engine,
-                expire_on_commit=False,
-            ) as _raw_delete_session:
-                delete_session = ReadWriteSession(_raw_delete_session)
-                await delete_session.write_session.execute(
-                    sa.text("SELECT set_config('application_name', :name, true)"),
-                    {"name": application_name},
-                )
-                await repo.delete_by_id(
-                    delete_session,
-                    integration.id,
-                    workspace_id=workspace_id,
-                )
-                await delete_session.write_session.commit()
+        def record_sql(
+            connection: sa.Connection,
+            cursor: object,
+            statement: str,
+            parameters: object,
+            context: object,
+            many: bool,
+        ) -> None:
+            statements.append(statement)
 
-        async def wait_for_workspace_lock() -> None:
-            deadline = asyncio.get_running_loop().time() + 5
-            while asyncio.get_running_loop().time() < deadline:
-                async with AsyncSession(rdb_engine) as _raw_observer:
-                    observer = ReadWriteSession(_raw_observer)
-                    waiting = await observer.write_session.scalar(
-                        sa.text(
-                            """
-                            SELECT EXISTS (
-                                SELECT 1
-                                FROM pg_stat_activity
-                                WHERE application_name = :application_name
-                                  AND wait_event_type = 'Lock'
-                                  AND query LIKE '%FROM workspaces%'
-                                  AND query LIKE '%FOR UPDATE%'
-                            )
-                            """
-                        ),
-                        {"application_name": application_name},
-                    )
-                if waiting:
-                    return
-                await asyncio.sleep(0.01)
-            raise TimeoutError("Integration deletion did not wait for the Workspace")
-
-        async with AsyncSession(
-            rdb_engine,
-            expire_on_commit=False,
-        ) as _raw_sync_session:
-            sync_session = ReadWriteSession(_raw_sync_session)
-            locked_workspace_id = await sync_session.write_session.scalar(
-                sa.select(RDBWorkspace.id)
-                .where(RDBWorkspace.id == workspace_id)
-                .with_for_update()
-            )
-            assert locked_workspace_id == workspace_id
-            locked_catalog_id = await sync_session.write_session.scalar(
-                sa.select(RDBLLMCatalog.id)
-                .where(RDBLLMCatalog.id == catalog.id)
-                .with_for_update()
-            )
-            assert locked_catalog_id == catalog.id
-
-            deletion_task = asyncio.create_task(delete_integration())
-            await wait_for_workspace_lock()
-            locked_integration_id = await asyncio.wait_for(
-                sync_session.write_session.scalar(
-                    sa.select(RDBLLMProviderIntegration.id)
-                    .where(RDBLLMProviderIntegration.id == integration.id)
+        try:
+            async with writes() as parent_writer:
+                await parent_writer.write_session.execute(
+                    sa.select(RDBWorkspace)
+                    .where(RDBWorkspace.id == workspace_id)
                     .with_for_update()
+                )
+                event.listen(
+                    rdb_engine.sync_engine, "before_cursor_execute", record_sql
+                )
+                try:
+                    async with asyncio.timeout(5):
+                        async with writes() as deleting:
+                            await repo.delete_by_id(
+                                deleting, integration.id, workspace_id="wrong-workspace"
+                            )
+                        async with reads() as reader:
+                            assert (
+                                await repo.get_by_id(reader, integration.id) is not None
+                            )
+                        async with writes() as deleting:
+                            await repo.delete_by_id(
+                                deleting, integration.id, workspace_id=workspace_id
+                            )
+                finally:
+                    event.remove(
+                        rdb_engine.sync_engine, "before_cursor_execute", record_sql
+                    )
+            assert not any(
+                "FOR UPDATE" in sql.upper() or "FOR SHARE" in sql.upper()
+                for sql in statements
+            )
+            async with reads() as reader:
+                assert await repo.get_by_id(reader, integration.id) is None
+                assert await reader.read_session.get(RDBLLMCatalog, catalog.id) is None
+        finally:
+            async with writes() as cleanup:
+                await repo.delete_by_id(
+                    cleanup, integration.id, workspace_id=workspace_id
+                )
+                await cleanup.write_session.execute(
+                    sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+                )
+
+    async def test_deleted_integration_rejects_delayed_catalog_publication(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Discovery that started before deletion cannot recreate its catalog."""
+        del latest_db_schema
+        repo, catalogs = _make_repo(), LLMCatalogRepository()
+        writes = create_read_write_session_manager(rdb_engine)
+        reads = create_read_only_session_manager(rdb_engine)
+        now = datetime.datetime.now(datetime.UTC)
+        async with writes() as setup:
+            workspace_id = await _create_workspace(
+                setup, handle=f"delete-publish-{uuid4().hex[:8]}"
+            )
+            integration = await repo.create(
+                setup,
+                LLMProviderIntegrationCreate(
+                    workspace_id=workspace_id,
+                    provider=LLMProvider.OPENAI,
+                    name="Discovery target",
+                    secrets=ApiKeySecrets(api_key="test"),
                 ),
-                timeout=5,
             )
-            assert locked_integration_id == integration.id
-            await sync_session.write_session.commit()
-
-        await asyncio.wait_for(deletion_task, timeout=5)
-
-        async with AsyncSession(rdb_engine) as _raw_verification_session:
-            verification_session = ReadWriteSession(_raw_verification_session)
-            assert (
-                await verification_session.read_session.get(
-                    RDBLLMProviderIntegration,
-                    integration.id,
+            catalog = await catalogs.ensure_integration_catalog(
+                setup,
+                integration_id=integration.id,
+                provider=integration.provider,
+                purpose=LLMCatalogPurpose.CONVERSATION,
+            )
+            claim = await catalogs.begin_integration_sync(
+                setup,
+                catalog_id=catalog.id,
+                workspace_id=workspace_id,
+                started_at=now,
+                trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+                required_projection_version=None,
+            )
+            assert isinstance(claim, IntegrationCatalogSyncClaim)
+        sources = ModelMetadataSourceRepository()
+        active = ActiveModelCapabilitiesRepository(reads, catalogs, sources)
+        operations = LLMCatalogOperationsRepository(
+            writes, reads, catalogs, repo, sources, active
+        )
+        try:
+            async with writes() as deleting:
+                await repo.delete_by_id(
+                    deleting, integration.id, workspace_id=workspace_id
                 )
-                is None
+            outcome = await operations.publish(
+                catalog=catalog,
+                claim=claim,
+                entries=[],
+                expected_source_metadata=None,
+                expected_source_models=(),
+                diagnostics=None,
+                sync_diagnostics=None,
+                fetched_count=0,
+                skipped_count=0,
+                finished_at=now,
             )
-            assert (
-                await verification_session.read_session.get(
-                    RDBLLMCatalog,
-                    catalog.id,
+            assert isinstance(outcome, CatalogPublicationSuperseded)
+            async with reads() as reader:
+                assert await repo.get_by_id(reader, integration.id) is None
+                assert await reader.read_session.get(RDBLLMCatalog, catalog.id) is None
+        finally:
+            async with writes() as cleanup:
+                await repo.delete_by_id(
+                    cleanup, integration.id, workspace_id=workspace_id
                 )
-                is None
+                await cleanup.write_session.execute(
+                    sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+                )
+
+    async def test_concurrent_publication_then_delete_cascades_without_resurrection(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """The actual producer owns its target fence; deletion needs no read gate."""
+        del latest_db_schema
+        repo, catalogs = _make_repo(), LLMCatalogRepository()
+        sources = ModelMetadataSourceRepository()
+        writes = create_read_write_session_manager(rdb_engine)
+        reads = create_read_only_session_manager(rdb_engine)
+        suffix = uuid4().hex[:8]
+        async with writes() as setup:
+            workspace_id = await _create_workspace(
+                setup, handle=f"delete-publisher-{suffix}"
             )
+            integration = await repo.create(
+                setup,
+                LLMProviderIntegrationCreate(
+                    workspace_id=workspace_id,
+                    provider=LLMProvider.OPENAI,
+                    name="Publishing target",
+                    secrets=ApiKeySecrets(api_key="test"),
+                ),
+            )
+            catalog = await catalogs.ensure_integration_catalog(
+                setup,
+                integration_id=integration.id,
+                provider=integration.provider,
+                purpose=LLMCatalogPurpose.CONVERSATION,
+            )
+        submitted = asyncio.Event()
+        application = f"delete-producer-{suffix}"
+
+        async def remove_target() -> None:
+            async with writes() as deleting:
+                await deleting.write_session.execute(
+                    sa.text("SELECT set_config('application_name', :name, true)"),
+                    {"name": application},
+                )
+                submitted.set()
+                await repo.delete_by_id(
+                    deleting, integration.id, workspace_id=workspace_id
+                )
+
+        task: asyncio.Task[None] | None = None
+        try:
+            async with writes() as publisher:
+                # Same real sorted integration -> source -> catalog producer fence.
+                await catalogs.lock_integration(
+                    publisher, integration_id=integration.id, workspace_id=workspace_id
+                )
+                await sources.ensure_authority(publisher, source_key=CATALOG_SOURCE_KEY)
+                await sources.lock_authority(publisher, source_key=CATALOG_SOURCE_KEY)
+                owner = await catalogs.lock_catalog(publisher, catalog_id=catalog.id)
+                task = asyncio.create_task(remove_target())
+                await submitted.wait()
+                async with asyncio.timeout(5):
+                    while True:
+                        async with reads() as observer:
+                            blocked = await observer.read_session.scalar(
+                                sa.text("""
+                                SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                                WHERE application_name=:name AND wait_event_type='Lock'
+                                AND query LIKE 'DELETE FROM llm_provider_integrations%')
+                            """),
+                                {"name": application},
+                            )
+                        if blocked:
+                            break
+                await catalogs.replace_current_entries(
+                    publisher,
+                    owner=owner,
+                    entries=[],
+                    diagnostics=None,
+                    finished_at=datetime.datetime.now(datetime.UTC),
+                )
+            async with asyncio.timeout(5):
+                await task
+            async with reads() as reader:
+                assert await repo.get_by_id(reader, integration.id) is None
+                assert await reader.read_session.get(RDBLLMCatalog, catalog.id) is None
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            async with writes() as cleanup:
+                await repo.delete_by_id(
+                    cleanup, integration.id, workspace_id=workspace_id
+                )
+                await cleanup.write_session.execute(
+                    sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+                )
+                await cleanup.write_session.execute(
+                    sa.delete(RDBModelMetadataSource).where(
+                        RDBModelMetadataSource.source_key == CATALOG_SOURCE_KEY
+                    )
+                )

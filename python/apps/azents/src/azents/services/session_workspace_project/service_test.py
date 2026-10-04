@@ -1,15 +1,17 @@
 """SessionWorkspaceProjectService tests."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.action_execution_data import ActionExecutionCreate
 from azents.core.agent_session_data import AgentSession
@@ -22,6 +24,7 @@ from azents.core.enums import (
     GitWorktreePathClaimState,
     LLMProvider,
     RuntimeRunnerState,
+    SessionWorkingFolderBindingState,
     WorkspaceUserRole,
 )
 from azents.core.session_workspace_paths import (
@@ -41,8 +44,20 @@ from azents.rdb.models.git_worktree_cleanup_claim import (
     RDBGitWorktreePathClaim,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextProject,
+)
+from azents.rdb.models.user import RDBUser
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
@@ -64,9 +79,6 @@ from azents.repos.session_working_folder_binding.data import (
 )
 from azents.repos.session_working_folder_binding.data import (
     SessionWorkingFolderAuthority as RepositoryWorkingFolderAuthority,
-)
-from azents.repos.session_working_folder_binding.data import (
-    SessionWorkingFolderBindingError as RepositoryWorkingFolderBindingError,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project_operations import (
@@ -520,6 +532,7 @@ def _service(
                 session_manager=session_manager
             ),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         repository=project_repository,
         runtime_target_resolver=(
@@ -562,6 +575,7 @@ def _repository_owned_service(
                 or SkillStateRepository(session_manager=session_manager)
             ),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         repository=project_repository,
         runtime_target_resolver=_FakeRuntimeTargetResolver(
@@ -592,8 +606,8 @@ def _runtime_target(fixture: _RuntimeFixture) -> RuntimeOperationTarget:
 class TestSessionWorkspaceProjectService:
     """SessionWorkspaceProjectService tests."""
 
-    async def test_final_registration_uses_agent_first_lock_order(self) -> None:
-        """Final Project authorization locks Agent before Session and membership."""
+    async def test_final_registration_uses_plain_scoped_authorization(self) -> None:
+        """Final Project authorization reads scoped Agent, Session, and membership."""
         calls: list[str] = []
         transaction = AsyncMock(spec=AsyncSession)
         session_manager = _SessionManager(transaction)
@@ -633,24 +647,10 @@ class TestSessionWorkspaceProjectService:
             calls.append("membership")
             return object()
 
-        async def resolve_binding(
-            session: WriteSession,
-            *,
-            agent: Agent,
-            session_id: str,
-            target: SessionWorkingFolderTarget,
-            bind_pending: bool,
-        ) -> RepositoryWorkingFolderAuthority:
-            del session, agent, session_id, target, bind_pending
-            calls.append("binding")
-            raise RepositoryWorkingFolderBindingError("test_stop")
-
-        agent_repository.lock_by_id.side_effect = lock_agent
-        session_repository.lock_by_id.side_effect = lock_session
-        membership_repository.lock_by_workspace_and_user.side_effect = lock_membership
-        binding_repository.resolve_locked_authority_in_session.side_effect = (
-            resolve_binding
-        )
+        agent_repository.get_by_id.side_effect = lock_agent
+        session_repository.get_by_id.side_effect = lock_session
+        membership_repository.get_by_workspace_and_user.side_effect = lock_membership
+        binding_repository.project_bound_authority_in_session.return_value = None
         repository = SessionWorkspaceProjectOperationsRepository(
             project_repository=AsyncMock(spec=SessionWorkspaceProjectRepository),
             agent_repository=agent_repository,
@@ -661,6 +661,7 @@ class TestSessionWorkspaceProjectService:
             binding_repository=binding_repository,
             skill_state_repository=AsyncMock(spec=SkillStateRepository),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         )
 
         result = await repository.register_existing_project(
@@ -680,7 +681,7 @@ class TestSessionWorkspaceProjectService:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, ProjectBindingUnavailable)
-        assert calls == ["agent", "session", "membership", "binding"]
+        assert calls == ["agent", "session", "membership"]
 
     def test_normalize_rejects_workspace_root(self) -> None:
         """Session Workspace root itself cannot become Project."""
@@ -1731,3 +1732,150 @@ class TestSessionWorkspaceProjectService:
                 created.value.id,
             )
         assert stored is None
+
+
+@pytest.mark.asyncio
+async def test_bound_project_management_survives_held_ancestor_mutation_locks(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> None:
+    """PENDING creation binds; later BOUND registration and reads avoid locks."""
+    writes = create_read_write_session_manager(rdb_engine)
+    reads = create_read_only_session_manager(rdb_engine)
+    slug = f"project-lag-{uuid4().hex}"
+    async with writes() as session:
+        workspace_id = await _create_workspace(session, slug)
+        fixture = await _create_runtime_fixture(session, workspace_id, slug)
+        user_id = await _create_workspace_user(
+            session, workspace_id=workspace_id, email=f"{slug}@example.com"
+        )
+    target = SessionWorkingFolderTarget(
+        id=fixture.runtime_id,
+        capability_snapshot_version=1,
+        runtime_target_capability_version=1,
+        workspace_path="/workspace/agent",
+    )
+    service = _repository_owned_service(writes, runtime_target=_runtime_target(fixture))
+    operations = dataclasses.replace(
+        service.operations_repository, read_session_manager=reads
+    )
+    context = ProjectDatabaseContext(
+        agent_id=fixture.agent_id, session_id=fixture.session_id
+    )
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def holder() -> None:
+        async with writes() as session:
+            # NO KEY UPDATE models parent status/config mutation and still permits
+            # PostgreSQL FK KEY SHARE checks from actual child insertion.
+            for model, predicate in (
+                (RDBAgent, RDBAgent.id == fixture.agent_id),
+                (RDBAgentSession, RDBAgentSession.id == fixture.session_id),
+                (
+                    RDBSessionAgentContext,
+                    RDBSessionAgentContext.agent_id == fixture.agent_id,
+                ),
+                (
+                    RDBSessionAgent,
+                    RDBSessionAgent.agent_session_id == fixture.session_id,
+                ),
+                (
+                    RDBWorkspaceUser,
+                    sa.and_(
+                        RDBWorkspaceUser.workspace_id == workspace_id,
+                        RDBWorkspaceUser.user_id == user_id,
+                    ),
+                ),
+            ):
+                await session.write_session.execute(
+                    sa.select(model).where(predicate).with_for_update(key_share=True)
+                )
+            held.set()
+            await release.wait()
+
+    task: asyncio.Task[None] | None = None
+    try:
+        async with reads() as session:
+            pending = await (
+                AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session, session_id=fixture.session_id
+                )
+            )
+            assert pending is not None
+            assert pending.binding_state is SessionWorkingFolderBindingState.PENDING
+        created = await operations.create_project(
+            context=context, path="/workspace/agent/initial", target=target
+        )
+        assert isinstance(created, Success)
+        async with reads() as session:
+            bound = await (
+                AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session, session_id=fixture.session_id
+                )
+            )
+            assert bound is not None
+            assert bound.binding_state is SessionWorkingFolderBindingState.BOUND
+        task = asyncio.create_task(holder())
+        await asyncio.wait_for(held.wait(), timeout=5)
+        registered = await asyncio.wait_for(
+            operations.register_existing_project(
+                context=context,
+                user_id=user_id,
+                path="/workspace/agent/registered",
+                target=target,
+            ),
+            timeout=5,
+        )
+        assert isinstance(registered, Success)
+        listed = await asyncio.wait_for(
+            operations.list_accessible_projects(
+                context=context, user_id=user_id, target=target
+            ),
+            timeout=5,
+        )
+        assert isinstance(listed, Success)
+        assert {project.path for project in listed.value} == {
+            "/workspace/agent/initial",
+            "/workspace/agent/registered",
+        }
+        assert not release.is_set()
+    finally:
+        release.set()
+        if task is not None:
+            await task
+        async with writes() as session:
+            context_ids = sa.select(RDBSessionAgentContext.id).where(
+                RDBSessionAgentContext.agent_id == fixture.agent_id
+            )
+            await session.write_session.execute(
+                sa.delete(RDBSessionAgentContextProject).where(
+                    RDBSessionAgentContextProject.session_agent_context_id.in_(
+                        context_ids
+                    )
+                )
+            )
+            await session.write_session.execute(
+                sa.update(RDBSessionAgentContext)
+                .where(RDBSessionAgentContext.agent_id == fixture.agent_id)
+                .values(root_session_agent_id=None)
+            )
+            for model, predicate in (
+                (
+                    RDBSessionAgent,
+                    RDBSessionAgent.agent_session_id == fixture.session_id,
+                ),
+                (
+                    RDBSessionAgentContext,
+                    RDBSessionAgentContext.agent_id == fixture.agent_id,
+                ),
+                (RDBAgentSession, RDBAgentSession.id == fixture.session_id),
+                (RDBAgentRuntime, RDBAgentRuntime.id == fixture.runtime_id),
+                (RDBAgent, RDBAgent.id == fixture.agent_id),
+                (
+                    RDBLLMProviderIntegration,
+                    RDBLLMProviderIntegration.workspace_id == workspace_id,
+                ),
+                (RDBWorkspaceUser, RDBWorkspaceUser.workspace_id == workspace_id),
+                (RDBWorkspace, RDBWorkspace.id == workspace_id),
+                (RDBUser, RDBUser.id == user_id),
+            ):
+                await session.write_session.execute(sa.delete(model).where(predicate))

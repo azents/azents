@@ -20,7 +20,7 @@ from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     ActiveProfileCaptureRequired,
@@ -222,18 +222,8 @@ class SessionModelProfileRepository:
         )
         if root is None or root.agent_session_id != locked.id:
             raise ValueError("AgentSession root lineage is invalid")
-        membership = (
-            await self.workspace_user_repository.lock_by_workspace_and_user_nowait(
-                session,
-                workspace_id=locked.workspace_id,
-                user_id=user_id,
-            )
-            if nowait
-            else await self.workspace_user_repository.lock_by_workspace_and_user(
-                session,
-                workspace_id=locked.workspace_id,
-                user_id=user_id,
-            )
+        membership = await self.workspace_user_repository.get_by_workspace_and_user(
+            session, workspace_id=locked.workspace_id, user_id=user_id
         )
         if membership is None:
             raise ValueError("Requester does not have session access")
@@ -241,7 +231,7 @@ class SessionModelProfileRepository:
 
     async def get_readable_root(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,

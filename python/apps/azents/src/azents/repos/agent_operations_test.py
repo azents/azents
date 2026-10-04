@@ -98,8 +98,8 @@ async def test_agent_atomic_operations_close_before_returning() -> None:
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     workspace_user_repository = AsyncMock(spec=WorkspaceUserRepository)
     availability_repository = AsyncMock(spec=RuntimeProfileAvailabilityRepository)
-    agent_repository.lock_by_id.return_value = agent
-    workspace_user_repository.get_for_update.return_value = SimpleNamespace(
+    agent_repository.get_by_id.return_value = agent
+    workspace_user_repository.get.return_value = SimpleNamespace(
         workspace_id=agent.workspace_id,
         role=WorkspaceUserRole.OWNER,
     )
@@ -253,12 +253,12 @@ async def test_update_rejects_revoked_admin_before_mutation() -> None:
     agent_repository = AsyncMock(spec=AgentRepository)
     admin_repository = AsyncMock(spec=AgentAdminRepository)
     workspace_user_repository = AsyncMock(spec=WorkspaceUserRepository)
-    agent_repository.lock_by_id.return_value = agent
-    workspace_user_repository.get_for_update.return_value = SimpleNamespace(
+    agent_repository.get_by_id.return_value = agent
+    workspace_user_repository.get.return_value = SimpleNamespace(
         workspace_id=agent.workspace_id,
         role=WorkspaceUserRole.MEMBER,
     )
-    admin_repository.is_admin_for_update.return_value = False
+    admin_repository.is_admin.return_value = False
     repository = AgentOperationsRepository(
         session_manager=session_manager,
         agent_repository=agent_repository,

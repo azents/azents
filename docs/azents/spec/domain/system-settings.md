@@ -55,8 +55,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-02
-spec_version: 8
+last_verified_at: 2026-10-04
+spec_version: 9
 ---
 
 # System Settings
@@ -171,6 +171,22 @@ A direct Section mutation validates and activates the merged Admin base in the s
 serialized transaction. It still requires `expected_version`, increments the Admin
 version, and appends the normal activation audit event, but it creates no candidate,
 confirmation, or health workflow.
+
+Ordinary current/candidate/state descriptions use independent read-only scopes;
+an expired candidate is absent in the description without cleanup writes.
+Current publication is conditioned on its existing version, candidate replacement
+is atomic at the unique Section, and activation consumes the exact candidate ID
+before current-version publication in the same transaction. A replaced candidate
+or stale current version cannot win activation; failure rolls back consumption.
+Generic Section advisory serialization is not inherited by these reads.
+
+Slack/Discord identity OAuth publication retains the same narrow Section fence
+as exact callback claim and link finalization, including environment-backed
+absent current rows. Optional platform default initialization and pending
+PLATFORM_RUNTIME candidate creation share only their actual initialization claim;
+ordinary administrator current writes retain version CAS. A losing optional
+initializer leaves the concurrently configured default and provider reconciliation
+intact.
 
 ### Health and audit
 

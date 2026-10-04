@@ -1,9 +1,18 @@
 """Toolkit namespace allocation repository tests."""
 
-import sqlalchemy as sa
+import asyncio
 
-from azents.rdb.session_capabilities import WriteSession
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
+from azents.repos.toolkit_namespace_data import AgentToolkitNamespaceReservation
 
 
 async def _seed_namespace_fixture(session: WriteSession) -> None:
@@ -230,3 +239,47 @@ async def test_toolkit_delete_retires_reservation_via_foreign_key(
         )
     ).one()
     assert row == (None, "mcp")
+
+
+async def test_distinct_toolkits_claim_unique_namespace_and_reuse_without_agent_lock(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Competing identities serialize only allocation; a matching reuse is a read."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    repository = ToolkitNamespaceRepository()
+    async with manager() as session:
+        await _seed_namespace_fixture(session)
+    try:
+
+        async def allocate(toolkit_id: str) -> AgentToolkitNamespaceReservation:
+            async with manager() as session:
+                return await repository.ensure_active(
+                    session,
+                    agent_id="agent-namespace",
+                    toolkit_id=toolkit_id,
+                    base_slug="duplicate",
+                )
+
+        first, second = await asyncio.gather(
+            allocate("toolkit-namespace-a"), allocate("toolkit-namespace-b")
+        )
+        assert {first.namespace, second.namespace} == {"duplicate", "duplicate_2"}
+        async with manager() as holder:
+            await holder.write_session.execute(
+                sa.select(RDBAgent.id)
+                .where(RDBAgent.id == "agent-namespace")
+                .with_for_update()
+            )
+            async with asyncio.timeout(5):
+                reused = await allocate("toolkit-namespace-a")
+            assert reused.id == first.id
+    finally:
+        async with manager() as session:
+            await session.write_session.execute(
+                sa.delete(RDBAgent).where(RDBAgent.id == "agent-namespace")
+            )
+            await session.write_session.execute(
+                sa.delete(RDBWorkspace).where(RDBWorkspace.id == "workspace-namespace")
+            )

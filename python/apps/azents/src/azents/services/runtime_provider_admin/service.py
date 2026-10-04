@@ -74,7 +74,6 @@ class RuntimeProviderAdminService:
             provider = await self.repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_id,
-                for_update=False,
             )
         if provider is None:
             raise RuntimeProviderAdminUnavailable(
@@ -92,7 +91,6 @@ class RuntimeProviderAdminService:
             provider = await self.repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_id,
-                for_update=False,
             )
             if provider is None:
                 raise RuntimeProviderAdminUnavailable(
@@ -125,7 +123,6 @@ class RuntimeProviderAdminService:
             provider = await self.repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_id,
-                for_update=False,
             )
             if provider is None:
                 raise RuntimeProviderAdminUnavailable(
@@ -165,7 +162,6 @@ class RuntimeProviderAdminService:
             provider = await self.repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_id,
-                for_update=False,
             )
             if provider is None:
                 raise RuntimeProviderAdminUnavailable(

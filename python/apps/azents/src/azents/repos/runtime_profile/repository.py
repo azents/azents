@@ -341,12 +341,10 @@ class RuntimeProfileRepository:
     ) -> RuntimeInfrastructureProfileDeleteOutcome:
         """Delete one unreferenced Profile and terminalize target recreation."""
         profile = await session.write_session.scalar(
-            sa.select(RDBRuntimeInfrastructureProfile)
-            .where(
+            sa.select(RDBRuntimeInfrastructureProfile).where(
                 RDBRuntimeInfrastructureProfile.id == profile_id,
                 RDBRuntimeInfrastructureProfile.provider_id == provider_id,
             )
-            .with_for_update()
         )
         if profile is None:
             return RuntimeInfrastructureProfileDeleteOutcome(
@@ -377,6 +375,23 @@ class RuntimeProfileRepository:
                 deletion=None,
                 current_profile=current_profile,
                 blocking_reference_count=blocking_reference_count,
+            )
+
+        deleted = await session.write_session.scalar(
+            sa.delete(RDBRuntimeInfrastructureProfile)
+            .where(
+                RDBRuntimeInfrastructureProfile.id == profile_id,
+                RDBRuntimeInfrastructureProfile.provider_id == provider_id,
+                RDBRuntimeInfrastructureProfile.version == expected_version,
+            )
+            .returning(RDBRuntimeInfrastructureProfile.id)
+        )
+        if deleted is None:
+            latest = await self.get_infrastructure_profile(
+                session, profile_id=profile_id
+            )
+            return RuntimeInfrastructureProfileDeleteOutcome(
+                deletion=None, current_profile=latest, blocking_reference_count=0
             )
 
         operations = list(
@@ -433,7 +448,6 @@ class RuntimeProfileRepository:
             operation.status = RuntimeRecreationOperationStatus.COMPLETED
             operation.completed_at = now
 
-        await session.write_session.delete(profile)
         await session.write_session.flush()
         return RuntimeInfrastructureProfileDeleteOutcome(
             deletion=RuntimeInfrastructureProfileDeletion(
@@ -574,9 +588,7 @@ class RuntimeProfileRepository:
     ) -> WorkspaceRuntimeProfileDeleteOutcome:
         """Delete one exact Profile and atomically clear all live authority."""
         workspace = await session.write_session.scalar(
-            sa.select(RDBWorkspace)
-            .where(RDBWorkspace.id == workspace_id)
-            .with_for_update()
+            sa.select(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
         )
         if workspace is None:
             return WorkspaceRuntimeProfileDeleteOutcome(
@@ -584,12 +596,10 @@ class RuntimeProfileRepository:
                 current_profile=None,
             )
         profile = await session.write_session.scalar(
-            sa.select(RDBWorkspaceRuntimeProfile)
-            .where(
+            sa.select(RDBWorkspaceRuntimeProfile).where(
                 RDBWorkspaceRuntimeProfile.id == profile_id,
                 RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
             )
-            .with_for_update()
         )
         if profile is None:
             return WorkspaceRuntimeProfileDeleteOutcome(
@@ -603,12 +613,52 @@ class RuntimeProfileRepository:
                 current_profile=current_profile,
             )
 
+        # Claim this exact expected-version deletion through its actual revision
+        # transition, before the dependent selection/generation mutations.
+        claimed = await session.write_session.scalar(
+            sa.update(RDBWorkspaceRuntimeProfile)
+            .where(
+                RDBWorkspaceRuntimeProfile.id == profile_id,
+                RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                RDBWorkspaceRuntimeProfile.version == expected_version,
+            )
+            .values(version=RDBWorkspaceRuntimeProfile.version + 1)
+            .returning(RDBWorkspaceRuntimeProfile.id)
+        )
+        if claimed is None:
+            latest = await session.read_session.scalar(
+                sa.select(RDBWorkspaceRuntimeProfile)
+                .where(
+                    RDBWorkspaceRuntimeProfile.id == profile_id,
+                    RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                )
+                .execution_options(populate_existing=True)
+            )
+            return WorkspaceRuntimeProfileDeleteOutcome(
+                deletion=None,
+                current_profile=(
+                    self._build_workspace_profile(latest)
+                    if latest is not None
+                    else None
+                ),
+            )
+
         now = tznow()
-        cleared_workspace_default = workspace.default_runtime_profile_id == profile_id
-        if cleared_workspace_default:
-            workspace.default_runtime_profile_id = None
-            workspace.default_runtime_profile_version += 1
-            workspace.updated_at = now
+        cleared_default = await session.write_session.scalar(
+            sa.update(RDBWorkspace)
+            .where(
+                RDBWorkspace.id == workspace_id,
+                RDBWorkspace.default_runtime_profile_id == profile_id,
+            )
+            .values(
+                default_runtime_profile_id=None,
+                default_runtime_profile_version=RDBWorkspace.default_runtime_profile_version
+                + 1,
+                updated_at=now,
+            )
+            .returning(RDBWorkspace.id)
+        )
+        cleared_workspace_default = cleared_default is not None
 
         agents = list(
             (

@@ -11,6 +11,7 @@ from azents.core.system_setting import (
     SystemDataMigrationOutcome,
     SystemSettingSection,
     SystemSettingValidationStatus,
+    SystemSettingVersionConflict,
 )
 from azents.core.system_setting_data import (
     StoredSystemDataMigration,
@@ -74,7 +75,61 @@ class SystemSettingRepository:
         *,
         write: SystemSettingCurrentWrite,
     ) -> StoredSystemSetting:
-        """Insert or replace current Section state."""
+        """Conditionally publish current Section state at its existing version."""
+        if write.section in {
+            SystemSettingSection.SLACK_IDENTITY_OAUTH,
+            SystemSettingSection.DISCORD_IDENTITY_OAUTH,
+        }:
+            # These writers must exclude exact OAuth claim/link finalization
+            # through commit, including environment-backed absent current rows.
+            await self.acquire_section_lock(session, section=write.section)
+        stored = await self._write_current_if_unchanged(session, write=write)
+        if stored is None:
+            current = await self.get_current(session, section=write.section)
+            raise SystemSettingVersionConflict(
+                section=write.section,
+                expected_version=write.version - 1,
+                current_version=current.version if current is not None else 0,
+            )
+        return stored
+
+    async def acquire_platform_runtime_initialization_claim(
+        self, session: WriteSession
+    ) -> None:
+        """Order optional default initialization against new candidate intent."""
+        await session.write_session.execute(
+            sa.select(
+                sa.func.pg_advisory_xact_lock(
+                    _advisory_lock_id(
+                        "platform-runtime-initialization",
+                        SystemSettingSection.PLATFORM_RUNTIME.value,
+                    )
+                )
+            )
+        )
+
+    async def initialize_current_if_unchanged(
+        self,
+        session: WriteSession,
+        *,
+        write: SystemSettingCurrentWrite,
+    ) -> StoredSystemSetting | None:
+        """Publish an optional Platform default only without pending intent."""
+        if write.section is not SystemSettingSection.PLATFORM_RUNTIME:
+            raise ValueError("Optional initialization requires Platform Runtime.")
+        await self.acquire_platform_runtime_initialization_claim(session)
+        candidate = await self.get_candidate(session, section=write.section)
+        if candidate is not None:
+            return None
+        return await self._write_current_if_unchanged(session, write=write)
+
+    async def _write_current_if_unchanged(
+        self,
+        session: WriteSession,
+        *,
+        write: SystemSettingCurrentWrite,
+    ) -> StoredSystemSetting | None:
+        """Return the published state or an exact expected-version CAS loss."""
         statement = (
             insert(RDBSystemSetting)
             .values(
@@ -92,6 +147,7 @@ class SystemSettingRepository:
             )
             .on_conflict_do_update(
                 index_elements=[RDBSystemSetting.section],
+                where=RDBSystemSetting.version == write.version - 1,
                 set_={
                     "schema_version": write.schema_version,
                     "version": write.version,
@@ -109,7 +165,8 @@ class SystemSettingRepository:
             .returning(RDBSystemSetting)
         )
         result = await session.write_session.execute(statement)
-        return self._build_current(result.scalar_one())
+        row = result.scalar_one_or_none()
+        return self._build_current(row) if row is not None else None
 
     async def get_candidate(
         self,
@@ -132,13 +189,18 @@ class SystemSettingRepository:
         *,
         create: SystemSettingCandidateCreate,
     ) -> StoredSystemSettingCandidate:
-        """Delete any previous candidate and store the replacement."""
-        await session.write_session.execute(
-            sa.delete(RDBSystemSettingCandidate).where(
-                RDBSystemSettingCandidate.section == create.section
-            )
-        )
-        rdb = RDBSystemSettingCandidate(
+        """Replace the candidate atomically at its unique Section boundary."""
+        if create.section is SystemSettingSection.PLATFORM_RUNTIME:
+            await self.acquire_platform_runtime_initialization_claim(session)
+            current = await self.get_current(session, section=create.section)
+            current_version = current.version if current is not None else 0
+            if current_version != create.base_version:
+                raise SystemSettingVersionConflict(
+                    section=create.section,
+                    expected_version=create.base_version,
+                    current_version=current_version,
+                )
+        statement = insert(RDBSystemSettingCandidate).values(
             id=create.id,
             section=create.section,
             schema_version=create.schema_version,
@@ -158,9 +220,30 @@ class SystemSettingRepository:
             impact=None,
             created_by_user_id=create.created_by_user_id,
         )
-        session.write_session.add(rdb)
-        await session.write_session.flush()
-        return self._build_candidate(rdb)
+        statement = statement.on_conflict_do_update(
+            index_elements=[RDBSystemSettingCandidate.section],
+            set_={
+                "id": statement.excluded.id,
+                "schema_version": statement.excluded.schema_version,
+                "base_version": statement.excluded.base_version,
+                "config": statement.excluded.config,
+                "validation_status": statement.excluded.validation_status,
+                "created_at": statement.excluded.created_at,
+                "updated_at": statement.excluded.updated_at,
+                "expires_at": statement.excluded.expires_at,
+                "encrypted_secrets": statement.excluded.encrypted_secrets,
+                "secret_metadata": statement.excluded.secret_metadata,
+                "validated_generation": statement.excluded.validated_generation,
+                "validation_code": statement.excluded.validation_code,
+                "validation_message": statement.excluded.validation_message,
+                "action_hint": statement.excluded.action_hint,
+                "validation_metadata": statement.excluded.validation_metadata,
+                "impact": statement.excluded.impact,
+                "created_by_user_id": statement.excluded.created_by_user_id,
+            },
+        ).returning(RDBSystemSettingCandidate)
+        row = (await session.write_session.execute(statement)).scalar_one()
+        return self._build_candidate(row)
 
     async def update_candidate_validation(
         self,

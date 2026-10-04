@@ -61,9 +61,9 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
         )
 
     updated = SimpleNamespace(slug="duplicate")
-    toolkit_repo.get_by_id_for_update.side_effect = load_toolkit
+    toolkit_repo.get_by_id.side_effect = load_toolkit
     toolkit_repo.update_by_id.return_value = Success(updated)
-    agent_repo.lock_by_id.side_effect = load_agent
+    agent_repo.get_by_id.side_effect = load_agent
     repository = AgentToolkitOperationsRepository(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=AsyncMock(spec=MCPOAuthConnectionRepository),
@@ -96,12 +96,12 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
         base_slug="duplicate",
     )
 
-    toolkit_repo.get_by_id_for_update.side_effect = None
-    toolkit_repo.get_by_id_for_update.return_value = SimpleNamespace(
+    toolkit_repo.get_by_id.side_effect = None
+    toolkit_repo.get_by_id.return_value = SimpleNamespace(
         owner_agent_id="another-agent",
         workspace_id="workspace-1",
     )
-    agent_repo.lock_by_id.reset_mock()
+    agent_repo.get_by_id.reset_mock()
     toolkit_repo.update_by_id.reset_mock()
     result = await repository.update_agent_owned(
         "agent-1",
@@ -115,7 +115,7 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
     )
 
     assert result == Failure(NotFound(toolkit_id="toolkit-1"))
-    agent_repo.lock_by_id.assert_not_awaited()
+    agent_repo.get_by_id.assert_not_awaited()
     toolkit_repo.update_by_id.assert_not_awaited()
 
 
@@ -135,12 +135,12 @@ async def test_owned_blank_slug_reset_uses_locked_current_name() -> None:
         slug="old",
     )
     toolkit_repo = AsyncMock(spec=ToolkitRepository)
-    toolkit_repo.get_by_id_for_update.return_value = toolkit
+    toolkit_repo.get_by_id.return_value = toolkit
     toolkit_repo.update_by_id.return_value = Success(
         SimpleNamespace(slug="current_production")
     )
     agent_repo = AsyncMock(spec=AgentRepository)
-    agent_repo.lock_by_id.return_value = SimpleNamespace(
+    agent_repo.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
     )

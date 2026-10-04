@@ -44,7 +44,7 @@ from azents.core.system_setting_data import (
     SystemSettingState,
 )
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.github_platform_system_setting.data import (
@@ -62,6 +62,9 @@ class SystemSettingsRepository:
 
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
     repository: Annotated[SystemSettingRepository, Depends(SystemSettingRepository)]
     payloads: Annotated[
@@ -89,10 +92,13 @@ class SystemSettingsRepository:
         definition = self.payloads.registry.get(mutation.section)
         now = tznow()
         async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(
-                session,
-                section=mutation.section,
-            )
+            if (
+                mutation.section is SystemSettingSection.PLATFORM_RUNTIME
+                and definition.activation_mode is not SystemSettingActivationMode.DIRECT
+            ):
+                await self.repository.acquire_platform_runtime_initialization_claim(
+                    session
+                )
             current = await self.repository.get_current(
                 session,
                 section=mutation.section,
@@ -256,17 +262,15 @@ class SystemSettingsRepository:
         self,
         section: SystemSettingSection,
     ) -> StoredSystemSettingCandidate | None:
-        """Return a non-expired candidate, deleting expired ciphertext."""
-        definition = self.payloads.registry.get(section)
+        """Describe a retained non-expired candidate without read-side cleanup."""
         now = tznow()
-        async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
-            await self._delete_expired_candidate(
-                session=session,
-                definition=definition,
-                now=now,
+        async with self.read_session_manager() as session:
+            candidate = await self.repository.get_candidate(session, section=section)
+            return (
+                candidate
+                if candidate is not None and candidate.expires_at > now
+                else None
             )
-            return await self.repository.get_candidate(session, section=section)
 
     async def get_state(
         self,
@@ -275,15 +279,11 @@ class SystemSettingsRepository:
         """Return current internal state for a redacted domain projection."""
         definition = self.payloads.registry.get(section)
         now = tznow()
-        async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
-            await self._delete_expired_candidate(
-                session=session,
-                definition=definition,
-                now=now,
-            )
+        async with self.read_session_manager() as session:
             current = await self.repository.get_current(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
+            if candidate is not None and candidate.expires_at <= now:
+                candidate = None
             health = await self.repository.get_health(session, section=section)
             resolved = self.payloads.resolve_current(
                 definition=definition, current=current
@@ -312,7 +312,6 @@ class SystemSettingsRepository:
         expired_candidate_id: str | None = None
         snapshot: SystemSettingCandidateValidationSnapshot | None = None
         async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
             if candidate is None:
                 if candidate_id is not None:
@@ -377,7 +376,6 @@ class SystemSettingsRepository:
         expired_candidate_id: str | None = None
         activated: SystemSettingActivated | None = None
         async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
             if candidate is None or candidate.id != candidate_id:
                 raise SystemSettingCandidateNotFound(section=section)
@@ -503,7 +501,6 @@ class SystemSettingsRepository:
         now = tznow()
         expired = False
         async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
             if candidate is None or candidate.id != candidate_id:
                 raise SystemSettingCandidateNotFound(section=section)
@@ -572,7 +569,6 @@ class SystemSettingsRepository:
         now = tznow()
         definition = self.payloads.registry.get(section)
         async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
             current = await self.repository.get_current(session, section=section)
             resolved = self.payloads.resolve_current(
                 definition=definition, current=current
@@ -637,7 +633,6 @@ class SystemSettingsRepository:
         expired_candidate_id: str | None = None
         output: SystemSettingMutationResult | None = None
         async with self.session_manager() as session:
-            await self.repository.acquire_section_lock(session, section=section)
             candidate = await self.repository.get_candidate(session, section=section)
             if candidate is None:
                 raise SystemSettingCandidateReplaced(
@@ -757,6 +752,13 @@ class SystemSettingsRepository:
         confirmation_action: str | None,
         now: datetime.datetime,
     ) -> SystemSettingActivated:
+        consumed = await self.repository.delete_candidate(
+            session, section=candidate.section, candidate_id=candidate.id
+        )
+        if not consumed:
+            raise SystemSettingCandidateReplaced(
+                section=candidate.section, candidate_id=candidate.id
+            )
         new_version = candidate.base_version + 1
         current = await self.repository.write_current(
             session,
@@ -773,11 +775,6 @@ class SystemSettingsRepository:
                 validated_at=now,
                 updated_by_user_id=actor_user_id,
             ),
-        )
-        await self.repository.delete_candidate(
-            session,
-            section=candidate.section,
-            candidate_id=candidate.id,
         )
         await self.repository.append_audit_event(
             session,

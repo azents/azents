@@ -123,19 +123,22 @@ class ToolkitRepository:
             return None
         return self._build(rdb)
 
-    async def get_by_id_for_update(
+    async def claim_shared_namespace_mutation(
         self,
         session: WriteSession,
         toolkit_id: str,
     ) -> ToolkitConfig | None:
-        """Fetch and lock one ToolkitConfig."""
-        result = await session.write_session.execute(
+        """Fence actual shared attachment/slug namespace identity allocation (E1)."""
+        row = await session.write_session.scalar(
             sa.select(RDBToolkitConfig)
-            .where(RDBToolkitConfig.id == toolkit_id)
+            .where(
+                RDBToolkitConfig.id == toolkit_id,
+                RDBToolkitConfig.owner_agent_id.is_(None),
+            )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        rdb = result.scalar_one_or_none()
-        return self._build(rdb) if rdb is not None else None
+        return None if row is None else self._build(row)
 
     async def get_shared_by_id(
         self,
@@ -148,23 +151,6 @@ class ToolkitRepository:
                 RDBToolkitConfig.id == toolkit_id,
                 RDBToolkitConfig.owner_agent_id.is_(None),
             )
-        )
-        rdb = result.scalar_one_or_none()
-        return self._build(rdb) if rdb is not None else None
-
-    async def get_shared_by_id_for_update(
-        self,
-        session: WriteSession,
-        toolkit_id: str,
-    ) -> ToolkitConfig | None:
-        """Fetch and lock one Workspace-shared ToolkitConfig."""
-        result = await session.write_session.execute(
-            sa.select(RDBToolkitConfig)
-            .where(
-                RDBToolkitConfig.id == toolkit_id,
-                RDBToolkitConfig.owner_agent_id.is_(None),
-            )
-            .with_for_update()
         )
         rdb = result.scalar_one_or_none()
         return self._build(rdb) if rdb is not None else None

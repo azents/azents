@@ -2,6 +2,7 @@
 
 import sqlalchemy as sa
 
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.toolkit import (
     RDBAgentToolkitNamespaceReservation,
     RDBAgentToolkitNamespaceSequence,
@@ -40,12 +41,21 @@ class ToolkitNamespaceRepository:
     ) -> AgentToolkitNamespaceReservation:
         """Reuse a matching active reservation or allocate a new one.
 
-        The caller must hold the Agent row lock for the complete transaction.
+        Reuse reads are unlocked. Actual allocation takes only its Agent claim
+        fence (E1), then rechecks the reservation before assigning durable identity.
         """
         existing = await self.get_active(
             session,
             agent_id=agent_id,
             toolkit_id=toolkit_id,
+        )
+        if existing is not None and existing.base_slug == base_slug:
+            return existing
+        await session.write_session.execute(
+            sa.select(RDBAgent.id).where(RDBAgent.id == agent_id).with_for_update()
+        )
+        existing = await self.get_active(
+            session, agent_id=agent_id, toolkit_id=toolkit_id
         )
         if existing is not None and existing.base_slug == base_slug:
             return existing

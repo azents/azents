@@ -913,7 +913,6 @@ class AgentRuntimeService:
                         session,
                         provider_id=desired_document.provider_id,
                         now=tznow(),
-                        for_update=True,
                     )
                 )
                 if not provider_connected:

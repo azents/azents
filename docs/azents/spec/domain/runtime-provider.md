@@ -60,7 +60,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-04
-spec_version: 35
+spec_version: 36
 ---
 
 # Runtime Provider
@@ -125,6 +125,15 @@ changing the selected row, and preserve absent-reference results. These
 descriptive reads do not provide globally latest or atomic multi-read authority.
 Actual Runtime/configuration mutations retain their admission, generation/version
 checks and mutation fencing; a lag-tolerant read is not permission to bypass them.
+
+Provider, binding, declaration and connection descriptions expose no hidden
+`for_update` mode. Ordinary policy updates use scoped database version increments
+and RETURNING; whole Workspace availability replacement serializes through its
+actual Provider update and replaces the set atomically. Administrative Profile
+deletion/default clearing uses exact existing version and reference conditions.
+Bootstrap reconciliation, enrollment/credential consumption, contract publication
+and generation-sensitive recreation retain separately named operation guards,
+not read-getter flags.
 
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
 

@@ -53,7 +53,7 @@ class SecurityOperationRepository:
         async with self.session_manager() as session:
             if await self.user_repository.get(session, user_id) is None:
                 return False
-            await session.read_session.execute(
+            await session.write_session.execute(
                 insert(RDBPasswordLogin)
                 .values(id=uuid7().hex, user_id=user_id, password_hash=password_hash)
                 .on_conflict_do_update(

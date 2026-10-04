@@ -1024,6 +1024,7 @@ def _project_operations_repository(
             session_manager=session_manager,
         ),
         session_manager=session_manager,
+        read_session_manager=session_manager,
     )
 
 

@@ -1,12 +1,16 @@
 """Runtime Profile persistence and durable claim tests."""
 
+import asyncio
 import dataclasses
 import datetime
+from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -38,11 +42,18 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeConfigurationState,
+    RDBRuntimeInfrastructureProfile,
     RDBRuntimeRecreationOperation,
     RDBRuntimeRecreationOperationItem,
+    RDBWorkspaceRuntimeProfile,
 )
+from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -1609,3 +1620,112 @@ async def test_recreation_claim_respects_existing_global_concurrency(
         assert completed.succeeded_count == 1
         assert completed.skipped_count == 1
         assert completed.failed_count == 1
+
+
+@pytest.mark.parametrize("workspace_profile", [False, True])
+async def test_profile_delete_cas_loss_reports_committed_state(
+    rdb_engine: AsyncEngine, latest_db_schema: None, workspace_profile: bool
+) -> None:
+    """A losing delete refreshes the committed version and replacement fields."""
+    writes = create_read_write_session_manager(rdb_engine)
+    repository = RuntimeProfileRepository()
+    slug = f"profile-conflict-{uuid4().hex}"
+    async with writes() as session:
+        provider_id = await _create_provider(session, logical_id=slug)
+        infrastructure = await repository.create_infrastructure_profile(
+            session, create=_infrastructure_create(provider_id)
+        )
+        workspace = RDBWorkspace(name="Profile conflicts", handle=slug)
+        session.write_session.add(workspace)
+        await session.write_session.flush()
+        workspace_id = workspace.id
+        profile_id = infrastructure.id
+        if workspace_profile:
+            profile = await repository.create_workspace_runtime_profile(
+                session,
+                create=WorkspaceRuntimeProfileCreate(
+                    workspace_id=workspace_id,
+                    provider_id=provider_id,
+                    infrastructure_profile_id=infrastructure.id,
+                    display_name="Initial",
+                    description="Initial",
+                    lifecycle=RuntimeProfileLifecycle.ACTIVE,
+                    policy={"schema_version": 1, "network_restriction": None},
+                    terminal_enabled=True,
+                    digest="c" * 64,
+                    actor_workspace_user_id=None,
+                ),
+            )
+            profile_id = profile.id
+    reached, proceed = asyncio.Event(), asyncio.Event()
+
+    async def delete() -> None:
+        async with writes() as session:
+            scalar = session.write_session.scalar
+
+            async def pause_claim(statement: sa.Executable) -> object:
+                if (workspace_profile and isinstance(statement, sa.Update)) or (
+                    not workspace_profile and isinstance(statement, sa.Delete)
+                ):
+                    reached.set()
+                    await proceed.wait()
+                return await scalar(statement)
+
+            with patch.object(session.write_session, "scalar", side_effect=pause_claim):
+                if workspace_profile:
+                    outcome = await repository.delete_workspace_runtime_profile(
+                        session,
+                        workspace_id=workspace_id,
+                        profile_id=profile_id,
+                        expected_version=1,
+                    )
+                else:
+                    outcome = await repository.delete_infrastructure_profile(
+                        session,
+                        provider_id=provider_id,
+                        profile_id=profile_id,
+                        expected_version=1,
+                    )
+            assert outcome.deletion is None
+            assert outcome.current_profile is not None
+            assert outcome.current_profile.version == 3
+            assert outcome.current_profile.display_name == "Committed replacement"
+
+    task = asyncio.create_task(delete())
+    try:
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        async with writes() as session:
+            model = (
+                RDBWorkspaceRuntimeProfile
+                if workspace_profile
+                else RDBRuntimeInfrastructureProfile
+            )
+            # Two competing revisions committed after the deleting ORM read.
+            for _ in range(2):
+                await session.write_session.execute(
+                    sa.update(model)
+                    .where(model.id == profile_id)
+                    .values(
+                        version=model.version + 1,
+                        display_name="Committed replacement",
+                    )
+                )
+        proceed.set()
+        await asyncio.wait_for(task, timeout=5)
+    finally:
+        proceed.set()
+        await task
+        async with writes() as session:
+            for model, predicate in (
+                (
+                    RDBWorkspaceRuntimeProfile,
+                    RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                ),
+                (
+                    RDBRuntimeInfrastructureProfile,
+                    RDBRuntimeInfrastructureProfile.id == infrastructure.id,
+                ),
+                (RDBRuntimeProvider, RDBRuntimeProvider.id == provider_id),
+                (RDBWorkspace, RDBWorkspace.id == workspace_id),
+            ):
+                await session.write_session.execute(sa.delete(model).where(predicate))

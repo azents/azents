@@ -26,20 +26,6 @@ from .data import (
 class RuntimeProviderPolicyRepository:
     """Persist Provider capability and operational configuration revisions."""
 
-    async def acquire_provider_lock(
-        self,
-        session: WriteSession,
-        *,
-        provider_id: str,
-    ) -> bool:
-        """Lock a Provider aggregate before changing its policy revisions."""
-        result = await session.write_session.execute(
-            sa.select(RDBRuntimeProvider.id)
-            .where(RDBRuntimeProvider.id == provider_id)
-            .with_for_update()
-        )
-        return result.scalar_one_or_none() is not None
-
     async def get_contract_by_id(
         self,
         session: ReadSession,

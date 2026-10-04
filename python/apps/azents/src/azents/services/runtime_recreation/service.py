@@ -86,10 +86,9 @@ class RuntimeRecreationService:
     ) -> RuntimeRecreationOperation:
         """Create one exact Provider-scoped recreation operation."""
         async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_provider_id(
+            provider = await self.provider_repository.lock_by_provider_id_for_authority(
                 session,
                 provider_logical_id=provider_logical_id,
-                for_update=True,
             )
             if provider is None:
                 raise RuntimeRecreationUnavailable(
@@ -126,7 +125,6 @@ class RuntimeRecreationService:
             provider = await self.provider_repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_logical_id,
-                for_update=False,
             )
             if provider is None:
                 raise RuntimeRecreationUnavailable(

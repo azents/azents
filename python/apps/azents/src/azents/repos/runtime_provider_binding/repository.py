@@ -50,18 +50,15 @@ class RuntimeProviderAuthBindingRepository:
 
     async def get_by_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         binding_id: str,
-        for_update: bool,
     ) -> RuntimeProviderAuthBinding | None:
         """Get one binding by durable identifier."""
         query = sa.select(RDBRuntimeProviderAuthBinding).where(
             RDBRuntimeProviderAuthBinding.id == binding_id
         )
-        if for_update:
-            query = query.with_for_update()
-        result = await session.write_session.execute(query)
+        result = await session.read_session.execute(query)
         binding = result.scalar_one_or_none()
         return self._build(binding) if binding is not None else None
 
@@ -86,10 +83,9 @@ class RuntimeProviderAuthBindingRepository:
 
     async def get_by_bootstrap_declaration_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         bootstrap_declaration_id: str,
-        for_update: bool,
     ) -> RuntimeProviderAuthBinding | None:
         """Get the binding owned by one bootstrap declaration."""
         query = (
@@ -112,9 +108,7 @@ class RuntimeProviderAuthBindingRepository:
             )
             .limit(1)
         )
-        if for_update:
-            query = query.with_for_update()
-        result = await session.write_session.execute(query)
+        result = await session.read_session.execute(query)
         binding = result.scalar_one_or_none()
         return self._build(binding) if binding is not None else None
 
@@ -278,6 +272,53 @@ class RuntimeProviderAuthBindingRepository:
             .limit(limit)
         )
         return tuple(self._build_audit_event(event) for event in result.scalars())
+
+    async def lock_by_id_for_authority(
+        self,
+        session: WriteSession,
+        *,
+        binding_id: str,
+    ) -> RuntimeProviderAuthBinding | None:
+        """Get one binding by durable identifier."""
+        query = sa.select(RDBRuntimeProviderAuthBinding).where(
+            RDBRuntimeProviderAuthBinding.id == binding_id
+        )
+        query = query.with_for_update()
+        result = await session.write_session.execute(query)
+        binding = result.scalar_one_or_none()
+        return self._build(binding) if binding is not None else None
+
+    async def lock_by_bootstrap_declaration_id_for_authority(
+        self,
+        session: WriteSession,
+        *,
+        bootstrap_declaration_id: str,
+    ) -> RuntimeProviderAuthBinding | None:
+        """Get the binding owned by one bootstrap declaration."""
+        query = (
+            sa.select(RDBRuntimeProviderAuthBinding)
+            .where(
+                RDBRuntimeProviderAuthBinding.bootstrap_declaration_id
+                == bootstrap_declaration_id
+            )
+            .order_by(
+                sa.case(
+                    (
+                        RDBRuntimeProviderAuthBinding.state
+                        == RuntimeProviderBindingState.ACTIVE,
+                        0,
+                    ),
+                    else_=1,
+                ),
+                RDBRuntimeProviderAuthBinding.created_at.desc(),
+                RDBRuntimeProviderAuthBinding.id.desc(),
+            )
+            .limit(1)
+        )
+        query = query.with_for_update()
+        result = await session.write_session.execute(query)
+        binding = result.scalar_one_or_none()
+        return self._build(binding) if binding is not None else None
 
     @staticmethod
     def _build(

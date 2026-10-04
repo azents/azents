@@ -99,8 +99,10 @@ class WorkspaceUserOperationRepository:
             if workspace_id is None:
                 return Failure(WorkspaceNotFound(workspace_id=workspace_handle))
             if role == WorkspaceUserRole.OWNER:
-                locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                    session, workspace_id
+                locked_workspace = (
+                    await self.workspace_repository.acquire_ownership_mutation(
+                        session, workspace_id
+                    )
                 )
                 if locked_workspace is None:
                     return Failure(WorkspaceNotFound(workspace_id=workspace_id))
@@ -171,63 +173,35 @@ class WorkspaceUserOperationRepository:
         workspace_user_id: str,
         role: WorkspaceUserRole,
     ) -> Result[WorkspaceUser, NotFound | WorkspaceUserOwnerLocked]:
-        """Update a non-Owner membership while holding the Workspace lock."""
+        """Reject obsolete role updates at the actual non-owner mutation."""
         async with self.session_manager() as session:
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, target.workspace_id
-            )
-            if locked_workspace is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-            if target.role == WorkspaceUserRole.OWNER:
-                return Failure(WorkspaceUserOwnerLocked())
-
-            result = await self.user_repository.update_role(
+            changed = await self.user_repository.update_non_owner_role(
                 session, workspace_user_id, role
             )
-            match result:
-                case Success(value):
-                    return Success(value)
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(result)
+            if changed is not None:
+                return Success(changed)
+            current = await self.user_repository.get(session, workspace_user_id)
+            if current is None:
+                return Failure(NotFound(workspace_user_id=workspace_user_id))
+            return Failure(WorkspaceUserOwnerLocked())
 
     async def delete_non_owner(
         self, *, workspace_user_id: str
     ) -> Result[DeletedWorkspaceUser, NotFound | WorkspaceUserOwnerLocked]:
-        """Delete a non-Owner membership and archive its lifecycle atomically."""
+        """Delete a still-non-owner membership and archive its lifecycle atomically."""
         async with self.session_manager() as session:
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            locked_workspace = await self.workspace_repository.get_by_id_for_update(
-                session, target.workspace_id
+            deleted = await self.user_repository.delete_non_owner(
+                session, workspace_user_id
             )
-            if locked_workspace is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-
-            target = await self.user_repository.get(session, workspace_user_id)
-            if target is None:
-                return Failure(NotFound(workspace_user_id=workspace_user_id))
-            if target.role == WorkspaceUserRole.OWNER:
+            if deleted is None:
+                current = await self.user_repository.get(session, workspace_user_id)
+                if current is None:
+                    return Failure(NotFound(workspace_user_id=workspace_user_id))
                 return Failure(WorkspaceUserOwnerLocked())
-
-            await self.user_repository.delete(session, workspace_user_id)
             await self.owner_lifecycle_repository.create_or_get_membership_archive(
-                session,
-                workspace_id=target.workspace_id,
-                user_id=target.user_id,
+                session, workspace_id=deleted.workspace_id, user_id=deleted.user_id
             )
-            return Success(DeletedWorkspaceUser(user_id=target.user_id))
+            return Success(DeletedWorkspaceUser(user_id=deleted.user_id))
 
     async def transfer_ownership(
         self,
@@ -279,15 +253,13 @@ class WorkspaceUserOperationRepository:
         WorkspaceNotFound | NotFound | WorkspaceUserOutsideWorkspace,
     ]:
         """Transfer ownership inside the caller-owned repository transaction."""
-        locked_workspace = await self.workspace_repository.get_by_id_for_update(
+        locked_workspace = await self.workspace_repository.acquire_ownership_mutation(
             session, workspace_id
         )
         if locked_workspace is None:
             return Failure(WorkspaceNotFound(workspace_id=workspace_id))
 
-        new_owner = await self.user_repository.get_for_update(
-            session, new_owner_workspace_user_id
-        )
+        new_owner = await self.user_repository.get(session, new_owner_workspace_user_id)
         if new_owner is None:
             return Failure(NotFound(workspace_user_id=new_owner_workspace_user_id))
         if new_owner.workspace_id != workspace_id:
@@ -297,7 +269,7 @@ class WorkspaceUserOperationRepository:
                 )
             )
 
-        current_owner = await self.user_repository.get_owner_by_workspace_for_update(
+        current_owner = await self.user_repository.get_owner_by_workspace(
             session, workspace_id
         )
         if (

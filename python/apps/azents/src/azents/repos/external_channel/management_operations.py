@@ -100,7 +100,6 @@ class ExternalChannelManagementOperationRepository:
                 workspace_id=workspace_id,
                 connection_id=connection_id,
                 provider=provider,
-                lock=True,
             )
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if (
@@ -581,12 +580,11 @@ class ExternalChannelManagementOperationRepository:
         include_disconnected: bool = False,
     ) -> RDBExternalChannelConnection:
         """Lock one Multi App and reject a stale destructive mutation."""
-        connection = await self.repository.get_multi_connection(
+        connection = await self.repository.lock_multi_connection_for_transition(
             session,
             workspace_id=workspace_id,
             connection_id=connection_id,
             provider=provider,
-            lock=True,
             include_disconnected=include_disconnected,
         )
         if connection is None:
@@ -608,12 +606,11 @@ class ExternalChannelManagementOperationRepository:
         """Re-enable a removed Multi App route without reviving old state."""
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
-            connection = await self.repository.get_multi_connection(
+            connection = await self.repository.lock_multi_connection_for_transition(
                 session,
                 workspace_id=workspace_id,
                 connection_id=connection_id,
                 provider=provider,
-                lock=True,
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)

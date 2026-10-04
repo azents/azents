@@ -145,16 +145,13 @@ class _LockFreeRuntimeProviderRepository(RuntimeProviderRepository):
 
     async def get_by_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider_id: str,
-        for_update: bool,
     ) -> RuntimeProvider | None:
-        assert not for_update
         return await super().get_by_id(
             session,
             provider_id=provider_id,
-            for_update=for_update,
         )
 
 
@@ -681,7 +678,7 @@ async def test_independent_getters_allow_read_only_while_writer_holds_rows(
             provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
         provider = await RuntimeProviderRepository().get_by_id(
-            session, provider_id=provider_id, for_update=False
+            session, provider_id=provider_id
         )
         assert provider is not None
         assert provider.current_contract_revision_id is not None

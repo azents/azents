@@ -69,6 +69,7 @@ def _service(
     generic = SystemSettingsService(
         repository=SystemSettingsRepository(
             session_manager=session_manager,
+            read_session_manager=session_manager,
             repository=SystemSettingRepository(),
             payloads=SystemSettingPayloadResolver(
                 registry=get_system_setting_registry(),

@@ -114,7 +114,7 @@ class TestMergeEnvVarCredentials:
         )
         toolkit_repo = MagicMock()
         toolkit_repo.get_shared_by_id = AsyncMock(return_value=existing)
-        toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=existing)
+        toolkit_repo.get_shared_by_id = AsyncMock(return_value=existing)
         toolkit_repo.update_by_id = AsyncMock(return_value=Success(existing))
         session_manager = MagicMock()
         session_manager.return_value = AsyncMock()
@@ -339,7 +339,7 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
     agent = _active_agent()
     agent_repo = MagicMock()
     agent_repo.get_by_id = AsyncMock(return_value=agent)
-    agent_repo.lock_by_id = AsyncMock(return_value=agent)
+    agent_repo.get_by_id = AsyncMock(return_value=agent)
     agent_admin_repo = MagicMock()
     agent_admin_repo.is_admin = AsyncMock()
     agent_toolkit_repo = MagicMock()
@@ -467,9 +467,9 @@ async def test_agent_oauth_store_locks_owner_and_marks_incomplete_flow() -> None
         update={"owner_agent_id": "agent-1"}
     )
     toolkit_repo = MagicMock()
-    toolkit_repo.get_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_by_id = AsyncMock(return_value=toolkit)
     agent_repo = MagicMock()
-    agent_repo.lock_by_id = AsyncMock(return_value=_active_agent())
+    agent_repo.get_by_id = AsyncMock(return_value=_active_agent())
     oauth_repo = MagicMock()
     oauth_repo.upsert_connected = AsyncMock()
     oauth_repo.mark_reconnect_required = AsyncMock()
@@ -507,8 +507,8 @@ async def test_agent_oauth_store_locks_owner_and_marks_incomplete_flow() -> None
     )
 
     assert isinstance(result, Success)
-    toolkit_repo.get_by_id_for_update.assert_awaited_once()
-    agent_repo.lock_by_id.assert_awaited_once()
+    toolkit_repo.get_by_id.assert_awaited_once()
+    agent_repo.get_by_id.assert_awaited_once()
     oauth_repo.upsert_connected.assert_awaited_once()
     oauth_repo.mark_reconnect_required.assert_awaited_once()
 
@@ -519,7 +519,7 @@ async def test_agent_oauth_delete_rejects_another_agents_toolkit() -> None:
         update={"owner_agent_id": "agent-other"}
     )
     toolkit_repo = MagicMock()
-    toolkit_repo.get_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_by_id = AsyncMock(return_value=toolkit)
     oauth_repo = MagicMock()
     oauth_repo.delete_by_toolkit_id = AsyncMock()
     service = _agent_management_service(
@@ -548,10 +548,11 @@ async def test_attach_allocates_namespace_after_projection_create() -> None:
     """Persist the Agent attachment and its reusable namespace in one transaction."""
     toolkit = _toolkit_config(slug="github")
     toolkit_repo = MagicMock()
-    toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_shared_by_id = AsyncMock(return_value=toolkit)
+    toolkit_repo.claim_shared_namespace_mutation = AsyncMock(return_value=toolkit)
     toolkit_repo.list_available_for_workspace_user = AsyncMock(return_value=[toolkit])
     agent_repo = MagicMock()
-    agent_repo.lock_by_id = AsyncMock(
+    agent_repo.get_by_id = AsyncMock(
         return_value=SimpleNamespace(workspace_id="workspace-1")
     )
     attachment = AgentToolkit(
@@ -589,20 +590,22 @@ async def test_attach_allocates_namespace_after_projection_create() -> None:
     }
 
 
-async def test_shared_slug_update_locks_agents_and_reallocates_duplicate_slug() -> None:
+async def test_shared_slug_update_reallocates_without_agent_read_lock() -> None:
     """Allow a duplicate Slug while reallocating attached Agent namespaces."""
     toolkit = _toolkit_config(slug="github")
     updated = toolkit.model_copy(update={"slug": "github_new"})
     toolkit_repo = MagicMock()
     toolkit_repo.get_shared_by_id = AsyncMock(return_value=toolkit)
-    toolkit_repo.get_shared_by_id_for_update = AsyncMock(return_value=toolkit)
+    toolkit_repo.claim_shared_namespace_mutation = AsyncMock(return_value=toolkit)
+    toolkit_repo.get_shared_by_id = AsyncMock(return_value=toolkit)
+    toolkit_repo.claim_shared_namespace_mutation = AsyncMock(return_value=toolkit)
     toolkit_repo.update_by_id = AsyncMock(return_value=Success(updated))
     agent_toolkit_repo = MagicMock()
     agent_toolkit_repo.list_agent_ids_by_toolkit = AsyncMock(
         return_value=["agent-a", "agent-b"],
     )
     agent_repo = MagicMock()
-    agent_repo.lock_by_id = AsyncMock(
+    agent_repo.get_by_id = AsyncMock(
         side_effect=[
             SimpleNamespace(workspace_id="workspace-1"),
             SimpleNamespace(workspace_id="workspace-1"),
@@ -624,10 +627,7 @@ async def test_shared_slug_update_locks_agents_and_reallocates_duplicate_slug() 
     )
 
     assert isinstance(result, Success)
-    assert [call.args[1] for call in agent_repo.lock_by_id.await_args_list] == [
-        "agent-a",
-        "agent-b",
-    ]
+    agent_repo.get_by_id.assert_not_awaited()
     toolkit_repo.update_by_id.assert_awaited_once()
     assert [
         call.kwargs["agent_id"] for call in namespace_repo.ensure_active.await_args_list
@@ -810,7 +810,7 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
             return None
         return SimpleNamespace(workspace_id=workspace_id)
 
-    agent_repo.lock_by_id = AsyncMock(side_effect=lock_agent)
+    agent_repo.get_by_id = AsyncMock(side_effect=lock_agent)
     service = _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
@@ -887,7 +887,7 @@ def _build_service(
 ) -> ToolkitService:
     """Compose test-owned repositories while preserving narrow collaborator probes."""
     workspace_repository = AsyncMock(spec=WorkspaceRepository)
-    workspace_repository.get_by_id_for_update.return_value = SimpleNamespace()
+    workspace_repository.get_by_id.return_value = SimpleNamespace()
     operations = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repo,
         scope_repository=scope_repo,

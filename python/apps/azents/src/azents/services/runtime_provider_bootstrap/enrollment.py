@@ -72,7 +72,6 @@ class RuntimeProviderBootstrapEnrollmentService:
             provider = await self.provider_repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_logical_id,
-                for_update=False,
             )
             if provider is None:
                 raise RuntimeError("Bootstrap Provider was not created.")
@@ -80,7 +79,6 @@ class RuntimeProviderBootstrapEnrollmentService:
                 await self.provider_repository.get_bootstrap_declaration_by_provider_id(
                     session,
                     provider_id=provider.id,
-                    for_update=False,
                 )
             )
             if (

@@ -112,27 +112,24 @@ class ExternalAccountLinkRepository:
         self.environment = environment
         self.generation_hasher = generation_hasher
 
-    async def lock_active_link(
+    async def get_active_link(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider: ExternalChannelProvider,
         identity_scope: str,
         provider_user_id: str,
-        nowait: bool = True,
         workspace_id: str | None = None,
     ) -> ExternalAccountLink | None:
-        """Lock the globally active link for repository composition."""
+        """Read the globally active link for repository composition."""
         del workspace_id
-        rdb = await session.write_session.scalar(
-            sa.select(RDBExternalAccountLink)
-            .where(
+        rdb = await session.read_session.scalar(
+            sa.select(RDBExternalAccountLink).where(
                 RDBExternalAccountLink.provider == provider,
                 RDBExternalAccountLink.identity_scope == identity_scope,
                 RDBExternalAccountLink.provider_user_id == provider_user_id,
                 RDBExternalAccountLink.revoked_at.is_(None),
             )
-            .with_for_update(nowait=nowait)
         )
         return None if rdb is None else _link_record(rdb)
 
@@ -147,7 +144,6 @@ class ExternalAccountLinkRepository:
             _, identity_scope = await self._validate_actor(
                 session,
                 actor=actor,
-                lock=False,
             )
             link = await session.write_session.scalar(
                 sa.select(RDBExternalAccountLink).where(
@@ -215,7 +211,7 @@ class ExternalAccountLinkRepository:
         """Terminally revoke an owned link."""
 
         async def operation(session: WriteSession) -> ExternalAccountLinkView:
-            await self._lock_active_user_session(
+            await self._require_active_user_session(
                 session,
                 user_id=user_id,
                 auth_session_id=auth_session_id,
@@ -317,7 +313,7 @@ class ExternalAccountLinkRepository:
                     or attempt.redirect_uri != redirect_uri
                 ):
                     return ExternalAccountOAuthFinalizeResult(None, "invalid_attempt")
-                await self._lock_active_user_session(
+                await self._lock_active_user_session_for_oauth_finalization(
                     session,
                     user_id=user_id,
                     auth_session_id=auth_session_id,
@@ -455,10 +451,9 @@ class ExternalAccountLinkRepository:
 
     async def _validate_actor(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         actor: VerifiedExternalAccountActor,
-        lock: bool,
     ) -> _ValidatedExternalAccountActor:
         connection_query = sa.select(RDBExternalChannelConnection).where(
             RDBExternalChannelConnection.id == actor.connection_id
@@ -466,11 +461,8 @@ class ExternalAccountLinkRepository:
         principal_query = sa.select(RDBExternalChannelPrincipal).where(
             RDBExternalChannelPrincipal.id == actor.principal_id
         )
-        if lock:
-            connection_query = connection_query.with_for_update(nowait=True)
-            principal_query = principal_query.with_for_update(nowait=True)
-        connection = await session.write_session.scalar(connection_query)
-        principal = await session.write_session.scalar(principal_query)
+        connection = await session.read_session.scalar(connection_query)
+        principal = await session.read_session.scalar(principal_query)
         if (
             connection is None
             or principal is None
@@ -493,7 +485,7 @@ class ExternalAccountLinkRepository:
             workspace_id=connection.workspace_id, identity_scope=_identity_scope(actor)
         )
 
-    async def _lock_active_user_session(
+    async def _lock_active_user_session_for_oauth_finalization(
         self,
         session: WriteSession,
         *,
@@ -501,16 +493,39 @@ class ExternalAccountLinkRepository:
         auth_session_id: str,
         now: datetime.datetime,
     ) -> None:
-        user = await session.write_session.scalar(
-            sa.select(RDBUser).where(RDBUser.id == user_id).with_for_update(nowait=True)
+        """Keep actor disable and session revocation ordered through OAuth commit."""
+        await session.write_session.scalar(
+            sa.select(RDBUser)
+            .where(RDBUser.id == user_id)
+            .with_for_update(nowait=True)
+            .execution_options(populate_existing=True)
         )
-        auth_session = await session.write_session.scalar(
+        await session.write_session.scalar(
             sa.select(RDBSession)
-            .where(
+            .where(RDBSession.id == auth_session_id, RDBSession.user_id == user_id)
+            .with_for_update(nowait=True)
+            .execution_options(populate_existing=True)
+        )
+        await self._require_active_user_session(
+            session, user_id=user_id, auth_session_id=auth_session_id, now=now
+        )
+
+    async def _require_active_user_session(
+        self,
+        session: ReadSession,
+        *,
+        user_id: str,
+        auth_session_id: str,
+        now: datetime.datetime,
+    ) -> None:
+        user = await session.read_session.scalar(
+            sa.select(RDBUser).where(RDBUser.id == user_id)
+        )
+        auth_session = await session.read_session.scalar(
+            sa.select(RDBSession).where(
                 RDBSession.id == auth_session_id,
                 RDBSession.user_id == user_id,
             )
-            .with_for_update(nowait=True)
         )
         if (
             user is None

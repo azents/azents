@@ -596,11 +596,10 @@ class RuntimeProviderControlRepository:
 
     async def has_connected_connection(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider_id: str,
         now: datetime.datetime,
-        for_update: bool = False,
     ) -> bool:
         """Return whether one Provider retains current connection authority."""
         statement = sa.select(RDBRuntimeProviderConnection.id).where(
@@ -629,9 +628,7 @@ class RuntimeProviderControlRepository:
                 ),
             ),
         )
-        if for_update:
-            statement = statement.with_for_update(read=True)
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         return result.scalar_one_or_none() is not None
 
     async def get_current_connection(

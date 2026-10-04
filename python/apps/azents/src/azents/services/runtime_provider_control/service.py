@@ -82,10 +82,9 @@ class RuntimeProviderEnrollmentService:
             raise RuntimeProviderEnrollmentUnavailable("grant_issuer_invalid")
         secret = self.verifier.issue_secret()
         async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_id(
+            provider = await self.provider_repository.lock_by_id_for_authority(
                 session,
                 provider_id=provider_id,
-                for_update=True,
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderEnrollmentUnavailable("provider_unavailable")
@@ -106,13 +105,11 @@ class RuntimeProviderEnrollmentService:
             if binding is None:
                 raise RuntimeProviderEnrollmentUnavailable("binding_unavailable")
             if issued_by_source_id is not None:
-                get_declaration = (
-                    self.provider_repository.get_bootstrap_declaration_by_provider_id
-                )
-                declaration = await get_declaration(
+                repo = self.provider_repository
+                lock = repo.lock_bootstrap_declaration_by_provider_id_for_authority
+                declaration = await lock(
                     session,
                     provider_id=provider.id,
-                    for_update=True,
                 )
                 if (
                     declaration is None
@@ -181,17 +178,15 @@ class RuntimeProviderEnrollmentService:
                 or not self.verifier.matches(secret, grant.verifier)
             ):
                 raise RuntimeProviderEnrollmentUnavailable("grant_unavailable")
-            provider = await self.provider_repository.get_by_id(
+            provider = await self.provider_repository.lock_by_id_for_authority(
                 session,
                 provider_id=grant.provider_id,
-                for_update=True,
             )
             if provider is None or provider.lifecycle_state in _TERMINAL:
                 raise RuntimeProviderEnrollmentUnavailable("provider_unavailable")
             binding = await self.binding_repository.get_by_id(
                 session,
                 binding_id=grant.binding_id,
-                for_update=False,
             )
             if (
                 binding is None
@@ -352,17 +347,15 @@ class RuntimeProviderEnrollmentService:
         validated_at: datetime.datetime,
     ) -> None:
         """Validate Provider authority inside a caller-owned transaction."""
-        provider = await self.provider_repository.get_by_id(
+        provider = await self.provider_repository.lock_by_id_for_authority(
             session,
             provider_id=authentication.provider_resource_id,
-            for_update=True,
         )
         if provider is None or provider.lifecycle_state in _TERMINAL:
             raise RuntimeProviderCredentialUnavailable("provider_unavailable")
-        binding = await self.binding_repository.get_by_id(
+        binding = await self.binding_repository.lock_by_id_for_authority(
             session,
             binding_id=authentication.binding_id,
-            for_update=True,
         )
         if (
             binding is None

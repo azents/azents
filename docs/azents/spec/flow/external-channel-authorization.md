@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-09-29
-spec_version: 27
+last_verified_at: 2026-10-04
+spec_version: 28
 ---
 
 # External Channel Authorization
@@ -243,6 +243,15 @@ Binding, current Agent, and current Workspace; parent settings omit navigation w
 there is no single parent Binding.
 
 ## Linked Account and Shared Model Settings Authorization
+
+Ordinary linked-account/settings inspection and draft editing use scoped
+descriptive authorization without blanket parent/link/User/grant read locks.
+Draft edits condition persistence on the existing exact identity, active status
+and expiry. Actual OAuth link finalization and model-setting apply perform their
+own final mutation guards, retaining exact User/auth-session/link eligibility,
+block/grant and route lifecycle authority through commit. These final guards do
+not become authority for later ordinary descriptions or bypass the independent
+captured-model input acceptance.
 
 Optional external-account linking is an additional identity proof, not an admission
 policy. Every existing principal grant, block, open-access decision, setup control,

@@ -94,10 +94,10 @@ class WorkspaceRepository:
             workspace=self._build_workspace(rdb_workspace),
         )
 
-    async def get_by_id_for_update(
+    async def acquire_ownership_mutation(
         self, session: WriteSession, workspace_id: str
     ) -> Workspace | None:
-        """Fetch and lock one Workspace."""
+        """Serialize only Workspace OWNER creation/transfer through commit (E3)."""
         result = await session.write_session.execute(
             sa.select(RDBWorkspace)
             .where(RDBWorkspace.id == workspace_id)
