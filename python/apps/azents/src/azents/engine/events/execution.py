@@ -2,15 +2,25 @@
 
 import asyncio
 import datetime
-import itertools
 import logging
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Literal, Protocol
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
 from azents.core.inference_profile import SessionInferenceState
+from azents.engine.events.iteration import (
+    AdmittedIteration,
+    IterationEndReason,
+    IterationFinished,
+    IterationValue,
+    ModelToolIterationCore,
+)
+from azents.engine.events.iteration_stream import (
+    InterruptedIterationStream,
+    consume_iteration_stream,
+)
+from azents.engine.events.iteration_tools import ParallelIterationTools
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.engine.events.protocols import (
     AdapterOutputNormalizer,
@@ -37,10 +47,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.contracts import ToolAdmissionBarrier
-from azents.engine.run.errors import (
-    ModelCallError,
-    UserVisibleRuntimeError,
-)
+from azents.engine.run.errors import ModelCallError
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.engine_execution_operation import (
@@ -230,14 +237,6 @@ class _ToolExecutionUserInterrupted(Exception):
     """Indicates tool execution was interrupted by user stop."""
 
 
-@dataclass(frozen=True)
-class _ToolExecutionOutcome:
-    """One foreground tool execution outcome."""
-
-    call: ClientToolCallPayload
-    result: ClientToolResultPayload
-
-
 class AgentRunExecution[
     TNativeRequest: NativeRequestInspection,
     TNativeStreamEvent,
@@ -298,335 +297,14 @@ class AgentRunExecution[
         check_stop: CheckStop | None = None,
         poll_input_events: InputPoller | None = None,
     ) -> AgentRunStatus:
-        """Run until terminal state."""
-        try:
-            for _model_call_index in _turn_range(request.max_turns):
-                if await _stopped(check_stop):
-                    if request.tool_admission_barrier.closed:
-                        return AgentRunStatus.RUNNING
-                    await self.terminal.interrupt_before_turn(run_id=request.run_id)
-                    return AgentRunStatus.INTERRUPTED
-
-                if poll_input_events is not None:
-                    poll_result = await poll_input_events(request.session_id)
-                    if poll_result.complete_run:
-                        await self.terminal.complete_polled_run(
-                            run_id=request.run_id,
-                            suppress_parent_result=poll_result.suppress_parent_result,
-                        )
-                        return AgentRunStatus.COMPLETED
-                    if poll_result.context_invalidated:
-                        return AgentRunStatus.RUNNING
-                prepared_input = (
-                    await self.model_input_operation_repository.prepare_input(
-                        run_id=request.run_id,
-                        session_id=request.session_id,
-                        owner_generation=request.owner_generation,
-                    )
-                )
-                transcript = prepared_input.transcript
-                if self.output_sink is not None:
-                    for repaired_event in prepared_input.repaired_events:
-                        await self.output_sink(
-                            NormalizedAdapterOutput(
-                                needs_follow_up=False,
-                                events=[],
-                            ),
-                            [repaired_event],
-                        )
-                if await self._complete_committed_terminal_run(request):
-                    return AgentRunStatus.COMPLETED
-                await self._publish_phase(
-                    AgentRunPhase.PREPARING_INPUT,
-                    prepared_input.model_call_started_at,
-                )
-
-                compacted = False
-                if self.auto_compaction_filter is not None:
-                    compaction_started = False
-
-                    async def on_compaction_started() -> None:
-                        nonlocal compaction_started
-                        compaction_started = True
-                        await self._update_phase(
-                            request.run_id,
-                            AgentRunPhase.COMPACTING,
-                        )
-
-                    transcript = await self.auto_compaction_filter.compact(
-                        transcript,
-                        on_started=on_compaction_started,
-                    )
-                    compacted = compacted or self.auto_compaction_filter.was_compacted
-                    if compaction_started:
-                        await self._update_phase(
-                            request.run_id,
-                            AgentRunPhase.PREPARING_INPUT,
-                        )
-                await self.operation_repository.pin_model_files(
-                    session_id=request.session_id,
-                    run_id=request.run_id,
-                    model_file_ids=unique_model_file_ids(transcript),
-                )
-                if self.pre_model_lower_hook is not None:
-                    await self.pre_model_lower_hook(transcript=transcript)
-                model_input_transcript = (
-                    _without_existing_terminal_run_markers(transcript)
-                    if compacted
-                    else transcript
-                )
-                prepared = await self._prepare_model_call(
-                    transcript=model_input_transcript,
-                    model=request.model,
-                )
-                turn_end_callback = prepared.on_turn_end
-                turn_ended = False
-
-                async def finish_turn(
-                    reason: TurnEndReason,
-                    callback: TurnEndCallback | None = turn_end_callback,
-                ) -> None:
-                    """Dispatch this turn's end hook at most once."""
-                    nonlocal turn_ended
-                    if turn_ended:
-                        return
-                    turn_ended = True
-                    await _finish_turn(callback, reason)
-
-                try:
-                    native_request = self.post_lower_filter.apply(
-                        prepared.native_request
-                    )
-
-                    await self._update_phase(
-                        request.run_id,
-                        AgentRunPhase.WAITING_FOR_MODEL,
-                    )
-                    try:
-                        output_stream = await self._stream_model(
-                            request.run_id,
-                            request.session_id,
-                            native_request,
-                            check_stop=check_stop,
-                        )
-                    except _ModelStreamUserInterrupted as exc:
-                        await finish_turn("cancelled")
-                        return await self._complete_user_interrupted_model_stream(
-                            request,
-                            exc.normalized,
-                        )
-
-                    await self._update_phase(
-                        request.run_id,
-                        AgentRunPhase.NORMALIZING_OUTPUT,
-                    )
-                    normalized = _enrich_client_tool_calls(
-                        output_stream.complete(),
-                        prepared.enrich_client_tool_call,
-                    )
-                    _log_model_token_usage(
-                        request=request,
-                        usage=normalized.usage,
-                    )
-                    prepared_provider_output = (
-                        await self.provider_output_materializer.prepare(normalized)
-                        if self.provider_output_materializer is not None
-                        else None
-                    )
-                    if prepared_provider_output is not None:
-                        normalized = prepared_provider_output.normalized
-
-                    try:
-                        await self._update_phase(
-                            request.run_id,
-                            AgentRunPhase.APPENDING_EVENTS,
-                        )
-                    except asyncio.CancelledError:
-                        if prepared_provider_output is not None:
-                            await prepared_provider_output.cleanup()
-                        raise
-                    except Exception:
-                        if prepared_provider_output is not None:
-                            await prepared_provider_output.cleanup()
-                        raise
-                    normalized_tool_calls = [
-                        event.payload
-                        for event in normalized.events
-                        if isinstance(event.payload, ClientToolCallPayload)
-                    ]
-                    appended: list[Event] = []
-                    turn_marker: Event | None = None
-                    needs_follow_up = normalized.needs_follow_up
-
-                    async def append_model_output(
-                        normalized_output: NormalizedAdapterOutput,
-                        prepared_call: PreparedModelCall[TNativeRequest],
-                        tool_calls: list[ClientToolCallPayload],
-                        prepared_output: PreparedProviderOutputProtocol | None,
-                    ) -> None:
-                        """Append output and admit its complete foreground call set."""
-                        nonlocal appended, turn_marker
-                        try:
-                            admitted_output = (
-                                await self.output_repository.admit_model_output(
-                                    ModelOutputAdmission(
-                                        session_id=request.session_id,
-                                        run_id=request.run_id,
-                                        owner_generation=request.owner_generation,
-                                        events=normalized_output.events,
-                                        usage=normalized_output.usage,
-                                        inference_state=prepared_call.inference_state,
-                                        system_prompt_analysis=(
-                                            prepared_call.system_prompt_analysis
-                                        ),
-                                        metadata_admission=(
-                                            prepared_output.metadata_admission
-                                            if prepared_output is not None
-                                            else None
-                                        ),
-                                    )
-                                )
-                            )
-                        except ProviderOutputOperationError as exc:
-                            raise ModelCallError(str(exc)) from None
-                        appended = admitted_output.events
-                        turn_marker = admitted_output.turn_marker
-                        if tool_calls:
-                            await self._publish_phase(
-                                AgentRunPhase.EXECUTING_TOOLS,
-                                admitted_output.model_call_started_at,
-                            )
-
-                    bound_append_model_output = partial(
-                        append_model_output,
-                        normalized,
-                        prepared,
-                        normalized_tool_calls,
-                        prepared_provider_output,
-                    )
-                    output_admitted = False
-                    try:
-                        if normalized_tool_calls:
-                            admitted = await request.tool_admission_barrier.run_if_open(
-                                bound_append_model_output
-                            )
-                            if not admitted:
-                                await finish_turn("cancelled")
-                                return AgentRunStatus.RUNNING
-                        else:
-                            await bound_append_model_output()
-                        output_admitted = True
-                        if prepared_provider_output is not None:
-                            prepared_provider_output.admitted = True
-                    finally:
-                        if prepared_provider_output is not None and not output_admitted:
-                            await prepared_provider_output.cleanup()
-
-                    turn_events = [turn_marker] if turn_marker is not None else []
-                    client_tool_calls = [
-                        event.payload
-                        for event in appended
-                        if isinstance(event.payload, ClientToolCallPayload)
-                    ]
-                    if not client_tool_calls and not needs_follow_up:
-                        run_marker = await self.terminal.complete_model_run(
-                            session_id=request.session_id,
-                            run_id=request.run_id,
-                            output_events=appended,
-                            completion=self.model_operation_completion,
-                        )
-                        if self.output_sink is not None:
-                            await self.output_sink(
-                                normalized,
-                                [*appended, *turn_events, run_marker],
-                            )
-                        await finish_turn("completed")
-                        return AgentRunStatus.COMPLETED
-
-                    if self.output_sink is not None:
-                        await self.output_sink(normalized, [*appended, *turn_events])
-                    if not client_tool_calls:
-                        await finish_turn("completed")
-                        continue
-                    try:
-                        terminal_tool_completed = await self._execute_tools(
-                            request.run_id,
-                            request.session_id,
-                            client_tool_calls,
-                            tool_executor=prepared.tool_executor,
-                        )
-                    except _ToolExecutionUserInterrupted:
-                        run_marker = (
-                            await self.terminal.interrupt_after_tool_stop_if_running(
-                                session_id=request.session_id, run_id=request.run_id
-                            )
-                        )
-                        if run_marker is not None and self.output_sink is not None:
-                            await self.output_sink(
-                                NormalizedAdapterOutput(
-                                    needs_follow_up=False,
-                                    events=[],
-                                ),
-                                [run_marker],
-                            )
-                        await finish_turn("cancelled")
-                        return AgentRunStatus.INTERRUPTED
-                    if terminal_tool_completed:
-                        completed = await self._complete_committed_terminal_run(request)
-                        if completed:
-                            await finish_turn("completed")
-                            return AgentRunStatus.COMPLETED
-                    bridge_observation = request.turn_action_bridge_boundary.consume()
-                    if bridge_observation is not None:
-                        if poll_input_events is None:
-                            raise RuntimeError(
-                                "TurnAction bridge admission requires input polling"
-                            )
-                        poll_result = await poll_input_events(request.session_id)
-                        if poll_result.complete_run:
-                            await self.terminal.complete_bridged_run(
-                                run_id=request.run_id
-                            )
-                            await finish_turn("completed")
-                            return AgentRunStatus.COMPLETED
-                        if poll_result.context_invalidated:
-                            await finish_turn("completed")
-                            return AgentRunStatus.RUNNING
-                    if not needs_follow_up:
-                        run_marker = await self.terminal.complete_model_run(
-                            session_id=request.session_id,
-                            run_id=request.run_id,
-                            output_events=appended,
-                            completion=self.model_operation_completion,
-                        )
-                        if self.output_sink is not None:
-                            await self.output_sink(
-                                NormalizedAdapterOutput(
-                                    needs_follow_up=False,
-                                    events=[],
-                                ),
-                                [run_marker],
-                            )
-                        await finish_turn("completed")
-                        return AgentRunStatus.COMPLETED
-                    await finish_turn("completed")
-                except asyncio.CancelledError:
-                    raise
-                except CanonicalExecutionOwnerGenerationStaleError:
-                    raise
-                except Exception:
-                    await finish_turn("error")
-                    raise
-        except UserVisibleRuntimeError:
-            raise
-        finally:
-            if isinstance(self.model_adapter, AsyncClosableAdapter):
-                await self.model_adapter.close()
-
-        await self.terminal.interrupt_turn_limit(
-            session_id=request.session_id, run_id=request.run_id
+        """Run the common iteration algorithm with durable foreground operations."""
+        host = ForegroundIterationHost(
+            execution=self,
+            request=request,
+            check_stop=check_stop,
+            poll_input_events=poll_input_events,
         )
-        return AgentRunStatus.INTERRUPTED
+        return await ModelToolIterationCore(host=host).run(max_turns=request.max_turns)
 
     async def _prepare_model_call(
         self,
@@ -669,20 +347,24 @@ class AgentRunExecution[
             attempt_number=None,
             check_stop=check_stop,
         )
-        try:
-            async for event in self.model_adapter.stream(
+
+        async def publish_incremental(incremental: NormalizedAdapterOutput) -> None:
+            if self.output_sink is not None and incremental.projections:
+                await self.output_sink(incremental, [])
+
+        outcome = await consume_iteration_stream(
+            events_factory=lambda: self.model_adapter.stream(
                 native_request,
                 watchdog=self.model_stream_watchdog,
                 timeout_policy=timeout_policy,
                 call_context=call_context,
-            ):
-                incremental = output_stream.process_event(event)
-                if self.output_sink is not None and incremental.projections:
-                    await self.output_sink(incremental, [])
-        except asyncio.CancelledError as exc:
-            if _is_user_stop_cancellation(exc):
-                raise _ModelStreamUserInterrupted(output_stream.interrupt()) from exc
-            raise
+            ),
+            output_stream=output_stream,
+            on_incremental=publish_incremental,
+            is_user_stop=_is_user_stop_cancellation,
+        )
+        if isinstance(outcome, InterruptedIterationStream):
+            raise _ModelStreamUserInterrupted(outcome.partial) from outcome.cancellation
         return output_stream
 
     async def _complete_user_interrupted_model_stream(
@@ -725,84 +407,15 @@ class AgentRunExecution[
         *,
         tool_executor: ClientToolExecutor,
     ) -> bool:
-        """Run foreground calls in parallel and durably complete each one."""
-        completed_call_ids: set[str] = set()
-        terminal_run = False
-        tasks_by_call_id = {
-            call.call_id: asyncio.create_task(
-                self._execute_tool_with_call(call, tool_executor=tool_executor)
-            )
-            for call in tool_calls
-        }
-        tasks = list(tasks_by_call_id.values())
-        try:
-            for completed in asyncio.as_completed(tasks):
-                outcome = await completed
-                await self._finalize_tool_result(
-                    run_id=run_id,
-                    session_id=session_id,
-                    call=outcome.call,
-                    result=outcome.result,
-                )
-                terminal_run = terminal_run or (
-                    outcome.result.status == "completed" and outcome.result.terminal_run
-                )
-                completed_call_ids.add(outcome.call.call_id)
-        except asyncio.CancelledError as exc:
-            unresolved = [
-                call for call in tool_calls if call.call_id not in completed_call_ids
-            ]
-            for call in unresolved:
-                tool_executor.request_cancel(call)
-            for call in unresolved:
-                task = tasks_by_call_id[call.call_id]
-                if not task.done():
-                    task.cancel()
-            settled = await asyncio.gather(
-                *(tasks_by_call_id[call.call_id] for call in unresolved),
-                return_exceptions=True,
-            )
-            cancelled: list[ClientToolCallPayload] = []
-            for call, result in zip(unresolved, settled, strict=True):
-                if isinstance(result, _ToolExecutionOutcome):
-                    await self._finalize_tool_result(
-                        run_id=run_id,
-                        session_id=session_id,
-                        call=result.call,
-                        result=result.result,
-                    )
-                    completed_call_ids.add(result.call.call_id)
-                    continue
-                cancelled.append(call)
-            await self._append_cancelled_tool_results(
-                session_id,
-                cancelled,
+        """Bind durable admission to the shared parallel tool-batch algorithm."""
+        return await ParallelIterationTools(
+            host=ForegroundToolBatchHost(
+                execution=self,
                 run_id=run_id,
+                session_id=session_id,
+                tool_executor=tool_executor,
             )
-            if _is_user_stop_cancellation(exc):
-                stopping = await self.operation_repository.update_phase_if_running(
-                    run_id=run_id,
-                    phase=AgentRunPhase.STOPPING,
-                    active_tool_calls=[],
-                )
-                if stopping.updated:
-                    await self._publish_phase(
-                        AgentRunPhase.STOPPING,
-                        stopping.model_call_started_at,
-                    )
-                raise _ToolExecutionUserInterrupted from exc
-            raise
-        return terminal_run
-
-    async def _execute_tool_with_call(
-        self,
-        call: ClientToolCallPayload,
-        *,
-        tool_executor: ClientToolExecutor,
-    ) -> _ToolExecutionOutcome:
-        """Execute one call while preserving its identity with the result."""
-        result = await self._execute_tool_safely(call, tool_executor=tool_executor)
-        return _ToolExecutionOutcome(call=call, result=result)
+        ).run(tool_calls)
 
     async def _finalize_tool_result(
         self,
@@ -999,6 +612,391 @@ class AgentRunExecution[
             await self.phase_sink(phase, model_call_started_at)
 
 
+@dataclass
+class ForegroundToolBatchHost[
+    TNativeRequest: NativeRequestInspection,
+    TNativeStreamEvent,
+]:
+    """Foreground result transactions around the neutral batch scheduler."""
+
+    execution: AgentRunExecution[TNativeRequest, TNativeStreamEvent]
+    run_id: str
+    session_id: str
+    tool_executor: ClientToolExecutor
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        return await self.execution._execute_tool_safely(
+            call, tool_executor=self.tool_executor
+        )
+
+    async def finalize(
+        self, call: ClientToolCallPayload, result: ClientToolResultPayload
+    ) -> bool:
+        await self.execution._finalize_tool_result(
+            run_id=self.run_id,
+            session_id=self.session_id,
+            call=call,
+            result=result,
+        )
+        return result.status == "completed" and result.terminal_run
+
+    def request_cancel(self, call: ClientToolCallPayload) -> None:
+        self.tool_executor.request_cancel(call)
+
+    async def finalize_cancelled(self, calls: Sequence[ClientToolCallPayload]) -> None:
+        await self.execution._append_cancelled_tool_results(
+            self.session_id, calls, run_id=self.run_id
+        )
+
+    async def handle_cancellation(self, error: asyncio.CancelledError) -> None:
+        if _is_user_stop_cancellation(error):
+            stopping = (
+                await self.execution.operation_repository.update_phase_if_running(
+                    run_id=self.run_id,
+                    phase=AgentRunPhase.STOPPING,
+                    active_tool_calls=[],
+                )
+            )
+            if stopping.updated:
+                await self.execution._publish_phase(
+                    AgentRunPhase.STOPPING, stopping.model_call_started_at
+                )
+            raise _ToolExecutionUserInterrupted from error
+
+
+@dataclass
+class ForegroundPreparedTurn[TNativeRequest]:
+    """Prepared foreground dependencies and once-only turn-end bookkeeping."""
+
+    call: PreparedModelCall[TNativeRequest]
+    ended: bool
+
+
+@dataclass(frozen=True)
+class ForegroundModelOutput:
+    """Normalized foreground output awaiting durable admission."""
+
+    normalized: NormalizedAdapterOutput
+    materialized: PreparedProviderOutputProtocol | None
+
+
+@dataclass(frozen=True)
+class ForegroundAdmittedTurn:
+    """Durable foreground events retained for delivery and tool execution."""
+
+    normalized: NormalizedAdapterOutput
+    events: list[Event]
+    turn_events: list[Event]
+    tool_calls: list[ClientToolCallPayload]
+
+
+@dataclass
+class ForegroundIterationHost[
+    TNativeRequest: NativeRequestInspection,
+    TNativeStreamEvent,
+]:
+    """Bind public execution authority and atomic operations to the shared core."""
+
+    execution: AgentRunExecution[TNativeRequest, TNativeStreamEvent]
+    request: AgentRunExecutionRequest
+    check_stop: CheckStop | None
+    poll_input_events: InputPoller | None
+
+    async def prepare_turn(
+        self,
+    ) -> (
+        IterationValue[ForegroundPreparedTurn[TNativeRequest]]
+        | IterationFinished[AgentRunStatus]
+    ):
+        """Recover durable input and honor foreground stop/mailbox boundaries."""
+        execution = self.execution
+        request = self.request
+        if await _stopped(self.check_stop):
+            if request.tool_admission_barrier.closed:
+                return IterationFinished(AgentRunStatus.RUNNING, "cancelled")
+            await execution.terminal.interrupt_before_turn(run_id=request.run_id)
+            return IterationFinished(AgentRunStatus.INTERRUPTED, "cancelled")
+        if self.poll_input_events is not None:
+            polled = await self.poll_input_events(request.session_id)
+            if polled.complete_run:
+                await execution.terminal.complete_polled_run(
+                    run_id=request.run_id,
+                    suppress_parent_result=polled.suppress_parent_result,
+                )
+                return IterationFinished(AgentRunStatus.COMPLETED, "completed")
+            if polled.context_invalidated:
+                return IterationFinished(AgentRunStatus.RUNNING, "completed")
+        prepared_input = await execution.model_input_operation_repository.prepare_input(
+            run_id=request.run_id,
+            session_id=request.session_id,
+            owner_generation=request.owner_generation,
+        )
+        transcript = prepared_input.transcript
+        if execution.output_sink is not None:
+            for repaired in prepared_input.repaired_events:
+                await execution.output_sink(
+                    NormalizedAdapterOutput(needs_follow_up=False, events=[]),
+                    [repaired],
+                )
+        if await execution._complete_committed_terminal_run(request):
+            return IterationFinished(AgentRunStatus.COMPLETED, "completed")
+        await execution._publish_phase(
+            AgentRunPhase.PREPARING_INPUT, prepared_input.model_call_started_at
+        )
+        compacted = False
+        if execution.auto_compaction_filter is not None:
+            compaction_started = False
+
+            async def on_compaction_started() -> None:
+                nonlocal compaction_started
+                compaction_started = True
+                await execution._update_phase(request.run_id, AgentRunPhase.COMPACTING)
+
+            transcript = await execution.auto_compaction_filter.compact(
+                transcript, on_started=on_compaction_started
+            )
+            compacted = execution.auto_compaction_filter.was_compacted
+            if compaction_started:
+                await execution._update_phase(
+                    request.run_id, AgentRunPhase.PREPARING_INPUT
+                )
+        await execution.operation_repository.pin_model_files(
+            session_id=request.session_id,
+            run_id=request.run_id,
+            model_file_ids=unique_model_file_ids(transcript),
+        )
+        if execution.pre_model_lower_hook is not None:
+            await execution.pre_model_lower_hook(transcript=transcript)
+        model_input = (
+            _without_existing_terminal_run_markers(transcript)
+            if compacted
+            else transcript
+        )
+        prepared = await execution._prepare_model_call(
+            transcript=model_input, model=request.model
+        )
+        return IterationValue(ForegroundPreparedTurn(call=prepared, ended=False))
+
+    async def invoke_model(
+        self, prepared: ForegroundPreparedTurn[TNativeRequest]
+    ) -> IterationValue[ForegroundModelOutput] | IterationFinished[AgentRunStatus]:
+        """Stream through the unchanged provider/normalizer foreground adapters."""
+        execution = self.execution
+        request = self.request
+        native_request = execution.post_lower_filter.apply(prepared.call.native_request)
+        await execution._update_phase(request.run_id, AgentRunPhase.WAITING_FOR_MODEL)
+        try:
+            stream = await execution._stream_model(
+                request.run_id,
+                request.session_id,
+                native_request,
+                check_stop=self.check_stop,
+            )
+        except _ModelStreamUserInterrupted as exc:
+            await self.finish_turn(prepared, "cancelled")
+            status = await execution._complete_user_interrupted_model_stream(
+                request, exc.normalized
+            )
+            return IterationFinished(status, "cancelled")
+        await execution._update_phase(request.run_id, AgentRunPhase.NORMALIZING_OUTPUT)
+        normalized = _enrich_client_tool_calls(
+            stream.complete(), prepared.call.enrich_client_tool_call
+        )
+        _log_model_token_usage(request=request, usage=normalized.usage)
+        materialized = (
+            await execution.provider_output_materializer.prepare(normalized)
+            if execution.provider_output_materializer is not None
+            else None
+        )
+        if materialized is not None:
+            normalized = materialized.normalized
+        return IterationValue(
+            ForegroundModelOutput(normalized=normalized, materialized=materialized)
+        )
+
+    async def admit_output(
+        self,
+        prepared: ForegroundPreparedTurn[TNativeRequest],
+        output: ForegroundModelOutput,
+    ) -> AdmittedIteration[ForegroundAdmittedTurn] | IterationFinished[AgentRunStatus]:
+        """Preserve atomic event/metadata/call admission before any handler starts."""
+        execution = self.execution
+        request = self.request
+        normalized = output.normalized
+        materialized = output.materialized
+        normalized_calls = [
+            event.payload
+            for event in normalized.events
+            if isinstance(event.payload, ClientToolCallPayload)
+        ]
+        appended: list[Event] = []
+        turn_marker: Event | None = None
+
+        async def append_output() -> None:
+            nonlocal appended, turn_marker
+            try:
+                admitted = await execution.output_repository.admit_model_output(
+                    ModelOutputAdmission(
+                        session_id=request.session_id,
+                        run_id=request.run_id,
+                        owner_generation=request.owner_generation,
+                        events=normalized.events,
+                        usage=normalized.usage,
+                        inference_state=prepared.call.inference_state,
+                        system_prompt_analysis=prepared.call.system_prompt_analysis,
+                        metadata_admission=(
+                            materialized.metadata_admission
+                            if materialized is not None
+                            else None
+                        ),
+                    )
+                )
+            except ProviderOutputOperationError as exc:
+                raise ModelCallError(str(exc)) from None
+            appended = admitted.events
+            turn_marker = admitted.turn_marker
+            if normalized_calls:
+                await execution._publish_phase(
+                    AgentRunPhase.EXECUTING_TOOLS, admitted.model_call_started_at
+                )
+
+        output_admitted = False
+        try:
+            await execution._update_phase(
+                request.run_id, AgentRunPhase.APPENDING_EVENTS
+            )
+            if normalized_calls:
+                allowed = await request.tool_admission_barrier.run_if_open(
+                    append_output
+                )
+                if not allowed:
+                    await self.finish_turn(prepared, "cancelled")
+                    return IterationFinished(AgentRunStatus.RUNNING, "cancelled")
+            else:
+                await append_output()
+            output_admitted = True
+            if materialized is not None:
+                materialized.admitted = True
+        finally:
+            if materialized is not None and not output_admitted:
+                await materialized.cleanup()
+        calls = [
+            event.payload
+            for event in appended
+            if isinstance(event.payload, ClientToolCallPayload)
+        ]
+        return AdmittedIteration(
+            admission=ForegroundAdmittedTurn(
+                normalized=normalized,
+                events=appended,
+                turn_events=[turn_marker] if turn_marker is not None else [],
+                tool_calls=calls,
+            ),
+            has_tool_calls=bool(calls),
+            needs_follow_up=normalized.needs_follow_up,
+        )
+
+    async def publish_output(self, admission: ForegroundAdmittedTurn) -> None:
+        """Deliver committed output before tool execution."""
+        if self.execution.output_sink is not None:
+            await self.execution.output_sink(
+                admission.normalized, [*admission.events, *admission.turn_events]
+            )
+
+    async def execute_tools(
+        self,
+        prepared: ForegroundPreparedTurn[TNativeRequest],
+        admission: ForegroundAdmittedTurn,
+    ) -> IterationFinished[AgentRunStatus] | None:
+        """Retain foreground parallel results, terminal tools and bridge polling."""
+        execution = self.execution
+        request = self.request
+        try:
+            terminal_completed = await execution._execute_tools(
+                request.run_id,
+                request.session_id,
+                admission.tool_calls,
+                tool_executor=prepared.call.tool_executor,
+            )
+        except _ToolExecutionUserInterrupted:
+            marker = await execution.terminal.interrupt_after_tool_stop_if_running(
+                session_id=request.session_id, run_id=request.run_id
+            )
+            if marker is not None and execution.output_sink is not None:
+                await execution.output_sink(
+                    NormalizedAdapterOutput(needs_follow_up=False, events=[]),
+                    [marker],
+                )
+            return IterationFinished(AgentRunStatus.INTERRUPTED, "cancelled")
+        if terminal_completed and await execution._complete_committed_terminal_run(
+            request
+        ):
+            return IterationFinished(AgentRunStatus.COMPLETED, "completed")
+        bridge = request.turn_action_bridge_boundary.consume()
+        if bridge is not None:
+            if self.poll_input_events is None:
+                raise RuntimeError("TurnAction bridge admission requires input polling")
+            polled = await self.poll_input_events(request.session_id)
+            if polled.complete_run:
+                await execution.terminal.complete_bridged_run(run_id=request.run_id)
+                return IterationFinished(AgentRunStatus.COMPLETED, "completed")
+            if polled.context_invalidated:
+                return IterationFinished(AgentRunStatus.RUNNING, "completed")
+        return None
+
+    async def complete_turn(
+        self, admission: ForegroundAdmittedTurn, *, include_output: bool
+    ) -> AgentRunStatus:
+        """Commit the original terminal operation before its output delivery."""
+        execution = self.execution
+        marker = await execution.terminal.complete_model_run(
+            session_id=self.request.session_id,
+            run_id=self.request.run_id,
+            output_events=admission.events,
+            completion=execution.model_operation_completion,
+        )
+        if execution.output_sink is not None:
+            await execution.output_sink(
+                admission.normalized
+                if include_output
+                else NormalizedAdapterOutput(needs_follow_up=False, events=[]),
+                [*admission.events, *admission.turn_events, marker]
+                if include_output
+                else [marker],
+            )
+        return AgentRunStatus.COMPLETED
+
+    async def finish_turn(
+        self,
+        prepared: ForegroundPreparedTurn[TNativeRequest],
+        reason: IterationEndReason,
+    ) -> None:
+        """Keep once-only callback semantics, including callback failure."""
+        if prepared.ended:
+            return
+        prepared.ended = True
+        await _finish_turn(prepared.call.on_turn_end, reason)
+
+    async def fail_turn(
+        self, prepared: ForegroundPreparedTurn[TNativeRequest], error: Exception
+    ) -> None:
+        """Preserve ownership-loss propagation without failure hook side effects."""
+        if not isinstance(error, CanonicalExecutionOwnerGenerationStaleError):
+            await self.finish_turn(prepared, "error")
+
+    async def close(self) -> None:
+        """Close the foreground adapter after any core exit."""
+        if isinstance(self.execution.model_adapter, AsyncClosableAdapter):
+            await self.execution.model_adapter.close()
+
+    async def limit_reached(self) -> AgentRunStatus:
+        """Persist turn-limit interruption rather than successful completion."""
+        await self.execution.terminal.interrupt_turn_limit(
+            session_id=self.request.session_id, run_id=self.request.run_id
+        )
+        return AgentRunStatus.INTERRUPTED
+
+
 async def _finish_turn(
     callback: TurnEndCallback | None,
     reason: TurnEndReason,
@@ -1050,13 +1048,6 @@ def _log_model_token_usage(
             ),
         },
     )
-
-
-def _turn_range(max_turns: int | None) -> Iterable[int]:
-    """Return unbounded turn iterator when max_turns is None."""
-    if max_turns is None:
-        return itertools.count()
-    return range(max_turns)
 
 
 def _is_user_stop_cancellation(exc: asyncio.CancelledError) -> bool:
