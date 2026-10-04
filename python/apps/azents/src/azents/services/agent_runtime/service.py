@@ -24,6 +24,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
+from azents.core.runtime_profile_workspace import RuntimeProfileWorkspaceUnavailable
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
@@ -34,7 +35,6 @@ from azents.repos.agent_runtime.lifecycle_operations import (
     AgentRuntimeLifecycleOperationsRepository,
 )
 from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
-from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.services.agent_runtime_removal import AgentRuntimeRemovalService
 from azents.services.agent_runtime_transition.data import (
     AgentRuntimeAdditionRequest,
@@ -52,7 +52,6 @@ from azents.services.runtime_profile_resolution.service import (
 )
 from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,
-    RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.runtime_terminal.invalidation import (
@@ -1141,18 +1140,6 @@ class AgentRuntimeService:
             status="unavailable",
             available=False,
             reason_code=projection.reason_code,
-        )
-
-    @staticmethod
-    def _removal_impact_from_operation(
-        operation: AgentRuntimeRemovalOperation,
-    ) -> AgentRuntimeRemovalImpact:
-        """Project immutable privacy-safe impact from a removal operation."""
-        return AgentRuntimeRemovalImpact(
-            active_root_session_count=operation.active_root_session_count,
-            active_subagent_count=operation.active_subagent_count,
-            active_run_count=operation.active_run_count,
-            queued_runtime_action_count=operation.queued_runtime_action_count,
         )
 
     @staticmethod

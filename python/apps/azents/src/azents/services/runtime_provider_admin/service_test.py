@@ -20,20 +20,23 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
+from azents.core.runtime_provider_admin import (
+    RuntimeProviderOperationalDiagnosticsProjection,
+)
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_admin_operations import (
+    RuntimeProviderAdminOperationsRepository,
+)
 from azents.repos.runtime_provider_control.data import RuntimeProviderConnection
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
 
-from .service import (
-    RuntimeProviderAdminService,
-    RuntimeProviderOperationalDiagnosticsProjection,
-)
+from .service import RuntimeProviderAdminService
 
 
 async def test_provider_policy_and_workspace_availability_enqueue_versions(
@@ -61,10 +64,12 @@ async def test_provider_policy_and_workspace_availability_enqueue_versions(
             ),
         )
     service = RuntimeProviderAdminService(
-        session_manager=rdb_session_manager,
-        repository=provider_repository,
-        profile_repository=profile_repository,
-        control_repository=RuntimeProviderControlRepository(),
+        operations=RuntimeProviderAdminOperationsRepository(
+            session_manager=rdb_session_manager,
+            repository=provider_repository,
+            profile_repository=profile_repository,
+            control_repository=RuntimeProviderControlRepository(),
+        )
     )
 
     policy_updated = await service.update_policy(
@@ -147,13 +152,14 @@ async def test_provider_operational_diagnostics_returns_only_current_projection(
         operational_diagnostics=diagnostics,
     )
     service = RuntimeProviderAdminService(
-        session_manager=rdb_session_manager,
-        repository=cast(RuntimeProviderRepository, provider_repository),
-        profile_repository=RuntimeProfileRepository(),
-        control_repository=cast(
-            RuntimeProviderControlRepository,
-            control_repository,
-        ),
+        operations=RuntimeProviderAdminOperationsRepository(
+            session_manager=rdb_session_manager,
+            repository=cast(RuntimeProviderRepository, provider_repository),
+            profile_repository=RuntimeProfileRepository(),
+            control_repository=cast(
+                RuntimeProviderControlRepository, control_repository
+            ),
+        )
     )
 
     projection = await service.get_operational_diagnostics("system-kubernetes")
