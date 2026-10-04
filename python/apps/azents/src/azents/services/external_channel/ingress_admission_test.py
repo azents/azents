@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -39,13 +40,12 @@ from azents.repos.external_channel.data import (
     ExternalChannelParticipationSetting,
     ExternalChannelResource,
 )
-from azents.repos.external_channel.ingress_queue import (
-    ExternalChannelIngressQueueRepository,
+from azents.repos.external_channel.ingress_admission_operations import (
+    ExternalChannelIngressAdmissionOperations,
+    _response_mode_triggered,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.ingress_admission import (
     ExternalChannelIngressAdmissionService,
-    _response_mode_triggered,
 )
 
 
@@ -68,13 +68,12 @@ def _service(
     queue_repository: MagicMock | None = None,
 ) -> ExternalChannelIngressAdmissionService:
     return ExternalChannelIngressAdmissionService(
-        session_manager=session_manager or _session_manager(),
-        repository=cast(ExternalChannelRepository, repository),
-        queue_repository=cast(
-            ExternalChannelIngressQueueRepository,
-            queue_repository or MagicMock(),
+        operations=ExternalChannelIngressAdmissionOperations(
+            session_manager=session_manager or _session_manager(),
+            repository=repository,
+            queue_repository=queue_repository or MagicMock(),
+            agent_session_repository=MagicMock(spec=AgentSessionRepository),
         ),
-        agent_session_repository=cast(AgentSessionRepository, MagicMock()),
         job_runtime=cast(JobRuntime, MagicMock()),
     )
 
@@ -274,17 +273,17 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
 
     with (
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_lock_authority",
             new=AsyncMock(return_value=_connection()),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_ensure_source_resource",
             new=AsyncMock(return_value=source),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_resolve_target",
             new=AsyncMock(return_value=cast(Any, target)),
         ),
@@ -334,14 +333,16 @@ async def test_bound_trigger_checks_session_without_row_lock() -> None:
         session_manager=_session_manager(session),
         queue_repository=queue_repository,
     )
-    service.agent_session_repository = MagicMock()
-    service.agent_session_repository.get_by_id = AsyncMock(
+    service.operations = replace(
+        service.operations, agent_session_repository=MagicMock()
+    )
+    service.operations.agent_session_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
             status=AgentSessionStatus.ACTIVE,
             stop_requested_at=None,
         )
     )
-    service.agent_session_repository.lock_by_id = AsyncMock()
+    service.operations.agent_session_repository.lock_by_id = AsyncMock()
     service._submit = AsyncMock()  # noqa: SLF001
     source = _resource("source-1", ExternalChannelResourceType.THREAD)
     route = _route().model_copy(update={"open_access_enabled": False})
@@ -355,17 +356,17 @@ async def test_bound_trigger_checks_session_without_row_lock() -> None:
 
     with (
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_lock_authority",
             new=AsyncMock(return_value=_connection()),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_ensure_source_resource",
             new=AsyncMock(return_value=source),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_resolve_target",
             new=AsyncMock(return_value=cast(Any, target)),
         ),
@@ -377,11 +378,11 @@ async def test_bound_trigger_checks_session_without_row_lock() -> None:
 
     assert outcome is not None
     assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
-    get_call = service.agent_session_repository.get_by_id.await_args
+    get_call = service.operations.agent_session_repository.get_by_id.await_args
     assert get_call is not None
     assert get_call.args[0].read_session is session
     assert get_call.args[1] == "session-1"
-    service.agent_session_repository.lock_by_id.assert_not_awaited()
+    service.operations.agent_session_repository.lock_by_id.assert_not_awaited()
     queue_repository.admit.assert_awaited_once()
     commit.assert_awaited_once()
 
@@ -406,7 +407,7 @@ async def test_discord_channel_location_keeps_thread_as_owner_target() -> None:
     service = _service(repository)
     session = cast(AsyncSession, object())
 
-    target = await service._resolve_target(  # noqa: SLF001
+    target = await service.operations._resolve_target(  # noqa: SLF001
         ReadWriteSession(session),
         request=_request(),
         connection=_connection(),
@@ -441,7 +442,7 @@ async def test_threads_location_keeps_source_thread_as_owner_target() -> None:
     repository.lock_resource_by_provider_key = AsyncMock()
     service = _service(repository)
 
-    target = await service._resolve_target(  # noqa: SLF001
+    target = await service.operations._resolve_target(  # noqa: SLF001
         ReadWriteSession(cast(AsyncSession, object())),
         request=_request(),
         connection=_connection(),
@@ -470,7 +471,7 @@ async def test_source_resource_create_race_rejects_inactive_result() -> None:
     repository.create_resource_idempotent = AsyncMock(return_value=inactive)
     service = _service(repository)
 
-    resource = await service._ensure_source_resource(  # noqa: SLF001
+    resource = await service.operations._ensure_source_resource(  # noqa: SLF001
         ReadWriteSession(cast(AsyncSession, object())),
         request=_request(),
         now=MagicMock(),
