@@ -13,6 +13,9 @@ from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
+from azents.repos.agent_project_catalog.operations import (
+    AgentProjectCatalogOperationsRepository,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
@@ -224,8 +227,11 @@ def _service(
         session_workspace_project_operations_repository=_ProjectOperationsProjection(),
         agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_catalog_service=AgentProjectCatalogService(
-            catalog_repository=AgentProjectCatalogRepository(),
-            session_manager=_reject_write_session_manager,
+            repository=AgentProjectCatalogOperationsRepository(
+                catalog_repository=AgentProjectCatalogRepository(),
+                session_manager=_reject_write_session_manager,
+                read_session_manager=_read_session_manager,
+            ),
             runtime_target_resolver=resolver,
             runner_operations=runner_operations,
         ),

@@ -19,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/kimi_oauth/**
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/kimi_oauth_session/**
@@ -34,8 +35,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-04
-spec_version: 7
+last_verified_at: 2026-10-05
+spec_version: 8
 ---
 
 # Kimi OAuth Flow
@@ -242,6 +243,14 @@ call Kimi directly.
 An enabled Kimi integration exposes live usage through the existing integration child endpoint.
 Azents does not persist usage snapshots, poll in the background, aggregate workspaces, or use usage to
 change execution entitlement.
+
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. Usage persistence, financial-field authorization and
+provider/secrets redaction retain their existing contracts.
 
 The usage adapter ensures fresh credentials and requests `GET /usages` with the access token and
 compatibility headers. It accepts an optional `usage` summary and zero or more `limits` entries,
