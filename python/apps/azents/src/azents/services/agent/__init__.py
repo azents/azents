@@ -32,6 +32,13 @@ from azents.core.enums import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.s3.deps import get_s3_service
+from azents.core.upload_images import (
+    ImageFile,
+    ImageThumbnails,
+    StoredImage,
+    StoredImageFile,
+    UploadedImage,
+)
 from azents.engine.context.window import (
     EffectiveContextWindow,
     compute_effective_context_window_tokens,
@@ -78,13 +85,6 @@ from azents.services.terminal_policy.invalidation_contracts import (
 from azents.services.uploads import UploadService, UploadValidationError
 from azents.services.uploads.deps import get_upload_service
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import (
-    ImageFile,
-    ImageThumbnails,
-    StoredImage,
-    StoredImageFile,
-    UploadedImage,
-)
 
 from .data import (
     AdminNotFound,

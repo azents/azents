@@ -20,6 +20,11 @@ from azents.core.enums import (
     ExchangeFileStatus,
     ModelFileStatus,
 )
+from azents.core.upload_images import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
@@ -39,11 +44,6 @@ from azents.repos.model_file.data import ModelFile
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import (
-    StoredImage,
-    StoredImageFile,
-    StoredImageThumbnails,
-)
 from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)

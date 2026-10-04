@@ -23,6 +23,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.core.upload_images import StoredImage
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.repos.agent_decommission_operations import (
@@ -36,7 +37,6 @@ from azents.services.agent_decommission import (
     AgentDecommissionAdvanceResult,
     AgentDecommissionService,
 )
-from azents.services.uploads.schema import StoredImage
 
 
 @asynccontextmanager
