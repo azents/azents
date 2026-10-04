@@ -66,7 +66,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-04
-spec_version: 27
+spec_version: 28
 ---
 
 # Periodic Execution Flow Spec
@@ -148,13 +148,19 @@ code-registered definition, reconstructs `TaskContext`, and invokes its async ha
 Runtime also hosts External Channel ingress through a separate registered handler; Scheduler claims
 do not use ingress coalescing or rerun behavior.
 
-If a handler raises while settling inside cancellation grace, Local Job Runtime
-keeps the authoritative timeout outcome and records that otherwise-unobserved
-handler exception once with origin traceback frames, a static replacement
-exception message, and bounded handler/execution identity. Expected cooperative
-cancellation remains silent, untrusted exception text is not rendered, and a
-handler that outlives grace continues through the separate detached-cleanup
-observer.
+Local Job Runtime owns one terminal ERROR observation per execution attempt.
+Uncaught handler/startup failures and elapsed cutoffs retain origin traceback
+frames with static replacement exception text and content-free handler/execution
+identity. The Runtime deadline path logs even when it wins an inner supervisor's
+timeout race; cooperative cancellation supplies handler frames when available.
+External shutdown cancellation before a deadline remains non-error cancellation.
+The first failure/outcome survives a subsequent container cleanup fault.
+
+Cancellation-grace, detached-handler and cleanup faults after the terminal
+observation are sanitized WARNING diagnostics, not duplicate terminal ERRORs.
+A handler that outlives grace continues through the separately owned
+detached-cleanup observer. Untrusted exception text, context and notes are never
+rendered in these observations.
 
 `job_runtime_backend=temporal` is a recognized configuration value but fails application composition
 because that backend is not implemented. Scheduler task handlers do not import Temporal APIs.
@@ -368,10 +374,17 @@ Consolidation discovery reuses this five-minute cadence for exact Team/personal
 units and due recovery. Obsolete metadata retirement runs inside the claimed
 attempt before model preparation, not in discovery before dispatch. Short
 PostgreSQL leases and owner generations, not local coalescing or Redis, establish
-one active consolidation owner per unit. Jobs use ten-minute absolute attempts,
-renew 120-second leases every 30 seconds, and preserve exact pending work across
+one active consolidation owner per unit. Jobs snapshot system-configured
+`max_turns` and `timeout_seconds` from `historical_memory_execution` (defaults:
+unlimited logical turns and 600 seconds). The submitted Runtime, durable claim
+and supervisor share one absolute deadline. Logical turn consumption survives
+quota candidate handoff. Jobs renew 120-second leases every 30 seconds and
+preserve exact pending work across
 productive finite slices. Productive progress requeues without failure delay;
 failures/no progress use one-minute exponential backoff capped at six hours.
+Elapsed cutoff settlement compares the exact active attempt/generation/token
+and writes terminal/retry metadata without restoring expired execution or
+publication authority. Internal faults/cutoffs store no user-facing failure code.
 Fenced periodic cleanup preserves active owners, unfinished passes and snapshot-
 referenced publications while collecting eligible private payloads.
 No Saved Memory is created or mutated. See

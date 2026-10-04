@@ -31,6 +31,7 @@ from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservat
 from azents.services.historical_memory.source_vfs import ConsolidationSourceVfsBackend
 from azents.services.vfs_read import VfsReadError
 from azents.testing.consolidation import (
+    consolidation_deadline,
     create_consolidation_source,
     seed_consolidation_corpus,
 )
@@ -111,7 +112,7 @@ async def test_personal_inventory_excludes_team_and_another_personal_user(
         )
         await session.write_session.commit()
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.personal
+        corpus.personal, deadline=consolidation_deadline()
     )
     assert claim is not None
     backend = ConsolidationSourceVfsBackend(

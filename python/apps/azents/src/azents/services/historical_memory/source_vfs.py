@@ -159,11 +159,7 @@ class ConsolidationSourceVfsBackend:
                         ]
                     )
                 full = "\n".join(lines) + "\n"
-                text = (
-                    full[offset : offset + limit]
-                    .encode("utf-8")[:11000]
-                    .decode("utf-8", errors="ignore")
-                )
+                text = full[offset : offset + limit]
                 end = offset + len(text)
                 return TextReadResult(text, offset, end, end < len(full))
             if path == "inventory/README.md" or (
@@ -195,18 +191,14 @@ class ConsolidationSourceVfsBackend:
                         ]
                     )
                 full = "\n".join(lines) + "\n"
-                text = (
-                    full[offset : offset + limit]
-                    .encode("utf-8")[:11000]
-                    .decode("utf-8", errors="ignore")
-                )
+                text = full[offset : offset + limit]
                 end = offset + len(text)
                 return TextReadResult(text, offset, end, end < len(full))
             read = await self.repository.read(
                 context,
                 source_session_id=self._source_id(location),
                 offset=offset,
-                max_bytes=11000,
+                max_bytes=limit * 4,
             )
         except ConsolidationAuthorityError:
             raise VfsReadError("not_found", "VFS location is unavailable.") from None
@@ -308,7 +300,7 @@ class ConsolidationSourceVfsBackend:
                     context,
                     source_session_id=entry.version.source_session_id,
                     offset=offset,
-                    max_bytes=min(12000, max_scanned_bytes - scanned),
+                    max_bytes=max_scanned_bytes - scanned,
                 )
                 self.observations.record_source_epoch(read.observation_epoch)
                 if version is not None and version != read.version:

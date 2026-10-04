@@ -192,7 +192,7 @@ async def test_unicode_bounds_inventory_and_native_search(
     tools = binding.tools({})
     await _invoke(tools["write"], "create", {"path": _URI, "content": "한" * 9000})
     result = await _read(binding, _URI)
-    assert len(result.text.encode("utf-8")) == 10998 and result.truncated
+    assert len(result.text.encode("utf-8")) == 27000 and not result.truncated
     rest = await binding.reads.read_text(
         binding.principal,
         _URI,
@@ -200,7 +200,7 @@ async def test_unicode_bounds_inventory_and_native_search(
         limit=10000,
         encoding="utf-8",
     )
-    assert rest.start_character == 3666 and rest.text == "한" * 3666
+    assert rest.start_character == 9000 and rest.text == ""
     glob = await binding.reads.glob(
         binding.principal, "azents://memory-draft/**", exclude_patterns=()
     )
@@ -231,7 +231,7 @@ async def test_unicode_bounds_inventory_and_native_search(
         session_storage=storage, agent_id=binding.principal.unit.agent_id
     )
     body = await read_tool.handler(json.dumps({"path": _URI, "limit": 10000}))
-    assert isinstance(body, str) and len(body.encode("utf-8")) <= 12000
+    assert isinstance(body, str) and body.endswith("한" * 9000)
     with pytest.raises(FunctionToolError, match="unavailable"):
         await storage.get_text(
             "/tmp/no-runtime",

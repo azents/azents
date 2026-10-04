@@ -48,7 +48,11 @@ from azents.repos.historical_memory_consolidation.publication import (
 from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
-from azents.testing.consolidation import ConsolidationCorpus, seed_consolidation_corpus
+from azents.testing.consolidation import (
+    ConsolidationCorpus,
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,7 +66,7 @@ class _Ready:
 async def _ready(manager: SessionManager[WriteSession], *, empty: bool) -> _Ready:
     corpus = await seed_consolidation_corpus(manager)
     owners = ConsolidationOwnershipRepository(manager)
-    claim = await owners.claim(corpus.team)
+    claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     work = ConsolidationWorkRepository(manager)
     page = await work.page(claim.principal, after_sequence=None, limit=50)
@@ -206,7 +210,9 @@ async def test_content_change_after_legitimate_read_publishes_old_work_only(
     )
     await _publish(rdb_session_manager, ready)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
-    next_claim = await owners.claim(ready.corpus.team)
+    next_claim = await owners.claim(
+        ready.corpus.team, deadline=consolidation_deadline()
+    )
     assert next_claim is not None
     page = await ConsolidationWorkRepository(rdb_session_manager).page(
         next_claim.principal, after_sequence=None, limit=50

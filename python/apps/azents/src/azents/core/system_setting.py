@@ -22,6 +22,7 @@ class SystemSettingSection(enum.StrEnum):
     PLATFORM_RUNTIME = "platform_runtime"
     SLACK_IDENTITY_OAUTH = "slack_identity_oauth"
     DISCORD_IDENTITY_OAUTH = "discord_identity_oauth"
+    HISTORICAL_MEMORY_EXECUTION = "historical_memory_execution"
 
 
 class SystemSettingActivationMode(enum.StrEnum):

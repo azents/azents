@@ -132,7 +132,7 @@ class MemoryHandoverRepository:
                     )
                     .values(
                         state=ConsolidationAttemptState.CANCELLED,
-                        failure_code="coordinated_handover",
+                        failure_code=None,
                         finished_at=now,
                     )
                 )

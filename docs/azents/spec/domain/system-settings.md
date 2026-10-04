@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-10-02
+updated: 2026-10-04
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -15,6 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/core/github_system_setting.py
   - python/apps/azents/src/azents/core/github_system_setting_data.py
   - python/apps/azents/src/azents/core/external_channel_file_system_setting.py
+  - python/apps/azents/src/azents/core/historical_memory_system_setting.py
+  - python/apps/azents/src/azents/services/historical_memory/execution_policy.py
   - python/apps/azents/src/azents/core/external_account_oauth_system_setting.py
   - python/apps/azents/src/azents/api/admin/system_setting/**
   - python/apps/azents/src/azents/services/system_setting/**
@@ -44,6 +46,7 @@ code_paths:
 api_routes:
   - /system-setting/v1/sections
   - /system-setting/v1/sections/external-channel-files
+  - /system-setting/v1/sections/historical-memory-execution
   - /system-setting/v1/sections/external-account-oauth/{provider}
   - /system-setting/v1/sections/external-account-oauth/{provider}/health-check
   - /system-setting/v1/sections/platform-github-app
@@ -55,8 +58,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-10-02
-spec_version: 8
+last_verified_at: 2026-10-04
+spec_version: 9
 ---
 
 # System Settings
@@ -68,6 +71,8 @@ independent setting families currently use this domain:
 
 - the provider-neutral Section lifecycle, whose first compiled Section is the Platform GitHub App;
 - the direct-activation `external_channel_files` Section for provider-neutral transfer policy;
+- the direct-activation `historical_memory_execution` Section for consolidation
+  maximum logical turns and elapsed-time policy;
 - the direct-activation Slack and Discord identity OAuth Sections;
 - archived-session retention under the file-lifecycle API; and
 - the confirmed `platform_runtime` Section, whose typed non-secret configuration stores the
@@ -271,6 +276,27 @@ Admin Web renders an independent `External Channel files` card. Administrators e
 whole-MiB values, see exact effective bytes and version, receive explicit unsaved/error
 state, and save directly. Successful save invalidates both detail and audit queries. The
 card intentionally has no candidate validation or health-check controls.
+
+## Historical Memory Execution Section
+
+`historical_memory_execution` is schema version 1 and activates directly, without
+secrets or environment bindings. Its configuration is `max_turns` (positive
+integer or null, default null/unlimited) and `timeout_seconds` (positive integer,
+default 600). No per-Agent execution cutoff or alternate spend budget is added.
+
+Dedicated GET/PATCH at `/system-setting/v1/sections/historical-memory-execution`
+returns effective values, schema version and Admin version. PATCH requires
+`expected_version`, preserves omitted values and uses explicit `max_turns: null`
+to select unlimited turns. Empty patches, null timeout and non-positive or
+non-integer values return 422; stale versions return the typed
+`409 stale_system_setting_version` envelope.
+
+Admin Web provides independent maximum-turn and timeout controls with loading,
+validation, unsaved, version, saving and conflict states. Blank maximum turns
+means unlimited. A conflict requires reloading the latest settings before retry.
+Successful save invalidates detail and audit queries. New consolidation jobs
+snapshot the effective policy and one absolute deadline; running attempts retain
+their original policy/deadline through candidate handoffs.
 
 ## Archived-session retention policy
 

@@ -35,7 +35,10 @@ from azents.repos.historical_memory_consolidation.recovery import (
 from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 @pytest.mark.parametrize("deny_restore", [False, True])
@@ -44,7 +47,7 @@ async def test_recovery_retains_authorized_draft_or_discards_entire_denied_work(
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
-    claim = await owners.claim(corpus.team)
+    claim = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     work = ConsolidationWorkRepository(rdb_session_manager)
     page = await work.page(claim.principal, after_sequence=None, limit=50)
@@ -146,7 +149,7 @@ async def test_new_owner_recovers_only_draft_dependencies_not_prior_unused_expos
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
-    first = await owners.claim(corpus.team)
+    first = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert first is not None
     drafts = ConsolidationDraftRepository(rdb_session_manager)
     observed = await drafts.observe(first.principal, path="summary.md")
@@ -181,7 +184,7 @@ async def test_new_owner_recovers_only_draft_dependencies_not_prior_unused_expos
         await AgentSessionRepository().archive(
             session, corpus.team_source, ended_at=datetime.datetime.now(datetime.UTC)
         )
-    second = await owners.claim(corpus.team)
+    second = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert second is not None
     checkpoint = await ConsolidationRecoveryRepository(rdb_session_manager).prepare(
         second.principal

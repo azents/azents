@@ -81,13 +81,10 @@ async def consolidation_job_session(
     manager: SessionManager[WriteSession], principal: ConsolidationJobPrincipal
 ) -> AsyncIterator[ConsolidationJobSession]:
     """Bound admission and all DB work by the approved lease and attempt deadline."""
-    timeout = asyncio.timeout(120)
+    timeout = asyncio.timeout(None)
     try:
         async with timeout:
             async with consolidation_session(manager) as session:
-                await session.write_session.execute(
-                    sa.select(sa.func.set_config("statement_timeout", "120000", True))
-                )
                 owner = await lock_job_owner(session, principal)
                 if owner.unit.lease_until is None:
                     raise ConsolidationAuthorityError(

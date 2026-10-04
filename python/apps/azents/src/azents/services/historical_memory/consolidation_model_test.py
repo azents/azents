@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import httpx2
 import pytest
-from openai import BadRequestError
+from openai import BadRequestError, omit
 from openai.types.responses import (
     Response,
     ResponseCompletedEvent,
@@ -33,7 +33,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationBudgetRepository,
+    ConsolidationExecutionRepository,
 )
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
@@ -60,7 +60,10 @@ from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
 )
 from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -186,13 +189,15 @@ def _unused_provider(
 
 
 @pytest.mark.parametrize("websocket", [False, True])
+@pytest.mark.parametrize("selected_output_tokens", [None, 20000])
 async def test_http_retry_and_websocket_sends_are_independently_reserved(
     rdb_session_manager: SessionManager[WriteSession],
     websocket: bool,
+    selected_output_tokens: int | None,
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     ownership = ConsolidationOwnershipRepository(rdb_session_manager)
-    claim = await ownership.claim(corpus.team)
+    claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     await ConsolidationRecoveryRepository(rdb_session_manager).prepare(claim.principal)
     client = _JournalClient(rdb_session_manager, claim.principal.attempt_id)
@@ -205,14 +210,16 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
     selection.normalized_capabilities.parameters.max_output_tokens = True
     model = bind_consolidation_provider_model(
         selection=selection,
-        settings=make_test_model_settings(),
+        settings=make_test_model_settings().model_copy(
+            update={"max_output_tokens": selected_output_tokens}
+        ),
         credential_kwargs={"api_key": "synthetic-unused"},
         effective_input_tokens=128000,
         sdk_factories=ModelSDKFactories(factory, _unused_provider),
         watchdog=make_test_model_stream_watchdog(),
         websocket_enabled=websocket,
     )
-    assert model.max_output_tokens == 4000
+    assert model.max_output_tokens == selected_output_tokens
     bindings = ConsolidationToolBindings(
         ConsolidationVfsObservations(claim.principal),
         ConsolidationDraftRepository(rdb_session_manager),
@@ -227,7 +234,7 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
             UserMessagePayload(sender_user_id=None, content="Scoped source input."),
         )
     ]
-    budgets = ConsolidationBudgetRepository(rdb_session_manager)
+    budgets = ConsolidationExecutionRepository(rdb_session_manager)
     second: ConsolidationDispatchAdmission | None = None
     try:
         for number in range(2):
@@ -235,7 +242,7 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
                 messages,
                 catalog,
                 system_prompt="Independent internal Agent task",
-                output_tokens=4000,
+                output_tokens=model.max_output_tokens,
             )
             dispatch = ConsolidationDispatchAdmission(
                 claim.principal, budgets, prepared.input_tokens, prepared.output_tokens
@@ -264,13 +271,22 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
     finally:
         await model.close()
     assert client.closed and client.socket_connected == websocket
+    assert all(
+        request["max_output_tokens"]
+        == (omit if selected_output_tokens is None else selected_output_tokens)
+        for request in client.requests
+    )
     assert second is not None
     assert isinstance(client.requests[1]["previous_response_id"], str)
     if websocket:
         assert client.admitted_numbers == [1, 2]
         assert len(second.reservations) == 1
-        remaining = await budgets.remaining(claim.principal)
-        assert remaining.model_requests == 30 and remaining.output_tokens == 15990
+        async with rdb_session_manager() as session:
+            attempt = await session.read_session.get(
+                RDBConsolidationAttempt, claim.principal.attempt_id
+            )
+            assert attempt is not None
+            assert attempt.model_requests == 2 and attempt.output_tokens == 10
         return
     assert client.admitted_numbers == [1, 2, 3]
     assert len(second.reservations) == 2
@@ -289,5 +305,9 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
         )
         assert succeeded is not None and succeeded.usage_json is not None
         assert "raw" not in succeeded.usage_json
-    remaining = await budgets.remaining(claim.principal)
-    assert remaining.model_requests == 29 and remaining.output_tokens == 11990
+    async with rdb_session_manager() as session:
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, claim.principal.attempt_id
+        )
+        assert attempt is not None
+        assert attempt.model_requests == 3 and attempt.output_tokens == 10

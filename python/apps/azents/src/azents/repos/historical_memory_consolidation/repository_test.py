@@ -51,6 +51,7 @@ from azents.repos.historical_memory_consolidation.sources import (
 )
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.testing.consolidation import consolidation_deadline
 from azents.testing.consolidation import seed_consolidation_corpus as _seed
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -83,10 +84,10 @@ async def test_exact_scope_reads_and_duplicate_claim(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
-    team = await owners.claim(corpus.team)
-    personal = await owners.claim(corpus.personal)
+    team = await owners.claim(corpus.team, deadline=consolidation_deadline())
+    personal = await owners.claim(corpus.personal, deadline=consolidation_deadline())
     assert team is not None and personal is not None
-    assert await owners.claim(corpus.team) is None
+    assert await owners.claim(corpus.team, deadline=consolidation_deadline()) is None
     assert team.principal.attempt_id != personal.principal.attempt_id
     sources = ConsolidationSourceRepository(rdb_session_manager)
     for claim, own_source, peer_source in (
@@ -112,7 +113,7 @@ async def test_expiry_takeover_fences_old_owner(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
-    first = await owners.claim(corpus.team)
+    first = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert first is not None
     async with rdb_session_manager() as session:
         await session.write_session.execute(
@@ -123,7 +124,7 @@ async def test_expiry_takeover_fences_old_owner(
             )
         )
         await session.write_session.commit()
-    second = await owners.claim(corpus.team)
+    second = await owners.claim(corpus.team, deadline=consolidation_deadline())
     assert second is not None
     assert second.principal.owner_generation == first.principal.owner_generation + 1
     with pytest.raises(ConsolidationAuthorityError):
@@ -136,7 +137,7 @@ async def test_receipt_replay_conflict_and_stale_draft(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     drafts = ConsolidationDraftRepository(rdb_session_manager)
@@ -169,7 +170,7 @@ async def test_source_exposure_fences_previously_admitted_mutation(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     drafts = ConsolidationDraftRepository(rdb_session_manager)
@@ -211,7 +212,7 @@ async def test_archive_restore_never_revives_draft_dependency(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     await ConsolidationSourceRepository(rdb_session_manager).read(
@@ -262,7 +263,7 @@ async def test_membership_recreated_with_same_row_id_cannot_revive_attempt(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     owners = ConsolidationOwnershipRepository(rdb_session_manager)
-    claim = await owners.claim(corpus.personal)
+    claim = await owners.claim(corpus.personal, deadline=consolidation_deadline())
     assert claim is not None
     async with rdb_session_manager() as session:
         member = await session.read_session.scalar(
@@ -289,34 +290,69 @@ async def test_membership_recreated_with_same_row_id_cannot_revive_attempt(
         await owners.renew(claim.principal)
 
 
-async def test_oversized_batch_rolls_back_every_file_and_receipt(
+async def test_large_multifile_batch_commits_without_memory_only_capacity_limit(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     drafts = ConsolidationDraftRepository(rdb_session_manager)
     observed = await drafts.observe(claim.principal, path="summary.md")
-    with pytest.raises(ValueError, match="budget"):
-        await drafts.mutate(
-            claim.principal,
-            tool_call_id="too-large",
-            request_digest="e" * 64,
-            expected_draft_revision_id=observed.draft_revision_id,
-            expected_observation_epoch=observed.observation_epoch,
-            changes=[
-                _change("summary.md", observed, "valid first file"),
-                DraftFileChange("second.md", None, "한" * 90000),
-            ],
-        )
+    result = await drafts.mutate(
+        claim.principal,
+        tool_call_id="large-working-files",
+        request_digest="e" * 64,
+        expected_draft_revision_id=observed.draft_revision_id,
+        expected_observation_epoch=observed.observation_epoch,
+        changes=[
+            _change("summary.md", observed, "valid first file"),
+            DraftFileChange("second.md", None, "한" * 90000),
+            *(DraftFileChange(f"note-{i}.md", None, "working") for i in range(40)),
+        ],
+    )
+    assert result.file_count == 42
     async with rdb_session_manager() as session:
-        assert not list(
-            await session.read_session.scalars(sa.select(RDBConsolidationDraftFile))
+        assert (
+            len(
+                list(
+                    await session.read_session.scalars(
+                        sa.select(RDBConsolidationDraftFile)
+                    )
+                )
+            )
+            == 42
         )
     current = await drafts.observe(claim.principal, path="summary.md")
-    assert current.draft_revision_id == observed.draft_revision_id
+    assert current.draft_revision_id != observed.draft_revision_id
+    assert current.content == "valid first file"
+    assert (
+        await drafts.observe(claim.principal, path="second.md")
+    ).content == "한" * 90000
+
+
+async def test_mutation_receipts_do_not_impose_a_memory_only_call_limit(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    corpus = await _seed(rdb_session_manager)
+    claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
+        corpus.team, deadline=consolidation_deadline()
+    )
+    assert claim is not None
+    drafts = ConsolidationDraftRepository(rdb_session_manager)
+    for index in range(98):
+        observed = await drafts.observe(claim.principal, path="summary.md")
+        await drafts.mutate(
+            claim.principal,
+            tool_call_id=f"mutation-{index}",
+            request_digest=hashlib.sha256(str(index).encode()).hexdigest(),
+            expected_draft_revision_id=observed.draft_revision_id,
+            expected_observation_epoch=observed.observation_epoch,
+            changes=[_change("summary.md", observed, f"Working revision {index}")],
+        )
+    current = await drafts.observe(claim.principal, path="summary.md")
+    assert current.content == "Working revision 97"
 
 
 async def test_source_purge_retains_independent_influence_and_denies_use(
@@ -324,7 +360,7 @@ async def test_source_purge_retains_independent_influence_and_denies_use(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     await ConsolidationSourceRepository(rdb_session_manager).read(
@@ -369,7 +405,7 @@ async def test_multifile_commit_and_delete_recreate_never_reuses_identity(
 ) -> None:
     corpus = await _seed(rdb_session_manager)
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
-        corpus.team
+        corpus.team, deadline=consolidation_deadline()
     )
     assert claim is not None
     drafts = ConsolidationDraftRepository(rdb_session_manager)
@@ -493,7 +529,10 @@ async def test_two_real_transactions_admit_exactly_one_owner(
 
         async def contender() -> bool:
             await gate.wait()
-            return await repository.claim(key) is not None
+            return (
+                await repository.claim(key, deadline=consolidation_deadline())
+                is not None
+            )
 
         left = asyncio.create_task(contender())
         right = asyncio.create_task(contender())
@@ -545,7 +584,9 @@ async def test_memory_disable_restore_retains_denial_continuity(
     corpus = await _seed(rdb_session_manager)
     key = corpus.personal if personal else corpus.team
     source_id = corpus.personal_source if personal else corpus.team_source
-    claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(key)
+    claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
+        key, deadline=consolidation_deadline()
+    )
     assert claim is not None
     await ConsolidationSourceRepository(rdb_session_manager).read(
         claim.principal, source_session_id=source_id, offset=0, max_bytes=12000

@@ -29,7 +29,10 @@ from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
 )
 from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 from azents.testing.model_selection import make_test_model_selection
 
 _URI = "azents://memory-draft/summary.md"
@@ -63,7 +66,7 @@ def _call(call_id: str, name: str, arguments: dict[str, str]) -> ClientToolCallP
 async def _bindings(manager: SessionManager[WriteSession]) -> ConsolidationToolBindings:
     corpus = await seed_consolidation_corpus(manager)
     ownership = ConsolidationOwnershipRepository(manager)
-    claim = await ownership.claim(corpus.team)
+    claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     await ConsolidationRecoveryRepository(manager).prepare(claim.principal)
     return ConsolidationToolBindings(

@@ -3107,6 +3107,86 @@
         ]
       }
     },
+    "/system-setting/v1/sections/historical-memory-execution": {
+      "get": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Get Historical Memory Execution Setting",
+        "operationId": "system_settings_v1_get_historical_memory_execution_setting",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryExecutionDetailResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "System Settings v1"
+        ],
+        "summary": "Patch Historical Memory Execution Setting",
+        "operationId": "system_settings_v1_patch_historical_memory_execution_setting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HistoricalMemoryExecutionPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoricalMemoryExecutionDetailResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The expected System Settings version is stale.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemSettingVersionConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/system-setting/v1/sections/external-account-oauth/{provider}": {
       "get": {
         "tags": [
@@ -5699,6 +5779,80 @@
         ],
         "title": "HealthStatus",
         "description": "Server status response model."
+      },
+      "HistoricalMemoryExecutionDetailResponse": {
+        "properties": {
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "admin_version": {
+            "type": "integer",
+            "title": "Admin Version"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Turns"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "title": "Timeout Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section",
+          "schema_version",
+          "admin_version",
+          "max_turns",
+          "timeout_seconds"
+        ],
+        "title": "HistoricalMemoryExecutionDetailResponse",
+        "description": "Effective memory execution cutoffs with the admin mutation version."
+      },
+      "HistoricalMemoryExecutionPatchRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "max_turns": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Turns"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Timeout Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "HistoricalMemoryExecutionPatchRequest",
+        "description": "Optimistic update of the system-owned memory execution cutoffs."
       },
       "InvitationListResponse": {
         "properties": {

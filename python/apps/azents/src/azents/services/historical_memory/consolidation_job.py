@@ -10,19 +10,16 @@ from pydantic import BaseModel, ConfigDict
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
+from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
 from azents.core.historical_memory_consolidation import ConsolidationUnitKey
-from azents.core.historical_memory_publication import ConsolidationOutputError
-from azents.core.model_operation import ModelOperationChainExhaustedError
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import (
-    ModelDispatchAdmissionError,
     ModelStreamClock,
     ModelStreamWatchdog,
     get_model_stream_watchdog,
 )
-from azents.engine.run.errors import ModelStreamTimeoutError
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
@@ -44,7 +41,7 @@ from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
 )
 from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationBudgetRepository,
+    ConsolidationExecutionRepository,
 )
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
@@ -91,6 +88,7 @@ class HistoricalMemoryConsolidationJobPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     unit: ConsolidationUnitKey
+    execution_policy: HistoricalMemoryExecutionConfig
 
 
 class SupervisedConsolidationAttempt(Protocol):
@@ -168,27 +166,16 @@ async def supervise_consolidation_attempt(
             raise
 
 
-def consolidation_failure_code(error: Exception) -> str:
-    """Closed safe operational labels, never prompt/provider-body persistence."""
-    if isinstance(error, ModelProviderFailure):
+def consolidation_failure_code(error: Exception) -> str | None:
+    """Persist only safe failures requiring user action or inspection."""
+    if isinstance(error, ModelProviderFailure) and error.category in {
+        ModelProviderFailureCategory.AUTHENTICATION,
+        ModelProviderFailureCategory.PERMISSION,
+        ModelProviderFailureCategory.QUOTA_OR_BILLING,
+        ModelProviderFailureCategory.MODEL_UNAVAILABLE,
+    }:
         return error.failure_code
-    if isinstance(error, ModelStreamTimeoutError):
-        return error.failure_code
-    if isinstance(error, ConsolidationBudgetExceeded):
-        return "budget_exhausted"
-    if isinstance(error, ModelDispatchAdmissionError):
-        return f"dispatch_{error.reason}_rejected"
-    if isinstance(error, ConsolidationOutputError):
-        return "invalid_authored_output"
-    if isinstance(error, ConsolidationModelCapabilityError):
-        return "lightweight_capability_unavailable"
-    if isinstance(error, ModelOperationChainExhaustedError):
-        return "lightweight_chain_exhausted"
-    if isinstance(error, ConsolidationAuthorityError):
-        return "authority_unconfirmed"
-    if isinstance(error, TimeoutError):
-        return "attempt_deadline"
-    return "internal_execution_failed"
+    return None
 
 
 @dataclasses.dataclass
@@ -218,10 +205,14 @@ class HistoricalMemoryConsolidationService:
     watchdog: Annotated[ModelStreamWatchdog, Depends(get_model_stream_watchdog)]
 
     async def run_unit(
-        self, key: ConsolidationUnitKey
+        self,
+        key: ConsolidationUnitKey,
+        *,
+        execution_policy: HistoricalMemoryExecutionConfig,
+        deadline: datetime.datetime,
     ) -> ConsolidationPublicationOutcome | None:
         ownership = ConsolidationOwnershipRepository(self.session_manager)
-        claim = await ownership.claim(key)
+        claim = await ownership.claim(key, deadline=deadline)
         if claim is None:
             return None
         attempt = ConsolidationAttemptExecution(
@@ -229,13 +220,25 @@ class HistoricalMemoryConsolidationService:
             claim,
             ownership,
             ConsolidationPublicationRepository(self.session_manager),
+            execution_policy,
         )
         try:
             return await supervise_consolidation_attempt(
                 attempt, clock=self.watchdog.clock
             )
-        except asyncio.CancelledError:
-            # Expiry/new-owner recovery remains authoritative on shutdown.
+        except asyncio.CancelledError as error:
+            if datetime.datetime.now(datetime.UTC) >= claim.deadline_at:
+                # Supervision has quiesced execution before terminal metadata
+                # settlement; this cannot restore source or publication authority.
+                try:
+                    await ownership.fail(
+                        claim.principal,
+                        failure_code=None,
+                        cancelled=False,
+                    )
+                except ConsolidationAuthorityError:
+                    raise error from None
+            # External shutdown before the deadline leaves expiry recovery intact.
             raise
         except Exception as error:
             try:
@@ -245,8 +248,8 @@ class HistoricalMemoryConsolidationService:
                     cancelled=False,
                 )
             except ConsolidationAuthorityError:
-                # A revoked/expired owner cannot write terminal metadata. Its
-                # original failure still propagates to Job Runtime unchanged.
+                # A replaced or settled owner cannot write terminal metadata.
+                # Its original failure propagates to Job Runtime unchanged.
                 raise error from None
             raise
 
@@ -259,6 +262,7 @@ class ConsolidationAttemptExecution:
     claim: ConsolidationClaim
     ownership_repository: ConsolidationOwnershipRepository
     publication_repository: ConsolidationPublicationRepository
+    execution_policy: HistoricalMemoryExecutionConfig
     active_host: ConsolidationIterationHost | None = dataclasses.field(
         init=False, default=None
     )
@@ -276,7 +280,15 @@ class ConsolidationAttemptExecution:
             service.active_capabilities_repository,
         )
         recovery = ConsolidationRecoveryRepository(service.session_manager)
+        started_turns = 0
         while True:
+            if (
+                self.execution_policy.max_turns is not None
+                and started_turns >= self.execution_policy.max_turns
+            ):
+                raise ConsolidationTurnLimitExceeded(
+                    "Consolidation turn limit was reached."
+                )
             self.active_host = None
             self.active_model = None
             await recovery.prepare(self.claim.principal)
@@ -322,11 +334,13 @@ class ConsolidationAttemptExecution:
                 self.claim,
                 model,
                 bindings,
-                ConsolidationBudgetRepository(service.session_manager),
+                ConsolidationExecutionRepository(service.session_manager),
                 self.ownership_repository,
                 work,
                 self.publication_repository,
+                self.execution_policy,
             )
+            self.active_host.prior_turns = started_turns
             try:
                 return await self.active_host.run()
             except asyncio.CancelledError:
@@ -344,6 +358,8 @@ class ConsolidationAttemptExecution:
                     raise
                 # Heartbeat/deadline remain active through this handoff. The shared
                 # core closed the old RAM history and SDK before fresh recovery.
+            finally:
+                started_turns += self.active_host.started_turns
 
     async def close(self) -> None:
         if self.active_host is not None:
@@ -365,7 +381,11 @@ async def execute_historical_memory_consolidation_job(
         context.request.payload
     )
     service = await context.container.solve(HistoricalMemoryConsolidationService)
-    result = await service.run_unit(payload.unit)
+    result = await service.run_unit(
+        payload.unit,
+        execution_policy=payload.execution_policy,
+        deadline=context.request.deadline,
+    )
     if result is not None:
         discovery = await context.container.solve(
             HistoricalMemoryConsolidationDiscoveryService

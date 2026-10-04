@@ -31,6 +31,54 @@ class JobRuntimeClosedError(RuntimeError):
     """Raised when new work is submitted during Runtime shutdown."""
 
 
+@dataclass
+class _TerminalLog:
+    """Own one content-safe terminal error observation per execution attempt."""
+
+    request: JobRequest
+    emitted: bool = False
+
+    def failure(self, error: BaseException, *, message: str) -> None:
+        """Record the first terminal failure with sanitized origin frames."""
+        if self.emitted:
+            return
+        self.emitted = True
+        logger.error(
+            message,
+            extra={
+                "job_handler_key": self.request.handler_key,
+                "job_execution_key": self.request.execution_key,
+                "failure_kind": type(error).__name__[:120],
+            },
+            exc_info=sanitized_exception_info(error, message=message),
+        )
+
+    def timeout(self, origin: BaseException | None = None) -> JobOutcome:
+        """Record cutoff with handler cancellation or a Runtime origin frame."""
+        if origin is None:
+            try:
+                raise TimeoutError(
+                    "Registered job handler exceeded its absolute deadline."
+                )
+            except TimeoutError as error:
+                origin = error
+        self.failure(
+            TimeoutError(
+                "Registered job handler exceeded its absolute deadline."
+            ).with_traceback(origin.__traceback__),
+            message="Registered job handler exceeded its absolute deadline",
+        )
+        return JobOutcome.timed_out()
+
+
+@dataclass(frozen=True)
+class _HandlerCancellation:
+    """Cancellation settlement with an available failure or cancellation origin."""
+
+    settled: bool
+    origin: BaseException | None
+
+
 @dataclass(frozen=True)
 class LocalJobHandle(JobHandle):
     """Handle backed by one strongly owned local asyncio task."""
@@ -149,14 +197,17 @@ class LocalJobRuntime:
         current_request = request
         try:
             while True:
+                terminal_log = _TerminalLog(request=current_request)
                 try:
-                    outcome = await self._execute(current_request)
+                    outcome = await self._execute(current_request, terminal_log)
                 except asyncio.CancelledError:
                     raise
                 except Exception as error:
-                    logger.exception(
-                        "Registered Job Runtime task escaped structured outcome",
-                        extra={"job_execution_key": current_request.execution_key},
+                    terminal_log.failure(
+                        error,
+                        message=(
+                            "Registered Job Runtime task escaped structured outcome"
+                        ),
                     )
                     outcome = JobOutcome.failed(error)
                 current = asyncio.current_task()
@@ -182,7 +233,11 @@ class LocalJobRuntime:
                     del self._tasks[request.execution_key]
                 self._rerun_requests.pop(request.execution_key, None)
 
-    async def _execute(self, request: JobRequest) -> JobOutcome:
+    async def _execute(
+        self,
+        request: JobRequest,
+        terminal_log: _TerminalLog,
+    ) -> JobOutcome:
         """Run one registered handler inside a task-local DI container."""
         handler = self.handlers.get(request.handler_key)
         if handler is None:
@@ -191,52 +246,53 @@ class LocalJobRuntime:
             )
         remaining = self._remaining_seconds(request)
         if remaining <= 0:
-            return JobOutcome.timed_out()
+            return terminal_log.timeout()
         handler_semaphore = self._handler_semaphores.get(request.handler_key)
         if handler_semaphore is not None:
             try:
                 await asyncio.wait_for(handler_semaphore.acquire(), timeout=remaining)
-            except TimeoutError:
-                return JobOutcome.timed_out()
+            except TimeoutError as error:
+                return terminal_log.timeout(error)
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
                 handler_semaphore.release()
-                return JobOutcome.timed_out()
+                return terminal_log.timeout()
         try:
             await asyncio.wait_for(self._semaphore.acquire(), timeout=remaining)
-        except TimeoutError:
+        except TimeoutError as error:
             if handler_semaphore is not None:
                 handler_semaphore.release()
-            return JobOutcome.timed_out()
+            return terminal_log.timeout(error)
 
         container_stack: AsyncExitStack | None = AsyncExitStack()
         release_semaphore = True
+        cancellation_requested = False
         try:
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
-                return JobOutcome.timed_out()
+                return terminal_log.timeout()
             container_context = self.container_factory()
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
-                return JobOutcome.timed_out()
+                return terminal_log.timeout()
             try:
                 container = await asyncio.wait_for(
                     container_stack.enter_async_context(container_context),
                     timeout=remaining,
                 )
-            except TimeoutError:
-                return JobOutcome.timed_out()
+            except TimeoutError as error:
+                return terminal_log.timeout(error)
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
-                return JobOutcome.timed_out()
+                return terminal_log.timeout()
             handler_task = asyncio.ensure_future(
                 handler(JobExecutionContext(request=request, container=container))
             )
             try:
                 done, _ = await asyncio.wait({handler_task}, timeout=remaining)
             except asyncio.CancelledError:
-                settled = await self._cancel_handler(handler_task, request=request)
-                if not settled:
+                cancellation = await self._cancel_handler(handler_task, request=request)
+                if not cancellation.settled:
                     await self._adopt_detached_cleanup(
                         handler_task,
                         container_stack,
@@ -247,8 +303,9 @@ class LocalJobRuntime:
                     release_semaphore = False
                 raise
             if handler_task not in done:
-                settled = await self._cancel_handler(handler_task, request=request)
-                if not settled:
+                cancellation = await self._cancel_handler(handler_task, request=request)
+                outcome = terminal_log.timeout(cancellation.origin)
+                if not cancellation.settled:
                     await self._adopt_detached_cleanup(
                         handler_task,
                         container_stack,
@@ -257,7 +314,7 @@ class LocalJobRuntime:
                     )
                     container_stack = None
                     release_semaphore = False
-                return JobOutcome.timed_out()
+                return outcome
             try:
                 result = handler_task.result()
                 return JobOutcome.succeeded(
@@ -266,21 +323,57 @@ class LocalJobRuntime:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                terminal_log.failure(
+                    error,
+                    message="Registered job handler failed",
+                )
                 return JobOutcome.failed(error)
+        except asyncio.CancelledError:
+            cancellation_requested = True
+            raise
+        except Exception as error:
+            terminal_log.failure(
+                error,
+                message="Registered job startup or execution failed",
+            )
+            return JobOutcome.failed(error)
         finally:
-            if container_stack is not None:
-                await container_stack.aclose()
-            if release_semaphore:
-                self._semaphore.release()
-                if handler_semaphore is not None:
-                    handler_semaphore.release()
+            try:
+                if container_stack is not None:
+                    try:
+                        await container_stack.aclose()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        if not terminal_log.emitted and not cancellation_requested:
+                            raise
+                        logger.warning(
+                            "Registered job cleanup failed after terminal outcome",
+                            extra={
+                                "job_handler_key": request.handler_key,
+                                "job_execution_key": request.execution_key,
+                                "failure_kind": type(error).__name__[:120],
+                            },
+                            exc_info=sanitized_exception_info(
+                                error,
+                                message=(
+                                    "Registered job cleanup failed "
+                                    "after terminal outcome"
+                                ),
+                            ),
+                        )
+            finally:
+                if release_semaphore:
+                    self._semaphore.release()
+                    if handler_semaphore is not None:
+                        handler_semaphore.release()
 
     async def _cancel_handler(
         self,
         task: asyncio.Future[JobPayload | None],
         *,
         request: JobRequest,
-    ) -> bool:
+    ) -> _HandlerCancellation:
         """Cancel one handler and report whether it settled within grace."""
         L = bind_extra(
             logger,
@@ -301,12 +394,14 @@ class LocalJobRuntime:
                     "job_cancellation_grace_seconds": (self.cancellation_grace_seconds),
                 },
             )
-            return False
+            return _HandlerCancellation(settled=False, origin=None)
+        origin: BaseException | None = None
         try:
             await task
-        except asyncio.CancelledError:
-            pass
+        except asyncio.CancelledError as error:
+            origin = error
         except Exception as error:
+            origin = error
             L.warning(
                 "Registered job handler failed during cancellation grace",
                 extra={
@@ -317,7 +412,7 @@ class LocalJobRuntime:
                     message="Registered job handler failed during cancellation grace",
                 ),
             )
-        return True
+        return _HandlerCancellation(settled=True, origin=origin)
 
     async def _adopt_detached_cleanup(
         self,
@@ -340,7 +435,9 @@ class LocalJobRuntime:
                 name=f"job-cleanup:{request.handler_key}:{request.execution_key}",
             )
             self._detached_cleanups.add(cleanup_task)
-        cleanup_task.add_done_callback(self._consume_detached_cleanup)
+        cleanup_task.add_done_callback(
+            lambda task: self._consume_detached_cleanup(task, request=request)
+        )
 
     async def _finish_detached_handler(
         self,
@@ -357,40 +454,68 @@ class LocalJobRuntime:
                     await asyncio.shield(handler_task)
                 except asyncio.CancelledError:
                     continue
+                except Exception:
+                    break
             try:
                 handler_task.result()
             except asyncio.CancelledError:
                 pass
-            except Exception:
-                logger.exception(
+            except Exception as error:
+                logger.warning(
                     "Detached registered job handler failed after terminal outcome",
                     extra={
                         "job_handler_key": request.handler_key,
                         "job_execution_key": request.execution_key,
+                        "failure_kind": type(error).__name__[:120],
                     },
+                    exc_info=sanitized_exception_info(
+                        error,
+                        message=(
+                            "Detached registered job handler failed "
+                            "after terminal outcome"
+                        ),
+                    ),
                 )
         finally:
-            await container_stack.aclose()
-            self._semaphore.release()
-            if handler_semaphore is not None:
-                handler_semaphore.release()
-            current = asyncio.current_task()
-            async with self._lock:
-                self._detached_execution_keys.discard(request.execution_key)
-                self._tasks.pop(request.execution_key, None)
-                self._rerun_requests.pop(request.execution_key, None)
-                if current is not None:
-                    self._detached_cleanups.discard(current)
+            try:
+                await container_stack.aclose()
+            finally:
+                self._semaphore.release()
+                if handler_semaphore is not None:
+                    handler_semaphore.release()
+                current = asyncio.current_task()
+                async with self._lock:
+                    self._detached_execution_keys.discard(request.execution_key)
+                    self._tasks.pop(request.execution_key, None)
+                    self._rerun_requests.pop(request.execution_key, None)
+                    if current is not None:
+                        self._detached_cleanups.discard(current)
 
-    def _consume_detached_cleanup(self, task: asyncio.Task[None]) -> None:
+    def _consume_detached_cleanup(
+        self,
+        task: asyncio.Task[None],
+        *,
+        request: JobRequest,
+    ) -> None:
         """Release detached cleanup ownership and consume cancellation."""
         self._detached_cleanups.discard(task)
         try:
             task.result()
         except asyncio.CancelledError:
             return
-        except Exception:
-            logger.exception("Detached registered job cleanup failed")
+        except Exception as error:
+            logger.warning(
+                "Detached registered job cleanup failed",
+                extra={
+                    "job_handler_key": request.handler_key,
+                    "job_execution_key": request.execution_key,
+                    "failure_kind": type(error).__name__[:120],
+                },
+                exc_info=sanitized_exception_info(
+                    error,
+                    message="Detached registered job cleanup failed",
+                ),
+            )
 
     @staticmethod
     async def _wait_for_ownership(

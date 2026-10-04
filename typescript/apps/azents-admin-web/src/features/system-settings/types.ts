@@ -1,5 +1,6 @@
 import type {
   ExternalChannelFilesDetailResponse,
+  HistoricalMemoryExecutionDetailResponse,
   PlatformGitHubAppDetailResponse,
   SystemSettingAuditEventResponse,
 } from "@azents/admin-client";
@@ -37,4 +38,14 @@ export interface PlatformGitHubAppDraft {
 export interface ExternalChannelFilesDraft {
   outboundMaxFileMiB: number | string;
   outboundMaxActionMiB: number | string;
+}
+
+export type HistoricalMemoryExecutionPageState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "LOADED"; detail: HistoricalMemoryExecutionDetailResponse };
+
+export interface HistoricalMemoryExecutionDraft {
+  maxTurns: number | string;
+  timeoutSeconds: number | string;
 }

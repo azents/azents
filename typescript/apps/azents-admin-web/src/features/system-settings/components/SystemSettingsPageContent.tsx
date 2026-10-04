@@ -30,6 +30,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { ExternalAccountOAuthCards } from "./ExternalAccountOAuthCards";
+import { HistoricalMemoryExecutionCard } from "./HistoricalMemoryExecutionCard";
 import type { SystemSettingsPageContentProps } from "../containers/useSystemSettingsPageContainer";
 import type {
   PlatformGitHubAppCandidateResponse,
@@ -561,6 +562,8 @@ export function SystemSettingsPageContent({
       />
 
       <ExternalAccountOAuthCards />
+
+      <HistoricalMemoryExecutionCard />
 
       <Paper withBorder p="lg" radius="md">
         <Stack gap="lg">

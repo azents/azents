@@ -234,7 +234,7 @@ class ConsolidationCleanupRepository:
                         and attempt.state is ConsolidationAttemptState.RUNNING
                     ):
                         attempt.state = ConsolidationAttemptState.CANCELLED
-                        attempt.failure_code = "lease_expired"
+                        attempt.failure_code = None
                         attempt.finished_at = checked_at
                     current.active_attempt_id = None
                     current.owner_token = None

@@ -7,8 +7,9 @@ from collections.abc import Sequence
 from sqlalchemy.exc import DBAPIError
 
 from azents.core.enums import EventKind
-from azents.core.historical_memory_budget import ConsolidationBudgetExceeded
+from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
 from azents.core.historical_memory_publication import validate_consolidation_overview
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.engine.events.iteration import (
     AdmittedIteration,
     IterationEndReason,
@@ -29,7 +30,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationBudgetRepository,
+    ConsolidationExecutionRepository,
 )
 from azents.repos.historical_memory_consolidation.ownership import (
     ConsolidationClaim,
@@ -106,10 +107,13 @@ class ConsolidationIterationHost:
     claim: ConsolidationClaim
     model: ConsolidationModelPort
     tools: ConsolidationToolBindings
-    budget_repository: ConsolidationBudgetRepository
+    execution_repository: ConsolidationExecutionRepository
     ownership_repository: ConsolidationOwnershipRepository
     work_repository: ConsolidationWorkRepository
     publication_repository: ConsolidationPublicationRepository
+    execution_policy: HistoricalMemoryExecutionConfig
+    prior_turns: int = dataclasses.field(init=False, default=0)
+    started_turns: int = dataclasses.field(init=False, default=0)
     messages: list[TransientModelMessage] = dataclasses.field(
         init=False, default_factory=list
     )
@@ -128,14 +132,16 @@ class ConsolidationIterationHost:
                 ),
             )
         )
-        return await ModelToolIterationCore(self).run(max_turns=None)
+        max_turns = self.execution_policy.max_turns
+        return await ModelToolIterationCore(self).run(
+            max_turns=(
+                None if max_turns is None else max(0, max_turns - self.prior_turns)
+            )
+        )
 
     async def prepare_turn(self) -> IterationValue[ConsolidationPreparedTurn]:
-        remaining = await self.budget_repository.remaining(self.claim.principal)
-        if remaining.model_requests < 1 or remaining.output_tokens < 1:
-            raise ConsolidationBudgetExceeded(
-                "Consolidation model budget is exhausted."
-            )
+        self.started_turns += 1
+        await self.execution_repository.authorize(self.claim.principal)
         catalog = self.tools.catalog(
             self.model.selection, writer=self.tools.observations.snapshot()
         )
@@ -146,19 +152,11 @@ class ConsolidationIterationHost:
             self.messages,
             catalog,
             system_prompt=_CONSOLIDATION_TASK + "\n" + guidance,
-            output_tokens=min(remaining.output_tokens, self.model.max_output_tokens),
+            output_tokens=self.model.max_output_tokens,
         )
-        if prepared.input_tokens > int(self.model.effective_input_tokens * 0.7):
-            raise ConsolidationBudgetExceeded(
-                "Consolidation input checkpoint was reached."
-            )
-        if prepared.input_tokens > remaining.input_tokens:
-            raise ConsolidationBudgetExceeded(
-                "Consolidation cumulative input budget is exhausted."
-            )
         dispatch = ConsolidationDispatchAdmission(
             self.claim.principal,
-            self.budget_repository,
+            self.execution_repository,
             prepared.input_tokens,
             prepared.output_tokens,
         )
@@ -193,7 +191,7 @@ class ConsolidationIterationHost:
         prepared: ConsolidationPreparedTurn,
         output: NormalizedAdapterOutput[TransientModelMessage],
     ) -> AdmittedIteration[ConsolidationAdmission]:
-        await self.budget_repository.remaining(self.claim.principal)
+        await self.execution_repository.authorize(self.claim.principal)
         if output.pending_provider_files or any(
             isinstance(message.payload, ProviderToolCallPayload)
             for message in output.events
@@ -211,7 +209,7 @@ class ConsolidationIterationHost:
             raise ValueError("Internal tool batch repeats a call identity.")
         admitted = self.tools.admit(calls, self.model.selection)
         if calls:
-            await self.budget_repository.reserve_tools(
+            await self.execution_repository.reserve_tools(
                 self.claim.principal, count=len(calls)
             )
         self.messages.extend(output.events)
@@ -235,7 +233,7 @@ class ConsolidationIterationHost:
     async def finalize(
         self, call: ConsolidationAdmittedTool, result: ClientToolResultPayload
     ) -> bool:
-        await self.budget_repository.remaining(self.claim.principal)
+        await self.execution_repository.authorize(self.claim.principal)
         if result.call_id != call.call_id:
             raise ValueError("Internal tool result does not match the admitted call.")
         self.tools.merge(call)
@@ -322,4 +320,4 @@ class ConsolidationIterationHost:
                 self.tools.observations.invalidated_files.clear()
 
     async def limit_reached(self) -> ConsolidationPublicationOutcome:
-        raise ConsolidationBudgetExceeded("Consolidation turn limit was reached.")
+        raise ConsolidationTurnLimitExceeded("Consolidation turn limit was reached.")

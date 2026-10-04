@@ -49,7 +49,10 @@ from azents.repos.historical_memory_consolidation.ownership import (
 )
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -94,7 +97,9 @@ async def _principal(
         agent.model_selection = main
         agent.lightweight_model_selection = primary
         agent.selectable_model_options = options
-    claim = await ConsolidationOwnershipRepository(manager).claim(corpus.team)
+    claim = await ConsolidationOwnershipRepository(manager).claim(
+        corpus.team, deadline=consolidation_deadline()
+    )
     assert claim is not None
     await ConsolidationDraftRepository(manager).observe(
         claim.principal, path="summary.md"

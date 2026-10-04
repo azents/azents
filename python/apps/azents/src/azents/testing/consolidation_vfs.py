@@ -41,7 +41,10 @@ from azents.services.vfs_mutation import (
     VfsMutationRouter,
 )
 from azents.services.vfs_read import VfsReadBackendRegistry, VfsReadRouter
-from azents.testing.consolidation import seed_consolidation_corpus
+from azents.testing.consolidation import (
+    consolidation_deadline,
+    seed_consolidation_corpus,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,7 +74,7 @@ async def bind_consolidation_test_vfs(
 ) -> ConsolidationTestVfsBinding:
     corpus = await seed_consolidation_corpus(manager)
     owner_repository = ConsolidationOwnershipRepository(manager)
-    claim = await owner_repository.claim(corpus.team)
+    claim = await owner_repository.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
     ledger = ConsolidationVfsObservations(claim.principal)
     draft = ConsolidationDraftVfsBackend(ConsolidationDraftRepository(manager), ledger)
