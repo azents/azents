@@ -1,21 +1,27 @@
 """PasswordResetTokenService tests."""
 
 import datetime
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.logging import RuntimeEnvironment
 from azcommon.result import Failure, Success
 
+import azents.services.password_reset_token as reset_module
 from azents.core.config import Config
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_reset_token import PasswordResetTokenRepository
+from azents.repos.password_reset_token.operations import (
+    PasswordResetOperationRepository,
+)
 from azents.repos.session import SessionRepository
 from azents.repos.session.data import SessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
-from azents.repos.user_email import UserEmailRepository
 from azents.services._utils import generate_refresh_token
 from azents.services.password_reset_token import (
     PasswordResetTokenService,
@@ -38,12 +44,14 @@ def _make_service(
 ) -> PasswordResetTokenService:
     """Create PasswordResetTokenService for tests."""
     return PasswordResetTokenService(
-        password_reset_token_repo=PasswordResetTokenRepository(),
-        user_repo=UserRepository(),
-        user_email_repo=UserEmailRepository(),
-        password_login_repo=PasswordLoginRepository(),
-        session_repo=SessionRepository(),
-        session_manager=rdb_session_manager,
+        operation_repository=PasswordResetOperationRepository(
+            token_repository=PasswordResetTokenRepository(),
+            user_repository=UserRepository(),
+            password_repository=PasswordLoginRepository(),
+            session_repository=SessionRepository(),
+            session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
+        ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         config=Config.model_construct(
             runtime_env=RuntimeEnvironment.LOCAL,
@@ -269,3 +277,79 @@ class TestPasswordResetTokenService:
 
         assert isinstance(second, Failure)
         assert isinstance(second.error, InvalidPasswordResetToken)
+
+
+async def test_hashing_and_terminal_failure_do_not_own_or_compensate_reset_sql(
+    rdb_session_manager: SessionManager[WriteSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hashing and postcommit terminal invalidation run outside completed SQL."""
+    active = 0
+
+    @asynccontextmanager
+    async def tracked_manager() -> AsyncGenerator[WriteSession, None]:
+        nonlocal active
+        async with rdb_session_manager() as session:
+            active += 1
+            try:
+                yield session
+            finally:
+                active -= 1
+
+    class FailingPublisher(NoopRuntimeTerminalInvalidationPublisher):
+        async def publish_user_terminal_invalidation(self, user_id: str) -> None:
+            del user_id
+            assert active == 0
+            raise RuntimeError("isolated terminal invalidation failure")
+
+    service = _make_service(tracked_manager)
+    service.terminal_invalidation_publisher = FailingPublisher()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        user = await UserRepository().create_with_verified_primary_email(
+            session,
+            UserCreate(email="reset-postcommit@example.com"),
+            verified_at=now,
+        )
+    token = await service.create(
+        CreatePasswordResetTokenInput(
+            user_id=user.id,
+            email=None,
+            created_by_user_id=None,
+            expires_at=None,
+        )
+    )
+    assert isinstance(token, Success)
+    original_hash = reset_module.hash_password
+
+    def observed_hash(password: str) -> str:
+        assert active == 0
+        return original_hash(password)
+
+    monkeypatch.setattr(reset_module, "hash_password", observed_hash)
+    with pytest.raises(RuntimeError, match="terminal invalidation"):
+        await service.redeem(
+            RedeemPasswordResetTokenInput(
+                token=token.value.plaintext_token,
+                password="Aa123456!",
+                user_agent=None,
+                ip_address=None,
+            )
+        )
+    async with rdb_session_manager() as session:
+        observed = await PasswordResetTokenRepository().get_by_token_hash(
+            session,
+            hash_password_reset_token(token.value.plaintext_token),
+        )
+        assert observed is not None and observed.used_at is not None
+        assert (
+            len(
+                await PasswordResetTokenRepository().list_redemptions_by_token_id(
+                    session, observed.id
+                )
+            )
+            == 1
+        )
+        assert (
+            await PasswordLoginRepository().get_by_user_id(session, user.id) is not None
+        )

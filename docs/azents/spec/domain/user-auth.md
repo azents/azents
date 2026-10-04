@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-10-03
+updated: 2026-10-05
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -123,8 +123,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-10-04
-spec_version: 27
+last_verified_at: 2026-10-05
+spec_version: 28
 ---
 
 # User & Authentication
@@ -385,6 +385,21 @@ Token preview validates hash, expiry, `used_at`, and `revoked_at`. A valid previ
 
 Token redeem validates password policy before consuming the token. On success it atomically marks the token used, creates or updates the target user's password credential, revokes all existing sessions for the user, and writes a `PasswordResetTokenRedemption` audit row. Redeem returns success only; it does not issue login tokens.
 
+Password-reset creation, count/page listing, preview, revocation and redemption
+finish inside completed repository-owned database operations. Listing and preview
+use the native read-only manager. Password policy, hashing, the captured redemption
+clock and token generation occur before mutation scopes; URL and masked-email
+projection occur after repository completion.
+
+Redemption preserves one atomic eligibility/user lookup, conditional single-use
+claim, password create-or-update, authentication-Session revocation and redemption
+audit group. The absent-password branch uses PostgreSQL conflict-update within that
+same transaction rather than a rolled-back insert followed by restarted SQL. A
+failed post-claim password update abandons the whole group before ordinary invalid
+token evidence returns. Exceptions and cancellation roll back all group writes.
+Terminal invalidation follows committed success and cannot compensate or replay
+accepted redemption if publication fails. No login token is issued.
+
 ### 3.7 System roles and Admin API authorization
 
 `system_user_roles` stores instance-wide assignments separately from Workspace membership. The only current role is `system_admin`. Every operational Admin API request decodes the ordinary Azents access token, verifies its live Session/User, and reads the current assignment from PostgreSQL. Role state is not embedded in the JWT, so grant or revoke applies immediately to an already-issued access token.
@@ -432,6 +447,21 @@ ownership, and environment configuration do not auto-promote users.
 The setup token is either operator-configured or generated with at least 256 bits of entropy. Only its hash is stored. A generated plaintext token is logged once after durable persistence; a configured plaintext token is never logged. While the instance remains empty, a configured token can replace an unconsumed generated token.
 
 Bootstrap serializes concurrent attempts and atomically creates the first User, verified primary email, password login, `system_admin` assignment, normal refresh Session, and consumed marker. It creates no Workspace or Workspace membership. Validation and rolled-back failures do not consume the token; after any User exists, bootstrap cannot reopen.
+
+Setup-token initialization and final bootstrap mutation retain the existing shared
+advisory serialization. Status and preliminary admission finish in native
+read-only repository operations. Preliminary admission preserves the existing
+User-count, active/unconsumed state and setup-token rejection order before password
+policy/hash preparation. The final locked mutation repeats all authority checks
+after preparation, so preliminary admission does not authorize later writes.
+
+Password policy/hash, setup/refresh-token preparation and clock capture occur
+outside active database scopes. The first verified User, password credential,
+system-admin role, authentication Session and setup-token consumption remain one
+atomic database-only group. Detached committed User/Session IDs return before JWT
+construction and success logging; a post-commit JWT failure does not roll back or
+reopen bootstrap. Generated-token logging follows completed initialization only
+when that operation actually persisted a new generated hash.
 
 ### 3.9 Admin Web session
 
@@ -690,6 +720,10 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
+
+- **2026-10-05** (v28) — Completed password-reset and first-admin bootstrap
+  repository operations, retaining single-use atomic mutation groups and final
+  authority revalidation with hash preparation before SQL and effects after commit.
 
 - **2026-10-03** (v25) — Completed all five SignupToken database groups in domain
   repository operations. Preserved prepared-clock/crypto ordering, atomic

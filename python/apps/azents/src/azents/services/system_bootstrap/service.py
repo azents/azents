@@ -2,10 +2,9 @@
 
 import dataclasses
 import hashlib
-import hmac
 import logging
 import secrets
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
@@ -19,19 +18,12 @@ from azents.core.auth.password import (
 )
 from azents.core.config import AuthConfig, SystemBootstrapConfig
 from azents.core.deps import get_auth_config, get_system_bootstrap_config
-from azents.core.enums import SystemUserRole
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.password_login import PasswordLoginRepository
-from azents.repos.password_login.data import PasswordLoginCreate
-from azents.repos.session import SessionRepository
-from azents.repos.session.data import SessionCreate
-from azents.repos.system_bootstrap.repository import SystemBootstrapRepository
-from azents.repos.system_user_role.data import SystemUserRoleAssignmentCreate
-from azents.repos.system_user_role.repository import SystemUserRoleRepository
-from azents.repos.user import UserRepository
-from azents.repos.user.data import UserCreate
+from azents.repos.system_bootstrap.operations import (
+    BootstrapCommand,
+    BootstrapCreated,
+    BootstrapRejection,
+    SystemBootstrapOperationRepository,
+)
 from azents.services._utils import generate_refresh_token
 
 from .data import (
@@ -54,14 +46,7 @@ def _hash_setup_token(token: str) -> str:
 class SystemBootstrapService:
     """Initialize and consume the one-time system bootstrap token."""
 
-    bootstrap_repository: Annotated[SystemBootstrapRepository, Depends()]
-    system_role_repository: Annotated[SystemUserRoleRepository, Depends()]
-    user_repository: Annotated[UserRepository, Depends()]
-    password_login_repository: Annotated[PasswordLoginRepository, Depends()]
-    session_repository: Annotated[SessionRepository, Depends()]
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
-    ]
+    operation_repository: Annotated[SystemBootstrapOperationRepository, Depends()]
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)]
     bootstrap_config: Annotated[
         SystemBootstrapConfig, Depends(get_system_bootstrap_config)
@@ -76,57 +61,26 @@ class SystemBootstrapService:
                 "32 characters."
             )
 
-        generated_token: str | None = None
-        configured_token_activated = False
-        async with self.session_manager() as session:
-            await self.bootstrap_repository.acquire_mutation_lock(session)
-            if await self.user_repository.count(session) != 0:
-                return
-
-            state = await self.bootstrap_repository.get(session)
-            if state is not None and state.consumed_at is not None:
-                return
-
-            if configured_token is not None:
-                token_hash = _hash_setup_token(configured_token)
-                if state is None:
-                    await self.bootstrap_repository.create(
-                        session,
-                        token_hash=token_hash,
-                    )
-                    configured_token_activated = True
-                elif not hmac.compare_digest(state.token_hash, token_hash):
-                    await self.bootstrap_repository.replace_token(
-                        session,
-                        token_hash=token_hash,
-                    )
-                    configured_token_activated = True
-            elif state is None:
-                generated_token = secrets.token_urlsafe(32)
-                await self.bootstrap_repository.create(
-                    session,
-                    token_hash=_hash_setup_token(generated_token),
-                )
-
-        if generated_token is not None:
+        token = configured_token or secrets.token_urlsafe(32)
+        result = await self.operation_repository.initialize(
+            token_hash=_hash_setup_token(token),
+            configured=configured_token is not None,
+        )
+        if result.generated:
             logger.warning(
                 "Generated one-time system bootstrap setup token",
                 extra={
-                    "setup_token": generated_token,
+                    "setup_token": token,
                     "secret_logging_reason": "initial_system_bootstrap",
                 },
             )
-        elif configured_token_activated:
+        elif result.configured:
             logger.info("Configured system bootstrap setup token activated")
 
     async def get_status(self) -> SystemBootstrapStatusOutput:
         """Return whether the initial bootstrap transaction can run."""
-        async with self.session_manager() as session:
-            if await self.user_repository.count(session) != 0:
-                return SystemBootstrapStatusOutput(available=False)
-            state = await self.bootstrap_repository.get(session)
         return SystemBootstrapStatusOutput(
-            available=state is not None and state.consumed_at is None
+            available=await self.operation_repository.available()
         )
 
     async def bootstrap(
@@ -142,77 +96,52 @@ class SystemBootstrapService:
         :return: Session tokens or a rejected-bootstrap reason
         """
         submitted_hash = _hash_setup_token(input.setup_token)
-        async with self.session_manager() as session:
-            await self.bootstrap_repository.acquire_mutation_lock(session)
-            if await self.user_repository.count(session) != 0:
-                self._log_rejection(input, reason="users_exist")
-                return Failure(BootstrapUnavailable())
-
-            state = await self.bootstrap_repository.get(session)
-            if state is None or state.consumed_at is not None:
-                self._log_rejection(input, reason="inactive_setup_token")
-                return Failure(BootstrapUnavailable())
-            if not hmac.compare_digest(state.token_hash, submitted_hash):
-                self._log_rejection(input, reason="invalid_setup_token")
-                return Failure(InvalidSetupToken())
-
-            try:
-                validate_password_strength(input.password)
-            except WeakPasswordError as error:
-                return Failure(WeakBootstrapPassword(message=error.message))
-
-            now = tznow()
-            user = await self.user_repository.create_with_verified_primary_email(
-                session,
-                UserCreate(email=input.email.strip().lower()),
-                verified_at=now,
-            )
-            await self.password_login_repository.create(
-                session,
-                PasswordLoginCreate(
-                    user_id=user.id,
-                    password_hash=hash_password(input.password),
+        rejection = await self.operation_repository.admission(
+            submitted_hash=submitted_hash
+        )
+        if rejection is not None:
+            return Failure(self._reject(input, rejection))
+        try:
+            validate_password_strength(input.password)
+        except WeakPasswordError as error:
+            return Failure(WeakBootstrapPassword(message=error.message))
+        now = tznow()
+        password_hash = hash_password(input.password)
+        refresh_token = generate_refresh_token()
+        result = await self.operation_repository.bootstrap(
+            command=BootstrapCommand(
+                submitted_hash=submitted_hash,
+                email=input.email.strip().lower(),
+                password_hash=password_hash,
+                now=now,
+                refresh_token=refresh_token,
+                expires_at=now + self.auth_config.refresh_token.expire_timedelta,
+                max_expires_at=(
+                    now + self.auth_config.refresh_token.max_expire_timedelta
+                    if self.auth_config.refresh_token.max_expire_timedelta is not None
+                    else None
                 ),
+                user_agent=input.user_agent,
+                ip_address=input.ip_address,
             )
-            await self.system_role_repository.create(
-                session,
-                SystemUserRoleAssignmentCreate(
-                    user_id=user.id,
-                    role=SystemUserRole.SYSTEM_ADMIN,
-                    granted_by_user_id=None,
-                ),
-            )
-
-            refresh_token = generate_refresh_token()
-            expires_at = now + self.auth_config.refresh_token.expire_timedelta
-            max_expires_at = (
-                now + self.auth_config.refresh_token.max_expire_timedelta
-                if self.auth_config.refresh_token.max_expire_timedelta is not None
-                else None
-            )
-            auth_session = await self.session_repository.create(
-                session,
-                SessionCreate(
-                    user_id=user.id,
-                    refresh_token=refresh_token,
-                    expires_at=expires_at,
-                    max_expires_at=max_expires_at,
-                    user_agent=input.user_agent,
-                    ip_address=input.ip_address,
-                ),
-            )
-            await self.bootstrap_repository.consume(session)
-
+        )
+        match result:
+            case BootstrapRejection():
+                return Failure(self._reject(input, result))
+            case BootstrapCreated():
+                pass
+            case _:
+                assert_never(result)
         access_token = create_access_token(
             config=self.auth_config.jwt,
-            user_id=user.id,
-            session_id=auth_session.id,
+            user_id=result.user_id,
+            session_id=result.session_id,
         )
         logger.info(
             "Initial system administrator bootstrap completed",
             extra={
-                "user_id": user.id,
-                "session_id": auth_session.id,
+                "user_id": result.user_id,
+                "session_id": result.session_id,
                 "source": "bootstrap",
             },
         )
@@ -223,6 +152,18 @@ class SystemBootstrapService:
                 expires_in=self.auth_config.jwt.access_token_expire_seconds,
             )
         )
+
+    def _reject(
+        self, input: SystemBootstrapInput, rejection: BootstrapRejection
+    ) -> BootstrapUnavailable | InvalidSetupToken:
+        self._log_rejection(input, reason=rejection.value)
+        match rejection:
+            case BootstrapRejection.INVALID_TOKEN:
+                return InvalidSetupToken()
+            case BootstrapRejection.USERS_EXIST | BootstrapRejection.INACTIVE:
+                return BootstrapUnavailable()
+            case _:
+                assert_never(rejection)
 
     @staticmethod
     def _log_rejection(input: SystemBootstrapInput, *, reason: str) -> None:
