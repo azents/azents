@@ -757,3 +757,38 @@ async def test_started_one_time_edit_is_conflict_after_canonical_lock_order() ->
         < task_lock_index
     )
     assert not repository.replaced
+
+
+async def test_replace_preserves_no_registration_effect() -> None:
+    """Editing future definition fields preserves the no-provider-effect path."""
+    events: list[str] = []
+    task = _task(binding_id=_CURRENT_BINDING_ID)
+    channel = AsyncMock(spec=ScheduledTaskChannelService)
+
+    class ReplacementRepository(_TaskRepository):
+        async def replace(
+            self, session: ReadSession, **kwargs: object
+        ) -> ScheduledTask:
+            del session, kwargs
+            return task
+
+    service = _service(
+        events=events,
+        task_repository=ReplacementRepository(events, task=task),
+        authority_validator=_AuthorityValidator(events),
+        channel_service=channel,
+    )
+    await service.replace(
+        workspace_id=_WORKSPACE_ID,
+        agent_id=_AGENT_ID,
+        user_id="user-1",
+        task_id=_TASK_ID,
+        title="Updated report",
+        objective="Preserve existing registration.",
+        at="2099-08-17T00:00:00Z",
+        cron=None,
+        timezone=None,
+        channel_id=_CURRENT_BINDING_ID,
+    )
+    channel.execute_registration.assert_not_awaited()
+    channel.execute_deletion.assert_not_awaited()

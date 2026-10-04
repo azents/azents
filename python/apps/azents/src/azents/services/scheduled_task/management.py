@@ -131,7 +131,6 @@ class ScheduledTaskManagementService:
             timezone=timezone,
             channel_id=channel_id,
         )
-        await self.channel_service.execute_registration(mutation.task)
         return mutation.projection
 
     async def delete(
