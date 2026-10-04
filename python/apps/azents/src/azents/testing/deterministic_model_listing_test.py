@@ -33,6 +33,31 @@ from azents.testing.deterministic_model_listing import (
 )
 
 
+def test_plain_title_fixture_is_an_exact_openai_candidate() -> None:
+    """Keep the known no-schema title scenario separate from baseline models."""
+    variant = parse_deterministic_fixture_variant(
+        "__testenv_model_listing:deterministic-title-plain"
+    )
+    assert variant == "deterministic-title-plain"
+    listing = build_deterministic_listing(
+        variant=variant,
+        provider=LLMProvider.OPENAI,
+        integration_id="plain-title-integration",
+    )
+    assert listing.summary.returned_count == 1
+    assert listing.summary.skipped_count == 0
+    assert listing.models[0].model_identifier == "gpt-5.5-title-plain"
+    metadata = listing.models[0].source_metadata
+    assert metadata is not None
+    assert metadata["fixture_lightweight"] is True
+    with pytest.raises(ValueError, match="requires provider=openai"):
+        build_deterministic_listing(
+            variant=variant,
+            provider=LLMProvider.ANTHROPIC,
+            integration_id="wrong-provider",
+        )
+
+
 def test_model_settings_fixture_exposes_supported_and_unsupported_tools() -> None:
     """Expose one hosted-tool model and one model without built-in tools."""
     variant = parse_deterministic_fixture_variant(

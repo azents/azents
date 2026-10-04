@@ -1658,6 +1658,13 @@ def _inference_profile_source_payload(
         }
         for model, efforts in model_efforts.items()
     }
+    payload["gpt-5.5-title-plain"] = {
+        **payload["gpt-5.5"],
+        "display_name": "Plain Title Deterministic",
+        "supports_response_schema": False,
+        "supports_reasoning": False,
+        "reasoning_effort_levels": [],
+    }
     match variant:
         case "baseline":
             pass
@@ -2608,8 +2615,14 @@ class _Handler(BaseHTTPRequestHandler):
             *(f"{_BRAVE_PROMPT_PREFIX}{kind}" for kind in _BRAVE_KINDS),
             f"{_BRAVE_PROMPT_PREFIX}disabled",
         }
+        matching_text = _decode_model_request(request).matching_text
+        watchdog_title_request = _SESSION_TITLE_SYSTEM_MARKER in matching_text and any(
+            prompt in matching_text
+            for prompt in ("Provider title retry", "Structured title fallback")
+        )
         if (
             user_text in captured_prompts
+            or watchdog_title_request
             or inference_profile_scenario(user_text) is not None
             or compaction_request
             or request_has_tool_output(request, "call_brave_e2e_images")

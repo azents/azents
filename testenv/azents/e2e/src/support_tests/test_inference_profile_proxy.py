@@ -60,6 +60,23 @@ def test_profile_fixture_does_not_capture_unrelated_requests(
     assert proxy.inference_profile_scenario(message) is None
 
 
+def test_plain_title_schema_declaration_is_exactly_scoped() -> None:
+    """The new title model is plain while every existing baseline stays intact."""
+    payload = proxy._inference_profile_source_payload("baseline")
+    for model in ("gpt-5.5", "gpt-5.5-mini", "gpt-6-astra", "gpt-5.6-sol"):
+        assert payload[model]["supports_response_schema"] is True
+    plain = payload["gpt-5.5-title-plain"]
+    assert plain["supports_response_schema"] is False
+    assert plain["supported_endpoints"] == ["/v1/responses"]
+    assert plain["supports_function_calling"] is True
+    assert plain["supports_reasoning"] is False
+    for variant in ("refreshed", "missing-model"):
+        assert (
+            proxy._inference_profile_source_payload(variant)["gpt-5.5-title-plain"]
+            == plain
+        )
+
+
 def test_profile_barrier_requires_explicit_release() -> None:
     """Observe preparation before releasing the response without scheduling sleeps."""
     barrier = proxy._ProviderToolLiveBarrier()

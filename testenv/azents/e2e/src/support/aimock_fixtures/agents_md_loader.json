@@ -140,6 +140,33 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Provider title retry",
+        "systemMessage": "Return only the title as plain text without JSON, labels, quotes",
+        "sequenceIndex": 0
+      },
+      "response": {
+        "error": {
+          "message": "Title provider failure. api_key=dummy-title-secret Bearer dummy-title-token\u0001 retry required.",
+          "type": "rate_limit_error",
+          "code": "rate_limit"
+        },
+        "status": 429
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider title retry",
+        "systemMessage": "Return only the title as plain text without JSON, labels, quotes",
+        "sequenceIndex": 1
+      },
+      "response": {
+        "content": "Provider title retry recovered"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Provider title retry",
         "systemMessage": "Create a brief title from the request",
         "sequenceIndex": 0
       },
@@ -160,24 +187,7 @@
         "sequenceIndex": 1
       },
       "response": {
-        "content": "Provider title retry recovered"
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "Structured title fallback",
-        "systemMessage": "Create a brief title from the request",
-        "sequenceIndex": 0
-      },
-      "response": {
-        "error": {
-          "message": "The response format is unsupported.",
-          "type": "invalid_request_error",
-          "code": "invalid_request",
-          "param": "text.format"
-        },
-        "status": 400
+        "content": "{\"title\":\"Provider title retry recovered\"}"
       }
     },
     {

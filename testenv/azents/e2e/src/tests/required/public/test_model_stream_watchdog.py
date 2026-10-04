@@ -1,5 +1,6 @@
 """Model stream watchdog E2E coverage through public product paths."""
 
+import dataclasses
 import json
 import time
 from collections.abc import Callable
@@ -7,6 +8,15 @@ from collections.abc import Callable
 import azentsadminclient
 import azentspublicclient
 import requests
+from azentspublicclient.api.llm_provider_integration_v1_api import (
+    LLMProviderIntegrationV1Api,
+)
+from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.llm_provider import LLMProvider
+from azentspublicclient.models.llm_provider_integration_create_request import (
+    LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.secrets import Secrets
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
@@ -14,7 +24,7 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from websockets.sync.connection import Connection
 
-from support.utils import unique
+from support.utils import model_selection_from_first_candidate, unique
 from tests.required.public.test_agent_execution_persistence import (
     auth_headers,
     connect_chat,
@@ -56,6 +66,27 @@ _TITLE_PROVIDER_RETRY_TITLE = "Provider title retry recovered"
 _TITLE_OUTPUT_FALLBACK_PROMPT = "Structured title fallback"
 _TITLE_OUTPUT_FALLBACK_RESPONSE = "TITLE_OUTPUT_FALLBACK_RUN_COMPLETED"
 _TITLE_OUTPUT_FALLBACK_TITLE = "Structured title fallback recovered"
+
+
+def _title_request_modes(proxy_url: str, prompt: str) -> list[str]:
+    """Read only output-format evidence from the synthetic provider journal."""
+    response = requests.get(f"{proxy_url}/v1/_image_generation_requests", timeout=10)
+    response.raise_for_status()
+    journal = json_object_list_payload(response.json(), label="title request journal")
+    modes: list[str] = []
+    for request in journal:
+        serialized = json.dumps(request)
+        if prompt not in serialized or (
+            "Create a brief title from the request" not in serialized
+        ):
+            continue
+        text = request.get("text")
+        format_value = text.get("format") if isinstance(text, dict) else None
+        structured = (
+            isinstance(format_value, dict) and format_value.get("type") == "json_schema"
+        )
+        modes.append("structured" if structured else "plain_text")
+    return modes
 
 
 def _wait_until(
@@ -922,6 +953,7 @@ class TestModelStreamWatchdog:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
+        openai_proxy_url: str,
     ) -> None:
         """Best-effort title generation retries provider failures independently."""
         del azents_engine_worker_container
@@ -966,8 +998,11 @@ class TestModelStreamWatchdog:
         _wait_until(
             title_recovered,
             timeout=15,
-            message=f"provider title retry did not recover: {observed!r}",
+            message=lambda: f"provider title retry did not recover: {observed!r}",
         )
+        modes = _title_request_modes(openai_proxy_url, _TITLE_PROVIDER_RETRY_PROMPT)
+        assert len(modes) == 2
+        assert modes[0] == modes[1]
 
     def test_session_title_unsupported_schema_uses_plain_text(
         self,
@@ -975,14 +1010,34 @@ class TestModelStreamWatchdog:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
+        openai_proxy_url: str,
     ) -> None:
-        """Absent structured support selects plain text without changing the run."""
+        """Known absent schema support selects plain text from the first attempt."""
         del azents_engine_worker_container
         workspace = setup_workspace(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        integration = LLMProviderIntegrationV1Api(
+            public_api_client
+        ).llm_provider_integration_v1_create_integration(
+            handle=workspace.handle,
+            llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+                provider=LLMProvider.OPENAI,
+                name="__testenv_model_listing:deterministic-title-plain",
+                secrets=Secrets(ApiKeySecrets(api_key="sk-title-plain-qa")),
+            ),
+            _headers=auth_headers(workspace.token),
+        )
+        selection = model_selection_from_first_candidate(
+            azents_public_server_url,
+            workspace.token,
+            workspace.handle,
+            integration.id,
+        )
+        assert selection.model_identifier == "gpt-5.5-title-plain"
+        workspace = dataclasses.replace(workspace, model_selection=selection)
         agent_id = create_agent(public_api_client, workspace)
         result = run_message(
             public_api_client=public_api_client,
@@ -1019,5 +1074,8 @@ class TestModelStreamWatchdog:
         _wait_until(
             title_recovered,
             timeout=15,
-            message=f"title output fallback did not recover: {observed!r}",
+            message=lambda: f"plain title output did not recover: {observed!r}",
         )
+        assert _title_request_modes(
+            openai_proxy_url, _TITLE_OUTPUT_FALLBACK_PROMPT
+        ) == ["plain_text"]
