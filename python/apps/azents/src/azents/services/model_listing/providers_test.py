@@ -884,29 +884,24 @@ async def test_list_kimi_models_projects_authenticated_account_metadata(
     }
 
 
-class _FakeOpenRouterAsyncClient:
+class _FakeOpenRouterAsyncClient(httpx.AsyncClient):
     def __init__(self, *, timeout: float) -> None:
         assert timeout == 20.0
+        super().__init__(
+            timeout=timeout,
+            transport=httpx.MockTransport(self._respond),
+        )
 
-    async def __aenter__(self) -> "_FakeOpenRouterAsyncClient":
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        del args
-
-    async def get(
+    async def _respond(
         self,
-        url: str,
-        *,
-        params: dict[str, str],
-        headers: dict[str, str],
+        request: httpx.Request,
     ) -> httpx.Response:
-        assert url == f"{providers.OPENROUTER_API_BASE_URL}/models/user"
-        assert params == {"output_modalities": "text"}
-        assert headers == {"Authorization": "Bearer openrouter-test-key"}
+        assert request.url.path == "/api/v1/models/user"
+        assert request.url.params == httpx.QueryParams(output_modalities="text")
+        assert request.headers["Authorization"] == "Bearer openrouter-test-key"
         return httpx.Response(
             status_code=200,
-            request=httpx.Request("GET", url),
+            request=request,
             json={
                 "data": [
                     {
@@ -952,14 +947,16 @@ class _FakeOpenRouterAsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_list_openrouter_models_projects_account_metadata_without_allowlist(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_list_openrouter_models_projects_account_metadata_without_allowlist() -> (
+    None
+):
     """OpenRouter listing keeps every valid text model and safe capabilities."""
-    monkeypatch.setattr(httpx, "AsyncClient", _FakeOpenRouterAsyncClient)
-
     result = await providers.list_openrouter_models_for_integration(
-        _openrouter_integration(), clients=providers.create_listing_client_factories()
+        _openrouter_integration(),
+        clients=replace(
+            providers.create_listing_client_factories(),
+            http=_FakeOpenRouterAsyncClient,
+        ),
     )
 
     assert result.summary.source == "openrouter:account_models"

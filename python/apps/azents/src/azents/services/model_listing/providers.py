@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, ClassVar, Protocol
@@ -31,6 +31,10 @@ from google.auth.exceptions import (
 )
 from google.oauth2 import service_account
 from openai import APIStatusError, AsyncOpenAI, OpenAIError
+from openrouter import OpenRouter
+from openrouter.errors.openroutererror import OpenRouterError
+from openrouter.errors.responsevalidationerror import ResponseValidationError
+from openrouter.utils.logger import NoOpLogger
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -556,6 +560,7 @@ class ListingClientFactories:
 
     http: Callable[..., AbstractAsyncContextManager[httpx.AsyncClient]]
     openai: Callable[..., AbstractAsyncContextManager[AsyncOpenAI]]
+    openrouter: Callable[..., AbstractAsyncContextManager[OpenRouter]]
     aws_session: Callable[..., boto3.Session]
     vertex_token: Callable[[GcpSecrets], str]
 
@@ -565,9 +570,25 @@ def create_listing_client_factories() -> ListingClientFactories:
     return ListingClientFactories(
         http=httpx.AsyncClient,
         openai=AsyncOpenAI,
+        openrouter=create_openrouter_listing_client,
         aws_session=boto3.Session,
         vertex_token=_vertex_access_token,
     )
+
+
+@asynccontextmanager
+async def create_openrouter_listing_client(
+    *,
+    client: httpx.AsyncClient,
+) -> AsyncIterator[OpenRouter]:
+    """Own sync SDK resources while the caller owns the async transport."""
+    with OpenRouter(
+        async_client=client,
+        retry_config=None,
+        timeout_ms=20_000,
+        debug_logger=NoOpLogger(),
+    ) as sdk:
+        yield sdk
 
 
 def _canonical_effort(value: str | None) -> ModelReasoningEffort | None:
@@ -784,7 +805,7 @@ async def list_openrouter_models_for_integration(
     """Fetch account-visible text-output models from OpenRouter."""
     try:
         return await _list_openrouter_models(integration, clients=clients)
-    except (httpx.HTTPError, json.JSONDecodeError, ValueError) as exc:
+    except (httpx.HTTPError, OpenRouterError, json.JSONDecodeError, ValueError) as exc:
         raise ListingProviderError(
             "OpenRouter model listing failed.",
             automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
@@ -854,6 +875,8 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
         status_code = exc.response.status_code
         return status_code not in {408, 409, 425, 429} and status_code < 500
     if isinstance(exc, APIStatusError):
+        return exc.status_code not in {408, 409, 425, 429} and exc.status_code < 500
+    if isinstance(exc, OpenRouterError):
         return exc.status_code not in {408, 409, 425, 429} and exc.status_code < 500
     if isinstance(exc, (BotoConnectionError, HTTPClientError)):
         return False
@@ -1552,14 +1575,34 @@ async def _list_openrouter_models(
     """Fetch candidates from the OpenRouter account model endpoint."""
     secrets = _require_api_key_secrets(integration.secrets)
     fetched_at = datetime.now(timezone.utc)
+    payload: _AccountModelsPayload | None = None
+
+    async def decode_account_response(response: httpx.Response) -> None:
+        """Preserve application evidence presence at the SDK response boundary."""
+        nonlocal payload
+        if response.status_code == 200:
+            await response.aread()
+            payload = _AccountModelsPayload.model_validate(response.json())
+
     async with clients.http(timeout=20.0) as client:
-        response = await client.get(
-            f"{OPENROUTER_API_BASE_URL}/models/user",
-            params={"output_modalities": "text"},
-            headers={"Authorization": f"Bearer {secrets.api_key}"},
+        client.params = client.params.merge({"output_modalities": "text"})
+        client.event_hooks["response"].append(decode_account_response)
+        async with clients.openrouter(client=client) as sdk:
+            try:
+                await sdk.models.list_for_user_async(
+                    security={"bearer": secrets.api_key},
+                    server_url=OPENROUTER_API_BASE_URL,
+                    timeout_ms=20_000,
+                    retries=None,
+                )
+            except ResponseValidationError as exc:
+                # SDK display fields are not Azents' catalog evidence contract.
+                if exc.status_code != 200 or payload is None:
+                    raise
+    if payload is None:
+        raise InvalidProviderResponseError(
+            "OpenRouter did not return an account model response."
         )
-        response.raise_for_status()
-        payload = _AccountModelsPayload.model_validate(response.json())
     models: list[NormalizedModelCandidate] = []
     skipped = 0
     for raw_model in payload.data:
