@@ -49,6 +49,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/core/config.py
   - python/apps/azents/src/azents/core/model_availability.py
+  - python/apps/azents/src/azents/core/model_availability_operations.py
+  - python/apps/azents/src/azents/repos/session_model_availability.py
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/engine/run/contracts.py
@@ -184,7 +186,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-05
-spec_version: 182
+spec_version: 183
 ---
 
 # Conversation & Events
@@ -1020,6 +1022,20 @@ event-list APIs:
   and drops unsupported execution options for the assigned model. Reserve and cancel routes use exact
   identity plus generation fencing and return the same projection, including user-safe `409`
   convergence state on a stale request.
+
+Session model availability is a completed repository-owned operation. Native
+PostgreSQL read-only scopes perform exact active-root/User/Workspace admission
+and health/fallback projection; application services receive only detached
+results. Reserve and cancel retain one database-only write transaction for
+existing Session/Agent locks, health claim CAS and Session reservation generation
+updates. Related changes roll back together on failure or cancellation. A stale
+Session cancellation cannot settle a newer candidate-health generation. The
+existing public identity, state, deadline, server time and configured-order first
+healthy fallback projection are unchanged; reasoning/execution option
+compatibility remains a dispatch concern rather than filtering this projection.
+
+Neutral model availability errors have one defining core module. API routes import
+those definitions and the service itself from their defining modules.
 
 Durable human `user_message` events preserve their immutable requested profile intent. They do not
 embed an associated AgentRun summary and do not change when later run provenance changes. Pending mailbox items likewise expose only requested intent and source-safe presentation data. The dedicated live Run projection carries the current

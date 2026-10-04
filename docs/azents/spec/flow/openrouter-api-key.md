@@ -20,6 +20,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
+  - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_adapter.py
@@ -70,6 +72,13 @@ Rules:
 - The PostgreSQL `llm_provider` enum additively includes `openrouter`. Downgrade leaves the enum value in place.
 
 ## API-Key Credit Usage
+
+The integration and decrypted typed API-key secrets are loaded by one completed
+native PostgreSQL read-only repository operation. Missing integration is
+classified before foreign-Workspace access, preserving the existing error and
+privacy contract. The usage-client call runs only after that read closes. Usage
+remains read-through; financial-field authorization, provider transport and
+provider/secrets redaction retain their existing contracts.
 
 For an enabled OpenRouter integration, the shared subscription-usage route reads the current key at the fixed provider endpoint:
 

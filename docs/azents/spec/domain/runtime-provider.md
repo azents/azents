@@ -9,6 +9,11 @@ code_paths:
   - python/apps/azents/src/azents/core/runtime_profile_deletion.py
   - python/apps/azents/src/azents/core/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/repos/runtime_provider_bootstrap_operations.py
+  - python/apps/azents/src/azents/repos/runtime_profile_resolution_operations.py
+  - python/apps/azents/src/azents/repos/runtime_profile_reconciliation_operations.py
+  - python/apps/azents/src/azents/repos/runtime_provider_auth_operations.py
+  - python/apps/azents/src/azents/repos/runtime_terminal_authority_read.py
+  - python/apps/azents/src/azents/repos/agent_runtime_transition_operations.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_policy.py
@@ -60,7 +65,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-05
-spec_version: 38
+spec_version: 39
 ---
 
 # Runtime Provider
@@ -161,6 +166,31 @@ CLI bootstrap enrollment resolves its exact Provider/declaration/source ownershi
 in a completed read-only operation before credential authentication, grant issuance
 or exchange orchestration. The preliminary description does not authorize writes
 or replace final enrollment authority checks.
+
+Profile resolution completes source checks, configuration CAS and current-state
+fallback inside one repository operation, returning detached desired/applied state.
+Explicit Runtime addition composes selection preparation and attachment in the
+same repository transaction as Agent capability/version updates, logical Runtime
+create/rearm and the idempotent addition receipt. No service passes a live session
+or separately commits those preparation helpers.
+
+Durable Profile reconciliation completes claim, source-version page checks,
+retry and attempt-fenced continue/complete inside repositories. Per-Agent resolution
+commits before task finalization; existing timeout, attempt/cursor, page-bound
+and handled-failure behavior remains unchanged.
+
+Issued-token authentication completes credential, binding and Provider checks with
+credential-used and binding-authenticated writes in one database-only operation.
+Kubernetes TokenReview and audience/subject/expiry validation precede that operation.
+Services return detached identity after durable authority checks and conditional
+authenticated timestamps finish.
+
+Runtime Terminal identity, Workspace membership, private Agent administration,
+Session ownership, Profile and applied-state checks finish in one native read-only
+authority operation. Runner coordination, policy projection and working-folder
+resolution consume its detached snapshot after closure, preserving fail-closed
+reason ordering.
+
 
 An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
 addition selects one available Workspace Runtime Profile, creates or rearms the one logical Runtime
@@ -406,9 +436,15 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **39 (2026-10-05):** Integrated completed resolution/reconciliation, atomic
+  explicit Runtime addition, credential verification and read-only Terminal
+  authority with Profile/binding Admin operations. Retained scoped lifecycle
+  checks, atomic authority groups and external effects after database completion.
+
 - **38 (2026-10-05):** Completed Profile/binding administrative database operations
   and bootstrap enrollment target reads while preserving atomic authority groups
   and postcommit terminal invalidation.
+
 
 - **37 (2026-10-05):** Separated ordinary recreation target description from actual
   dispatch fencing and retained the checked target version and item-attempt identity.

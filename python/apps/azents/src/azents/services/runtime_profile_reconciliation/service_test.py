@@ -17,8 +17,11 @@ from azents.core.runtime_profile import (
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import RuntimeConfigurationReconcileTask
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.services.runtime_profile_resolution.service import (
-    RuntimeProfileResolutionService,
+from azents.repos.runtime_profile_reconciliation_operations import (
+    RuntimeProfileReconciliationOperationRepository,
+)
+from azents.repos.runtime_profile_resolution_operations import (
+    RuntimeProfileResolutionOperationRepository,
 )
 
 from .service import RuntimeProfileReconciliationService
@@ -67,12 +70,14 @@ def _task(
 
 def _service() -> _Harness:
     repository = AsyncMock(spec=RuntimeProfileRepository)
-    resolution_service = AsyncMock(spec=RuntimeProfileResolutionService)
+    resolution_service = AsyncMock(spec=RuntimeProfileResolutionOperationRepository)
     return _Harness(
         service=RuntimeProfileReconciliationService(
-            session_manager=_SessionManager(),
-            profile_repository=repository,
-            resolution_service=resolution_service,
+            operations=RuntimeProfileReconciliationOperationRepository(
+                session_manager=_SessionManager(),
+                profile_repository=repository,
+                resolution_operations=resolution_service,
+            )
         ),
         repository=repository,
         resolution_service=resolution_service,

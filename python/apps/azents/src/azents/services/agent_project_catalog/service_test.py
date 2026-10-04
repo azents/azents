@@ -18,6 +18,9 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
+from azents.repos.agent_project_catalog.operations import (
+    AgentProjectCatalogOperationsRepository,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -228,8 +231,11 @@ def _service(
 ) -> AgentProjectCatalogService:
     """Create service for tests."""
     return AgentProjectCatalogService(
-        catalog_repository=AgentProjectCatalogRepository(),
-        session_manager=rdb_session_manager,
+        repository=AgentProjectCatalogOperationsRepository(
+            catalog_repository=AgentProjectCatalogRepository(),
+            session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
+        ),
         runtime_target_resolver=_FakeRuntimeTargetResolver(),
         runner_operations=runner_operations,
     )

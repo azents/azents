@@ -72,6 +72,12 @@ from azents.repos.runtime_lifecycle_dispatch.repository import (
     RuntimeLifecycleDispatchRepository,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_profile_reconciliation_operations import (
+    RuntimeProfileReconciliationOperationRepository,
+)
+from azents.repos.runtime_profile_resolution_operations import (
+    RuntimeProfileResolutionOperationRepository,
+)
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
@@ -209,9 +215,6 @@ from azents.services.runtime_connection_registration.service import (
 )
 from azents.services.runtime_profile_reconciliation.service import (
     RuntimeProfileReconciliationService,
-)
-from azents.services.runtime_profile_resolution.service import (
-    RuntimeProfileResolutionService,
 )
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractService,
@@ -879,7 +882,7 @@ async def runtime_control_server_lifespan(
     profile_repository = RuntimeProfileRepository()
     provider_repository = RuntimeProviderRepository()
     provider_control_repository = RuntimeProviderControlRepository()
-    profile_resolution = RuntimeProfileResolutionService(
+    resolution_operations = RuntimeProfileResolutionOperationRepository(
         session_manager=session_manager,
         agent_repository=agent_repository,
         runtime_repository=runtime_repository,
@@ -888,9 +891,11 @@ async def runtime_control_server_lifespan(
         provider_policy_repository=policy_repository,
     )
     profile_reconciliation = RuntimeProfileReconciliationService(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        resolution_service=profile_resolution,
+        operations=RuntimeProfileReconciliationOperationRepository(
+            session_manager=session_manager,
+            profile_repository=profile_repository,
+            resolution_operations=resolution_operations,
+        ),
     )
     kubernetes_api_client: ApiClient | None = None
     kubernetes_token_reviewer = None

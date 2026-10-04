@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,13 +24,15 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
 )
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.transport_ingestion_read import (
+    ExternalChannelTransportReadRepository,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
 )
@@ -40,6 +43,7 @@ from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
     external_channel_transport_deadline,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 7, 29, 1, tzinfo=datetime.UTC)
 
@@ -158,10 +162,15 @@ def _service(
     ingestion = _Ingestion()
     return (
         ExternalChannelTransportIngestionService(
-            session_manager=cast(SessionManager[WriteSession], session_manager),
-            repository=cast(
-                ExternalChannelRepository,
-                repository or _Repository(),
+            read_operations=ExternalChannelTransportReadRepository(
+                session_manager=session_manager,
+                repository=require_instance(
+                    MagicMock(
+                        spec=ExternalChannelRepository,
+                        wraps=repository or _Repository(),
+                    ),
+                    ExternalChannelRepository,
+                ),
             ),
             ingestion_service=cast(
                 ExternalChannelConversationIngestionService,
