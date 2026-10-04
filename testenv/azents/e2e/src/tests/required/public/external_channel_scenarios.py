@@ -516,8 +516,10 @@ def _required(value: T | None) -> T:
 
 def list_live(*, server_url: str, token: str, session_id: str) -> LiveEventListResponse:
     """Decode the adjacent scenario's serialized live API at this ingress."""
-    return LiveEventListResponse.model_validate(
-        _wire_live(server_url=server_url, token=token, session_id=session_id)
+    return _required(
+        LiveEventListResponse.from_dict(
+            _wire_live(server_url=server_url, token=token, session_id=session_id)
+        )
     )
 
 
