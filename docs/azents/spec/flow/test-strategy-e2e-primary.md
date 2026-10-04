@@ -47,7 +47,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-04
-spec_version: 83
+spec_version: 84
 ---
 
 # E2E Primary Test Strategy
@@ -547,6 +547,15 @@ Always-on required CI does not depend on external credentials.
   in deterministic backend, protocol, component, and story coverage rather than
   independent full-stack journeys.
 - Web Surface E2E runs from `src/tests/web/` in its own suite lane.
+- Required Brave Search journeys admit the five independent success Sessions before
+  waiting for their persisted terminal run markers and idle projections. Every
+  created Session is registered for draining before input admission; definite
+  validation/auth rejection preserves the original error without awaiting a run
+  that was never admitted. Cleanup continues through every admitted or ambiguous
+  Session after a submission or drain failure.
+  Tool Search routing, five endpoint results, Runtime capability, correlation,
+  attachment bytes, vision continuation, credential failures, and text-only fallback
+  assertions remain unchanged. Credential mutation and failure journeys remain serial.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - Workspace Upload API E2E collects three public-API journeys against the real
   Docker Runtime Provider, Runtime Control, and HTTPS S3-compatible gateway:
