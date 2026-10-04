@@ -34,11 +34,20 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeConfigurationState,
+    RDBRuntimeInfrastructureProfile,
+    RDBWorkspaceRuntimeProfile,
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadOnlySession,
+    ReadSession,
+    ReadWriteSession,
+    WriteSession,
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import (
@@ -56,6 +65,7 @@ from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
+    RuntimeProviderConfigRevisionCreate,
     RuntimeProviderContractRevisionCreate,
 )
 from azents.repos.runtime_provider_policy.repository import (
@@ -105,34 +115,28 @@ class _LockFreeRuntimeProfileRepository(RuntimeProfileRepository):
 
     async def get_workspace_runtime_profile(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         profile_id: str,
-        for_update: bool,
     ) -> WorkspaceRuntimeProfile | None:
-        assert not for_update
         self.source_read_count[0] += 1
         return await super().get_workspace_runtime_profile(
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=for_update,
         )
 
     async def get_infrastructure_profile(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         profile_id: str,
-        for_update: bool,
     ) -> RuntimeInfrastructureProfile | None:
-        assert not for_update
         self.source_read_count[0] += 1
         return await super().get_infrastructure_profile(
             session,
             profile_id=profile_id,
-            for_update=for_update,
         )
 
 
@@ -661,6 +665,113 @@ async def test_resolution_reads_sources_without_row_locks(
     assert source_read_count == [2]
 
 
+async def test_independent_getters_allow_read_only_while_writer_holds_rows(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Descriptive reads return committed evidence without waiting on a writer."""
+    writes = create_read_write_session_manager(rdb_engine)
+    reads = create_read_only_session_manager(rdb_engine)
+    profile_repository = RuntimeProfileRepository()
+    policy_repository = RuntimeProviderPolicyRepository()
+    async with writes() as session:
+        agent_id, provider_id = await _seed_selected_agent(
+            session,
+            handle=f"readonly-profile-{uuid7().hex}",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
+        )
+        provider = await RuntimeProviderRepository().get_by_id(
+            session, provider_id=provider_id, for_update=False
+        )
+        assert provider is not None
+        assert provider.current_contract_revision_id is not None
+        contract_id = provider.current_contract_revision_id
+        config = await policy_repository.create_config_candidate(
+            session,
+            create=RuntimeProviderConfigRevisionCreate(
+                provider_id=provider_id,
+                base_revision_id=None,
+                contract_revision_id=contract_id,
+                config={},
+                encrypted_secrets=None,
+                secret_metadata={},
+                created_by_user_id=None,
+                validation_request_id=None,
+            ),
+        )
+    try:
+        resolution = await _service(writes).ensure_for_agent(agent_id)
+        document = resolution.desired.document
+        assert document is not None
+        async with writes() as writer:
+            await writer.write_session.execute(
+                sa.select(RDBRuntimeConfigurationState)
+                .where(RDBRuntimeConfigurationState.runtime_id == resolution.runtime.id)
+                .with_for_update()
+            )
+            await writer.write_session.execute(
+                sa.select(RDBRuntimeInfrastructureProfile)
+                .where(
+                    RDBRuntimeInfrastructureProfile.id
+                    == document.infrastructure_profile_id
+                )
+                .with_for_update()
+            )
+            await writer.write_session.execute(
+                sa.update(RDBWorkspaceRuntimeProfile)
+                .where(
+                    RDBWorkspaceRuntimeProfile.id
+                    == document.workspace_runtime_profile_id
+                )
+                .values(display_name="Uncommitted rename")
+            )
+            async with reads() as reader:
+                assert isinstance(reader, ReadOnlySession)
+                await reader.read_session.execute(
+                    sa.text("SET LOCAL statement_timeout = '2s'")
+                )
+                assert (
+                    await policy_repository.get_contract_by_id(
+                        reader, contract_revision_id=contract_id
+                    )
+                    is not None
+                )
+                assert (
+                    await policy_repository.get_config_by_id(
+                        reader, config_revision_id=config.id
+                    )
+                    is not None
+                )
+                assert (
+                    await profile_repository.get_infrastructure_profile(
+                        reader, profile_id=document.infrastructure_profile_id
+                    )
+                    is not None
+                )
+                profile = await profile_repository.get_workspace_runtime_profile(
+                    reader,
+                    workspace_id=resolution.runtime.workspace_id,
+                    profile_id=document.workspace_runtime_profile_id,
+                )
+                assert profile is not None
+                assert profile.display_name != "Uncommitted rename"
+                assert (
+                    await profile_repository.get_configuration_state(
+                        reader, runtime_id=resolution.runtime.id
+                    )
+                    is not None
+                )
+                assert (
+                    await policy_repository.get_contract_by_id(
+                        reader, contract_revision_id="missing-revision"
+                    )
+                    is None
+                )
+    finally:
+        async with writes() as session:
+            await _cleanup_independent_resolution_fixture(session, agent_id=agent_id)
+
+
 async def test_runtime_resolution_lock_allows_session_context_fk_reference(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
@@ -809,7 +920,6 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
                 session,
                 workspace_id=agent.workspace_id,
                 profile_id=agent.runtime_profile_id or "",
-                for_update=False,
             )
             assert selected is not None
             replacement = await profile_repository.create_workspace_runtime_profile(

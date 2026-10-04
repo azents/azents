@@ -94,25 +94,31 @@ class ModelMetadataSourceRepository:
         return token
 
     async def get_current(
-        self, session: WriteSession, *, source_key: str
+        self, session: ReadSession, *, source_key: str
     ) -> ModelMetadataSource | None:
-        """Maintenance-only complete view; owner lock makes all rows coherent."""
-        owner = await self.lock_authority(session, source_key=source_key, shared=True)
-        if owner is None or owner.last_success_at is None:
-            return None
-        self._validate_owner(owner)
-        if owner.source_url is None or owner.producer_name is None:
-            raise ValueError("Published source provenance is incomplete.")
-        result = await session.write_session.execute(
-            sa.select(RDBModelMetadataSourceModel)
-            .where(RDBModelMetadataSourceModel.source_key == source_key)
+        """Observe provenance and complete current rows in one ordinary statement."""
+        result = await session.read_session.execute(
+            sa.select(RDBModelMetadataSource, RDBModelMetadataSourceModel)
+            .outerjoin(
+                RDBModelMetadataSourceModel,
+                RDBModelMetadataSourceModel.source_key
+                == RDBModelMetadataSource.source_key,
+            )
+            .where(RDBModelMetadataSource.source_key == source_key)
             .order_by(
                 RDBModelMetadataSourceModel.provider,
                 RDBModelMetadataSourceModel.source_model_key,
             )
             .execution_options(populate_existing=True)
         )
-        models = tuple(self._build_model(row) for row in result.scalars())
+        rows = result.all()
+        if not rows or rows[0][0].last_success_at is None:
+            return None
+        owner = rows[0][0]
+        self._validate_owner(owner)
+        if owner.source_url is None or owner.producer_name is None:
+            raise ValueError("Published source provenance is incomplete.")
+        models = tuple(self._build_model(row) for _, row in rows if row is not None)
         payload = CatalogSourcePayload(
             schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
             interpreter_version="1",
@@ -138,9 +144,13 @@ class ModelMetadataSourceRepository:
         )
 
     async def get_projection_metadata(
-        self, session: WriteSession, *, source_key: str
+        self, session: ReadSession, *, source_key: str
     ) -> SourceProjectionMetadata | None:
-        owner = await self.lock_authority(session, source_key=source_key, shared=True)
+        owner = await session.read_session.scalar(
+            sa.select(RDBModelMetadataSource)
+            .where(RDBModelMetadataSource.source_key == source_key)
+            .execution_options(populate_existing=True)
+        )
         if owner is None or owner.last_success_at is None:
             return None
         self._validate_owner(owner)
@@ -180,6 +190,7 @@ class ModelMetadataSourceRepository:
         expectations: Sequence[SourceModelExpectation],
     ) -> bool:
         """Compare relevant values/presence, never work tokens or dataset identities."""
+        await self.lock_authority(session, source_key=CATALOG_SOURCE_KEY, shared=True)
         metadata = await self.get_projection_metadata(
             session, source_key=CATALOG_SOURCE_KEY
         )
@@ -327,32 +338,21 @@ class ModelMetadataSourceRepository:
         return changed
 
     async def get_sync_status(
-        self, session: WriteSession, *, source_key: str
+        self, session: ReadSession, *, source_key: str
     ) -> LLMCatalogSyncStatus | None:
-        owner = await self.lock_authority(session, source_key=source_key, shared=True)
+        owner = await session.read_session.scalar(
+            sa.select(RDBModelMetadataSource)
+            .where(RDBModelMetadataSource.source_key == source_key)
+            .execution_options(populate_existing=True)
+        )
         return None if owner is None else current_sync_status(owner)
 
     async def capture_for_context(
-        self, session: WriteSession, *, requests: Sequence[ContextModelRequest]
+        self, session: ReadSession, *, requests: Sequence[ContextModelRequest]
     ) -> CapturedContextSource:
         """Project only requested maxima; never load model payloads or price rules."""
         if not requests:
             return CapturedContextSource(models=())
-        owner = await self.lock_authority(
-            session, source_key=CATALOG_SOURCE_KEY, shared=True
-        )
-        if owner is None or owner.last_success_at is None:
-            return CapturedContextSource(
-                models=tuple(
-                    ContextModelMetadata(
-                        provider=request.provider,
-                        model_identifier=request.model_identifier,
-                        max_input_tokens=None,
-                    )
-                    for request in requests
-                )
-            )
-        self._validate_owner(owner)
         request_keys = {
             request: catalog_source_keys(
                 provider=request.provider, model_identifier=request.model_identifier
@@ -364,28 +364,40 @@ class ModelMetadataSourceRepository:
             for values in request_keys.values()
             for key in values
         }
-        maxima: dict[tuple[str, str], int | None] = {}
-        if keys:
-            result = await session.write_session.execute(
-                sa.select(
-                    RDBModelMetadataSourceModel.provider,
-                    RDBModelMetadataSourceModel.source_model_key,
-                    sa.cast(
-                        RDBModelMetadataSourceModel.model_data["facts"][
-                            "max_input_tokens"
-                        ]["value"].astext,
-                        sa.BigInteger,
-                    ).label("maximum"),
-                ).where(
-                    RDBModelMetadataSourceModel.source_key == CATALOG_SOURCE_KEY,
+        result = await session.read_session.execute(
+            sa.select(
+                RDBModelMetadataSource,
+                RDBModelMetadataSourceModel.provider,
+                RDBModelMetadataSourceModel.source_model_key,
+                sa.cast(
+                    RDBModelMetadataSourceModel.model_data["facts"]["max_input_tokens"][
+                        "value"
+                    ].astext,
+                    sa.BigInteger,
+                ).label("maximum"),
+            )
+            .outerjoin(
+                RDBModelMetadataSourceModel,
+                sa.and_(
+                    RDBModelMetadataSourceModel.source_key
+                    == RDBModelMetadataSource.source_key,
                     sa.tuple_(
                         RDBModelMetadataSourceModel.provider,
                         RDBModelMetadataSourceModel.source_model_key,
                     ).in_(keys),
-                )
+                ),
             )
+            .where(RDBModelMetadataSource.source_key == CATALOG_SOURCE_KEY)
+            .execution_options(populate_existing=True)
+        )
+        rows = result.all()
+        maxima: dict[tuple[str, str], int | None] = {}
+        if rows and rows[0][0].last_success_at is not None:
+            self._validate_owner(rows[0][0])
             maxima = {
-                (row.provider, row.source_model_key): row.maximum for row in result
+                (row.provider, row.source_model_key): row.maximum
+                for row in rows
+                if row.provider is not None
             }
         models: list[ContextModelMetadata] = []
         for request in requests:

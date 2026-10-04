@@ -4,7 +4,7 @@ import dataclasses
 
 from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import RuntimeConfigurationState
@@ -26,7 +26,7 @@ class RuntimeToolBehaviorState:
 class EngineRuntimeToolReadRepository:
     """Own completed Runtime Toolkit database reads."""
 
-    session_manager: SessionManager[WriteSession]
+    session_manager: SessionManager[ReadSession]
     agent_runtime_repository: AgentRuntimeRepository
     runtime_profile_repository: RuntimeProfileRepository
     project_repository: SessionWorkspaceProjectRepository

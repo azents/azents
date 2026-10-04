@@ -21,9 +21,9 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -164,6 +164,9 @@ class AgentRuntimeService:
     ]
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
     runtime_profile_resolution_service: Annotated[
         RuntimeProfileResolutionService,
@@ -1282,22 +1285,44 @@ class AgentRuntimeService:
         """Ensure Agent Runtime through exact Workspace Runtime Profile selection."""
         return await self.runtime_profile_resolution_service.ensure_for_agent(agent_id)
 
+    async def project_operation_target(
+        self, agent_id: str
+    ) -> RuntimeOperationTarget | None:
+        """Project retained ready evidence without admission or reconciliation."""
+        async with self.read_session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            ):
+                return None
+            resolution = await self._read_existing_resolution(session, agent_id)
+            if resolution is None:
+                return None
+            return self._qualified_operation_target(
+                resolution, runtime_capability_version=agent.runtime_capability_version
+            )
+
     async def _get_existing_resolution(
-        self,
-        agent_id: str,
+        self, agent_id: str
     ) -> RuntimeProfileResolutionResult | None:
         """Load retained configuration evidence without resolving new sources."""
         async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
-            if runtime is None:
-                return None
-            state = await self.runtime_profile_repository.get_configuration_state(
-                session,
-                runtime_id=runtime.id,
-                for_update=False,
-            )
-            if state is None:
-                return None
+            return await self._read_existing_resolution(session, agent_id)
+
+    async def _read_existing_resolution(
+        self, session: ReadSession, agent_id: str
+    ) -> RuntimeProfileResolutionResult | None:
+        """Read existing Runtime and configuration in the caller's scope."""
+        runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+        if runtime is None:
+            return None
+        state = await self.runtime_profile_repository.get_configuration_state(
+            session, runtime_id=runtime.id
+        )
+        if state is None:
+            return None
         return RuntimeProfileResolutionResult(
             runtime=runtime,
             desired=state.desired,

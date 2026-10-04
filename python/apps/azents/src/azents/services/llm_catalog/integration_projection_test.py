@@ -110,6 +110,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             operations=LLMCatalogOperationsRepository(
                 session_manager=rdb_session_manager,
+                read_session_manager=rdb_session_manager,
                 catalog_repository=LLMCatalogRepository(),
                 integration_repository=integration_repository,
                 source_repository=ModelMetadataSourceRepository(),
@@ -132,6 +133,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
             source_sync_service=ModelMetadataSourceSyncService(
                 operations=ModelMetadataSourceOperations(
                     session_manager=rdb_session_manager,
+                    read_session_manager=rdb_session_manager,
                     repository=ModelMetadataSourceRepository(),
                     catalog_repository=LLMCatalogRepository(),
                 ),
@@ -325,6 +327,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             operations=LLMCatalogOperationsRepository(
                 session_manager=rdb_session_manager,
+                read_session_manager=rdb_session_manager,
                 catalog_repository=LLMCatalogRepository(),
                 integration_repository=integration_repository,
                 source_repository=ModelMetadataSourceRepository(),
@@ -347,6 +350,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
             source_sync_service=ModelMetadataSourceSyncService(
                 operations=ModelMetadataSourceOperations(
                     session_manager=rdb_session_manager,
+                    read_session_manager=rdb_session_manager,
                     repository=ModelMetadataSourceRepository(),
                     catalog_repository=LLMCatalogRepository(),
                 ),
@@ -474,6 +478,7 @@ async def test_xai_failure_preserves_last_successful_current_data(
             provider_listing=llm_catalog_service.get_integration_model_listing(),
             operations=LLMCatalogOperationsRepository(
                 session_manager=rdb_session_manager,
+                read_session_manager=rdb_session_manager,
                 catalog_repository=catalog_repository,
                 integration_repository=integration_repository,
                 source_repository=ModelMetadataSourceRepository(),
@@ -496,6 +501,7 @@ async def test_xai_failure_preserves_last_successful_current_data(
             source_sync_service=ModelMetadataSourceSyncService(
                 operations=ModelMetadataSourceOperations(
                     session_manager=rdb_session_manager,
+                    read_session_manager=rdb_session_manager,
                     repository=ModelMetadataSourceRepository(),
                     catalog_repository=LLMCatalogRepository(),
                 ),

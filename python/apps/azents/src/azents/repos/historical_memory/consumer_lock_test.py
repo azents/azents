@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
@@ -18,7 +17,11 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadWriteSession,
+    WriteSession,
+    create_read_only_session_manager,
+)
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory.repository_test import (
@@ -155,22 +158,18 @@ async def test_concurrent_snapshot_consumers_keep_parent_fk_locks(
 
 
 @pytest.mark.parametrize("entity", ["agent", "session"])
-async def test_snapshot_consumer_still_fences_authority_writers(
+async def test_snapshot_consumer_reads_while_authority_writer_holds_lock(
     rdb_engine: AsyncEngine,
     rdb_session_manager: SessionManager[WriteSession],
     entity: Literal["agent", "session"],
 ) -> None:
-    """FK-compatible reads still exclude changes to Memory and Session authority."""
+    """Current committed descriptive authority never waits for row writers."""
     repository = HistoricalMemoryRepository(rdb_session_manager)
+    reads = create_read_only_session_manager(rdb_engine)
     async with (
         _committed_source(rdb_engine) as source,
-        AsyncSession(rdb_engine, expire_on_commit=False) as consumer,
         AsyncSession(rdb_engine, expire_on_commit=False) as writer,
     ):
-        snapshot = await repository.get_snapshot_consumer_in_session(
-            ReadWriteSession(consumer), session_id=source.session_id
-        )
-        assert snapshot is not None
         statement = (
             sa.select(RDBAgent.id).where(RDBAgent.id == source.agent_id)
             if entity == "agent"
@@ -178,5 +177,13 @@ async def test_snapshot_consumer_still_fences_authority_writers(
                 RDBAgentSession.id == source.session_id
             )
         )
-        with pytest.raises(OperationalError, match="could not obtain lock"):
-            await writer.execute(statement.with_for_update(key_share=True, nowait=True))
+        assert await writer.scalar(statement.with_for_update()) is not None
+        async with reads() as consumer:
+            snapshot = await asyncio.wait_for(
+                repository.get_snapshot_consumer_in_session(
+                    consumer, session_id=source.session_id
+                ),
+                timeout=2,
+            )
+            assert snapshot is not None
+            assert snapshot.session_id == source.session_id

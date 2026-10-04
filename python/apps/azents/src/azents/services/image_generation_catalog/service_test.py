@@ -139,6 +139,7 @@ async def _create_service(
     service = ImageGenerationCatalogService(
         operations=ImageGenerationCatalogOperationsRepository(
             session_manager=_session_manager_for(rdb_session),
+            read_session_manager=_session_manager_for(rdb_session),
             catalog_repository=LLMCatalogRepository(),
             integration_repository=integration_repository,
         ),

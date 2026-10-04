@@ -8,9 +8,9 @@ from fastapi import Depends
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.session_resource_authority import SessionExecutionOwner
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -53,6 +53,7 @@ class EngineMcpSnapshotFactory:
     """Create completed snapshot operations for explicit nullable identities."""
 
     session_manager: SessionManager[WriteSession] | None
+    read_session_manager: SessionManager[ReadSession] | None
 
     def with_owner(self, owner: SessionExecutionOwner) -> "EngineMcpSnapshotFactory":
         manager = self.session_manager
@@ -71,10 +72,16 @@ class EngineMcpSnapshotFactory:
         """Bind a complete operation only when storage and identities exist."""
         if agent_id == "" or session_id == "":
             raise ValueError("MCP snapshot identities must be nonempty or absent.")
-        if self.session_manager is None or agent_id is None or session_id is None:
+        if (
+            self.session_manager is None
+            or self.read_session_manager is None
+            or agent_id is None
+            or session_id is None
+        ):
             return None
         return McpToolSnapshotStore(
             session_manager=self.session_manager,
+            read_session_manager=self.read_session_manager,
             agent_id=agent_id,
             session_id=session_id,
             toolkit_namespace=toolkit_namespace,
@@ -87,10 +94,16 @@ class EngineMcpSnapshotFactory:
         """Create completed GitHub selection operations for an available identity."""
         if agent_id == "" or session_id == "":
             raise ValueError("GitHub selection identities must be nonempty or absent.")
-        if self.session_manager is None or agent_id is None or session_id is None:
+        if (
+            self.session_manager is None
+            or self.read_session_manager is None
+            or agent_id is None
+            or session_id is None
+        ):
             return None
         return GitHubSelectedInstallationStore(
             session_manager=self.session_manager,
+            read_session_manager=self.read_session_manager,
             agent_id=agent_id,
             session_id=session_id,
         )
@@ -114,10 +127,6 @@ class EngineToolRepositories:
                 self.memory,
                 session_manager=_owner_manager(self.memory.session_manager, owner),
             ),
-            runtime=dataclasses.replace(
-                self.runtime,
-                session_manager=_owner_manager(self.runtime.session_manager, owner),
-            ),
             mcp_oauth=dataclasses.replace(
                 self.mcp_oauth,
                 session_manager=_owner_manager(self.mcp_oauth.session_manager, owner),
@@ -130,6 +139,9 @@ class EngineToolRepositories:
 def get_engine_tool_repositories(
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
+    ],
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ],
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
     memory_repository: Annotated[MemoryRepository, Depends(MemoryRepository)],
@@ -154,7 +166,7 @@ def get_engine_tool_repositories(
             agent_session_repository=agent_session_repository,
         ),
         runtime=EngineRuntimeToolReadRepository(
-            session_manager=session_manager,
+            session_manager=read_session_manager,
             agent_runtime_repository=agent_runtime_repository,
             runtime_profile_repository=runtime_profile_repository,
             project_repository=project_repository,
@@ -163,7 +175,10 @@ def get_engine_tool_repositories(
             session_manager=session_manager,
             connection_repository=MCPOAuthConnectionRepository(cipher=cipher),
         ),
-        snapshots=EngineMcpSnapshotFactory(session_manager=session_manager),
+        snapshots=EngineMcpSnapshotFactory(
+            session_manager=session_manager,
+            read_session_manager=read_session_manager,
+        ),
         appendix=ToolkitAgentsAppendixDedupeStateStore(session_manager=session_manager),
     )
 

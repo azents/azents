@@ -19,10 +19,10 @@ from azents.core.llm_catalog_sync import (
     IntegrationCatalogSyncTrigger,
 )
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.llm_catalog import CatalogEntryWithCatalog, LLMCatalogRepository
@@ -124,6 +124,9 @@ class LLMCatalogOperationsRepository:
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
@@ -139,7 +142,7 @@ class LLMCatalogOperationsRepository:
     async def load_integration(
         self, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.integration_repository.get_by_id_with_secrets(
                 session, integration_id
             )
@@ -147,7 +150,7 @@ class LLMCatalogOperationsRepository:
     async def selectable_entry(
         self, *, integration_id: str, workspace_id: str, model_identifier: str
     ) -> CapturedSelectableCatalogEntry | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             scope = await self.active_repository.prepare_read_scope_in_session(
                 session, workspace_id=workspace_id, integration_ids=(integration_id,)
             )
@@ -181,7 +184,7 @@ class LLMCatalogOperationsRepository:
         limit: int,
         offset: int,
     ) -> CatalogReadPage | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             scope = await self.active_repository.prepare_read_scope_in_session(
                 session, workspace_id=workspace_id, integration_ids=(integration_id,)
             )
@@ -225,23 +228,22 @@ class LLMCatalogOperationsRepository:
     async def read_system_catalogs(
         self, providers: tuple[LLMProvider, ...]
     ) -> list[SystemCatalogRead]:
-        """Acquire all owner read locks in the same sorted order as publication."""
-        async with self.session_manager() as session:
-            result = await session.write_session.execute(
-                sa.select(RDBLLMCatalog.id, RDBLLMCatalog.provider)
+        """Observe current system owners in one ordinary read statement."""
+        async with self.read_session_manager() as session:
+            result = await session.read_session.execute(
+                sa.select(RDBLLMCatalog)
                 .where(
                     RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                     RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
                     RDBLLMCatalog.provider.in_(providers),
                 )
                 .order_by(RDBLLMCatalog.id)
+                .execution_options(populate_existing=True)
             )
-            current: dict[LLMProvider, LLMCatalog] = {}
-            for row in result:
-                owner = await self.catalog_repository.lock_catalog(
-                    session, catalog_id=row.id, shared=True
-                )
-                current[owner.provider] = self.catalog_repository.build_catalog(owner)
+            current = {
+                owner.provider: self.catalog_repository.build_catalog(owner)
+                for owner in result.scalars()
+            }
             return [
                 SystemCatalogRead(
                     provider=provider,

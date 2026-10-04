@@ -557,6 +557,7 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
         repositories=get_engine_tool_repositories(
             session_manager=_session_manager_for(session),
+            read_session_manager=_session_manager_for(session),
             cipher=CredentialCipher(Fernet.generate_key().decode()),
             memory_repository=require_instance(memory, MemoryRepository),
             agent_runtime_repository=require_instance(runtimes, AgentRuntimeRepository),

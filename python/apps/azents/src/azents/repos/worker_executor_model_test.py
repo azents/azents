@@ -114,7 +114,7 @@ class ModelActiveCapabilities(ActiveModelCapabilitiesRepository):
 
     async def capture_exact_choices_in_session(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         identities: Sequence[ConfiguredModelIdentity],

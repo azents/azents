@@ -111,7 +111,6 @@ class RuntimeProviderContractService:
                 current = await self.policy_repository.get_contract_by_id(
                     session,
                     contract_revision_id=provider.current_contract_revision_id,
-                    for_update=False,
                 )
                 if current is not None and current.digest == canonical.digest:
                     return current

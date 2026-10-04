@@ -147,14 +147,12 @@ class ObservedProfiles(RuntimeProfileRepository):
     ) -> None:
         self.probe = probe
         self.error = error
-        self.sessions: list[WriteSession] = []
+        self.sessions: list[ReadSession] = []
 
     async def get_configuration_state(
-        self, session: WriteSession, *, runtime_id: str, for_update: bool = False
+        self, session: ReadSession, *, runtime_id: str
     ) -> RuntimeConfigurationState | None:
-        state = await super().get_configuration_state(
-            session, runtime_id=runtime_id, for_update=for_update
-        )
+        state = await super().get_configuration_state(session, runtime_id=runtime_id)
         assert self.probe.active_contexts == 1 and session.read_session.in_transaction()
         self.sessions.append(session)
         if self.error is not None:

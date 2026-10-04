@@ -159,7 +159,6 @@ class RuntimeProfileWorkspaceService:
                     session,
                     workspace_id=workspace_id,
                     profile_id=runtime_profile_id,
-                    for_update=False,
                 )
                 if profile is None:
                     raise RuntimeProfileWorkspaceUnavailable(
@@ -226,7 +225,6 @@ class RuntimeProfileWorkspaceService:
             session,
             workspace_id=workspace_id,
             profile_id=default_profile_id,
-            for_update=False,
         )
         if profile is None:
             return None
@@ -245,7 +243,6 @@ class RuntimeProfileWorkspaceService:
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=False,
         )
         if profile is None:
             raise RuntimeProfileWorkspaceUnavailable(
@@ -290,7 +287,6 @@ class RuntimeProfileWorkspaceService:
                 session,
                 workspace_id=workspace_id,
                 profile_id=profile_id,
-                for_update=False,
             )
             if profile is None:
                 raise RuntimeProfileWorkspaceUnavailable(
@@ -382,7 +378,6 @@ class RuntimeProfileWorkspaceService:
                 session,
                 workspace_id=workspace_id,
                 profile_id=profile_id,
-                for_update=False,
             )
             if current is None:
                 raise RuntimeProfileWorkspaceUnavailable(
@@ -443,7 +438,6 @@ class RuntimeProfileWorkspaceService:
                     session,
                     workspace_id=workspace_id,
                     profile_id=profile_id,
-                    for_update=False,
                 )
                 raise RuntimeProfileWorkspaceUnavailable(
                     code="profile_version_conflict",
@@ -690,7 +684,6 @@ class RuntimeProfileWorkspaceService:
         profile = await self.profile_repository.get_infrastructure_profile(
             session,
             profile_id=profile_id,
-            for_update=False,
         )
         if profile is None:
             raise RuntimeProfileWorkspaceUnavailable(
@@ -716,7 +709,6 @@ class RuntimeProfileWorkspaceService:
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=False,
         )
         if profile is None:
             raise AssertionError("Workspace default Runtime Profile is missing.")
@@ -857,7 +849,6 @@ class RuntimeProfileWorkspaceService:
         revision = await self.policy_repository.get_contract_by_id(
             session,
             contract_revision_id=revision_id,
-            for_update=False,
         )
         if revision is None or revision.provider_id != provider.id:
             return _unavailable_compatibility("provider_capability_unavailable")
@@ -889,7 +880,6 @@ class RuntimeProfileWorkspaceService:
         revision = await self.policy_repository.get_contract_by_id(
             session,
             contract_revision_id=revision_id,
-            for_update=False,
         )
         if revision is None or revision.provider_id != provider.id:
             return _unavailable_compatibility("provider_capability_unavailable")

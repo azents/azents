@@ -66,9 +66,9 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import Event
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.engine.tools.skill import SkillProjectionService
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
@@ -471,6 +471,14 @@ class AgentRemoveGitWorktreeAdmission:
     bridge_identity: str
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentGitWorktreeToolAvailability:
+    """Retained descriptive eligibility for the two Agent worktree tools."""
+
+    create: bool
+    remove: bool
+
+
 @dataclasses.dataclass
 class SessionGitWorktreeService:
     """Orchestrate session Git worktree allocation and initialization."""
@@ -509,6 +517,9 @@ class SessionGitWorktreeService:
     ]
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
@@ -567,36 +578,49 @@ class SessionGitWorktreeService:
             actor_generation=actor_generation,
         ).assert_current()
 
-    async def agent_create_git_worktree_available(
+    async def project_agent_git_worktree_availability(
         self,
         *,
         agent_id: str,
         session_id: str,
-    ) -> bool:
-        """Return whether the current Session may project the Agent create tool."""
+    ) -> AgentGitWorktreeToolAvailability:
+        """Describe both worktree tools from one retained eligibility context."""
+        unavailable = AgentGitWorktreeToolAvailability(create=False, remove=False)
         if self.runner_operations is None or self.skill_store is None:
-            return False
-        try:
-            await self.session_working_folder_binding_service.require_bindable_context(
-                agent_id=agent_id,
-                session_id=session_id,
-            )
-            await self.runtime_target_resolver.resolve_operation_target(
-                agent_id,
-                wait_timeout_seconds=0,
-                start_if_stopped=False,
-            )
-        except RuntimeStorageError, SessionWorkingFolderBindingError:
-            return False
-        async with self.session_manager() as session:
+            return unavailable
+        target = await self.runtime_target_resolver.project_operation_target(agent_id)
+        if target is None:
+            return unavailable
+        binding_service = self.session_working_folder_binding_service
+        binding = await binding_service.project_bound_authority_for_target(
+            agent_id=agent_id,
+            session_id=session_id,
+            runtime_target=target,
+        )
+        if binding is None:
+            return unavailable
+        async with self.read_session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
             )
-        return (
-            agent_session is not None
-            and agent_session.agent_id == agent_id
-            and agent_session.status is AgentSessionStatus.ACTIVE
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+            ):
+                return unavailable
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        return AgentGitWorktreeToolAvailability(
+            create=True,
+            remove=any(
+                allocation.status is SessionGitWorktreeStatus.READY
+                and allocation.session_workspace_project_id is not None
+                for allocation in allocations
+            ),
         )
 
     async def admit_agent_create_git_worktree(
@@ -743,48 +767,6 @@ class SessionGitWorktreeService:
         return AgentCreateGitWorktreeAdmission(
             mailbox_item_id=admission.id,
             bridge_identity=bridge_identity,
-        )
-
-    async def agent_remove_git_worktree_available(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-    ) -> bool:
-        """Return whether the current context has a removable managed Project."""
-        if self.runner_operations is None or self.skill_store is None:
-            return False
-        try:
-            await self.session_working_folder_binding_service.require_bindable_context(
-                agent_id=agent_id,
-                session_id=session_id,
-            )
-            await self.runtime_target_resolver.resolve_operation_target(
-                agent_id,
-                wait_timeout_seconds=0,
-                start_if_stopped=False,
-            )
-        except RuntimeStorageError, SessionWorkingFolderBindingError:
-            return False
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if (
-                agent_session is None
-                or agent_session.agent_id != agent_id
-                or agent_session.status is not AgentSessionStatus.ACTIVE
-            ):
-                return False
-            allocations = await self.session_git_worktree_repository.list_by_session_id(
-                session,
-                session_id=session_id,
-            )
-        return any(
-            allocation.status is SessionGitWorktreeStatus.READY
-            and allocation.session_workspace_project_id is not None
-            for allocation in allocations
         )
 
     async def admit_agent_remove_git_worktree(

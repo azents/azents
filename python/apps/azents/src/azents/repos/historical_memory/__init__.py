@@ -62,15 +62,15 @@ class HistoricalMemoryRepository:
         """Create the repository."""
         self.session_manager = session_manager
 
+    @staticmethod
     async def get_snapshot_consumer_in_session(
-        self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> MemorySnapshotConsumer | None:
         """Return one currently authorized Memory-enabled root consumer."""
-        locked = (
-            await session.write_session.execute(
+        observed = (
+            await session.read_session.execute(
                 sa.select(
                     RDBAgentSession.id,
                     RDBAgentSession.agent_id,
@@ -85,27 +85,22 @@ class HistoricalMemoryRepository:
                     RDBAgentSession.session_kind == AgentSessionKind.ROOT,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgent.memory_enabled.is_(True),
-                    self._authorized_source(),
+                    HistoricalMemoryRepository._authorized_source(),
                 )
-                # NO KEY UPDATE fences authority writers while permitting
-                # the FK KEY SHARE protection used by Session event writes.
-                .with_for_update(of=(RDBAgentSession, RDBAgent), key_share=True)
             )
         ).one_or_none()
-        if locked is None:
+        if observed is None:
             return None
-        if locked.product_mode is None:
+        if observed.product_mode is None:
             return None
         consumer = MemorySnapshotConsumer(
-            session_id=locked.id,
-            agent_id=locked.agent_id,
-            workspace_id=locked.workspace_id,
-            product_mode=locked.product_mode,
-            associated_user_id=locked.associated_user_id,
-            model_input_head_event_id=locked.model_input_head_event_id,
+            session_id=observed.id,
+            agent_id=observed.agent_id,
+            workspace_id=observed.workspace_id,
+            product_mode=observed.product_mode,
+            associated_user_id=observed.associated_user_id,
+            model_input_head_event_id=observed.model_input_head_event_id,
         )
-        if not await self._lock_associated_user_membership(session, consumer):
-            return None
         return consumer
 
     async def admit_eligible_sources(

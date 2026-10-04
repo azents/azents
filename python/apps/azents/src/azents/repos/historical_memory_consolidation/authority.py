@@ -59,6 +59,22 @@ async def consolidation_session(
         ) from None
 
 
+@asynccontextmanager
+async def consolidation_read_session(
+    manager: SessionManager[ReadSession],
+) -> AsyncIterator[ReadSession]:
+    """Complete independent reads while retaining existing deadline failures."""
+    try:
+        async with manager() as session:
+            yield session
+    except OperationalError as error:
+        if not isinstance(error.orig, QueryCanceled):
+            raise
+        raise ConsolidationDeadlineError(
+            "Consolidation database deadline was exceeded."
+        ) from None
+
+
 @dataclass(frozen=True)
 class LockedConsolidationOwner:
     """Repository-local rows held only during a database operation."""

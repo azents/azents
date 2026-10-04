@@ -20,7 +20,7 @@ from azents.services.historical_memory.context_snapshot import (
 from azents.testing.consolidation import seed_consolidation_corpus
 
 
-async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_mutation(
+async def test_takeover_keeps_descriptive_reads_but_rejects_old_owner_writes(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
@@ -31,6 +31,7 @@ async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_muta
             MemoryRepository(),
             MessageRepository(),
             ToolkitStateRepository(),
+            manager,
             manager,
         )
     )
@@ -56,8 +57,9 @@ async def test_takeover_rejects_old_owner_reads_and_writes_without_snapshot_muta
         root = await session.write_session.get(RDBAgentSession, corpus.team_source)
         assert root is not None
         root.owner_generation = generation + 1
-    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
-        await bound.prompt_for_turn(session_id=corpus.team_source)
+    assert await bound.prompt_for_turn(
+        session_id=corpus.team_source
+    ) == await service.prompt_for_turn(session_id=corpus.team_source)
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
         await bound.refresh_snapshot(
             session_id=corpus.team_source, after_compaction=False

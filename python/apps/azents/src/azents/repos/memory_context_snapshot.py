@@ -23,11 +23,14 @@ from azents.core.historical_memory_snapshot import (
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import CompactionSummaryPayload
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory import HistoricalMemoryRepository
-from azents.repos.historical_memory_consolidation.authority import consolidation_session
+from azents.repos.historical_memory_consolidation.authority import (
+    consolidation_read_session,
+    consolidation_session,
+)
 from azents.repos.historical_memory_consolidation.foreground import (
     read_foreground_revision,
 )
@@ -57,6 +60,10 @@ class MemoryContextSnapshotRepository:
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
+
     def with_owner(
         self, owner: SessionExecutionOwner
     ) -> "MemoryContextSnapshotRepository":
@@ -71,8 +78,8 @@ class MemoryContextSnapshotRepository:
         )
 
     async def prompt_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
-        async with consolidation_session(self.session_manager) as session:
-            await session.write_session.execute(
+        async with consolidation_read_session(self.read_session_manager) as session:
+            await session.read_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
             consumer = (

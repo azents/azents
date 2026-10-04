@@ -48,7 +48,7 @@ class CapturedIntegrationScope:
 
 @dataclasses.dataclass(frozen=True)
 class ActiveReadScope:
-    """Owner locks are acquired before a caller reads current catalog rows."""
+    """Descriptive integration/source observation; not final acceptance authority."""
 
     workspace_id: str
     integrations: tuple[CapturedIntegrationScope, ...]

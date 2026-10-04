@@ -260,12 +260,21 @@ class ImageGenerationCatalogService:
             return Failure(CatalogNotFound(integration_id))
         integration, page = captured.integration, captured.page
         if page is None:
-            return Success(
-                default_only_image_generation_catalog(
-                    provider=integration.provider,
-                    integration_enabled=integration.enabled,
-                )
+            description = default_only_image_generation_catalog(
+                provider=integration.provider,
+                integration_enabled=integration.enabled,
             )
+            if image_generation_explicit_selection_supported(integration.provider):
+                # A missing owner is descriptive absence. Actual sync initializes
+                # it in begin_sync; reads never silently downgrade provider support.
+                description = description.model_copy(
+                    update={
+                        "explicit_selection_supported": True,
+                        "stale": True,
+                        "usable": False,
+                    }
+                )
+            return Success(description)
         policy = evaluate_integration_catalog_sync_policy(
             IntegrationCatalogSyncPolicyInput(
                 trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
