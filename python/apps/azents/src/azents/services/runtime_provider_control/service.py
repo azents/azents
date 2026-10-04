@@ -19,6 +19,9 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderAuditEventCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_auth_operations import (
+    RuntimeProviderAuthenticationOperationRepository,
+)
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
@@ -244,21 +247,22 @@ class RuntimeProviderEnrollmentService:
 
     def _build_auth_registry(self) -> ProviderAuthRegistry:
         """Build the explicit Provider verifier registry."""
+        authentication_operations = RuntimeProviderAuthenticationOperationRepository(
+            session_manager=self.session_manager,
+            repository=self.repository,
+            provider_repository=self.provider_repository,
+            binding_repository=self.binding_repository,
+        )
         verifiers: list[ProviderAuthVerifier] = [
             IssuedTokenProviderAuthVerifier(
-                session_manager=self.session_manager,
-                repository=self.repository,
-                provider_repository=self.provider_repository,
-                binding_repository=self.binding_repository,
+                operations=authentication_operations,
                 credential_verifier=self.verifier,
             )
         ]
         if self.kubernetes_token_reviewer is not None:
             verifiers.append(
                 KubernetesServiceAccountProviderAuthVerifier(
-                    session_manager=self.session_manager,
-                    provider_repository=self.provider_repository,
-                    binding_repository=self.binding_repository,
+                    operations=authentication_operations,
                     token_reviewer=self.kubernetes_token_reviewer,
                 )
             )

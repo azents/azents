@@ -14,23 +14,13 @@ from kubernetes_asyncio.client.api.authentication_v1_api import AuthenticationV1
 from kubernetes_asyncio.client.models.v1_token_review import V1TokenReview
 from kubernetes_asyncio.client.models.v1_token_review_spec import V1TokenReviewSpec
 from kubernetes_asyncio.client.rest import ApiException
-from pydantic import BaseModel, ConfigDict, ValidationError
 
-from azents.core.enums import (
-    RuntimeProviderAuthMethod,
-    RuntimeProviderBindingOwner,
-    RuntimeProviderBindingState,
-    RuntimeProviderLifecycleState,
-)
+from azents.core.enums import RuntimeProviderAuthMethod
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.runtime_provider.repository import RuntimeProviderRepository
-from azents.repos.runtime_provider_binding.repository import (
-    RuntimeProviderAuthBindingRepository,
-)
-from azents.repos.runtime_provider_control.repository import (
-    RuntimeProviderControlRepository,
+from azents.repos.runtime_provider_auth_operations import (
+    RuntimeProviderAuthenticationOperationRepository,
+    RuntimeProviderAuthenticationRecord,
+    RuntimeProviderAuthenticationRejected,
 )
 
 from .data import (
@@ -39,24 +29,8 @@ from .data import (
     RuntimeProviderCredentialUnavailable,
 )
 
-_TERMINAL = frozenset(
-    {
-        RuntimeProviderLifecycleState.DECOMMISSIONED,
-        RuntimeProviderLifecycleState.FORCE_RETIRED,
-    }
-)
 _SERVICE_ACCOUNT_SUBJECT = re.compile(r"^system:serviceaccount:([^:]+):([^:]+)$")
 _KUBERNETES_AUDIENCE = "azents-runtime-control"
-
-
-class _KubernetesServiceAccountBindingConfig(BaseModel):
-    """Decode consumed binding fields while retaining unknown-field compatibility."""
-
-    model_config = ConfigDict(strict=True, extra="ignore", frozen=True)
-
-    audience: str
-    namespace: str
-    service_account_name: str
 
 
 class KubernetesServiceAccountTokenReviewer(Protocol):
@@ -164,10 +138,7 @@ class ProviderAuthVerifier(Protocol):
 class IssuedTokenProviderAuthVerifier:
     """Verify Azents-issued Provider credentials against binding state."""
 
-    session_manager: SessionManager[WriteSession]
-    repository: RuntimeProviderControlRepository
-    provider_repository: RuntimeProviderRepository
-    binding_repository: RuntimeProviderAuthBindingRepository
+    operations: RuntimeProviderAuthenticationOperationRepository
     credential_verifier: RuntimeProviderCredentialVerifier
     method: RuntimeProviderAuthMethod = RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN
 
@@ -178,68 +149,20 @@ class IssuedTokenProviderAuthVerifier:
         now: datetime.datetime,
     ) -> RuntimeProviderCredentialAuthentication:
         """Resolve one active, unexpired issued credential and its binding."""
-        async with self.session_manager() as session:
-            credential = await self.repository.get_active_credential_by_verifier(
-                session,
-                verifier=self.credential_verifier.verifier_for(secret),
-                now=now,
+        try:
+            record = await self.operations.verify_issued_token(
+                verifier=self.credential_verifier.verifier_for(secret), now=now
             )
-            if credential is None or not self.credential_verifier.matches(
-                secret, credential.verifier
-            ):
-                raise RuntimeProviderCredentialUnavailable("credential_unavailable")
-            binding = await self.binding_repository.get_by_id(
-                session,
-                binding_id=credential.binding_id,
-            )
-            if (
-                binding is None
-                or binding.state is not RuntimeProviderBindingState.ACTIVE
-                or binding.auth_method is not self.method
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            if binding.provider_id != credential.provider_id:
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            provider = await self.provider_repository.get_by_id(
-                session,
-                provider_id=binding.provider_id,
-            )
-            if provider is None or provider.lifecycle_state in _TERMINAL:
-                raise RuntimeProviderCredentialUnavailable("provider_unavailable")
-            if not await self.repository.mark_credential_used(
-                session,
-                credential_id=credential.id,
-                used_at=now,
-            ):
-                raise RuntimeProviderCredentialUnavailable("credential_unavailable")
-            evidence_expires_at = credential.expires_at
-            if not await self.binding_repository.mark_authenticated(
-                session,
-                binding_id=binding.id,
-                authenticated_at=now,
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-        return RuntimeProviderCredentialAuthentication(
-            binding_id=binding.id,
-            credential_id=credential.id,
-            provider_id=provider.provider_id,
-            provider_resource_id=provider.id,
-            provider_kind=provider.kind,
-            provider_scope=provider.scope,
-            provider_workspace_id=provider.workspace_id,
-            auth_method=self.method,
-            auth_subject=binding.subject,
-            evidence_expires_at=evidence_expires_at,
-        )
+        except RuntimeProviderAuthenticationRejected as error:
+            raise RuntimeProviderCredentialUnavailable(error.code) from error
+        return _authentication(record)
 
 
 @dataclass(frozen=True)
 class KubernetesServiceAccountProviderAuthVerifier:
     """Verify Kubernetes workload evidence against a bootstrap-owned binding."""
 
-    session_manager: SessionManager[WriteSession]
-    provider_repository: RuntimeProviderRepository
-    binding_repository: RuntimeProviderAuthBindingRepository
+    operations: RuntimeProviderAuthenticationOperationRepository
     token_reviewer: KubernetesServiceAccountTokenReviewer
     method: RuntimeProviderAuthMethod = (
         RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT
@@ -268,55 +191,35 @@ class KubernetesServiceAccountProviderAuthVerifier:
         if match is None:
             raise RuntimeProviderCredentialUnavailable("workload_identity_unavailable")
         subject = review.username
-        async with self.session_manager() as session:
-            binding = await self.binding_repository.get_active_by_subject(
-                session,
-                auth_method=self.method,
+        try:
+            record = await self.operations.verify_workload_binding(
                 subject=subject,
+                namespace=match.group(1),
+                service_account_name=match.group(2),
+                evidence_expires_at=review.evidence_expires_at,
+                now=now,
             )
-            if (
-                binding is None
-                or binding.owner is not RuntimeProviderBindingOwner.BOOTSTRAP
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            try:
-                config = _KubernetesServiceAccountBindingConfig.model_validate(
-                    binding.config
-                )
-            except ValidationError:
-                raise RuntimeProviderCredentialUnavailable(
-                    "binding_unavailable"
-                ) from None
-            if (
-                config.audience != _KUBERNETES_AUDIENCE
-                or config.namespace != match.group(1)
-                or config.service_account_name != match.group(2)
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-            provider = await self.provider_repository.get_by_id(
-                session,
-                provider_id=binding.provider_id,
-            )
-            if provider is None or provider.lifecycle_state in _TERMINAL:
-                raise RuntimeProviderCredentialUnavailable("provider_unavailable")
-            if not await self.binding_repository.mark_authenticated(
-                session,
-                binding_id=binding.id,
-                authenticated_at=now,
-            ):
-                raise RuntimeProviderCredentialUnavailable("binding_unavailable")
-        return RuntimeProviderCredentialAuthentication(
-            binding_id=binding.id,
-            credential_id=None,
-            provider_id=provider.provider_id,
-            provider_resource_id=provider.id,
-            provider_kind=provider.kind,
-            provider_scope=provider.scope,
-            provider_workspace_id=provider.workspace_id,
-            auth_method=self.method,
-            auth_subject=subject,
-            evidence_expires_at=review.evidence_expires_at,
-        )
+        except RuntimeProviderAuthenticationRejected as error:
+            raise RuntimeProviderCredentialUnavailable(error.code) from error
+        return _authentication(record)
+
+
+def _authentication(
+    record: RuntimeProviderAuthenticationRecord,
+) -> RuntimeProviderCredentialAuthentication:
+    """Project detached committed identity into the application contract."""
+    return RuntimeProviderCredentialAuthentication(
+        binding_id=record.binding_id,
+        credential_id=record.credential_id,
+        provider_id=record.provider_id,
+        provider_resource_id=record.provider_resource_id,
+        provider_kind=record.provider_kind,
+        provider_scope=record.provider_scope,
+        provider_workspace_id=record.provider_workspace_id,
+        auth_method=record.auth_method,
+        auth_subject=record.auth_subject,
+        evidence_expires_at=record.evidence_expires_at,
+    )
 
 
 @dataclass(frozen=True)
