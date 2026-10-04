@@ -331,7 +331,9 @@ class AgentRunExecution[
             run_id,
             AgentRunPhase.STREAMING_MODEL,
         )
-        output_stream = self.output_normalizer.start(session_id)
+        output_stream = self.output_normalizer.for_native_replay(
+            native_request.native_replay_schema_version()
+        ).start(session_id)
         timeout_policy = self.model_stream_watchdog.resolve_policy(
             provider=self.model_stream_provider,
             model=native_request.model,

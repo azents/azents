@@ -2,6 +2,7 @@
 title: "Agentic Historical Memory and Shared Execution Design"
 created: 2026-10-02
 updated: 2026-10-02
+implemented: 2026-10-04
 tags: [memory, engine, architecture, backend, security, storage]
 document_role: primary
 document_type: design

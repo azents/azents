@@ -16,6 +16,9 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
 )
+from azents.core.historical_memory_consolidation import ConsolidationScope
+from azents.core.historical_memory_context import render_live_consolidated
+from azents.core.vfs import VFS_FILE_MAX_BYTES
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.types import (
@@ -38,7 +41,13 @@ from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.repos.historical_memory import HistoricalMemoryRepository
+from azents.repos.historical_memory_consolidation.authority import consolidation_session
+from azents.repos.historical_memory_consolidation.foreground import (
+    read_foreground_revision,
+)
 from azents.repos.memory_vfs.data import (
+    ConsolidatedMemoryVfsRecord,
     HistoricalMemoryVfsRecord,
     MemoryVfsAuthority,
     MemoryVfsRecordPage,
@@ -93,6 +102,75 @@ class MemoryVfsRepository:
         SessionManager[AsyncSession],
         Depends(get_session_manager),
     ]
+
+    async def get_consolidated(
+        self,
+        authority: MemoryVfsAuthority,
+        *,
+        scope: Literal["team", "user"],
+        max_bytes: int,
+    ) -> ConsolidatedMemoryVfsRecord | None:
+        """Reauthorize the actual root before resolving the exact personal alias."""
+        self._require_max_bytes(max_bytes)
+        if not authority.memory_enabled:
+            return None
+        async with consolidation_session(self.session_manager) as session:
+            await session.execute(
+                sa.select(sa.func.set_config("statement_timeout", "2000", True))
+            )
+            consumer = await HistoricalMemoryRepository(
+                self.session_manager
+            ).get_snapshot_consumer_in_session(
+                session, session_id=authority.root_session_id
+            )
+            if (
+                consumer is None
+                or consumer.agent_id != authority.agent_id
+                or consumer.workspace_id != authority.workspace_id
+                or consumer.associated_user_id != authority.associated_user_id
+            ):
+                return None
+            entry = await read_foreground_revision(
+                session,
+                consumer=consumer,
+                scope=ConsolidationScope(scope),
+                selected=None,
+            )
+            if (
+                entry is None
+                or len(render_live_consolidated(entry).encode()) > max_bytes
+            ):
+                return None
+            result = ConsolidatedMemoryVfsRecord(entry)
+        return result
+
+    async def list_consolidated(
+        self,
+        authority: MemoryVfsAuthority,
+        *,
+        scopes: Sequence[Literal["team", "user"]],
+        limit: int,
+        max_bytes: int,
+    ) -> MemoryVfsRecordPage:
+        """At most two permitted aliases, with a whole-file byte bound."""
+        self._require_limit(limit)
+        self._require_max_bytes(max_bytes)
+        records = []
+        remaining = max_bytes
+        truncated = False
+        for scope in scopes:
+            record = await self.get_consolidated(
+                authority, scope=scope, max_bytes=VFS_FILE_MAX_BYTES
+            )
+            if record is None:
+                continue
+            size = len(render_live_consolidated(record.entry).encode())
+            if len(records) >= limit or size > remaining:
+                truncated = True
+                continue
+            records.append(record)
+            remaining -= size
+        return MemoryVfsRecordPage(tuple(records), truncated)
 
     async def authorized(self, authority: MemoryVfsAuthority) -> bool:
         """Return whether the current root authority may use the Memory mount."""
@@ -902,6 +980,23 @@ class MemoryVfsRepository:
             return MemoryVfsUriPage((), False)
         uris = ["azents://memory/README.md"] if query.include_readme else []
         has_more = False
+        if query.namespace in {"all", "consolidated"}:
+            page = await self.list_consolidated(
+                authority,
+                scopes=query.source_scopes,
+                limit=max(1, limit - len(uris)),
+                max_bytes=2 * VFS_FILE_MAX_BYTES,
+            )
+            for record in page.records:
+                if isinstance(record, ConsolidatedMemoryVfsRecord):
+                    if len(uris) < limit:
+                        uris.append(
+                            "azents://memory/consolidated/"
+                            f"{record.entry.unit.scope.value}/summary.md"
+                        )
+                    else:
+                        has_more = True
+            has_more = has_more or page.has_more
         if query.namespace in {"all", "saved"}:
             if remaining := limit - len(uris):
                 page = await self._list_saved_uris(

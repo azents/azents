@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from base64 import b64encode, urlsafe_b64encode
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -88,6 +88,243 @@ _HISTORICAL_MEMORY_SUMMARY = (
 )
 
 
+_CONSOLIDATION_TASK_MARKER = (
+    "You are an internal historical-context consolidation Agent."
+)
+_CONSOLIDATION_SENTINEL = re.compile(r"AGENTIC_(?:TEAM|PERSONAL)_[a-zA-Z0-9]+_V[0-9]+")
+_CONSOLIDATION_WORK = re.compile(
+    r"- Work ([0-9a-f]{32}); (?:prepared|removed|restored); "
+    r"(azents://memory/historical/(team|user)/[0-9a-f]{32}/summary\.md)"
+)
+
+
+class ConsolidationFixtureWork(NamedTuple):
+    """An exact presented identity parsed only from this execution's result."""
+
+    work_id: str
+    uri: str
+    scope: str
+
+
+class ConsolidationFixtureCall(NamedTuple):
+    call_id: str
+    name: str
+    arguments: dict[str, object]
+
+
+class ConsolidationFixturePlan(NamedTuple):
+    call: ConsolidationFixtureCall | None
+    final_text: str | None
+
+
+class ConsolidationFixtureContinuation(NamedTuple):
+    chain_id: str
+    input_items: list[dict[str, object]]
+
+
+class ConsolidationFixtureRequest(NamedTuple):
+    chain_id: str
+    request: dict[str, object]
+
+
+def is_consolidation_fixture_request(request: dict[str, object]) -> bool:
+    """Match the closed internal host rather than foreground Memory tools."""
+    instructions = request.get("instructions")
+    names = {
+        name
+        for tool in _list(request.get("tools", []))
+        if isinstance(tool, dict) and isinstance(name := tool.get("name"), str)
+    }
+    return (
+        isinstance(instructions, str)
+        and _CONSOLIDATION_TASK_MARKER in instructions
+        and {"read", "write", "edit"} <= names
+        and names <= {"read", "write", "edit", "delete", "glob", "grep", "apply_patch"}
+    )
+
+
+def consolidation_fixture_request(
+    request: dict[str, object],
+    continuations: Mapping[str, ConsolidationFixtureContinuation],
+    *,
+    new_chain_id: str,
+) -> ConsolidationFixtureRequest:
+    """Emulate provider stored context without mixing logical executions."""
+    inputs = [_object(item) for item in _list(request.get("input", []))]
+    previous = request.get("previous_response_id")
+    if isinstance(previous, str) and previous.startswith("resp_consolidation_"):
+        stored = continuations.get(previous)
+        if stored is None:
+            raise ValueError("Consolidation fixture context is unavailable.")
+        return ConsolidationFixtureRequest(
+            stored.chain_id, {**request, "input": [*stored.input_items, *inputs]}
+        )
+    identifiers = {
+        call_id.rsplit("_", 1)[-1]
+        for item in inputs
+        if isinstance(call_id := item.get("call_id"), str)
+        and call_id.startswith("call_consolidation_")
+    }
+    if len(identifiers) > 1:
+        raise ValueError("Consolidation fixture mixes execution identities.")
+    chain_id = next(iter(identifiers), new_chain_id)
+    return ConsolidationFixtureRequest(chain_id, {**request, "input": inputs})
+
+
+def consolidation_fixture_plan(
+    request: dict[str, object], *, chain_id: str
+) -> ConsolidationFixturePlan:
+    """Choose real file-tool rounds from returned own-scope evidence."""
+    outputs: dict[str, str] = {}
+    for raw in _list(request.get("input", [])):
+        item = _object(raw)
+        if item.get("type") != "function_call_output":
+            continue
+        call_id, output = item.get("call_id"), item.get("output")
+        if not isinstance(call_id, str) or not call_id.startswith(
+            "call_consolidation_"
+        ):
+            continue
+        if not call_id.endswith(f"_{chain_id}") or not isinstance(output, str):
+            raise ValueError("Consolidation fixture result is invalid.")
+        stage = call_id.removeprefix("call_consolidation_").removesuffix(f"_{chain_id}")
+        outputs[stage] = output
+
+    def call(
+        stage: str, name: str, arguments: dict[str, object]
+    ) -> ConsolidationFixturePlan:
+        return ConsolidationFixturePlan(
+            ConsolidationFixtureCall(
+                f"call_consolidation_{stage}_{chain_id}", name, arguments
+            ),
+            None,
+        )
+
+    def read(stage: str, path: str) -> ConsolidationFixturePlan:
+        return call(
+            stage,
+            "read",
+            {"path": path, "offset": 0, "limit": 10000, "encoding": "utf-8"},
+        )
+
+    if "work" not in outputs:
+        return read("work", "azents://memory/inventory/work/README.md")
+    work = [
+        ConsolidationFixtureWork(match.group(1), match.group(2), match.group(3))
+        for match in _CONSOLIDATION_WORK.finditer(outputs["work"])
+    ]
+    if len({entry.scope for entry in work}) > 1:
+        raise ValueError("Consolidation inventory crosses a scope boundary.")
+    if "draft" not in outputs:
+        return read("draft", "azents://memory-draft/summary.md")
+    if "coverage" not in outputs:
+        return read("coverage", "azents://memory-draft/coverage.json")
+    for index, entry in enumerate(work):
+        if f"source{index}" not in outputs:
+            return read(f"source{index}", entry.uri)
+    useful = [
+        (entry, outputs[f"source{index}"])
+        for index, entry in enumerate(work)
+        if _CONSOLIDATION_SENTINEL.search(outputs[f"source{index}"])
+    ]
+    if not useful:
+        return ConsolidationFixturePlan(None, "UNSUPPORTED_CONSOLIDATION_FIXTURE")
+    context = "\n".join(
+        re.sub(r"azents://[^\s\"'`]+", "[source route below]", text)[:1200]
+        for _entry, text in useful
+    )
+    routes = "\n".join(
+        f"- {entry.uri} — Correction and unfinished-work evidence"
+        for entry, _text in useful
+    )
+    markdown = (
+        "## Historical Context\nConsolidation working draft\n"
+        f"{context}\n\n## Source Routes\n{routes}\n"
+    )
+    if "write_summary" not in outputs:
+        return call(
+            "write_summary",
+            "write",
+            {
+                "path": "azents://memory-draft/summary.md",
+                "content": markdown,
+                "overwrite": "## Historical Context" in outputs["draft"],
+            },
+        )
+    if "observe_summary" not in outputs:
+        if not outputs["write_summary"].startswith("VFS write committed:"):
+            if "refresh_draft" not in outputs:
+                return read("refresh_draft", "azents://memory-draft/summary.md")
+            if "retry_write_summary" not in outputs:
+                return call(
+                    "retry_write_summary",
+                    "write",
+                    {
+                        "path": "azents://memory-draft/summary.md",
+                        "content": markdown,
+                        "overwrite": "## Historical Context"
+                        in outputs["refresh_draft"],
+                    },
+                )
+            if not outputs["retry_write_summary"].startswith("VFS write committed:"):
+                raise ValueError("Consolidation fixture could not author its draft.")
+        return read("observe_summary", "azents://memory-draft/summary.md")
+    if "bad_edit" not in outputs:
+        return call(
+            "bad_edit",
+            "edit",
+            {
+                "path": "azents://memory-draft/summary.md",
+                "old_string": "ABSENT_CONSOLIDATION_FIXTURE_MATCH",
+                "new_string": "Unreachable replacement",
+                "replace_all": False,
+            },
+        )
+    if "repair_edit" not in outputs:
+        return call(
+            "repair_edit",
+            "edit",
+            {
+                "path": "azents://memory-draft/summary.md",
+                "old_string": "Consolidation working draft",
+                "new_string": "Source-dependent integrated context",
+                "replace_all": False,
+            },
+        )
+    if "observe_coverage" not in outputs:
+        return read("observe_coverage", "azents://memory-draft/coverage.json")
+    if "write_coverage" not in outputs:
+        useful_ids = {entry.work_id for entry, _text in useful}
+        coverage = {
+            "dispositions": [
+                {
+                    "work_id": entry.work_id,
+                    "action": "considered"
+                    if entry.work_id in useful_ids
+                    else "omitted",
+                    "reason": "Integrated source-dependent evidence"
+                    if entry.work_id in useful_ids
+                    else "Empty or unavailable synthetic summary",
+                }
+                for entry in work
+            ]
+        }
+        return call(
+            "write_coverage",
+            "write",
+            {
+                "path": "azents://memory-draft/coverage.json",
+                "content": json.dumps(coverage, ensure_ascii=False),
+                "overwrite": '"dispositions"' in outputs["observe_coverage"],
+            },
+        )
+    if "verify" not in outputs:
+        return read("verify", "azents://memory-draft/summary.md")
+    return ConsolidationFixturePlan(
+        None, "CONSOLIDATION_FIXTURE_FINISHED_NOT_THE_PUBLICATION_BODY"
+    )
+
+
 def historical_memory_summary_response(request: _ModelRequestInput) -> str | None:
     """Match isolated Historical fixtures and enforce the real strict schema."""
     request = _decode_model_request(request)
@@ -109,7 +346,9 @@ def historical_memory_summary_response(request: _ModelRequestInput) -> str | Non
         return '{"summary":42,"unexpected":true}'
     if f"{_HISTORICAL_MEMORY_PREFIX}oversized" in source:
         return json.dumps({"summary": "Bounded evidence " * 1_000})
-    return json.dumps({"summary": _HISTORICAL_MEMORY_SUMMARY})
+    sentinels = tuple(dict.fromkeys(_CONSOLIDATION_SENTINEL.findall(source)))
+    suffix = "\nSynthetic scope evidence: " + " ".join(sentinels) if sentinels else ""
+    return json.dumps({"summary": _HISTORICAL_MEMORY_SUMMARY + suffix})
 
 
 class HistoricalMemoryInspection(NamedTuple):
@@ -2013,6 +2252,9 @@ def _image_request_egress(request: _ImageGenerationRequest) -> dict[str, object]
 class _State:
     catalog_source_variant: ClassVar[_InferenceProfileSourceVariant] = "baseline"
     requests: ClassVar[list[dict[str, object]]] = []
+    consolidation_continuations: ClassVar[
+        OrderedDict[str, ConsolidationFixtureContinuation]
+    ] = OrderedDict()
     openai_image_requests: ClassVar[list[dict[str, object]]] = []
     dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
     external_channel_progress_requests: ClassVar[list[dict[str, object]]] = []
@@ -2068,6 +2310,8 @@ class _Handler(BaseHTTPRequestHandler):
         if journal is not None:
             with _State.lock:
                 journal.clear()
+                if journal is _State.requests:
+                    _State.consolidation_continuations.clear()
                 if journal is _State.subscription_usage_requests:
                     _State.subscription_usage_sequences.clear()
             if journal is _State.external_channel_progress_requests:
@@ -2188,6 +2432,81 @@ class _Handler(BaseHTTPRequestHandler):
         request = _decode_model_request(request)
         user_text = _last_user_text(request)
         if self.path == "/v1/responses":
+            fixture_request = _model_request_egress(request)
+            if is_consolidation_fixture_request(fixture_request):
+                try:
+                    with _State.lock:
+                        logical = consolidation_fixture_request(
+                            fixture_request,
+                            _State.consolidation_continuations,
+                            new_chain_id=os.urandom(16).hex(),
+                        )
+                        plan = consolidation_fixture_plan(
+                            logical.request, chain_id=logical.chain_id
+                        )
+                        _State.requests.append(
+                            {
+                                **logical.request,
+                                "fixture_consolidation_chain": logical.chain_id,
+                                "fixture_physical_input": fixture_request.get("input"),
+                            }
+                        )
+                        if plan.call is not None:
+                            call = plan.call
+                            response_id = f"resp_{call.call_id.removeprefix('call_')}"
+                            item: dict[str, object] = {
+                                "id": f"fc_{call.call_id.removeprefix('call_')}",
+                                "type": "function_call",
+                                "status": "completed",
+                                "call_id": call.call_id,
+                                "name": call.name,
+                                "arguments": json.dumps(
+                                    call.arguments,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                ),
+                            }
+                            _State.consolidation_continuations[response_id] = (
+                                ConsolidationFixtureContinuation(
+                                    logical.chain_id,
+                                    [
+                                        *[
+                                            _object(item)
+                                            for item in _list(
+                                                logical.request.get("input", [])
+                                            )
+                                        ],
+                                        item,
+                                    ],
+                                )
+                            )
+                            while len(_State.consolidation_continuations) > 256:
+                                _State.consolidation_continuations.popitem(last=False)
+                except ValueError:
+                    self._write_json(
+                        409,
+                        {
+                            "error": {
+                                "message": "Invalid consolidation fixture context."
+                            }
+                        },
+                    )
+                    return
+                if plan.call is not None:
+                    self._write_function_call_response(
+                        request,
+                        call_id=plan.call.call_id,
+                        name=plan.call.name,
+                        arguments=plan.call.arguments,
+                    )
+                else:
+                    assert plan.final_text is not None
+                    self._write_text_response(
+                        request,
+                        plan.final_text,
+                        response_id=f"resp_consolidation_final_{logical.chain_id}",
+                    )
+                return
             try:
                 historical_summary = historical_memory_summary_response(request)
                 historical_inspection = historical_memory_inspection(request)

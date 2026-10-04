@@ -2,7 +2,6 @@
 
 import dataclasses
 import datetime
-from collections.abc import Sequence
 from typing import Annotated
 
 import sqlalchemy as sa
@@ -23,10 +22,11 @@ from azents.core.historical_memory import (
     HistoricalMemoryFailure,
     HistoricalMemorySource,
 )
-from azents.core.historical_memory_snapshot import (
-    HistoricalMemorySnapshotCandidate,
-    MemorySnapshotConsumer,
+from azents.core.historical_memory_consolidation import (
+    ConsolidationWorkKind,
+    prepared_source_evidence_hash,
 )
+from azents.core.historical_memory_snapshot import MemorySnapshotConsumer
 from azents.core.model_operation import ModelOperationSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent import RDBAgent
@@ -35,6 +35,9 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.repos.historical_memory_consolidation.enrollment import (
+    enroll_source_in_session,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -68,7 +71,14 @@ class HistoricalMemoryRepository:
         """Return one currently authorized Memory-enabled root consumer."""
         locked = (
             await session.execute(
-                sa.select(RDBAgentSession, RDBAgent)
+                sa.select(
+                    RDBAgentSession.id,
+                    RDBAgentSession.agent_id,
+                    RDBAgentSession.workspace_id,
+                    RDBAgentSession.product_mode,
+                    RDBAgentSession.associated_user_id,
+                    RDBAgentSession.model_input_head_event_id,
+                )
                 .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
                 .where(
                     RDBAgentSession.id == session_id,
@@ -82,19 +92,19 @@ class HistoricalMemoryRepository:
         ).one_or_none()
         if locked is None:
             return None
-        row, _agent = locked
-        if row.product_mode is None or not await self._lock_associated_user_membership(
-            session, row
-        ):
+        if locked.product_mode is None:
             return None
-        return MemorySnapshotConsumer(
-            session_id=row.id,
-            agent_id=row.agent_id,
-            workspace_id=row.workspace_id,
-            product_mode=row.product_mode,
-            associated_user_id=row.associated_user_id,
-            model_input_head_event_id=row.model_input_head_event_id,
+        consumer = MemorySnapshotConsumer(
+            session_id=locked.id,
+            agent_id=locked.agent_id,
+            workspace_id=locked.workspace_id,
+            product_mode=locked.product_mode,
+            associated_user_id=locked.associated_user_id,
+            model_input_head_event_id=locked.model_input_head_event_id,
         )
+        if not await self._lock_associated_user_membership(session, consumer):
+            return None
+        return consumer
 
     async def admit_eligible_sources(
         self,
@@ -392,94 +402,6 @@ class HistoricalMemoryRepository:
             ) in rows
         ]
 
-    async def list_available_snapshot_candidates_in_session(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        workspace_id: str,
-        consumer_product_mode: AgentSessionProductMode,
-        associated_user_id: str | None,
-        source_session_ids: Sequence[str] | None,
-        limit: int,
-    ) -> list[HistoricalMemorySnapshotCandidate]:
-        """Return currently authorized prepared summaries for one root consumer."""
-        if limit < 1:
-            raise ValueError("Historical Memory snapshot limit must be positive.")
-        if source_session_ids is not None and not source_session_ids:
-            return []
-        personal_scope = sa.false()
-        if (
-            consumer_product_mode is AgentSessionProductMode.USER
-            and associated_user_id is not None
-        ):
-            personal_scope = sa.and_(
-                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-                RDBAgentSession.associated_user_id == associated_user_id,
-            )
-        statement = (
-            sa.select(
-                RDBHistoricalMemorySource.source_session_id,
-                RDBAgentSession.product_mode,
-                RDBAgentSession.title,
-                RDBHistoricalMemorySource.completed_source_activity_at,
-                RDBHistoricalMemorySource.prepared_at,
-                RDBHistoricalMemorySource.summary,
-            )
-            .join(
-                RDBAgentSession,
-                RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
-            )
-            .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
-            .where(
-                RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.workspace_id == workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                RDBAgent.memory_enabled.is_(True),
-                self._authorized_source(),
-                sa.or_(
-                    RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
-                    personal_scope,
-                ),
-                RDBHistoricalMemorySource.prepared_at.is_not(None),
-                RDBHistoricalMemorySource.completed_source_activity_at.is_not(None),
-                RDBHistoricalMemorySource.summary.is_not(None),
-                RDBHistoricalMemorySource.summary != "",
-            )
-            .order_by(
-                RDBHistoricalMemorySource.completed_source_activity_at.desc(),
-                RDBHistoricalMemorySource.prepared_at.desc(),
-                RDBHistoricalMemorySource.source_session_id,
-            )
-            .limit(limit)
-        )
-        if source_session_ids is not None:
-            statement = statement.where(
-                RDBHistoricalMemorySource.source_session_id.in_(source_session_ids)
-            )
-        rows = (await session.execute(statement)).all()
-        return [
-            HistoricalMemorySnapshotCandidate(
-                source_session_id=source_session_id,
-                source_scope=(
-                    "team" if product_mode is AgentSessionProductMode.TEAM else "user"
-                ),
-                source_title=source_title,
-                source_activity_through=source_activity_through,
-                prepared_at=prepared_at,
-                summary=summary,
-            )
-            for (
-                source_session_id,
-                product_mode,
-                source_title,
-                source_activity_through,
-                prepared_at,
-                summary,
-            ) in rows
-        ]
-
     async def lock_preparation_admission_in_session(
         self,
         session: AsyncSession,
@@ -705,6 +627,14 @@ class HistoricalMemoryRepository:
         row.prepared_at = completion.prepared_at
         row.source_title_snapshot = completion.source_title_snapshot
         row.summary = completion.summary or None
+        row.summary_generation += 1
+        row.evidence_hash = prepared_source_evidence_hash(completion)
+        await enroll_source_in_session(
+            session,
+            source=row,
+            root=source,
+            kind=ConsolidationWorkKind.PREPARED,
+        )
         await session.flush()
         await session.refresh(row)
         return self._build(row)
@@ -712,7 +642,7 @@ class HistoricalMemoryRepository:
     @staticmethod
     async def _lock_associated_user_membership(
         session: AsyncSession,
-        source: RDBAgentSession,
+        source: RDBAgentSession | MemorySnapshotConsumer,
     ) -> bool:
         """Lock the current User-source membership authority when required."""
         if source.product_mode is AgentSessionProductMode.TEAM:

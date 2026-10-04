@@ -24,8 +24,10 @@ code_paths:
   - python/apps/azents/src/azents/core/toolkit_state.py
   - python/apps/azents/src/azents/core/engine_tool_state.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot.py
+  - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/services/historical_memory/context_snapshot.py
-  - python/apps/azents/src/azents/repos/historical_memory/context_snapshot_operations.py
+  - python/apps/azents/src/azents/repos/memory_context_snapshot.py
+  - python/apps/azents/src/azents/repos/historical_memory_consolidation/foreground.py
   - python/apps/azents/src/azents/repos/historical_memory/**
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
@@ -42,7 +44,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-04
-spec_version: 48
+spec_version: 49
 ---
 
 # Context Compaction
@@ -112,8 +114,9 @@ from current durable history.
 ## Memory Context Boundary
 
 Memory context selection is independent of transcript summary generation.
-Enabled root execution reselects its Saved index and bounded Historical source
-blocks in `on_run_start` preparation before entering the Run loop. Independently,
+Enabled root execution reselects its Saved index and whole authorized Team/
+personal consolidated documents in `on_run_start` preparation before entering
+the Run loop. Independently,
 `on_session_compact` marks a pending Memory refresh. Since that hook runs before
 compaction commits, the following model-context reconstruction refreshes only
 when a new committed `compaction_summary` becomes the model-input head. This
@@ -122,16 +125,25 @@ The compaction transaction itself does not write `memory/context_snapshot`.
 Identical selection reuses existing content; a changed compaction head is
 persisted without replacing unchanged summary text or its creation time.
 
-The new summary supplies the deterministic topic relevance signal. Selection
-uses no integration-model overview, embeddings, or extra summarization call.
-Whole Historical blocks fit a 10,000-byte budget with stable relevance, recency,
-and source-ID ordering. Saved entries remain an index rather than copied full
-content. Historical text is explicitly source-linked and potentially stale;
-it is neither a fresh instruction nor independent corroboration.
+Compaction does not generate Historical Memory or supply a source-ranking
+signal. Each independent background-generated document is selected whole within
+its own 10,000-byte framed UTF-8 budget; foreground may compose both authorized
+units for up to 20,000 bytes. No lexical ranking, packing, peer-budget transfer or
+per-source summary fallback occurs. Saved entries remain an index rather than
+copied full content. Historical text is explicitly source-linked and potentially
+stale; it is neither a fresh instruction nor independent corroboration.
 
 Other model/tool turns retain the selected text and paths while filtering deleted,
 archived, inaccessible, or disabled entries. They do not reselect replacements,
-refresh edited Saved descriptions, or include newly prepared summaries.
+refresh edited Saved descriptions, or include newly published documents.
+Historical filtering checks each selected immutable revision's own complete
+manifest and removes the whole affected unit, retaining the independent peer.
+Changed/denied context forces native opaque replay and stored-response continuation
+to use the current permitted input. Prepared text and exact admitted unit/revision
+identities bind native compatibility out-of-band; identical text on a new clean
+revision cannot restore encrypted/signed/redacted state, including across restart.
+This adds no Historical framing, changes no durable Event and preserves the
+existing unchanged-selection/creation-time reuse contract.
 Explicit generic VFS reads inspect live permitted records without refreshing
 the automatic snapshot. A failed or stale compaction cannot create a new Memory
 boundary because it does not change the model-input head. See
@@ -364,6 +376,10 @@ not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
 ## Changelog
+
+- **2026-10-04** (spec_version 49) — Replaced source ranking/packing with whole
+  independently authorized 10k Team/personal documents and up to 20k foreground
+  assembly while retaining Run/compaction refresh boundaries and revision denial.
 
 - **2026-10-03** (spec_version 48) — Replaced complete-source context capture
   with grouped exact current maxima and retained saved candidate pricing for compaction.

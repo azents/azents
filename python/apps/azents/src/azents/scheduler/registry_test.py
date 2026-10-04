@@ -20,6 +20,10 @@ from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
 )
+from azents.services.historical_memory.consolidation_discovery import (
+    ConsolidationDiscoverySummary,
+    HistoricalMemoryConsolidationDiscoveryService,
+)
 from azents.services.historical_memory.discovery import (
     HistoricalMemoryDiscoveryService,
     HistoricalMemoryDiscoverySummary,
@@ -109,13 +113,20 @@ class _CatalogProjectionContainer:
 class _HistoricalMemoryDiscoveryContainer:
     """Container test double for Historical Memory discovery."""
 
-    def __init__(self, service: HistoricalMemoryDiscoveryService) -> None:
+    def __init__(
+        self,
+        service: HistoricalMemoryDiscoveryService,
+        consolidation: HistoricalMemoryConsolidationDiscoveryService,
+    ) -> None:
         self.service = service
+        self.consolidation = consolidation
 
     async def solve(self, target: type[object]) -> object:
         """Return the configured discovery service."""
-        assert target is HistoricalMemoryDiscoveryService
-        return self.service
+        if target is HistoricalMemoryDiscoveryService:
+            return self.service
+        assert target is HistoricalMemoryConsolidationDiscoveryService
+        return self.consolidation
 
 
 @pytest.mark.asyncio
@@ -397,6 +408,10 @@ def test_external_account_oauth_cleanup_is_registered_with_a_distinct_key() -> N
 async def test_historical_memory_discovery_handler_returns_dispatch_summary() -> None:
     """Scheduler completion covers discovery and dispatch, not model work."""
     service = Mock()
+    consolidation = Mock()
+    consolidation.discover_once = AsyncMock(
+        return_value=ConsolidationDiscoverySummary(2, 2, 1, 0, 0)
+    )
     service.discover_once = AsyncMock(
         return_value=HistoricalMemoryDiscoverySummary(
             admitted=4,
@@ -411,7 +426,7 @@ async def test_historical_memory_discovery_handler_returns_dispatch_summary() ->
         lease_owner="scheduler-1",
         deadline=now + datetime.timedelta(minutes=2),
         manual_triggered=False,
-        container=_HistoricalMemoryDiscoveryContainer(service),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
+        container=_HistoricalMemoryDiscoveryContainer(service, consolidation),  # ty: ignore[invalid-argument-type] # Focused container implements only solve().
     )
 
     result = await registry.historical_memory_discovery_handler(context)
@@ -423,8 +438,14 @@ async def test_historical_memory_discovery_handler_returns_dispatch_summary() ->
         "admitted": 4,
         "due_agents": 3,
         "dispatched": 3,
+        "consolidation_due_units": 2,
+        "consolidation_dispatched": 2,
+        "consolidation_cleanup_drafts": 1,
+        "consolidation_expired_owners": 0,
+        "consolidation_cleanup_revisions": 0,
     }
     service.discover_once.assert_awaited_once_with()
+    consolidation.discover_once.assert_awaited_once_with()
 
 
 def test_historical_memory_discovery_is_registered_and_enabled() -> None:

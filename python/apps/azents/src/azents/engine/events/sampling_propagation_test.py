@@ -68,7 +68,12 @@ def _request(
         temperature=0.0,
         top_p=0.35,
         kwargs=options,
-    ).lower([], model=model, system_prompt="Synthetic sampling contract")
+    ).lower(
+        [],
+        native_replay_context=None,
+        model=model,
+        system_prompt="Synthetic sampling contract",
+    )
     return dataclasses.replace(
         request,
         assembly_metadata=ModelAssemblyMetadata(
@@ -313,7 +318,7 @@ def test_native_selected_top_k_is_explicitly_unrepresentable(
         top_k=37,
     )
     with pytest.raises(ValueError, match="top-k has no mapping"):
-        lowerer.lower([], model="opaque-native")
+        lowerer.lower([], native_replay_context=None, model="opaque-native")
 
 
 @pytest.mark.parametrize(

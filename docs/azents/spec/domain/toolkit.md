@@ -42,6 +42,7 @@ code_paths:
   - python/apps/azents/src/azents/services/toolkit_oauth/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/vfs_read.py
+  - python/apps/azents/src/azents/services/vfs_mutation.py
   - python/apps/azents/src/azents/services/memory_vfs.py
   - python/apps/azents/src/azents/services/historical_memory/**
   - python/apps/azents/src/azents/repos/memory_vfs/**
@@ -106,8 +107,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-03
-spec_version: 130
+last_verified_at: 2026-10-04
+spec_version: 131
 ---
 
 # Toolkit
@@ -354,7 +355,13 @@ and save it through authorized Runtime transfer. Target failure cannot be reclas
 output. Stored parts are suppressed from the outer result; only failed parts and a final
 already-executed notice remain model-visible after partial Runtime storage failure.
 
-### Registered VFS and Generic Read Ownership
+Dynamic prompt preparation may return visible text plus server-only native replay
+compatibility metadata in one result. Ordinary toolkit strings are unchanged.
+Memory supplies only already admitted exact Historical unit/revision identity;
+catalog projections preserve that binding without injecting it into visible
+prompt fragments or treating it as access authority.
+
+### Registered VFS and Generic Storage Ownership
 
 The DI-owned VFS backend registry maps canonical mounts to native read backends;
 duplicate registration is fatal. There is no static supported-mount allowlist
@@ -369,6 +376,16 @@ Runtime capability/version gate. Canonical `azents://` paths route to their
 registered backend under a server-created Run/concrete/root Session/Agent/
 Workspace/User/owner context. Relative or ambiguous locations are invalid.
 Unsupported backend operations fail explicitly.
+
+The same routed storage surface owns exactly one generic `write`, `edit`,
+`delete` and `apply_patch`. Absolute Runtime paths delegate to the existing
+Runtime filesystem implementations/capability checks. Canonical VFS mutations
+use separately registered optional mutation and atomic-patch capabilities;
+read-only backends need no mutation members or throwing placeholder methods.
+Patch admission rejects mixed backends and commits all-or-none within a backend.
+Unsupported VFS operations fail without Runtime fallback. Foreground Skills and
+Memory remain read-only; only the internal consolidation principal registers the
+private writable `memory-draft` mount with draft/epoch/receipt fences.
 
 Skills reads use the immutable current AgentRun projection. Memory reads use live
 PostgreSQL queries and independently recheck Memory enablement and current root/
@@ -387,8 +404,8 @@ deadline or cancellation kills and reaps the child. Memory operations have a
 two-second bound, at most 1,000 glob candidates/results, and row/byte admission
 bounds. Content-free logs retain backend/operation/duration/count/stop metadata.
 
-RuntimeToolkit owns process, mutation, image, and transfer tools, not generic
-read/grep/glob. Generic VFS write/edit/delete/patch is unsupported. Optional
+RuntimeToolkit owns process, image, transfer and Runtime filesystem adapter
+implementations, not duplicate generic storage tool names. Optional
 transfer-read is a backend capability: Skills retains its immutable import path,
 while Memory explicitly does not support transfer or import.
 
@@ -440,7 +457,7 @@ For importable Skills it validates the canonical URI, current run ownership,
 exact projection membership, Base64 content, decoded size, and SHA-256 hash
 before passing bytes to Runtime materialization. Generic `read`, `glob`, and
 `grep` resolve managed URIs through readable storage without import. Runtime
-mutation tools remain filesystem-only, and Memory has no import/transfer
+mutation adapters remain filesystem-only, and foreground Memory has no import/transfer
 capability. Only the materialized Runtime copy follows Runtime path retention
 rules; the Skill source remains in the retained immutable AgentRun projection.
 
@@ -1230,6 +1247,10 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-04** (spec_version 131) — Promoted single generic mutation routing
+  with optional native VFS mutation/atomic-patch protocols and scoped internal
+  drafts, preserving read-only foreground Memory/Skills and Runtime adapters.
 
 - **2026-10-03** (spec_version 130) — Allowed `present_file` to publish files from
   absolute Runtime paths outside the Agent Workspace while preserving filesystem

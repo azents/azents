@@ -4,10 +4,13 @@ import dataclasses
 import datetime
 from typing import Literal, NamedTuple
 
+from azents.core.historical_memory_snapshot import ConsolidatedMemorySnapshotEntry
 from azents.engine.events.types import Event
 
 MemoryVfsScope = Literal["agent", "team", "user"]
-MemoryVfsUriNamespace = Literal["all", "readme", "saved", "historical", "sources"]
+MemoryVfsUriNamespace = Literal[
+    "all", "readme", "saved", "historical", "sources", "consolidated"
+]
 MemoryVfsSourceFileKind = Literal["session", "events", "tool-results"]
 
 
@@ -46,6 +49,13 @@ class HistoricalMemoryVfsRecord:
     source_activity_through: datetime.datetime
     prepared_at: datetime.datetime
     summary: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ConsolidatedMemoryVfsRecord:
+    """One latest currently authorized immutable compact document."""
+
+    entry: ConsolidatedMemorySnapshotEntry
 
 
 @dataclasses.dataclass(frozen=True)
@@ -88,6 +98,7 @@ class ToolResultVfsRecord:
 type MemoryVfsRecord = (
     SavedMemoryVfsRecord
     | HistoricalMemoryVfsRecord
+    | ConsolidatedMemoryVfsRecord
     | SourceSessionVfsRecord
     | SourceEventVfsRecord
     | ToolResultVfsRecord

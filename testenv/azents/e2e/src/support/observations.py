@@ -287,6 +287,14 @@ class ProxyToolObservation(ExtensionObservation):
     type: StrictStr | None = None
 
 
+class ConsolidatedHistoricalSampleObservation(HistoricalSampleObservation):
+    """Sampler evidence including the explicitly requested consolidation pass."""
+
+    consolidation_due: StrictInt
+    consolidation_published: StrictInt
+    consolidation_failed: StrictInt
+
+
 class ProxyRequestObservation(ExtensionObservation):
     """Fixture request fields used for selection; provider body stays opaque."""
 
@@ -300,6 +308,19 @@ class ProxyJournalObservation(BaseModel):
     """An operation-specific provider request list, not a dictionary adapter."""
 
     requests: list[ProxyRequestObservation]
+
+
+class ConsolidationProxyRequestObservation(ProxyRequestObservation):
+    """Interpreted internal fixture identity and foreground instructions."""
+
+    instructions: StrictStr | None = None
+    fixture_consolidation_chain: StrictStr | None = None
+
+
+class ConsolidationProxyJournalObservation(BaseModel):
+    """Logical request groups returned by the consolidation-capable proxy."""
+
+    requests: list[ConsolidationProxyRequestObservation]
 
 
 class InfrastructureProfileObservation(ExtensionObservation):

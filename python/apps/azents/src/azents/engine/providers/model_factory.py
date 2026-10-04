@@ -561,7 +561,7 @@ class ProviderModelFactory:
         register_bedrock_cache_ttl_compatibility(client)
 
         def before_send(**_: object) -> None:
-            state.authorize_dispatch()
+            state.authorize_dispatch_from_thread()
             state.worker_started()
 
         def after_call(*, parsed: dict[str, object], **_: object) -> None:

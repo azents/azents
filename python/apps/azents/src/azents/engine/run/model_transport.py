@@ -16,7 +16,7 @@ class ModelTransportKey:
 
 
 class ModelTransportState(Protocol):
-    """Session-owned model transport eligibility state."""
+    """Execution-owned model transport eligibility state."""
 
     def websocket_allowed(self, key: ModelTransportKey) -> bool:
         """Return whether WebSocket remains eligible for the transport key."""
@@ -28,7 +28,7 @@ class ModelTransportState(Protocol):
 
 
 class InMemoryModelTransportState:
-    """Retain keyed HTTP-only fallback for one SessionRunner lifetime."""
+    """Retain keyed HTTP-only fallback for one execution host lifetime."""
 
     def __init__(self, *, websocket_enabled: bool) -> None:
         self.websocket_enabled = websocket_enabled

@@ -1,6 +1,7 @@
 ---
 title: "Consolidated Historical Memory Requirements"
 created: 2026-10-02
+implemented: 2026-10-04
 tags: [memory, conversation, security, engine]
 document_role: primary
 document_type: requirements

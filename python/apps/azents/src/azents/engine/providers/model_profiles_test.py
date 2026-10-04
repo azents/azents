@@ -500,7 +500,10 @@ async def test_saved_conditions_reach_real_sdk_wire_without_codec_clamping(
         if not allowed:
             with pytest.raises(ValueError):
                 request = lowerer.lower(
-                    [], model=_WIRE_MODEL, system_prompt="Synthetic condition test"
+                    [],
+                    native_replay_context=None,
+                    model=_WIRE_MODEL,
+                    system_prompt="Synthetic condition test",
                 )
                 await model.request(
                     request.messages, request.settings, request.parameters
@@ -508,7 +511,10 @@ async def test_saved_conditions_reach_real_sdk_wire_without_codec_clamping(
             assert captured == []
             return
         request = lowerer.lower(
-            [], model=_WIRE_MODEL, system_prompt="Synthetic condition test"
+            [],
+            native_replay_context=None,
+            model=_WIRE_MODEL,
+            system_prompt="Synthetic condition test",
         )
         assert request.parameters.function_tools[0].strict is True
         await model.request(request.messages, request.settings, request.parameters)
@@ -540,7 +546,7 @@ def test_sampling_bridge_keeps_existing_typed_settings_normalization() -> None:
         supported_execution_options=[],
         enabled_execution_options=[],
         kwargs={"temperature": "0.2", "top_p": "0.9"},
-    ).lower([], model=_WIRE_MODEL)
+    ).lower([], native_replay_context=None, model=_WIRE_MODEL)
     assert request.settings is not None
     body = _WIRE_OBJECT.validate_python(request.settings["extra_body"])
     assert body["temperature"] == 0.2
@@ -694,10 +700,20 @@ async def test_saved_sampling_survives_compatible_sdk_reasoning_filter(
     try:
         if not allowed:
             with pytest.raises(ValueError):
-                lowerer.lower([], model=model_id, system_prompt="Sampling test")
+                lowerer.lower(
+                    [],
+                    native_replay_context=None,
+                    model=model_id,
+                    system_prompt="Sampling test",
+                )
             assert bodies == []
             return
-        request = lowerer.lower([], model=model_id, system_prompt="Sampling test")
+        request = lowerer.lower(
+            [],
+            native_replay_context=None,
+            model=model_id,
+            system_prompt="Sampling test",
+        )
         assert request.settings is not None
         assert "temperature" not in request.settings
         assert "top_p" not in request.settings

@@ -195,7 +195,7 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
         provider="openai",
         model="gpt-5.1",
         tools=catalog.native_tools,
-    ).lower([], model="gpt-5.1")
+    ).lower([], native_replay_context=None, model="gpt-5.1")
     assert request.tools == catalog.native_tools
 
 

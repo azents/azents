@@ -146,3 +146,52 @@ async def test_empty_batch_does_not_claim_a_terminal_result() -> None:
     assert not await ParallelIterationTools(host).run([])
     assert host.results == []
     assert host.cancel_requests == []
+
+
+class _FaultHost(_Host):
+    async def execute(self, call: _Call) -> _Result:
+        result = await super().execute(call)
+        if call.call_id == "fault":
+            raise PermissionError("Synthetic authority failure")
+        return result
+
+
+async def test_unexpected_failure_quiesces_siblings_before_host_failure() -> None:
+    base = _host(["fault", "waiting"])
+    host = _FaultHost(**vars(base))
+    batch = asyncio.create_task(
+        ParallelIterationTools(host).run([_Call("fault"), _Call("waiting")])
+    )
+    await host.started["fault"].wait()
+    await host.started["waiting"].wait()
+    host.gates["fault"].set()
+    with pytest.raises(PermissionError, match="Synthetic authority"):
+        await batch
+    assert set(host.cancel_requests) == {"fault", "waiting"}
+    assert host.results == []
+    assert host.cancellation_messages == []
+
+
+async def test_duplicate_ids_fail_before_any_tool_dispatch() -> None:
+    host = _host(["same"])
+    with pytest.raises(ValueError, match="repeats a call identity"):
+        await ParallelIterationTools(host).run([_Call("same"), _Call("same")])
+    assert not host.started["same"].is_set()
+
+
+class _LostFinalizeHost(_Host):
+    async def finalize(self, call: _Call, result: _Result) -> bool:
+        raise PermissionError("Synthetic settlement authority loss")
+
+
+async def test_late_settlement_denial_cannot_replace_shutdown_cancellation() -> None:
+    base = _host(["late"])
+    host = _LostFinalizeHost(**vars(base))
+    host.cancel_defiant.add("late")
+    batch = asyncio.create_task(ParallelIterationTools(host).run([_Call("late")]))
+    await host.started["late"].wait()
+    batch.cancel("worker-shutdown")
+    with pytest.raises(asyncio.CancelledError, match="worker-shutdown") as error:
+        await batch
+    assert isinstance(error.value.__cause__, PermissionError)
+    assert host.results == [] and host.cancel_requests == ["late"]

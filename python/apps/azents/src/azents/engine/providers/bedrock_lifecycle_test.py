@@ -168,6 +168,7 @@ class BedrockCall:
             event
             async for event in self.adapter.stream(
                 PydanticAIRequest(
+                    native_replay_context=None,
                     provider="aws_bedrock",
                     model=self.model,
                     assembly_metadata=assembly_metadata,

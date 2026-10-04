@@ -1,6 +1,5 @@
 """Credential-free scheduler execution controls."""
 
-import asyncio
 import dataclasses
 import datetime
 from typing import Annotated
@@ -13,9 +12,8 @@ from azents.scheduler.service import SchedulerService
 from azents.scheduler.user_scheduled_task_dispatch import (
     get_user_scheduled_task_dispatcher,
 )
-from azents.services.historical_memory.discovery import HistoricalMemoryDiscoveryService
-from azents.services.historical_memory.preparation import (
-    HistoricalMemoryPreparationService,
+from azents.services.historical_memory.sampling import (
+    HistoricalMemorySamplingService,
 )
 from azents.services.scheduled_task.service import ScheduledTaskDispatcher
 from azents.utils.fastapi.route import RouteMounter
@@ -64,6 +62,7 @@ class HistoricalMemorySampleRequest(BaseModel):
 
     agent_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     now: AwareDatetime
+    consolidate: bool
 
 
 class HistoricalMemorySampleResponse(BaseModel):
@@ -77,48 +76,28 @@ class HistoricalMemorySampleResponse(BaseModel):
     empty: int
     failed: int
     quota_advanced: int
+    consolidation_due: int
+    consolidation_published: int
+    consolidation_unclaimed: int
+    consolidation_failed: int
 
 
 @router.post("/historical-memory/sample")
 async def sample_historical_memory(
     body: HistoricalMemorySampleRequest,
-    discovery: Annotated[HistoricalMemoryDiscoveryService, Depends()],
-    preparation: Annotated[HistoricalMemoryPreparationService, Depends()],
+    sampling: Annotated[HistoricalMemorySamplingService, Depends()],
 ) -> HistoricalMemorySampleResponse:
     """Run real bounded services without changing source activity.
 
-    This isolated testenv sampling endpoint proves admission, model execution,
-    and publication. Scheduler dispatch and Job Runtime supervision have
-    separate integration coverage; this endpoint does not bypass their clocks
-    or claim to execute a registered job.
+    Optional consolidation uses the real claimed shared-core host and publication
+    services. Scheduler dispatch and Job Runtime have separate integration
+    coverage; sampling never overrides database ownership or execution clocks.
     """
     now = body.now.astimezone(datetime.UTC)
-    async with asyncio.timeout(120):
-        sample = await discovery.admit_and_list_due_agents(
-            now=now,
-            agent_id=body.agent_id,
-        )
-        counters = {
-            "attempted": 0,
-            "prepared": 0,
-            "empty": 0,
-            "failed": 0,
-            "quota_advanced": 0,
-        }
-        if body.agent_id in sample.due_agent_ids:
-            summary = await preparation.prepare_agent(
-                agent_id=body.agent_id,
-                deadline=datetime.datetime.now(datetime.UTC)
-                + datetime.timedelta(seconds=110),
-                now=now,
-            )
-            counters = dataclasses.asdict(summary)
-    return HistoricalMemorySampleResponse(
-        now=now,
-        admitted=sample.admitted,
-        due_agents=len(sample.due_agent_ids),
-        **counters,
+    report = await sampling.sample_agent(
+        now=now, agent_id=body.agent_id, consolidate=body.consolidate
     )
+    return HistoricalMemorySampleResponse(**dataclasses.asdict(report))
 
 
 @router.post("/run")

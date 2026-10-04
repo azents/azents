@@ -1,173 +1,89 @@
-"""Historical Memory boundary snapshot selection and rendering tests."""
+"""Independent 10k documents, exact 20k composition and whole-unit filtering."""
 
-import datetime
+import pytest
 
-from azents.core.historical_memory_snapshot import HistoricalMemorySnapshotCandidate
-from azents.core.historical_memory_snapshot_policy import (
+from azents.core.historical_memory_consolidation import ConsolidationScope
+from azents.core.historical_memory_context import (
     build_memory_context_snapshot,
     filter_memory_context_snapshot,
     render_memory_context_snapshot,
 )
-from azents.core.memory_scope import MemoryScope
-from azents.repos.memory.data import Memory
-
-_NOW = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+from azents.core.historical_memory_snapshot import SavedMemorySnapshotEntry
+from azents.testing.consolidated_context import CONTEXT_FIXTURE_TIME, context_entry
 
 
-def _memory(index: int, *, user: bool = False) -> Memory:
-    return Memory(
-        id=f"{index:032d}",
-        agent_id="a" * 32,
-        user_id="u" * 32 if user else None,
-        scope=MemoryScope.USER if user else MemoryScope.AGENT,
+@pytest.mark.parametrize(
+    "team_bytes,user_bytes", [(10000, 10000), (10000, 600), (600, 10000)]
+)
+def test_complete_multilingual_documents_have_independent_budgets(
+    team_bytes: int, user_bytes: int
+) -> None:
+    team = context_entry(
+        scope=ConsolidationScope.TEAM, text="Team 한글 🧠", exact_bytes=team_bytes
+    )
+    user = context_entry(
+        scope=ConsolidationScope.USER, text="User 日本語 🧠", exact_bytes=user_bytes
+    )
+    snapshot = build_memory_context_snapshot(
+        boundary_head_event_id=None,
+        created_at=CONTEXT_FIXTURE_TIME,
+        saved_entries=[],
+        historical_entries=[user, team],
+    )
+    assert snapshot.historical_entries == [team, user]
+    rendered = render_memory_context_snapshot(snapshot)
+    historical = team.rendered_block + user.rendered_block
+    assert rendered.endswith(historical)
+    assert "Historical" not in rendered.removesuffix(historical)
+    assert len(historical.encode()) == team_bytes + user_bytes <= 20000
+    assert rendered.count("HISTORICAL MEMORY DATA BEGINS") == 2
+    assert team.rendered_block in rendered and user.rendered_block in rendered
+
+
+def test_single_unit_does_not_borrow_missing_peer_budget() -> None:
+    entry = context_entry(
+        scope=ConsolidationScope.TEAM, text="single", exact_bytes=10000
+    )
+    snapshot = build_memory_context_snapshot(
+        boundary_head_event_id=None,
+        created_at=CONTEXT_FIXTURE_TIME,
+        saved_entries=[],
+        historical_entries=[entry],
+    )
+    assert render_memory_context_snapshot(snapshot).endswith(entry.rendered_block)
+    assert len(entry.rendered_block.encode()) == 10000
+
+
+def test_filter_removes_whole_denied_unit_without_replacement_or_rewriting() -> None:
+    team = context_entry(
+        scope=ConsolidationScope.TEAM, text="Team boundary", exact_bytes=None
+    )
+    user = context_entry(
+        scope=ConsolidationScope.USER, text="Personal boundary", exact_bytes=None
+    )
+    saved = SavedMemorySnapshotEntry(
+        memory_id="f" * 32,
+        scope="agent",
+        name="Current project",
         type="project",
-        name=f"memory-{index}",
-        description=f"Description {index}",
-        content=f"Content {index}",
-        created_at=_NOW,
-        updated_at=_NOW + datetime.timedelta(minutes=index),
+        description_snapshot="Current independent knowledge",
+        updated_at_snapshot=CONTEXT_FIXTURE_TIME,
+        vfs_path=f"azents://memory/saved/agent/{'f' * 32}.md",
     )
-
-
-def _candidate(
-    index: int,
-    *,
-    hours_ago: int,
-    title: str,
-    summary: str,
-    scope: str = "team",
-) -> HistoricalMemorySnapshotCandidate:
-    return HistoricalMemorySnapshotCandidate.model_validate(
-        {
-            "source_session_id": f"{index:032d}",
-            "source_scope": scope,
-            "source_title": title,
-            "source_activity_through": _NOW - datetime.timedelta(hours=hours_ago),
-            "prepared_at": _NOW - datetime.timedelta(minutes=index),
-            "summary": summary,
-        }
-    )
-
-
-def test_initial_snapshot_selects_recency_then_presents_chronologically() -> None:
-    """Initial selection is newest-first while presentation is oldest-first."""
     snapshot = build_memory_context_snapshot(
         boundary_head_event_id=None,
-        created_at=_NOW,
-        saved_memories=[_memory(2, user=True), _memory(1)],
-        historical_candidates=[
-            _candidate(1, hours_ago=20, title="Old", summary="old context"),
-            _candidate(2, hours_ago=8, title="New", summary="new context"),
-        ],
-        topic=None,
+        created_at=CONTEXT_FIXTURE_TIME,
+        saved_entries=[saved],
+        historical_entries=[team, user],
     )
-
-    assert [entry.memory_id for entry in snapshot.saved_entries] == [
-        f"{1:032d}",
-        f"{2:032d}",
-    ]
-    assert [entry.source_session_id for entry in snapshot.historical_entries] == [
-        f"{1:032d}",
-        f"{2:032d}",
-    ]
-    rendered = render_memory_context_snapshot(snapshot)
-    assert rendered.index("old context") < rendered.index("new context")
-    assert "incomplete, stale, or wrong" in rendered
-    assert f"azents://memory/saved/agent/{1:032d}.md" in rendered
-    assert f"azents://memory/saved/user/{2:032d}.md" in rendered
-    assert f"azents://memory/historical/team/{1:032d}/summary.md" in rendered
-    assert f"azents://memory/sources/team/{1:032d}/session.md" in rendered
-
-
-def test_known_topic_ranks_all_term_match_before_newer_partial_match() -> None:
-    """Post-compaction topic relevance precedes source recency."""
-    snapshot = build_memory_context_snapshot(
-        boundary_head_event_id="h" * 32,
-        created_at=_NOW,
-        saved_memories=[],
-        historical_candidates=[
-            _candidate(
-                1,
-                hours_ago=20,
-                title="Historical memory authorization",
-                summary="Approved boundary locking",
-            ),
-            _candidate(
-                2,
-                hours_ago=8,
-                title="Historical memory",
-                summary="Recent unrelated implementation",
-            ),
-        ],
-        topic="historical authorization",
-        historical_budget_bytes=450,
-    )
-
-    assert [entry.source_session_id for entry in snapshot.historical_entries] == [
-        f"{1:032d}"
-    ]
-
-
-def test_snapshot_packs_only_complete_groups_and_deduplicates_body_rendering() -> None:
-    """Identical normalized bodies render once with every source dependency."""
-    duplicate = "Same   historical\naccount"
-    snapshot = build_memory_context_snapshot(
-        boundary_head_event_id=None,
-        created_at=_NOW,
-        saved_memories=[],
-        historical_candidates=[
-            _candidate(1, hours_ago=9, title="First", summary=duplicate),
-            _candidate(
-                2,
-                hours_ago=8,
-                title="Second",
-                summary="Same historical account",
-            ),
-        ],
-        topic=None,
-    )
-
-    rendered = render_memory_context_snapshot(snapshot)
-    assert len(snapshot.historical_entries) == 2
-    assert rendered.count("Same historical account") == 1
-    assert f"Session: {1:032d}" in rendered
-    assert f"Session: {2:032d}" in rendered
-
-    excluded = build_memory_context_snapshot(
-        boundary_head_event_id=None,
-        created_at=_NOW,
-        saved_memories=[],
-        historical_candidates=[
-            _candidate(3, hours_ago=8, title="Large", summary="x" * 500),
-        ],
-        topic=None,
-        historical_budget_bytes=100,
-    )
-    assert excluded.historical_entries == []
-
-
-def test_filter_removes_unavailable_entries_without_refresh_or_replacement() -> None:
-    """Ordinary turns keep boundary text and only remove denied identities."""
-    snapshot = build_memory_context_snapshot(
-        boundary_head_event_id=None,
-        created_at=_NOW,
-        saved_memories=[_memory(1), _memory(2)],
-        historical_candidates=[
-            _candidate(1, hours_ago=9, title="First", summary="first snapshot"),
-            _candidate(2, hours_ago=8, title="Second", summary="second snapshot"),
-        ],
-        topic=None,
-    )
-
     filtered = filter_memory_context_snapshot(
         snapshot,
-        available_saved_ids={f"{1:032d}"},
-        available_historical_ids={f"{2:032d}"},
+        available_saved_ids={saved.memory_id},
+        available_revision_ids={user.revision_id},
     )
-
-    assert [entry.memory_id for entry in filtered.saved_entries] == [f"{1:032d}"]
-    assert [entry.source_session_id for entry in filtered.historical_entries] == [
-        f"{2:032d}"
-    ]
-    assert filtered.saved_entries[0].description_snapshot == "Description 1"
-    assert filtered.historical_entries[0].summary_snapshot == "second snapshot"
+    assert filtered.historical_entries == [user]
+    assert filtered.saved_entries == [saved]
+    assert filtered.created_at == snapshot.created_at
+    assert "Team boundary" not in render_memory_context_snapshot(filtered)
+    assert "Personal boundary" in render_memory_context_snapshot(filtered)
+    assert "Current independent knowledge" in render_memory_context_snapshot(filtered)
