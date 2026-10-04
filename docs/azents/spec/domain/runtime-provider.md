@@ -18,6 +18,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/runtime_provider_binding/**
   - python/apps/azents/src/azents/repos/runtime_provider_control/**
   - python/apps/azents/src/azents/repos/runtime_provider_policy/**
+  - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/runtime_provider_admin/**
   - python/apps/azents/src/azents/services/runtime_provider_binding_admin/**
   - python/apps/azents/src/azents/services/runtime_provider_bootstrap/**
@@ -116,6 +117,14 @@ Provider-global operational configuration revisions remain a separate Provider-o
 They may configure the Provider process but cannot contain Workspace or Agent Runtime Profile
 authority. Configuration candidates require Provider validation and explicit Admin activation, and
 secret plaintext is never returned.
+
+Independent contract/configuration revision, infrastructure/Workspace Profile,
+and retained configuration-state getters use ordinary read-only-capable SELECTs.
+They expose no row-lock mode, can return committed evidence while a writer is
+changing the selected row, and preserve absent-reference results. These
+descriptive reads do not provide globally latest or atomic multi-read authority.
+Actual Runtime/configuration mutations retain their admission, generation/version
+checks and mutation fencing; a lag-tolerant read is not permission to bypass them.
 
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
 
@@ -355,6 +364,9 @@ network controls, and infrastructure access are operator responsibilities outsid
 Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
+
+- **35 (2026-10-04):** Removed row-lock modes from independent revision, Profile
+  and retained configuration-state getters while preserving mutation fencing.
 
 - **34 (2026-09-30):** Promoted direct-file storage readiness and Platform-owned
   object-storage Service routes/host mappings, preserving strict customer-network authority.

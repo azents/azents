@@ -113,7 +113,6 @@ class RuntimeProfileResolutionService:
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=False,
         )
         if profile is None:
             raise RuntimeProfileResolutionUnavailable(
@@ -124,7 +123,6 @@ class RuntimeProfileResolutionService:
         infrastructure = await self.profile_repository.get_infrastructure_profile(
             session,
             profile_id=profile.infrastructure_profile_id,
-            for_update=False,
         )
         if infrastructure is None:
             raise RuntimeProfileResolutionUnavailable(
@@ -263,7 +261,6 @@ class RuntimeProfileResolutionService:
                 session,
                 workspace_id=agent.workspace_id,
                 profile_id=agent.runtime_profile_id,
-                for_update=False,
             )
             if profile is None:
                 raise RuntimeProfileResolutionUnavailable(
@@ -274,7 +271,6 @@ class RuntimeProfileResolutionService:
             infrastructure = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile.infrastructure_profile_id,
-                for_update=False,
             )
             if infrastructure is None:
                 raise RuntimeProfileResolutionUnavailable(
@@ -407,7 +403,6 @@ class RuntimeProfileResolutionService:
                 await self.provider_policy_repository.get_contract_by_id(
                     session,
                     contract_revision_id=provider.current_contract_revision_id,
-                    for_update=False,
                 )
             )
             if (

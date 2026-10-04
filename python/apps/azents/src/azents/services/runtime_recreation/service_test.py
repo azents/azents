@@ -303,7 +303,6 @@ async def test_workspace_operation_hides_foreign_profile_target() -> None:
         ANY,
         workspace_id="foreign-workspace",
         profile_id="profile-1",
-        for_update=False,
     )
     profiles.list_recreation_items.assert_not_awaited()
 

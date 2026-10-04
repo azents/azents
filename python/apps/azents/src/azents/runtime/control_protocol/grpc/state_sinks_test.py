@@ -127,11 +127,8 @@ class _ProfileRepository(RuntimeProfileRepository):
         session: ReadSession,
         *,
         runtime_id: str,
-        for_update: bool = False,
     ) -> RuntimeConfigurationState | None:
-        return await self.get_configuration_state_call(
-            session, runtime_id=runtime_id, for_update=for_update
-        )
+        return await self.get_configuration_state_call(session, runtime_id=runtime_id)
 
     async def configuration_evidence_matches_current(
         self,

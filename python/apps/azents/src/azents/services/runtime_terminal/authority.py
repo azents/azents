@@ -371,7 +371,6 @@ class DatabaseRuntimeTerminalAuthorityResolver:
                         session,
                         workspace_id=workspace_id,
                         profile_id=agent.runtime_profile_id,
-                        for_update=False,
                     )
                 )
             if workspace_profile is not None:
@@ -379,7 +378,6 @@ class DatabaseRuntimeTerminalAuthorityResolver:
                     await self.profile_repository.get_infrastructure_profile(
                         session,
                         profile_id=workspace_profile.infrastructure_profile_id,
-                        for_update=False,
                     )
                 )
             if runtime is not None:
