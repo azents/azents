@@ -199,7 +199,10 @@ def _make_toolkit(
         timeout=30.0,
         proxy_url=None,
         artifact_service=None,
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",

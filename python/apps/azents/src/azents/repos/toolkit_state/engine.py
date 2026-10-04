@@ -417,6 +417,7 @@ class McpToolSnapshotStore:
     """Own completed MCP tool snapshot operations."""
 
     session_manager: SessionManager[WriteSession] | None
+    read_session_manager: SessionManager[ReadSession] | None
     agent_id: str
     session_id: str
     toolkit_namespace: str
@@ -440,8 +441,8 @@ class McpToolSnapshotStore:
         """Load one snapshot in a completed transaction."""
         if not self._available():
             return None
-        assert self.session_manager is not None  # noqa: S101
-        async with self.session_manager() as session:
+        assert self.read_session_manager is not None  # noqa: S101
+        async with self.read_session_manager() as session:
             return await self._handle(session).load(
                 default_factory=McpToolSnapshotState
             )
@@ -471,6 +472,7 @@ class McpToolSnapshotStore:
         """Return whether persistence and state identity are available."""
         return (
             self.session_manager is not None
+            and self.read_session_manager is not None
             and bool(self.agent_id)
             and bool(self.session_id)
         )
@@ -496,6 +498,7 @@ class GitHubSelectedInstallationStore:
     """Own completed GitHub selected-installation operations."""
 
     session_manager: SessionManager[WriteSession]
+    read_session_manager: SessionManager[ReadSession]
     agent_id: str
     session_id: str
 
@@ -510,6 +513,7 @@ class GitHubSelectedInstallationStore:
                 session_id=owner.session_id,
                 owner_generation=owner.owner_generation,
             ),
+            read_session_manager=self.read_session_manager,
             agent_id=self.agent_id,
             session_id=self.session_id,
         )
@@ -518,7 +522,7 @@ class GitHubSelectedInstallationStore:
         """Load the selected installation in a completed transaction."""
         if not self.agent_id or not self.session_id:
             return None
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             state = await self._handle(session).load(
                 default_factory=lambda: GitHubSelectedInstallationState(
                     installation_id="__unset__"

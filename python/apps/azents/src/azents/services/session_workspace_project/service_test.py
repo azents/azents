@@ -546,6 +546,7 @@ def _repository_owned_service(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         session_manager=session_manager,
+        read_session_manager=session_manager,
     )
     return SessionWorkspaceProjectService(
         operations_repository=SessionWorkspaceProjectOperationsRepository(

@@ -201,6 +201,12 @@ class RuntimeOperationTarget:
 class RuntimeOperationTargetResolver(Protocol):
     """Resolve one exact Runtime authority for an explicit operation."""
 
+    async def project_operation_target(
+        self, agent_id: str
+    ) -> RuntimeOperationTarget | None:
+        """Describe retained ready evidence without real-operation admission."""
+        ...
+
     async def resolve_operation_target(
         self,
         agent_id: str,

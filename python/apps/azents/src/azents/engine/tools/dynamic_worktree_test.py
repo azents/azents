@@ -12,6 +12,7 @@ from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.services.session_git_worktree import (
     AgentCreateGitWorktreeAdmission,
+    AgentGitWorktreeToolAvailability,
     AgentRemoveGitWorktreeAdmission,
     SessionGitWorktreeService,
 )
@@ -60,27 +61,19 @@ class _Service(SessionGitWorktreeService):
         self.remove_admissions: list[dict[str, object]] = []
         self.failure: ValueError | None = None
 
-    async def agent_create_git_worktree_available(
+    async def project_agent_git_worktree_availability(
         self,
         *,
         agent_id: str,
         session_id: str,
-    ) -> bool:
-        """Return configured projection eligibility."""
+    ) -> AgentGitWorktreeToolAvailability:
+        """Return both configured tools from one descriptive projection."""
         assert agent_id == "agent-1"
         assert session_id == "session-1"
-        return self.available
-
-    async def agent_remove_git_worktree_available(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-    ) -> bool:
-        """Return configured removal projection eligibility."""
-        assert agent_id == "agent-1"
-        assert session_id == "session-1"
-        return self.remove_available
+        return AgentGitWorktreeToolAvailability(
+            create=self.available,
+            remove=self.remove_available,
+        )
 
     async def admit_agent_create_git_worktree(
         self,

@@ -138,15 +138,13 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
         tools: list[FunctionTool] = []
-        if await self.service.agent_create_git_worktree_available(
+        availability = await self.service.project_agent_git_worktree_availability(
             agent_id=self.agent_id,
             session_id=self.session_id,
-        ):
+        )
+        if availability.create:
             tools.append(self._create_git_worktree_tool())
-        if await self.service.agent_remove_git_worktree_available(
-            agent_id=self.agent_id,
-            session_id=self.session_id,
-        ):
+        if availability.remove:
             tools.append(self._remove_git_worktree_tool())
         return ToolkitState(
             status=ToolkitStatus.ENABLED,

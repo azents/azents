@@ -221,13 +221,15 @@ def _binding(
         lazy_mcp_secret_provider=token_provider,
         lazy_mcp_proxy_url=None,
         snapshot_factory=EngineMcpSnapshotFactory(
-            session_manager=_FakeSessionManager()
+            session_manager=_FakeSessionManager(),
+            read_session_manager=_FakeSessionManager(),
         ),
         agent_id="agent-1",
         session_id="session-1",
         state_name=state_name,
         snapshot_store=McpToolSnapshotStore(
             session_manager=_FakeSessionManager(),
+            read_session_manager=_FakeSessionManager(),
             agent_id="agent-1",
             session_id="session-1",
             toolkit_namespace="mcp",

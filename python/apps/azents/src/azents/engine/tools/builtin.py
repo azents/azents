@@ -1055,16 +1055,13 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         resolver = self.runtime_capability_resolver
         if resolver is None:
             return False
-        try:
-            for capability in (
+        return resolver.project(
+            (
                 RuntimeCapability.WORKSPACE,
                 RuntimeCapability.RUNTIME_FILESYSTEM,
                 RuntimeCapability.PROCESS_EXECUTION,
-            ):
-                await resolver.require(capability)
-        except RuntimeCapabilityDeniedError:
-            return False
-        return True
+            )
+        )
 
     def _guard_runtime_tool(
         self,
@@ -1450,24 +1447,28 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         )
 
     def _runtime_read_repository(self) -> EngineRuntimeToolReadRepository:
-        """Return completed Runtime reads bound to this execution owner."""
+        """Return independent completed Runtime description reads."""
         return self.repositories.runtime
 
     async def _resolve_projection_runtime_target(
         self,
     ) -> RuntimeOperationTarget | None:
         """Return current qualified Runtime evidence without starting compute."""
-        try:
-            return await _ready_runtime_for_agent(
-                agent_runtime_service=self.agent_runtime_service,
-                agent_id=self._runtime_agent_id,
-                wait_timeout_seconds=0.0,
-                poll_interval_seconds=0.0,
-                expected_authority=self._expected_runtime_authority,
-                start_if_stopped=False,
+        target = await self.agent_runtime_service.project_operation_target(
+            self._runtime_agent_id
+        )
+        expected = self._expected_runtime_authority
+        if (
+            target is not None
+            and expected is not None
+            and (
+                target.configuration_sequence != expected.configuration_sequence
+                or target.configuration_digest != expected.configuration_digest
+                or target.desired_generation != expected.desired_generation
             )
-        except RuntimeStorageError:
+        ):
             return None
+        return target
 
     async def _resolve_projection_binding(
         self,
@@ -1477,18 +1478,17 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         resolver = self.runtime_capability_resolver
         if resolver is None or runtime_target is None or not self._runtime_session_id:
             return None
-        try:
-            await resolver.require(RuntimeCapability.WORKSPACE)
-            return await (
-                self.session_working_folder_binding_service.resolve_bound_authority(
-                    agent_id=self._runtime_agent_id,
-                    session_id=self._runtime_session_id,
-                    capability_snapshot=resolver.snapshot,
-                    runtime_target=runtime_target,
-                )
-            )
-        except RuntimeCapabilityDeniedError, SessionWorkingFolderBindingError:
+        if (
+            not resolver.project((RuntimeCapability.WORKSPACE,))
+            or resolver.snapshot.version != runtime_target.runtime_capability_version
+        ):
             return None
+        binding_service = self.session_working_folder_binding_service
+        return await binding_service.project_bound_authority_for_target(
+            agent_id=self._runtime_agent_id,
+            session_id=self._runtime_session_id,
+            runtime_target=runtime_target,
+        )
 
     async def _resolve_operation_working_folder_authority(
         self,
