@@ -265,6 +265,32 @@ export const VersionedPartialReasoning = {
   },
 } satisfies Story;
 
+export const UnverifiedToolCalling = {
+  args: {
+    state: {
+      ...readyState,
+      models: [
+        {
+          provider: "openai",
+          model_identifier: "unknown-tool-fixture",
+          model_display_name: "Unverified tool fixture",
+          normalized_capabilities: {
+            ...partialReasoningCapabilities,
+            tool_calling: { supported: false },
+          },
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    await expect(body.getByText("Tool calling (unverified)")).toBeVisible();
+    await expect(
+      body.queryByText("Tool calling", { exact: true }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
 export const NoIntegrationSelected = {
   args: {
     selectedIntegrationId: null,

@@ -76,3 +76,16 @@ export function modelSupportsFunctionCalling(
         request,
       );
 }
+
+/** Picker status preserves uncertainty without authorizing unknown capabilities. */
+export function modelFunctionCallingStatus(
+  capabilities: ModelCapabilities,
+  request: CapabilityRequestContext = {},
+): "supported" | "unverified" | "hidden" {
+  if (capabilities.semantic_contract?.function_calling.state === "unknown") {
+    return "unverified";
+  }
+  return modelSupportsFunctionCalling(capabilities, request)
+    ? "supported"
+    : "hidden";
+}

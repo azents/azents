@@ -12,6 +12,10 @@ from azents.core.historical_memory_budget import CONSOLIDATION_OUTPUT_TOKEN_LIMI
 from azents.core.model_pricing import capture_model_pricing
 from azents.core.openai_client_config import openai_responses_client_config
 from azents.engine.events.model_messages import TransientModelMessage
+from azents.engine.events.model_support_contract import (
+    model_support_allowed,
+    resolve_model_support_context,
+)
 from azents.engine.events.openai_responses import (
     OpenAIResponsesLowerer,
     OpenAIResponsesModelAdapter,
@@ -115,7 +119,21 @@ class ConsolidationProviderModel:
         output_tokens: int,
     ) -> PreparedConsolidationRequest:
         selection = self.selection
-        if not selection.normalized_capabilities.tool_calling.supported:
+        capabilities = selection.normalized_capabilities
+        contract = capabilities.semantic_contract
+        function_support = (
+            capabilities.tool_calling.supported
+            if contract is None
+            else model_support_allowed(
+                contract.function_calling,
+                context=resolve_model_support_context(
+                    capabilities,
+                    requested_effort=None,
+                    function_tools=True,
+                ),
+            )
+        )
+        if function_support is False:
             raise ConsolidationModelCapabilityError(
                 "Lightweight tool calling is unavailable."
             )

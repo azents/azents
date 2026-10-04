@@ -70,7 +70,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-04
-spec_version: 12
+spec_version: 13
 ---
 
 # Memory
@@ -221,6 +221,12 @@ atomically and clears retry progress.
 ## Agentic Consolidation
 
 Each Team and personal unit runs an independent internal Lightweight execution.
+Function-tool admission uses the saved semantic contract with the request's
+function declarations and known default effort. Unknown support is not a denial
+and retains the ordinary provider error boundary; explicit unsupported or unmet
+conditions block the request. Descriptor-less selections retain their legacy
+boolean behavior. Consolidation does not infer an effort or alter a saved
+capability merely to pass this check.
 Its model input, tool results, retry state and files never contain the peer
 unit's body, inventory, existence hint or pending work. This execution is an
 ephemeral host of the same model/tool iteration core as foreground conversation,

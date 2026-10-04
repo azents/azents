@@ -817,6 +817,7 @@
       "reasoningBadge": "추론",
       "hostedToolsBadge": "호스티드 도구",
       "toolCallingBadge": "도구 호출",
+      "toolCallingUnverifiedBadge": "도구 호출 · 미확인",
       "syncingWithoutData": "카탈로그 동기화 중입니다. 첫 동기화가 완료되면 모델이 표시됩니다."
     },
     "memorySettings": {

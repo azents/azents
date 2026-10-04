@@ -817,6 +817,7 @@
       "reasoningBadge": "Reasoning",
       "hostedToolsBadge": "Hosted tools",
       "toolCallingBadge": "Tool calling",
+      "toolCallingUnverifiedBadge": "Tool calling (unverified)",
       "syncingWithoutData": "Catalog sync is running. Models will appear after the first successful sync."
     },
     "memorySettings": {

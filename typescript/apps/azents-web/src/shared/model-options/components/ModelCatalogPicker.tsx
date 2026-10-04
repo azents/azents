@@ -15,7 +15,7 @@ import {
 import { useTranslations } from "next-intl";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import {
-  modelSupportsFunctionCalling,
+  modelFunctionCallingStatus,
   modelSupportsReasoning,
   supportedBuiltinTools,
 } from "@/shared/lib/model-capability-support";
@@ -97,6 +97,7 @@ function formatCapabilityBadges(
     reasoning: string;
     hostedTools: string;
     toolCalling: string;
+    toolCallingUnverified: string;
   },
 ): string[] {
   const capabilities = model.normalized_capabilities;
@@ -115,8 +116,11 @@ function formatCapabilityBadges(
   if (supportedBuiltinTools(capabilities).length > 0) {
     badges.push(labels.hostedTools);
   }
-  if (modelSupportsFunctionCalling(capabilities)) {
+  const functionCallingStatus = modelFunctionCallingStatus(capabilities);
+  if (functionCallingStatus === "supported") {
     badges.push(labels.toolCalling);
+  } else if (functionCallingStatus === "unverified") {
+    badges.push(labels.toolCallingUnverified);
   }
   return badges;
 }
@@ -337,6 +341,9 @@ export function ModelCatalogPicker({
                           reasoning: t("reasoningBadge"),
                           hostedTools: t("hostedToolsBadge"),
                           toolCalling: t("toolCallingBadge"),
+                          toolCallingUnverified: t(
+                            "toolCallingUnverifiedBadge",
+                          ),
                         }).map((badge) => (
                           <Badge key={badge} variant="light">
                             {badge}

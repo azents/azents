@@ -817,6 +817,7 @@
       "reasoningBadge": "推論",
       "hostedToolsBadge": "ホスト型ツール",
       "toolCallingBadge": "ツール呼び出し",
+      "toolCallingUnverifiedBadge": "ツール呼び出し · 未確認",
       "syncingWithoutData": "カタログを同期中です。最初の同期が完了するとモデルが表示されます。"
     },
     "memorySettings": {

@@ -88,7 +88,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-04
-spec_version: 44
+spec_version: 45
 ---
 
 # Model Catalog Domain Spec
@@ -597,6 +597,13 @@ justified subsets remain available, and exact xhigh/max values are retained. The
 is no new source or unknown-state configuration mode.
 
 The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing before first success, failed before first success, ready, ready with latest failed sync, ready empty result, and loading next page. Failure state renders before empty result state. Pages are current-data offset reads, not revision-pinned views.
+
+Function-call badges distinguish known/satisfied support from unknown evidence.
+Unknown semantic function support is shown as unverified instead of silently
+disappearing or being advertised as verified support. Explicit denial and unmet
+conditions retain their hidden badge state. Historical descriptor-less entries
+retain their saved boolean presentation. This informational distinction does not
+enable a control, change a model choice, or override execution authorization.
 
 Each model card displays the resolved default context value
 `default_input_tokens ?? max_input_tokens`. When a distinct default and maximum

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   capabilitySupportEnabled,
+  modelFunctionCallingStatus,
   modelSupportsFunctionCalling,
   modelSupportsReasoning,
   supportedBuiltinTools,
@@ -77,6 +78,78 @@ void test("v2 unknown support remains conservative despite old boolean views", (
   assert.equal(capabilitySupportEnabled(unknown, model), false);
   assert.equal(capabilitySupportEnabled(unsupported, model), false);
   assert.equal(capabilitySupportEnabled(supported, model), true);
+});
+
+void test("function-calling status exposes unknown despite contradictory derived booleans", () => {
+  for (const derived of [false, true]) {
+    const model = capabilities();
+    model.tool_calling = { supported: derived };
+    assert.equal(modelFunctionCallingStatus(model), "unverified");
+    assert.equal(modelSupportsFunctionCalling(model), false);
+    assert.equal(capabilitySupportEnabled(unknown, model), false);
+  }
+});
+
+void test("function-calling status uses v2 support and denial over stale views", () => {
+  const model = capabilities();
+  const descriptor = model.semantic_contract;
+  assert.ok(descriptor);
+  model.tool_calling = { supported: false };
+  descriptor.function_calling = supported;
+  assert.equal(modelFunctionCallingStatus(model), "supported");
+  model.tool_calling = { supported: true };
+  descriptor.function_calling = unsupported;
+  assert.equal(modelFunctionCallingStatus(model), "hidden");
+});
+
+void test("function-calling status keeps unmet conditions hidden", () => {
+  const model = capabilities();
+  const descriptor = model.semantic_contract;
+  assert.ok(descriptor);
+  descriptor.function_calling = {
+    state: "conditional",
+    origin: "explicit",
+    predicate: { reasoning_efforts: ["none"], function_tools: false },
+  };
+  assert.equal(modelFunctionCallingStatus(model), "hidden");
+  assert.equal(
+    modelFunctionCallingStatus(model, { reasoningEffort: "none" }),
+    "hidden",
+  );
+  assert.equal(
+    modelFunctionCallingStatus(model, {
+      reasoningEffort: "none",
+      functionTools: true,
+    }),
+    "hidden",
+  );
+  assert.equal(
+    modelFunctionCallingStatus(model, {
+      reasoningEffort: "none",
+      functionTools: false,
+    }),
+    "supported",
+  );
+});
+
+void test("function-calling status preserves descriptor-absent legacy behavior", () => {
+  for (const semantic_contract of [null, void 0]) {
+    assert.equal(
+      modelFunctionCallingStatus({
+        semantic_contract,
+        tool_calling: { supported: true },
+      }),
+      "supported",
+    );
+    assert.equal(
+      modelFunctionCallingStatus({
+        semantic_contract,
+        tool_calling: { supported: false },
+      }),
+      "hidden",
+    );
+    assert.equal(modelFunctionCallingStatus({ semantic_contract }), "hidden");
+  }
 });
 
 void test("partial declarations expose only the exact justified subset including max/xhigh", () => {
