@@ -31,8 +31,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
   - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
-last_verified_at: 2026-10-04
-spec_version: 8
+last_verified_at: 2026-10-05
+spec_version: 9
 ---
 
 # OpenRouter API Key Provider Flow
@@ -90,6 +90,21 @@ OpenRouter uses an integration-scoped catalog because visibility depends on the 
 GET https://openrouter.ai/api/v1/models/user?output_modalities=text
 Authorization: Bearer <integration API key>
 ```
+
+The official OpenRouter SDK public `models.list_for_user_async` operation owns
+account-catalog routing, Bearer authentication, and dispatch. The application pins
+the Pydantic-compatible official SDK release `0.10.8` through normal dependency
+resolution. The injected HTTPX client supplies the text-output query filter and
+observes the same response at a typed application-codec boundary. Each listing
+uses a 20-second timeout and disables SDK retries; the catalog synchronization
+lifecycle owns subsequent retry decisions.
+
+The application codec preserves consumed field presence and sparse records before
+SDK display-model validation. A successful HTTP 200 response rejected only by the
+SDK response schema still uses the validated application payload. Invalid consumed
+catalog evidence and non-200 SDK failures remain errors. This boundary performs
+one SDK-owned request and releases both transport and SDK resources, including on
+cancellation. SDK debug logging is disabled to protect credentials and payloads.
 
 The provider response is normalized under these rules:
 
