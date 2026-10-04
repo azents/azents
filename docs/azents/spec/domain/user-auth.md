@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/core/user.py
   - python/apps/azents/src/azents/core/user_email.py
   - python/apps/azents/src/azents/core/system_user_role.py
+  - python/apps/azents/src/azents/core/retirement_data.py
   - python/apps/azents/src/azents/core/email/**
   - python/apps/azents/src/azents/api/public/auth/v1/**
   - python/apps/azents/src/azents/api/admin/auth/v1/**
@@ -49,6 +50,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/system_user_role/**
   - python/apps/azents/src/azents/repos/system_bootstrap/**
   - python/apps/azents/src/azents/repos/owner_lifecycle/**
+  - python/apps/azents/src/azents/repos/owner_lifecycle_operations.py
   - python/apps/azents/src/azents/services/auth/**
   - python/apps/azents/src/azents/services/account_access.py
   - python/apps/azents/src/azents/services/email_verification/**
@@ -124,7 +126,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-10-05
-spec_version: 28
+spec_version: 29
 ---
 
 # User & Authentication
@@ -433,6 +435,19 @@ those effects; an existing already-disabled User still follows the accepted,
 idempotent cleanup and publication path. A failure before commit rolls back the
 whole database group, while publication failure cannot undo committed authority.
 
+Membership/account lifecycle claims, phase/retry/completion writes and User root
+retirement finish in complete repository-owned database operations. Root listings
+and the associated-User Session existence predicate use native read-only scopes.
+Locked retirement preserves Scheduled started-cycle retention, ordered
+stop/participant/archive mutations and purge scheduling. Account purge accelerates
+already archived roots without adding a provider cleanup effect; membership
+archive still permits Unlimited retention. Final account cleanup atomically
+completes the owned job, detaches retained Team-side Chat request, Mailbox,
+ExchangeFile and External Channel references, deletes private User Memory and
+deletes the User. Failure or cancellation rolls back that database group.
+Provider cleanup and Broker signals follow completed retirement; publication
+failure does not compensate committed state.
+
 The operator CLI accepts one or more repeated `--email` options and grants `system_admin`
 sequentially to each normalized exact email. Every successful grant is committed and reported before
 the next email is processed. A missing User stops the invocation with an operator error without
@@ -721,6 +736,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-10-05** (v29) — Completed owner-lifecycle repository transaction ownership
+  while preserving root retirement, atomic account finalization and post-commit
+  provider/Broker effects.
 - **2026-10-05** (v28) — Completed password-reset and first-admin bootstrap
   repository operations, retaining single-use atomic mutation groups and final
   authority revalidation with hash preparation before SQL and effects after commit.
