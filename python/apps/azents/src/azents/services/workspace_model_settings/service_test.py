@@ -559,16 +559,6 @@ async def test_empty_row_null_omission_and_label_error_matrix(
     [
         (WorkspaceModelSettingsUpdateInput(), "Quality", "Quick"),
         (
-            WorkspaceModelSettingsUpdateInput(default_main_model_label=None),
-            "Quality",
-            "Quick",
-        ),
-        (
-            WorkspaceModelSettingsUpdateInput(default_lightweight_model_label=None),
-            "Quality",
-            "Quick",
-        ),
-        (
             WorkspaceModelSettingsUpdateInput(default_main_model_label=""),
             "Quality",
             "Quick",
@@ -606,7 +596,7 @@ async def test_configured_label_only_matrix_preserves_options_without_catalog_re
     main: str,
     lightweight: str,
 ) -> None:
-    """Label null uses stored fallback; unknown labels use first ordered option."""
+    """Omitted labels retain stored values; invalid strings use the first option."""
     fixture = await _fixture(
         rdb_session_manager,
         "defaults-label-matrix",
@@ -782,3 +772,134 @@ async def test_final_repository_failure_maps_existing_service_error_after_resolu
     )
     assert fixture.manager.resolved == [True, True]
     fixture.manager.assert_closed()
+
+
+@pytest.mark.parametrize("lightweight", [False, True])
+@pytest.mark.parametrize("replace_options", [False, True])
+async def test_explicit_label_null_is_rejected_before_resolution_or_write(
+    rdb_session_manager: SessionManager[WriteSession],
+    lightweight: bool,
+    replace_options: bool,
+) -> None:
+    """A configured label clear fails atomically without null-as-default behavior."""
+    fixture = await _fixture(
+        rdb_session_manager,
+        "defaults-null-label-rejected",
+        missing=set(),
+        image_errors=[],
+        catalog_error=None,
+        image_error=None,
+    )
+    configured = await fixture.operations.update(fixture.workspace_id, full_update())
+    assert isinstance(configured, Success)
+    scopes_before = len(fixture.manager.sessions)
+    update: WorkspaceModelSettingsUpdateInput = {}
+    if lightweight:
+        update["default_lightweight_model_label"] = None
+        update["default_main_model_label"] = "Quick"
+    else:
+        update["default_main_model_label"] = None
+        update["default_lightweight_model_label"] = "Quality"
+    if replace_options:
+        update["default_selectable_model_options"] = _inputs()
+    result = await fixture.service.update(fixture.workspace_id, update)
+    assert result == Failure(DefaultModelCannotBeCleared(fixture.workspace_id))
+    assert len(fixture.manager.sessions) == scopes_before + 1
+    assert fixture.catalog.calls == [] and fixture.images.calls == []
+    fixture.manager.assert_closed()
+    assert await fixture.operations.get(fixture.workspace_id) == configured.value
+
+
+@pytest.mark.parametrize("lightweight", [False, True])
+async def test_initial_options_with_explicit_null_label_are_rejected(
+    rdb_session_manager: SessionManager[WriteSession], lightweight: bool
+) -> None:
+    """Initial option configuration cannot successfully clear its required label."""
+    fixture = await _fixture(
+        rdb_session_manager,
+        "defaults-initial-null-label",
+        missing=set(),
+        image_errors=[],
+        catalog_error=None,
+        image_error=None,
+    )
+    update: WorkspaceModelSettingsUpdateInput = {
+        "default_selectable_model_options": _inputs(),
+    }
+    if lightweight:
+        update["default_lightweight_model_label"] = None
+    else:
+        update["default_main_model_label"] = None
+    result = await fixture.service.update(fixture.workspace_id, update)
+    assert result == Failure(DefaultModelCannotBeCleared(fixture.workspace_id))
+    assert await fixture.operations.get(fixture.workspace_id) is None
+    assert fixture.catalog.calls == [] and fixture.images.calls == []
+
+
+@pytest.mark.parametrize("remove_selected", [False, True])
+async def test_option_replacement_retains_omitted_labels_until_removed(
+    rdb_session_manager: SessionManager[WriteSession], remove_selected: bool
+) -> None:
+    """Only removal from the replacement list triggers the established fallback."""
+    fixture = await _fixture(
+        rdb_session_manager,
+        "defaults-replacement-preserves-label",
+        missing=set(),
+        image_errors=[],
+        catalog_error=None,
+        image_error=None,
+    )
+    configured = full_update()
+    configured["default_main_model_label"] = "Quick"
+    configured["default_lightweight_model_label"] = "Quick"
+    configured["default_model_selection"] = configured[
+        "default_lightweight_model_selection"
+    ]
+    await fixture.operations.update(fixture.workspace_id, configured)
+    inputs = _inputs()
+    if remove_selected:
+        inputs = inputs[:1]
+    result = await fixture.service.update(
+        fixture.workspace_id,
+        WorkspaceModelSettingsUpdateInput(default_selectable_model_options=inputs),
+    )
+    assert isinstance(result, Success)
+    expected = "Quality" if remove_selected else "Quick"
+    assert result.value.default_main_model_label == expected
+    assert result.value.default_lightweight_model_label == expected
+    assert result.value.default_model_selection is not None
+    assert result.value.default_lightweight_model_selection is not None
+    assert (
+        result.value.default_model_selection
+        == result.value.default_lightweight_model_selection
+    )
+    stored = await fixture.operations.get(fixture.workspace_id)
+    assert stored is not None and stored.default_main_model_label == expected
+    assert stored.default_lightweight_model_label == expected
+
+
+async def test_label_only_empty_string_retains_existing_normalization(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """An empty string keeps its old behavior without being confused with null."""
+    fixture = await _fixture(
+        rdb_session_manager,
+        "defaults-empty-label-compatible",
+        missing=set(),
+        image_errors=[],
+        catalog_error=None,
+        image_error=None,
+    )
+    configured = full_update()
+    configured["default_main_model_label"] = "Quick"
+    configured["default_model_selection"] = configured[
+        "default_lightweight_model_selection"
+    ]
+    await fixture.operations.update(fixture.workspace_id, configured)
+    result = await fixture.service.update(
+        fixture.workspace_id,
+        WorkspaceModelSettingsUpdateInput(default_main_model_label=""),
+    )
+    assert isinstance(result, Success)
+    assert result.value.default_main_model_label == "Quick"
+    assert fixture.catalog.calls == [] and fixture.images.calls == []

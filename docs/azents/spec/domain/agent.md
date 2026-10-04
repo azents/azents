@@ -140,8 +140,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-04
-spec_version: 92
+last_verified_at: 2026-10-05
+spec_version: 93
 ---
 
 # Agent Domain Spec
@@ -346,7 +346,10 @@ Rules:
 
 - If Workspace default selectable model options are absent, creating Agent without explicit model options fails.
 - Once Workspace defaults are configured, the default selectable model list cannot be cleared to empty.
-- Workspace default selectable model list uses the same label, order, cap, and fallback invariants as Agent selectable model options.
+- Workspace default selectable model lists retain Agent label, order and cap validation. Partial Workspace updates distinguish omission from explicit null.
+- Omitted default main/lightweight labels retain their current values, including whole-option replacement if the selected label still exists. Removed labels fall back to the first ordered option; initial configuration with omitted labels also uses the first option.
+- Explicit null requests a clear and is rejected with `DefaultModelCannotBeCleared`/HTTP 400 when defaults are configured or the request supplies a nonempty new option list. Rejection precedes candidate resolution and mutation; mixed requests are not partially stored.
+- Empty unconfigured records retain their nullable representation and existing creation/rejection behavior. Empty/unknown string normalization remains separate from null. New Agents copy the selected Workspace labels; existing Agents are not changed by Workspace updates.
 - Updating Workspace defaults recomputes the denormalized effective default snapshots from default labels.
 - New Agents copy exact Workspace identities, order and complete model-scoped settings,
   including built-in configs, while capturing current compiled capabilities for those
