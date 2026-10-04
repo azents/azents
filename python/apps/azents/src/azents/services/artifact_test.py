@@ -3,31 +3,44 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import Any, NamedTuple, cast
+from typing import IO, NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
-from azcommon.infra.s3.service import S3ObjectIdentity, S3ProductPublicationMetadata
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ObjectMetadata,
+    S3ProductPublicationMetadata,
+    S3ProductPublicationResult,
+    S3Service,
+)
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
+from azents.core.config import Config, Settings
 from azents.core.enums import (
+    AgentRunPhase,
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStartReason,
     AgentSessionStatus,
     ArtifactStatus,
+    SessionAgentKind,
     WorkspaceUserRole,
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
-from azents.repos.agent_session.data import AgentSession
+from azents.engine.events.types import AgentRunState
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import (
     ArtifactMetadataFailure,
     ArtifactOperationRepository,
 )
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 
 from .artifact import (
@@ -41,7 +54,7 @@ from .artifact import (
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
 
-class _FakeArtifactRepository:
+class _FakeArtifactRepository(ArtifactRepository):
     """Artifact repository for tests."""
 
     def __init__(self) -> None:
@@ -141,7 +154,7 @@ class _FakeArtifactRepository:
         )
 
 
-class _FakeAgentSessionRepository:
+class _FakeAgentSessionRepository(AgentSessionRepository):
     """AgentSession repository for tests."""
 
     def __init__(self, agent_session: AgentSession) -> None:
@@ -150,27 +163,43 @@ class _FakeAgentSessionRepository:
     async def get_by_id(
         self,
         session: AsyncSession,
-        session_id: str,
+        agent_session_id: str,
     ) -> AgentSession | None:
         """Fetch AgentSession by ID."""
         del session
-        if session_id == self.agent_session.id:
+        if agent_session_id == self.agent_session.id:
             return self.agent_session
         return None
 
     async def get_root_session_agent_by_session_id(
         self,
         session: AsyncSession,
-        session_id: str,
-    ) -> object | None:
+        agent_session_id: str,
+    ) -> SessionAgent | None:
         """Return the root SessionAgent identity."""
         del session
-        if session_id != self.agent_session.id:
+        if agent_session_id != self.agent_session.id:
             return None
-        return SimpleNamespace(agent_session_id=self.agent_session.id)
+        return SessionAgent(
+            id="root-node",
+            context_id="context",
+            root_session_agent_id="root-node",
+            agent_session_id=self.agent_session.id,
+            kind=SessionAgentKind.ROOT,
+            name="root",
+            path="/root",
+            agent_type="default",
+            parent_session_agent_id=None,
+            last_task_message=None,
+            last_message_at=None,
+            parent_observed_run_index=None,
+            parent_observed_event_id=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
 
 
-class _FakeWorkspaceUserRepository:
+class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
     """WorkspaceUser repository for tests."""
 
     def __init__(self, workspace_user: WorkspaceUser | None = None) -> None:
@@ -179,7 +208,6 @@ class _FakeWorkspaceUserRepository:
     async def get_by_workspace_and_user(
         self,
         session: AsyncSession,
-        *,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -195,7 +223,7 @@ class _FakeWorkspaceUserRepository:
         return None
 
 
-class _FakeS3Service:
+class _FakeS3Service(S3Service):
     """S3 service for tests."""
 
     def __init__(self, session_boundary: "_SessionBoundary") -> None:
@@ -213,13 +241,14 @@ class _FakeS3Service:
         self,
         bucket: str,
         key: str,
-        body: bytes,
+        body: str | bytes | IO[str] | IO[bytes],
         *,
         content_type: str | None = None,
     ) -> None:
         """Store object."""
         del bucket, content_type
         assert self.session_boundary.active == 0
+        assert isinstance(body, bytes)
         self.objects[key] = body
 
     async def download_bytes(self, bucket: str, key: str) -> bytes | None:
@@ -242,14 +271,25 @@ class _FakeS3Service:
         destination: S3ObjectIdentity,
         expected_size: int,
         publication_metadata: S3ProductPublicationMetadata,
-    ) -> object:
+    ) -> S3ProductPublicationResult:
         """Copy one trusted source into the final product key."""
         assert self.session_boundary.active == 0
         self.product_copy_calls.append(
             (source, destination, expected_size, publication_metadata)
         )
         self.objects[destination.key] = b"x" * expected_size
-        return SimpleNamespace(created=True)
+        return S3ProductPublicationResult(
+            metadata=S3ObjectMetadata(
+                identity=destination,
+                content_length=expected_size,
+                content_type=publication_metadata.content_type,
+                etag=None,
+                checksum_sha256=None,
+                user_metadata={},
+                last_modified_at=_NOW,
+            ),
+            created=True,
+        )
 
     async def delete_uncommitted_product_object(
         self,
@@ -266,23 +306,19 @@ class _FakeS3Service:
         self.objects.pop(identity.key, None)
 
 
-class _WorkspaceS3Config:
-    """workspace S3 config for tests."""
-
-    bucket = "test-bucket"
-
-
-class _FileLifecycleConfig:
-    """File lifecycle config for tests."""
-
-    artifact_ttl = datetime.timedelta(days=7)
-
-
-class _Config:
-    """Config for tests."""
-
-    workspace_s3 = _WorkspaceS3Config()
-    file_lifecycle = _FileLifecycleConfig()
+def _make_config() -> Config:
+    """Construct complete application configuration for the declared fixture."""
+    return Config.from_settings(
+        Settings(
+            _env_file=None,
+            rdb_host="unused",
+            rdb_user="unused",
+            rdb_db_name="unused",
+            auth_jwt_secret_key="test-secret-key-for-artifact",
+            credential_encryption_key="unused",
+            workspace_s3_bucket="test-bucket",
+        )
+    )
 
 
 class _SessionBoundary:
@@ -296,7 +332,8 @@ class _SessionBoundary:
         """Yield a test DB session while tracking its lifetime."""
         self.active += 1
         try:
-            yield cast(AsyncSession, object())
+            async with AsyncSession() as session:
+                yield session
         finally:
             self.active -= 1
 
@@ -375,18 +412,18 @@ def _make_service() -> _ArtifactServiceFixture:
     session_boundary = _SessionBoundary()
     s3 = _FakeS3Service(session_boundary)
     agent_session_repository = _FakeAgentSessionRepository(_make_agent_session())
-    agent_run_repository = AsyncMock()
+    agent_run_repository = AsyncMock(spec=AgentRunRepository)
     workspace_user_repository = _FakeWorkspaceUserRepository(_make_workspace_user())
     service = ArtifactService(
         operation_repository=ArtifactOperationRepository(
-            artifact_repository=cast(Any, artifact_repo),
-            agent_session_repository=cast(Any, agent_session_repository),
+            artifact_repository=artifact_repo,
+            agent_session_repository=agent_session_repository,
             agent_run_repository=agent_run_repository,
-            workspace_user_repository=cast(Any, workspace_user_repository),
+            workspace_user_repository=workspace_user_repository,
             session_manager=session_boundary.session_manager,
         ),
-        s3_service=cast(Any, s3),
-        config=cast(Any, _Config()),
+        s3_service=s3,
+        config=_make_config(),
     )
     return _ArtifactServiceFixture(
         service=service, repository=artifact_repo, s3_service=s3
@@ -432,14 +469,15 @@ def _make_authority_service(
         existing = artifact_repo.artifacts.get(create.id)
         if existing is not None:
             return Success(existing)
-        return Success(await artifact_repo.create(cast(AsyncSession, object()), create))
+        async with AsyncSession() as session:
+            return Success(await artifact_repo.create(session, create))
 
     operations.load_verified_publication.side_effect = load_verified_publication
     operations.finalize_verified_publication.side_effect = finalize_verified_publication
     service = _AuthorityArtifactService(
         operation_repository=operations,
-        s3_service=cast(Any, s3),
-        config=cast(Any, _Config()),
+        s3_service=s3,
+        config=_make_config(),
     )
     service.authority_results = authority_results
     return _AuthorityArtifactServiceFixture(
@@ -512,36 +550,47 @@ async def test_expired_artifact_is_denied_even_if_blob_exists() -> None:
 async def test_authority_resolves_artifact_created_by_previous_session_run() -> None:
     """A later Run can import an Artifact owned by the same exact Session."""
     service, _, _ = _make_service()
+    previous_run_id = "1" * 32
+    current_run_id = "2" * 32
     created = await service.create(
         session_id="session-1",
         user_id="user-1",
-        created_run_id="run-1",
+        created_run_id=previous_run_id,
         created_run_index=1,
         filename="report.txt",
         media_type="text/plain",
         body=b"hello",
     )
     assert isinstance(created, Success)
-    run_repository = AsyncMock()
+    run_repository = AsyncMock(spec=AgentRunRepository)
 
     async def get_run(
         session: AsyncSession,
         run_id: str,
-    ) -> object | None:
+    ) -> AgentRunState | None:
         del session
-        if run_id == "run-1":
-            return SimpleNamespace(
-                session_id="session-1",
-                run_index=1,
-                status=AgentRunStatus.COMPLETED,
-            )
-        if run_id == "run-2":
-            return SimpleNamespace(
-                session_id="session-1",
-                run_index=2,
-                status=AgentRunStatus.RUNNING,
-            )
-        return None
+        if run_id not in {previous_run_id, current_run_id}:
+            return None
+        index = 1 if run_id == previous_run_id else 2
+        return AgentRunState(
+            id=run_id,
+            session_id="session-1",
+            scheduled_task_cycle_id=None,
+            run_index=index,
+            phase=AgentRunPhase.IDLE,
+            status=(AgentRunStatus.COMPLETED if index == 1 else AgentRunStatus.RUNNING),
+            parent_agent_run_id=None,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            requested_enabled_execution_options=[],
+            parent_result_delivery_state=None,
+            parent_result_mailbox_item_id=None,
+            parent_result_enqueued_at=None,
+            created_at=_NOW,
+            started_at=None,
+            model_call_started_at=None,
+            updated_at=_NOW,
+        )
 
     run_repository.get_by_id.side_effect = get_run
     service.operation_repository.agent_run_repository = run_repository
@@ -553,7 +602,7 @@ async def test_authority_resolves_artifact_created_by_previous_session_run() -> 
             agent_id="agent-1",
             session_id="session-1",
             root_session_id="session-1",
-            run_id="run-2",
+            run_id=current_run_id,
             run_index=2,
             owner_generation=0,
         ),
@@ -561,7 +610,7 @@ async def test_authority_resolves_artifact_created_by_previous_session_run() -> 
 
     assert isinstance(resolved, Success)
     assert resolved.value.body == b"hello"
-    assert resolved.value.artifact.created_run_id == "run-1"
+    assert resolved.value.artifact.created_run_id == previous_run_id
 
 
 @pytest.mark.asyncio

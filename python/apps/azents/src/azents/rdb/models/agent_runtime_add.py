@@ -16,13 +16,13 @@ class RDBAgentRuntimeAddReceipt(RDBModel):
     __tablename__ = "agent_runtime_add_receipts"
 
     UQ_AGENT_IDEMPOTENCY_KEY = sa.Index(
-        "uq_agent_runtime_add_receipts_agent_idempotency",
+        "ix_agent_runtime_add_receipts_agent_id_idempotency_key",
         "agent_id",
         "idempotency_key",
         unique=True,
     )
     IX_AGENT_CREATED_AT = sa.Index(
-        "ix_agent_runtime_add_receipts_agent_created_at",
+        "ix_agent_runtime_add_receipts_agent_id_created_at",
         "agent_id",
         "created_at",
     )

@@ -12,16 +12,16 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.mailbox_data import (
+    MailboxEnvelopePayload,
+    MailboxItem,
+    MailboxItemCreate,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
-    MailboxEnvelopePayload,
-    MailboxItem,
-    MailboxItemCreate,
-)
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,

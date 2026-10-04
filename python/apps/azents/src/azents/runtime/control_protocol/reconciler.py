@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from azcommon.logging import bind_extra
 from azents_runtime_control.provider import (
     RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT,
     RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY,
@@ -106,9 +107,9 @@ class RuntimeLifecycleReconciler:
     ) -> None:
         """Initialize the reconciler."""
         self.repository = repository
-        self._dispatch_repository = dispatch_repository
-        self._coordination_store = coordination_store
-        self._control_protocol = control_protocol
+        self.dispatch_repository = dispatch_repository
+        self.coordination_store = coordination_store
+        self.control_protocol = control_protocol
         self._config = config
 
     async def reconcile_once(self, *, limit: int = _DEFAULT_LIMIT) -> int:
@@ -308,7 +309,15 @@ class RuntimeLifecycleReconciler:
         reconciliation_kind: str | None = None,
         reconciliation_reason: str | None = None,
     ) -> bool:
-        preflight_result = await self._dispatch_repository.preflight(
+        L = bind_extra(
+            _LOGGER,
+            {
+                "runtime_id": runtime.id,
+                "agent_id": runtime.agent_id,
+                "command_type": command_type.value,
+            },
+        )
+        preflight_result = await self.dispatch_repository.preflight(
             RuntimeLifecycleDispatchRequest(
                 runtime=runtime,
                 command_type=command_type,
@@ -324,33 +333,34 @@ class RuntimeLifecycleReconciler:
                 preflight_result.reason
                 is RuntimeLifecycleDispatchRejectionReason.PROVIDER_NOT_CONFIGURED
             ):
-                _LOGGER.warning(
+                L.warning(
                     "Runtime lifecycle dispatch skipped without provider",
                     extra={
-                        "runtime_id": runtime.id,
-                        "agent_id": runtime.agent_id,
                         "desired_generation": runtime.desired_generation,
                     },
                 )
             return False
         preflight = preflight_result
         provider_id = preflight.provider_id
-        connection = await self._coordination_store.get_connection(
+        L = bind_extra(
+            _LOGGER,
+            {
+                "runtime_id": preflight.runtime_id,
+                "agent_id": preflight.agent_id,
+                "provider_id": provider_id,
+                "command_type": command_type.value,
+            },
+        )
+        connection = await self.coordination_store.get_connection(
             kind=RuntimeConnectionKind.PROVIDER,
             subject_id=provider_id,
         )
         if connection is None:
-            _LOGGER.warning(
+            L.warning(
                 "Runtime lifecycle dispatch waiting for provider connection",
-                extra={
-                    "runtime_id": preflight.runtime_id,
-                    "agent_id": preflight.agent_id,
-                    "provider_id": provider_id,
-                    "desired_generation": preflight.desired_generation,
-                    "command_type": command_type.value,
-                },
+                extra={"desired_generation": preflight.desired_generation},
             )
-            await self._dispatch_repository.record_connection_outcome(
+            await self.dispatch_repository.record_connection_outcome(
                 preflight,
                 RuntimeProviderConnectionState.DISCONNECTED,
             )
@@ -359,20 +369,16 @@ class RuntimeLifecycleReconciler:
             required_provider_generation is not None
             and connection.generation != required_provider_generation
         ):
-            _LOGGER.info(
+            L.info(
                 "Runtime lifecycle dispatch skipped after Provider generation changed",
                 extra={
-                    "runtime_id": preflight.runtime_id,
-                    "agent_id": preflight.agent_id,
-                    "provider_id": provider_id,
                     "required_provider_generation": required_provider_generation,
                     "connection_provider_generation": connection.generation,
                     "desired_generation": preflight.desired_generation,
-                    "command_type": command_type.value,
                 },
             )
             return False
-        admission_result = await self._dispatch_repository.claim(
+        admission_result = await self.dispatch_repository.claim(
             preflight,
             connection_generation=connection.generation,
         )
@@ -381,15 +387,9 @@ class RuntimeLifecycleReconciler:
                 admission_result.reason
                 is RuntimeLifecycleDispatchRejectionReason.LIFECYCLE_CLAIM_UNAVAILABLE
             ):
-                _LOGGER.debug(
+                L.debug(
                     "Runtime lifecycle dispatch skipped after concurrent claim",
-                    extra={
-                        "runtime_id": preflight.runtime_id,
-                        "agent_id": preflight.agent_id,
-                        "provider_id": provider_id,
-                        "desired_generation": preflight.desired_generation,
-                        "command_type": command_type.value,
-                    },
+                    extra={"desired_generation": preflight.desired_generation},
                 )
             return False
         admission = admission_result
@@ -399,7 +399,7 @@ class RuntimeLifecycleReconciler:
             runtime_id=admission.runtime_id,
             desired_generation=admission.desired_generation,
         )
-        result = await self._control_protocol.dispatch_provider_command(
+        result = await self.control_protocol.dispatch_provider_command(
             RuntimeProviderCommand(
                 provider_id=provider_id,
                 provider_generation=admission.connection_generation,
@@ -430,19 +430,15 @@ class RuntimeLifecycleReconciler:
             created_at=created_at,
         )
         if isinstance(result, RuntimeDispatchResult):
-            await self._dispatch_repository.record_connection_outcome(
+            await self.dispatch_repository.record_connection_outcome(
                 admission,
                 RuntimeProviderConnectionState.CONNECTED,
             )
-            _LOGGER.info(
+            L.info(
                 "Runtime lifecycle command dispatched",
                 extra={
-                    "runtime_id": admission.runtime_id,
-                    "agent_id": admission.agent_id,
-                    "provider_id": provider_id,
                     "provider_generation": admission.connection_generation,
                     "desired_generation": admission.desired_generation,
-                    "command_type": command_type.value,
                     "request_id": result.request_id,
                     "configuration_sequence": (
                         runtime_configuration.evidence.configuration_sequence
@@ -453,31 +449,21 @@ class RuntimeLifecycleReconciler:
             )
             return True
         if isinstance(result, RuntimeProtocolRouteUnavailable):
-            _LOGGER.warning(
+            L.warning(
                 "Runtime lifecycle dispatch route unavailable",
-                extra={
-                    "runtime_id": admission.runtime_id,
-                    "agent_id": admission.agent_id,
-                    "provider_id": provider_id,
-                    "desired_generation": admission.desired_generation,
-                    "command_type": command_type.value,
-                },
+                extra={"desired_generation": admission.desired_generation},
             )
-            await self._dispatch_repository.record_connection_outcome(
+            await self.dispatch_repository.record_connection_outcome(
                 admission,
                 RuntimeProviderConnectionState.DISCONNECTED,
             )
             return False
         if isinstance(result, RuntimeProtocolStaleGeneration):
-            _LOGGER.info(
+            L.info(
                 "Runtime lifecycle dispatch skipped for stale provider generation",
                 extra={
-                    "runtime_id": admission.runtime_id,
-                    "agent_id": admission.agent_id,
-                    "provider_id": provider_id,
                     "provider_generation": admission.connection_generation,
                     "desired_generation": admission.desired_generation,
-                    "command_type": command_type.value,
                 },
             )
             return False

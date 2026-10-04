@@ -4,7 +4,7 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -33,6 +33,7 @@ from azents.runtime.control_protocol.data import (
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionPromotionResult,
+    RuntimeConnectionRecord,
 )
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
 from azents.services.runtime_provider_control.data import (
@@ -50,7 +51,7 @@ class _SessionManager:
     def __init__(self) -> None:
         self.sessions: list[AsyncSession] = []
 
-    def __call__(self) -> object:
+    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
         return self._open()
 
     @asynccontextmanager
@@ -146,19 +147,49 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
         )
         self.external_calls += 1
 
-    async def stage_connection_candidate(self, **kwargs: object) -> bool:
+    async def stage_connection_candidate(
+        self,
+        *,
+        record: RuntimeConnectionRecord,
+        publication_token: str,
+        ttl_seconds: int,
+    ) -> bool:
         self._assert_transactions_closed()
-        return await super().stage_connection_candidate(**kwargs)  # ty: ignore[invalid-argument-type]
+        return await super().stage_connection_candidate(
+            record=record,
+            publication_token=publication_token,
+            ttl_seconds=ttl_seconds,
+        )
 
     async def promote_connection_candidate(
-        self, **kwargs: object
+        self,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+        publication_token: str,
+        ttl_seconds: int,
     ) -> RuntimeConnectionPromotionResult:
         self._assert_transactions_closed()
-        return await super().promote_connection_candidate(**kwargs)  # ty: ignore[invalid-argument-type]
+        return await super().promote_connection_candidate(
+            kind=kind,
+            subject_id=subject_id,
+            generation=generation,
+            publication_token=publication_token,
+            ttl_seconds=ttl_seconds,
+        )
 
-    async def revoke_connection(self, **kwargs: object) -> bool:
+    async def revoke_connection(
+        self,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+    ) -> bool:
         self._assert_transactions_closed()
-        return await super().revoke_connection(**kwargs)  # ty: ignore[invalid-argument-type]
+        return await super().revoke_connection(
+            kind=kind, subject_id=subject_id, generation=generation
+        )
 
 
 class _ProviderAuthority:
@@ -263,9 +294,20 @@ class _PromotionHookStore(_TransactionCheckingStore):
 
     async def promote_connection_candidate(
         self,
-        **kwargs: object,
+        *,
+        kind: RuntimeConnectionKind,
+        subject_id: str,
+        generation: int,
+        publication_token: str,
+        ttl_seconds: int,
     ) -> RuntimeConnectionPromotionResult:
-        result = await super().promote_connection_candidate(**kwargs)
+        result = await super().promote_connection_candidate(
+            kind=kind,
+            subject_id=subject_id,
+            generation=generation,
+            publication_token=publication_token,
+            ttl_seconds=ttl_seconds,
+        )
         self.after_promotion()
         return result
 
@@ -280,7 +322,7 @@ async def test_provider_registration_separates_external_calls_from_transactions(
     provider = _ProviderAuthority()
     now = datetime.now(UTC)
     service = RuntimeProviderConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         provider_control=provider,
@@ -317,7 +359,7 @@ async def test_provider_final_acceptance_rechecks_current_evidence_time() -> Non
         ),
     )
     service = RuntimeProviderConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         provider_control=provider,
@@ -355,7 +397,7 @@ async def test_failed_final_acceptance_revokes_only_after_transaction_ends() -> 
     generations.reject_acceptance = True
     store = _TransactionCheckingStore(sessions)
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         runner_authentication=_RunnerAuthority(),
@@ -387,7 +429,7 @@ async def test_provider_cancellation_after_promotion_revokes_connection() -> Non
     generations.cancel_acceptance = True
     store = _TransactionCheckingStore(sessions)
     service = RuntimeProviderConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         provider_control=_ProviderAuthority(),
@@ -419,7 +461,7 @@ async def test_runner_cancellation_after_promotion_revokes_connection() -> None:
     generations.cancel_acceptance = True
     store = _TransactionCheckingStore(sessions)
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         runner_authentication=_RunnerAuthority(),
@@ -450,7 +492,7 @@ async def test_runner_replacement_observer_runs_after_durable_acceptance() -> No
     store = _TransactionCheckingStore(sessions)
     observer = _GenerationObserver()
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         runner_authentication=_RunnerAuthority(),
@@ -495,7 +537,7 @@ async def test_runner_observer_failure_does_not_reject_committed_acceptance(
             raise RuntimeError("observer failed")
 
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,  # ty: ignore[invalid-argument-type]
+        session_manager=sessions,
         generation_repository=generations,
         coordination_store=store,
         runner_authentication=_RunnerAuthority(),

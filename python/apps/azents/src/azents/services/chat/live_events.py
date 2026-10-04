@@ -28,6 +28,11 @@ from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+)
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -53,11 +58,6 @@ from azents.engine.events.types import (
     ToolkitSourceSnapshot,
     UserContentPart,
     UserMessagePayload,
-)
-from azents.repos.mailbox.data import (
-    MailboxItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
 )
 from azents.utils.appctx import AppContext
 
@@ -820,7 +820,7 @@ class BaseLiveEventStore:
         self,
         session_id: str,
         owner_generation: int,
-    ) -> "_OwnerBoundLiveEventStore":
+    ) -> "BaseLiveEventStore":
         """Bind live mutations to one validated PostgreSQL owner generation."""
         return _OwnerBoundLiveEventStore(
             store=self,
@@ -1226,6 +1226,10 @@ class InMemoryLiveEventStore(BaseLiveEventStore):
             removed_events=removed_events,
         )
 
+    def owns_generation(self, session_id: str, owner_generation: int) -> bool:
+        """Check the actual local live fence without yielding to another writer."""
+        return self._owner_generations.get(session_id) == owner_generation
+
     async def _list_for_owner(
         self,
         session_id: str,
@@ -1373,7 +1377,10 @@ async def get_live_event_store(
 ) -> LiveEventStore:
     """API-side event live event store dependency."""
 
-    async def create_store() -> AsyncIterator[RedisLiveEventStore]:
+    async def create_store() -> AsyncIterator[BaseLiveEventStore]:
+        if appctx.config.broadcast_backend == "memory":
+            yield InMemoryLiveEventStore()
+            return
         redis = create_redis_client(appctx.config.redis.url)
         store = RedisLiveEventStore(redis)
         try:

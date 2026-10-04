@@ -14,6 +14,7 @@ from azents.core.config import (
     RefreshTokenConfig,
     SignupTokenConfig,
 )
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.credential_read_operations import CredentialReadOperationRepository
@@ -57,7 +58,11 @@ _TEST_AUTH_CONFIG = AuthConfig(
 def _make_email_service(*, configured: bool) -> EmailService:
     """Create EmailService for tests."""
     if not configured:
-        service = EmailService(config=None, ses_client=None)
+        service = EmailService(
+            config=None,
+            ses_client=None,
+            template_environment=create_template_environment(),
+        )
     else:
         service = EmailService(
             config=EmailConfig(
@@ -69,6 +74,7 @@ def _make_email_service(*, configured: bool) -> EmailService:
                 web_url="https://azents.example.com",
             ),
             ses_client=create_autospec(SESClient, instance=True),
+            template_environment=create_template_environment(),
         )
     service.send_verification_code = AsyncMock()
     return service

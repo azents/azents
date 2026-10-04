@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import NamedTuple
 
 import pytest
@@ -15,6 +16,7 @@ from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
+    LLMCatalogAttemptStatus,
     LLMCatalogEntryVisibility,
     LLMCatalogPurpose,
     LLMModelLifecycleStatus,
@@ -50,6 +52,7 @@ from azents.services.image_generation_catalog import (
 from azents.services.model_listing.data import ImageGenerationModelListingOutput
 from azents.services.model_listing.providers import (
     ListingClientFactories,
+    ListingProviderError,
     create_listing_client_factories,
 )
 from azents.testing.model_selection import make_test_model_selection
@@ -301,6 +304,88 @@ async def test_disabled_conversation_without_image_tool_has_no_image_gate(
         ),
     )
     assert errors == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("automatic_retry_blocked", [False, True])
+async def test_sync_provider_failure_is_visible_after_failed_attempt_commit(
+    rdb_session_manager: SessionManager[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    automatic_retry_blocked: bool,
+) -> None:
+    """Record the failure before propagation without replacing last-good authority."""
+    async with rdb_session_manager() as session:
+        fixture = await _create_service(
+            session,
+            handle=f"image-service-provider-failure-{int(automatic_retry_blocked)}",
+        )
+        await _publish_flare(
+            fixture.service,
+            rdb_session=session,
+            workspace_id=fixture.workspace_id,
+            integration_id=fixture.integration_id,
+        )
+    service = replace(
+        fixture.service,
+        operations=replace(
+            fixture.service.operations, session_manager=rdb_session_manager
+        ),
+    )
+    before = await service.operations.read(
+        integration_id=fixture.integration_id, workspace_id=fixture.workspace_id
+    )
+    assert before is not None and before.page is not None
+    failure = ListingProviderError(
+        "Provider image listing is unavailable.",
+        automatic_retry_blocked=automatic_retry_blocked,
+    )
+    cause = RuntimeError("Provider transport failed.")
+
+    async def failing_listing(
+        integration: LLMProviderIntegrationWithSecrets,
+        *,
+        clients: ListingClientFactories,
+    ) -> ImageGenerationModelListingOutput:
+        del integration, clients
+        raise failure from cause
+
+    clock = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+    monkeypatch.setattr(image_generation_catalog_module, "_utcnow", lambda: clock)
+    monkeypatch.setattr(
+        image_generation_catalog_module,
+        "list_openai_image_generation_models_for_integration",
+        failing_listing,
+    )
+    with pytest.raises(ListingProviderError) as caught:
+        await service.sync(
+            integration_id=fixture.integration_id,
+            workspace_id=fixture.workspace_id,
+            trigger=IntegrationCatalogSyncTrigger.EXPLICIT,
+        )
+    assert caught.value is failure
+    assert caught.value.__cause__ is cause
+
+    after = await service.operations.read(
+        integration_id=fixture.integration_id, workspace_id=fixture.workspace_id
+    )
+    assert after is not None and after.page is not None
+    sync_status = after.page.catalog.sync_status
+    assert sync_status is not None
+    assert sync_status.status is LLMCatalogAttemptStatus.FAILED
+    assert sync_status.finished_at == clock
+    assert sync_status.failure_code == "RuntimeError"
+    assert sync_status.failure_message == str(failure)
+    assert sync_status.diagnostics is not None
+    assert sync_status.diagnostics["automatic_retry_blocked"] is automatic_retry_blocked
+    assert after.page.catalog.last_success_at == before.page.catalog.last_success_at
+    assert after.page.catalog.image_usable == before.page.catalog.image_usable
+    assert after.page.catalog.visible_count == before.page.catalog.visible_count
+    assert after.page.catalog.hidden_count == before.page.catalog.hidden_count
+    assert after.page.entries == before.page.entries
+    assert (
+        after.integration.catalog_configuration_version
+        == before.integration.catalog_configuration_version
+    )
 
 
 @pytest.mark.asyncio

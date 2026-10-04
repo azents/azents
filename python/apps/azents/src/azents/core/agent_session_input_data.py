@@ -2,10 +2,10 @@
 
 import dataclasses
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.exchange_file_errors import ExchangeFileInputClaimError
+from azents.core.mailbox_data import MailboxItem
 from azents.core.session_workspace_paths import InvalidProjectPath
-from azents.repos.agent_session.data import AgentSession
-from azents.repos.mailbox.data import MailboxItem
 
 
 @dataclasses.dataclass(frozen=True)

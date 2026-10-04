@@ -15,6 +15,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRunStatus,
@@ -72,7 +73,6 @@ from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_account_link import ExternalAccountLinkRepository
 from azents.repos.external_channel.data import (

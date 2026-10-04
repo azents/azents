@@ -23,7 +23,7 @@ from azents.repos.user_stop_data import (
     UserStopOwnerInput,
     UserStopPartialInput,
 )
-from azents.services.chat.live_events import RedisLiveEventStore
+from azents.services.chat.live_events import BaseLiveEventStore
 from azents.worker.deps import get_live_event_store
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
@@ -37,7 +37,7 @@ class UserStopFinalizer:
     repository: Annotated[
         UserStopOperationRepository, Depends(UserStopOperationRepository)
     ]
-    live_event_store: Annotated[RedisLiveEventStore, Depends(get_live_event_store)]
+    live_event_store: Annotated[BaseLiveEventStore, Depends(get_live_event_store)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     session_lifecycle: Annotated[

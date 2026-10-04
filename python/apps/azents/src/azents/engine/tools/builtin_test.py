@@ -36,6 +36,7 @@ from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import (
     ResolveContext,
     ShellToolkitConfig,
@@ -113,7 +114,6 @@ from azents.repos.runtime_profile.data import (
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadError,
     RuntimeImageReadService,

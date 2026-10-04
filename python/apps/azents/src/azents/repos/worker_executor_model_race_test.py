@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import ModelCandidateClaimKind
 from azents.core.worker_model_profile import ModelQuotaAdvanceResult
 from azents.rdb.models.agent import RDBAgent
@@ -26,7 +27,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.worker_executor_model_test import (
     ModelAgents,

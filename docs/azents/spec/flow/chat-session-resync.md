@@ -29,6 +29,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/broker/broadcast.py
+  - python/apps/azents/src/azents/broker/websocket_deps.py
+  - python/apps/azents/src/azents/core/config.py
+  - python/apps/azents/src/azents/core/settings.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
@@ -60,8 +63,24 @@ Chat screen has two timeline states.
 | --- | --- |
 | Auth | WebSocket ticket or REST JWT must be valid. |
 | Session access | Requester must be session workspace member. |
-| Backend live source | `/live` must be able to read Redis live projections, `mailbox_items`, running `agent_runs`, and active `action_executions`. |
+| Backend live source | `/live` must be able to read the selected ephemeral live projection store, `mailbox_items`, running `agent_runs`, and active `action_executions`. |
 | Frontend state | Session component is remounted by session key and does not share cross-session state. |
+
+### Broadcast backend selection
+
+`Settings`/`Config.broadcast_backend` selects `redis` by default or explicit
+`memory`. Redis retains its existing pubsub and owner-fenced Lua behavior.
+Memory mode composes one broadcast and in-memory live store per `AppContext`;
+API and Worker wrappers share that instance only when they use the same context.
+Separate contexts, processes or replicas cannot fan out through this adapter.
+Cross-process deployments therefore require the Redis adapter.
+
+The in-memory store is seeded only after the existing PostgreSQL owner-generation
+validation. Publication and owner-scoped clearing reject stale generations;
+clearing retains the generation fence. This is an ephemeral transport, not durable
+history or execution authority. Redis errors do not trigger implicit memory
+fallback. Focused memory fixtures verify local behavior and do not certify a live
+multi-process or deployment topology.
 
 ## 3. Initial Entry Sequence
 
@@ -109,7 +128,7 @@ sequenceDiagram
 | `action_execution_removed` | server → client | `session_id`, `action_execution_id` | The operation left live state after its terminal durable snapshot was committed. |
 | `subagent_tree_changed` | server → client | `root_session_agent_id`, `changed_session_agent_id` | Subagent Tree projection invalidation signal; client refetches the dedicated tree API. |
 
-The server sends `subscribed` only after the Redis session subscription is confirmed for the current
+The server sends `subscribed` only after the selected backend session subscription is confirmed for the current
 send-loop generation. A `subscription_health_check_ack` is emitted only while that same generation
 still owns the confirmed subscription, including a second check under the WebSocket send lock. Client
 does not query the history/live REST baseline before `subscribed`. If health check ack timeout or
@@ -421,7 +440,7 @@ finite transaction periodically.
 
 - Given: existing session id and valid ticket.
 - When: connect to WebSocket.
-- Then: server registers Redis subscription and sends `subscribed`.
+- Then: server confirms the selected backend subscription and sends `subscribed`.
 
 **TC-2: Initial finite baseline after barriers**
 
@@ -511,7 +530,7 @@ finite transaction periodically.
 
 ## 10. Invariants
 
-- WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current Redis-confirmed send-loop generation.
+- WebSocket open is not subscribe completion; `subscribed` and health-check ack require the current backend-confirmed send-loop generation.
 - Public WebSocket delivery uses canonical action envelopes plus the listed control frames; the server does not emit raw top-level durable Events or internal runtime telemetry.
 - Every resync is a finite epoch/generation-guarded transaction with a fresh REST query and eventual release of its owned observation buffer.
 - REST baseline is applied as latest source only after session subscription ack and a successful health check for that transaction.

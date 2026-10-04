@@ -23,6 +23,7 @@ from azents.core.agent import (
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.agent_session_data import AgentSession
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -76,7 +77,6 @@ from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInpu
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
@@ -649,6 +649,7 @@ class TestSessionTitleHelpers:
     async def test_unsupported_structured_response_retries_plain_text_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A plain-text operation retries without attempting a structured schema."""
         calls: list[dict[str, object]] = []
@@ -689,6 +690,20 @@ class TestSessionTitleHelpers:
             TitleOutputMode.PLAIN_TEXT,
         ]
         assert [call["attempt_number"] for call in calls] == [1, 2]
+        records = [
+            record
+            for record in caplog.records
+            if record.name == session_title_module.logger.name
+        ]
+        assert [record.__dict__["title_output_mode"] for record in records] == [
+            "plain_text",
+        ]
+        assert len(records) == 1
+        assert all(record.__dict__["session_id"] == "session-001" for record in records)
+        assert all(record.__dict__["agent_id"] == "agent-001" for record in records)
+        assert all(record.__dict__["provider"] == "openai" for record in records)
+        assert all(record.__dict__["model"] == "gpt-test" for record in records)
+        assert all(record.exc_info is not None for record in records)
 
     async def test_supported_schema_decode_failure_does_not_change_mode(
         self,
@@ -879,6 +894,10 @@ class TestSessionTitleHelpers:
         assert fields["provider_failure_message"] == "Stream must be set to true"
         assert fields["provider_failure_fingerprint"] == failure.fingerprint
         assert fields["provider_failure_retry_outcome"] == "exhausted"
+        assert fields["provider"] == "openai"
+        # Bound selection context remains distinct from provider error diagnostics.
+        assert fields["model"] == "gpt-test"
+        assert records[0].exc_info is not None
 
     async def test_generate_title_propagates_unclassified_provider_failure(
         self,

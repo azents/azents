@@ -2,9 +2,9 @@
 
 from dataclasses import dataclass
 
+from azents.core.agent_session_data import AgentSession
 from azents.engine.events.types import Event
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession
 
 
 @dataclass(frozen=True)

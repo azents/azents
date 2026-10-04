@@ -13,6 +13,7 @@ from azcommon.infra.s3.service import S3Service
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
 from azents.core.enums import (
     AgentRunStatus,
@@ -46,7 +47,6 @@ from azents.engine.tools.import_file import (
 )
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import ArtifactOperationRepository

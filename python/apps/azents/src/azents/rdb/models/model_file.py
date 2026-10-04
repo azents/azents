@@ -34,7 +34,7 @@ class RDBModelFile(RDBModel):
 
     IX_WORKSPACE_ID = sa.Index("ix_model_files_workspace_id", "workspace_id")
     IX_SESSION_STATUS = sa.Index(
-        "ix_model_files_session_status",
+        "ix_model_files_session_id_status",
         "session_id",
         "status",
     )

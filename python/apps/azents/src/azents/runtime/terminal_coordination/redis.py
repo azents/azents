@@ -179,7 +179,7 @@ class RedisRuntimeTerminalCoordinationStore:
         key_prefix: str = "runtime-terminal:v2",
     ) -> None:
         """Initialize the Redis namespace."""
-        self._redis = redis
+        self.redis = redis
         self._prefix = key_prefix.rstrip(":")
 
     async def admit_or_get(
@@ -193,7 +193,7 @@ class RedisRuntimeTerminalCoordinationStore:
         record = _initial_record(admission, admitted_at)
         ttl = _ttl_seconds(record.expires_at, admitted_at)
         index_keys = self._index_keys(record)
-        response = await self._redis.eval(
+        response = await self.redis.eval(
             _ADMIT_SCRIPT,
             5 + len(index_keys),
             self._record_key(admission.terminal_id),
@@ -233,7 +233,7 @@ class RedisRuntimeTerminalCoordinationStore:
     ) -> RuntimeTerminalRecord | None:
         """Return current non-expired Terminal metadata."""
         _require_aware(current_time)
-        raw = await self._redis.get(self._record_key(terminal_id))
+        raw = await self.redis.get(self._record_key(terminal_id))
         if raw is None:
             return None
         record = _record_from_json(_text(raw))
@@ -260,14 +260,14 @@ class RedisRuntimeTerminalCoordinationStore:
 
     async def _get_session_pointer(self, key: str) -> str | None:
         """Remove only the observed missing record's pointer, never its replacement."""
-        terminal_id = await self._redis.get(key)
+        terminal_id = await self.redis.get(key)
         if terminal_id is None:
             return None
         observed = _text(terminal_id)
         record_key = self._record_key(observed)
-        if await self._redis.exists(record_key):
+        if await self.redis.exists(record_key):
             return observed
-        current = await self._redis.eval(
+        current = await self.redis.eval(
             _CLEAN_STALE_SESSION_POINTER_SCRIPT, 2, key, record_key, observed
         )
         return None if current is None else _text(current)
@@ -283,7 +283,7 @@ class RedisRuntimeTerminalCoordinationStore:
             raise ValueError("ttl_seconds must be positive")
         if ticket.expires_at > ticket.issued_at + timedelta(seconds=ttl_seconds):
             raise ValueError("ticket expiry exceeds ttl_seconds")
-        await self._redis.set(
+        await self.redis.set(
             self._ticket_key(ticket.ticket_id),
             _ticket_to_json(ticket),
             ex=ttl_seconds,
@@ -298,7 +298,7 @@ class RedisRuntimeTerminalCoordinationStore:
     ) -> RuntimeTerminalMutationResult[RuntimeTerminalTicket]:
         """Atomically consume one exact unexpired ticket."""
         _require_aware(consumed_at)
-        response = await self._redis.eval(
+        response = await self.redis.eval(
             _CONSUME_TICKET_SCRIPT,
             1,
             self._ticket_key(ticket_id),
@@ -1022,7 +1022,7 @@ class RedisRuntimeTerminalCoordinationStore:
                 *self._index_keys(record),
                 self._notification_key(terminal_id),
             )
-            result = await self._redis.eval(
+            result = await self.redis.eval(
                 _FINALIZE_SCRIPT,
                 len(keys),
                 *keys,
@@ -1048,7 +1048,7 @@ class RedisRuntimeTerminalCoordinationStore:
         invalidated_at: datetime,
     ) -> RuntimeTerminalInvalidationResult:
         """Request termination for every Terminal indexed by one source."""
-        members = await self._redis.smembers(self._source_key(source, source_id))
+        members = await self.redis.smembers(self._source_key(source, source_id))
         affected: list[str] = []
         for member in sorted(_text(value) for value in members):
             result = await self.request_termination(
@@ -1063,7 +1063,7 @@ class RedisRuntimeTerminalCoordinationStore:
             ):
                 affected.append(member)
             elif result.status is RuntimeTerminalMutationStatus.NOT_FOUND:
-                await self._redis.srem(self._source_key(source, source_id), member)
+                await self.redis.srem(self._source_key(source, source_id), member)
         return RuntimeTerminalInvalidationResult(tuple(affected))
 
     async def repair_expired(
@@ -1078,7 +1078,7 @@ class RedisRuntimeTerminalCoordinationStore:
             raise ValueError("limit must be positive")
         pattern = f"{self._prefix}:terminal:*"
         affected: list[str] = []
-        async for raw_key in self._redis.scan_iter(match=pattern, count=limit):
+        async for raw_key in self.redis.scan_iter(match=pattern, count=limit):
             if len(affected) >= limit:
                 break
             terminal_id = _text(raw_key).removeprefix(f"{self._prefix}:terminal:")
@@ -1134,21 +1134,21 @@ class RedisRuntimeTerminalCoordinationStore:
         """Wait for a newer revision or return current state after timeout."""
         if timeout_seconds < 0:
             raise ValueError("timeout_seconds must not be negative")
-        current_time = _utc_from_redis_time(await self._redis.time())
+        current_time = _utc_from_redis_time(await self.redis.time())
         current = await self.get_terminal(terminal_id, current_time=current_time)
         if current is None or current.revision > after_revision:
             return current
         stream_key = self._notification_key(terminal_id)
-        latest = await self._redis.xrevrange(stream_key, count=1)
+        latest = await self.redis.xrevrange(stream_key, count=1)
         cursor = _text(latest[0][0]) if latest else "0-0"
-        current_time = _utc_from_redis_time(await self._redis.time())
+        current_time = _utc_from_redis_time(await self.redis.time())
         current = await self.get_terminal(terminal_id, current_time=current_time)
         if current is None or current.revision > after_revision:
             return current
         block_ms = max(0, math.ceil(timeout_seconds * 1000))
         if block_ms > 0:
-            await self._redis.xread({stream_key: cursor}, block=block_ms, count=1)
-        current_time = _utc_from_redis_time(await self._redis.time())
+            await self.redis.xread({stream_key: cursor}, block=block_ms, count=1)
+        current_time = _utc_from_redis_time(await self.redis.time())
         return await self.get_terminal(terminal_id, current_time=current_time)
 
     async def _mutate[ValueT](
@@ -1166,7 +1166,7 @@ class RedisRuntimeTerminalCoordinationStore:
             if mutation.record is None:
                 return _result(mutation.status, mutation.value)
             ttl = _ttl_seconds(mutation.record.expires_at, current_time)
-            result = await self._redis.eval(
+            result = await self.redis.eval(
                 _CAS_SCRIPT,
                 2,
                 self._record_key(terminal_id),

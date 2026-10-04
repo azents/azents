@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunPhase,
@@ -16,14 +17,13 @@ from azents.core.enums import (
     AgentSessionStatus,
     SessionAgentKind,
 )
+from azents.core.mailbox_data import MailboxItem, MailboxItemCreate
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
-from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.subagent_terminal_result import SubagentTerminalResultRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.terminal_finalization_data import TerminalDeliveryDisposition

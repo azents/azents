@@ -29,6 +29,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItemCreate
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     ActiveToolCall,
@@ -57,7 +58,6 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
-from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.message import MessageRepository
 from azents.repos.root_agent_session_creation import (

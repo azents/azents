@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from typing import NamedTuple, Protocol
 
 from azents.core.engine_tool_state import AgentsAppendixDedupeState
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import ToolCallHookContext, ToolCallHookOutcome
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
@@ -19,7 +20,6 @@ from azents.engine.hooks.types import (
     ToolOutputReplace,
 )
 from azents.engine.tools.runtime_instruction_context import RuntimeInstructionContext
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.file_storage import FileStorage
 
 logger = logging.getLogger(__name__)

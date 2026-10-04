@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
@@ -17,15 +18,14 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
-from azents.repos.mailbox.data import MailboxItem
 
 
 class _ObservedManager:

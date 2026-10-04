@@ -6,6 +6,9 @@ spec_type: domain
 domain: external-channel
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/external_channel_impact.py
+  - python/apps/azents/src/azents/core/external_channel_management.py
+  - python/apps/azents/src/azents/core/external_channel_management_errors.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
   - python/apps/azents/src/azents/core/external_channel_access.py

@@ -11,6 +11,7 @@ from azcommon.result import Success
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionProductMode,
@@ -37,6 +38,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.mailbox_data import MailboxItemCreate
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -54,9 +56,7 @@ from azents.rdb.models.external_channel import (
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -1502,7 +1502,7 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
     await rdb_session.flush()
 
     with pytest.raises(
-        IntegrityError, match="uq_external_channel_bindings_connected_resource"
+        IntegrityError, match="ix_external_channel_bindings_resource_id"
     ):
         async with rdb_session.begin_nested():
             rdb_session.add(

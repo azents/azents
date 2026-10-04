@@ -109,7 +109,7 @@ _DOWNLOAD_EXTERNAL_FILE_DESCRIPTION = (
 class ChannelActionSourceInput(BaseModel):
     """One labeled URL source supplied by the Agent."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     url: str = Field(min_length=1, max_length=2_048)
     label: str = Field(min_length=1, max_length=500)
@@ -118,7 +118,7 @@ class ChannelActionSourceInput(BaseModel):
 class ChannelActionTaskInput(BaseModel):
     """One ordered task supplied by the Agent."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: str = Field(min_length=1, max_length=80)
     title: str = Field(min_length=1, max_length=500)
@@ -142,7 +142,7 @@ class ChannelActionTaskInput(BaseModel):
 class ChannelActionInput(BaseModel):
     """Act on one active External Channel binding."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     mode: Literal["finish", "continue", "request_input", "ignore"] = Field(
         description=(
@@ -250,7 +250,7 @@ class ChannelActionInput(BaseModel):
 class DownloadExternalFileInput(BaseModel):
     """Materialize one selected External Channel file in the Runtime."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     file: str = Field(
         min_length=1,

@@ -239,11 +239,10 @@ async def test_runtime_s3_clients_use_checksum_capable_sigv4_presigning(
         "http://s3.internal",
         "http://s3.public",
     ]
-    assert all(
-        isinstance(call["config"], control_server.BotoConfig)
-        and getattr(call["config"], "signature_version", None) == "s3v4"
-        for call in calls
-    )
+    for call in calls:
+        config = call["config"]
+        assert isinstance(config, control_server.BotoConfig)
+        assert config.signature_version == "s3v4"
 
 
 @pytest.mark.asyncio

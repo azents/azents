@@ -14,6 +14,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.provider_output as provider_output
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.config import Config, FileLifecycleConfig, WorkspaceS3Config
 from azents.core.enums import (
     AgentRunStatus,
@@ -44,7 +45,6 @@ from azents.engine.run.errors import ModelCallError
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.exchange_file.operations import ExchangeFileOperationRepository

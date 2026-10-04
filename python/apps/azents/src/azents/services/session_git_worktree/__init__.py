@@ -5,17 +5,25 @@ import dataclasses
 import hashlib
 import logging
 import re
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
+from types import MappingProxyType
 from typing import Annotated, Literal, NamedTuple, assert_never
 
 from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import (
+    ActionExecution,
+    ActionExecutionEvent,
+    ActionExecutionEventCreate,
+    ActionExecutionProjection,
+)
 from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
@@ -30,12 +38,24 @@ from azents.core.enums import (
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
 )
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
+    AgentCreateGitWorktreeContinuationResult,
+    AgentRemoveGitWorktreeContinuationResult,
+    MailboxItemCreate,
+    MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.core.session_workspace_items import NewSessionWorkspaceItem
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
     normalize_session_workspace_path,
+)
+from azents.core.session_workspace_project import (
+    SessionWorkspaceProject,
+    SessionWorkspaceProjectCreate,
 )
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
@@ -48,15 +68,8 @@ from azents.engine.events.types import Event
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
 from azents.engine.tools.skill import SkillProjectionService
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionEvent,
-    ActionExecutionEventCreate,
-    ActionExecutionProjection,
-)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -64,13 +77,6 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
-    AgentCreateGitWorktreeContinuationResult,
-    AgentRemoveGitWorktreeContinuationResult,
-    MailboxItemCreate,
-    MailboxPresentationItem,
-    TurnActionContinuationMailboxPayload,
-)
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -81,10 +87,6 @@ from azents.repos.session_git_worktree.data import (
     SessionGitWorktreeCreate,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import (
-    SessionWorkspaceProject,
-    SessionWorkspaceProjectCreate,
-)
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )
@@ -136,6 +138,100 @@ class _CleanupClassification(NamedTuple):
 
     classification: Literal["legacy", "canonical"] | None
     ownership_error: str | None
+
+
+type _CleanupOutcome = Literal[
+    "unresolved", "protected", "removed", "already_absent", "failed"
+]
+_CLEANUP_OUTCOME_ADAPTER = TypeAdapter[_CleanupOutcome](_CleanupOutcome)
+
+
+@dataclasses.dataclass(frozen=True)
+class _CleanupCandidate:
+    """Typed fields with opaque legacy data retained only for compatible egress."""
+
+    path: str | None
+    outcome: _CleanupOutcome | None
+    reason_code: str | None
+    summary: str | None
+    historical_payload: Mapping[str, JSONValue] | None
+    cancellation_applied: bool
+
+    @classmethod
+    def decode(cls, payload: dict[str, JSONValue]) -> "_CleanupCandidate":
+        """Decode consumed fields once, preserving historical unknown-field behavior."""
+        try:
+            outcome = _CLEANUP_OUTCOME_ADAPTER.validate_python(payload.get("outcome"))
+        except ValidationError:
+            outcome = None
+        return cls(
+            path=_optional_result_string(payload, "path"),
+            outcome=outcome,
+            reason_code=_optional_result_string(payload, "reason_code"),
+            summary=_optional_result_string(payload, "summary"),
+            historical_payload=MappingProxyType(dict(payload)),
+            cancellation_applied=False,
+        )
+
+    def with_cancellation(self, reason: str) -> "_CleanupCandidate":
+        """Update unresolved typed candidates without changing captured wire data."""
+        if self.outcome != "unresolved":
+            return self
+        return dataclasses.replace(
+            self, reason_code="cancelled", summary=reason, cancellation_applied=True
+        )
+
+    def to_json(self) -> dict[str, JSONValue]:
+        """Encode known fields or transparently retain legacy extensions at egress."""
+        if self.historical_payload is not None:
+            payload = dict(self.historical_payload)
+            if self.cancellation_applied:
+                payload["reason_code"] = self.reason_code
+                payload["summary"] = self.summary
+            return payload
+        return {
+            "path": self.path,
+            "outcome": self.outcome,
+            "reason_code": self.reason_code,
+            "summary": self.summary,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
+class _CleanupResult:
+    """Immutable application result until its explicit durable JSON encoding."""
+
+    phase: str
+    candidates: tuple[_CleanupCandidate, ...]
+
+    def to_json(self) -> dict[str, JSONValue]:
+        """Encode unchanged version/count/phase fields from typed outcomes."""
+        values: list[JSONValue] = [candidate.to_json() for candidate in self.candidates]
+        return {
+            "schema_version": 1,
+            "phase": self.phase,
+            "examined_count": len(self.candidates),
+            "protected_count": _cleanup_candidate_count(self.candidates, "protected"),
+            "removed_count": _cleanup_candidate_count(self.candidates, "removed"),
+            "already_absent_count": _cleanup_candidate_count(
+                self.candidates, "already_absent"
+            ),
+            "failed_count": _cleanup_candidate_count(self.candidates, "failed"),
+            "unresolved_count": _cleanup_candidate_count(self.candidates, "unresolved"),
+            "candidates": values,
+        }
+
+
+def _decode_cleanup_candidates(
+    result: dict[str, JSONValue],
+) -> tuple[_CleanupCandidate, ...]:
+    """Decode the historical list once with the original non-dict skip rule."""
+    values = result.get("candidates")
+    if not isinstance(values, list):
+        return ()
+    return tuple(
+        _CleanupCandidate.decode(value) for value in values if isinstance(value, dict)
+    )
 
 
 def _is_agent_worktree_bridge_action(action_type: str) -> bool:
@@ -1427,7 +1523,7 @@ class SessionGitWorktreeService:
             execution = await self.action_execution_repository.update_result(
                 session,
                 action_execution_id=execution.id,
-                result=_cleanup_result(phase="discovering", candidates=[]),
+                result=_cleanup_result(phase="discovering", candidates=[]).to_json(),
             )
         await self._publish_action_execution_projection(
             execution=execution,
@@ -1487,6 +1583,7 @@ class SessionGitWorktreeService:
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
+                exc_info=True,
                 extra=_cleanup_log_summary(
                     stage="terminal",
                     reason_code=(
@@ -1586,6 +1683,7 @@ class SessionGitWorktreeService:
             )
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
+                exc_info=True,
                 extra=_cleanup_log_summary(
                     stage="terminal",
                     reason_code="runtime_unavailable",
@@ -1616,6 +1714,7 @@ class SessionGitWorktreeService:
             )
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
+                exc_info=True,
                 extra=_cleanup_log_summary(
                     stage="terminal",
                     reason_code="runner_operation_failed",
@@ -2128,11 +2227,12 @@ class SessionGitWorktreeService:
         self,
         *,
         execution: ActionExecution,
-        result: dict[str, JSONValue],
+        result: _CleanupResult,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         actor_generation: int | None = None,
     ) -> ActionExecution:
         """Persist and project one cleanup result snapshot."""
+        encoded_result = result.to_json()
         async with self._action_owner_session_manager(
             execution,
             actor_generation=actor_generation,
@@ -2140,7 +2240,7 @@ class SessionGitWorktreeService:
             updated = await self.action_execution_repository.update_result(
                 session,
                 action_execution_id=execution.id,
-                result=result,
+                result=encoded_result,
             )
         await self._publish_action_execution_projection(
             execution=updated,
@@ -2153,7 +2253,7 @@ class SessionGitWorktreeService:
         self,
         *,
         execution: ActionExecution,
-        result: dict[str, JSONValue],
+        result: _CleanupResult,
         reason: str,
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
@@ -2204,25 +2304,15 @@ class SessionGitWorktreeService:
             if current_result is None:
                 result = _cleanup_result(phase="cancelled", candidates=[])
             else:
-                candidates_value = current_result.get("candidates")
-                candidates = (
-                    [
-                        candidate
-                        for candidate in candidates_value
-                        if isinstance(candidate, dict)
-                    ]
-                    if isinstance(candidates_value, list)
-                    else []
+                candidates = tuple(
+                    candidate.with_cancellation(reason)
+                    for candidate in _decode_cleanup_candidates(current_result)
                 )
-                for candidate in candidates:
-                    if candidate.get("outcome") == "unresolved":
-                        candidate["reason_code"] = "cancelled"
-                        candidate["summary"] = reason
                 result = _cleanup_result(phase="cancelled", candidates=candidates)
             updated = await self.action_execution_repository.update_result(
                 session,
                 action_execution_id=execution.id,
-                result=result,
+                result=result.to_json(),
             )
         await self._publish_action_execution_projection(
             execution=updated,
@@ -5273,6 +5363,15 @@ class SessionGitWorktreeService:
                         reason=str(error),
                     )
                     continue
+                cleanup_logger = bind_extra(
+                    logger,
+                    {
+                        "agent_id": agent_id,
+                        "root_session_id": root_session_id,
+                        "session_id": creator_session_id,
+                        "worktree_id": allocation.id,
+                    },
+                )
                 try:
                     await self._run_cleanup_for_allocation(
                         agent_id=agent_id,
@@ -5285,13 +5384,9 @@ class SessionGitWorktreeService:
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.exception(
+                    cleanup_logger.exception(
                         "Archived Session Git worktree cleanup failed unexpectedly",
                         extra={
-                            "agent_id": agent_id,
-                            "root_session_id": root_session_id,
-                            "session_id": creator_session_id,
-                            "worktree_id": allocation.id,
                             "reason_code": "unexpected_cleanup_failure",
                         },
                     )
@@ -5303,15 +5398,9 @@ class SessionGitWorktreeService:
                     except asyncio.CancelledError:
                         raise
                     except Exception:
-                        logger.exception(
+                        cleanup_logger.exception(
                             "Archived Session Git worktree cleanup failure state "
                             "could not be recorded",
-                            extra={
-                                "agent_id": agent_id,
-                                "root_session_id": root_session_id,
-                                "session_id": creator_session_id,
-                                "worktree_id": allocation.id,
-                            },
                         )
         return len(allocations)
 
@@ -5514,6 +5603,7 @@ class SessionGitWorktreeService:
         ):
             logger.info(
                 "Skipped empty session worktree directory cleanup",
+                exc_info=True,
                 extra={
                     "session_id": allocation.session_id,
                     "worktree_id": allocation.id,
@@ -5952,52 +6042,40 @@ def _cleanup_candidate(
     ],
     reason_code: str | None,
     summary: str | None,
-) -> dict[str, JSONValue]:
-    """Build one content-free durable cleanup candidate result."""
-    return {
-        "path": path,
-        "outcome": outcome,
-        "reason_code": reason_code,
-        "summary": summary,
-    }
+) -> _CleanupCandidate:
+    """Build one content-free typed cleanup candidate."""
+    return _CleanupCandidate(
+        path=path,
+        outcome=outcome,
+        reason_code=reason_code,
+        summary=summary,
+        historical_payload=None,
+        cancellation_applied=False,
+    )
 
 
 def _cleanup_result(
     *,
     phase: str,
-    candidates: list[dict[str, JSONValue]],
-) -> dict[str, JSONValue]:
+    candidates: Sequence[_CleanupCandidate],
+) -> _CleanupResult:
     """Build the versioned durable result for one cleanup action."""
-    candidate_values: list[JSONValue] = [candidate for candidate in candidates]
-    return {
-        "schema_version": 1,
-        "phase": phase,
-        "examined_count": len(candidates),
-        "protected_count": _cleanup_candidate_count(candidates, "protected"),
-        "removed_count": _cleanup_candidate_count(candidates, "removed"),
-        "already_absent_count": _cleanup_candidate_count(
-            candidates,
-            "already_absent",
-        ),
-        "failed_count": _cleanup_candidate_count(candidates, "failed"),
-        "unresolved_count": _cleanup_candidate_count(candidates, "unresolved"),
-        "candidates": candidate_values,
-    }
+    return _CleanupResult(phase=phase, candidates=tuple(candidates))
 
 
 def _cleanup_candidate_count(
-    candidates: list[dict[str, JSONValue]],
+    candidates: Sequence[_CleanupCandidate],
     outcome: str,
 ) -> int:
     """Count one candidate outcome without exposing candidate contents."""
-    return sum(1 for candidate in candidates if candidate.get("outcome") == outcome)
+    return sum(1 for candidate in candidates if candidate.outcome == outcome)
 
 
 def _cleanup_log_summary(
     *,
     stage: str,
     reason_code: str | None,
-    candidates: list[dict[str, JSONValue]],
+    candidates: Sequence[_CleanupCandidate],
 ) -> dict[str, str | int | None]:
     """Return structured cleanup summary fields for operational logs."""
     return {

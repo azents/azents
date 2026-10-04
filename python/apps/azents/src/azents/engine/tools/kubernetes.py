@@ -3,7 +3,7 @@
 lightkube-based native Toolkit.
 Provides Generic tools for all resource types, including CRDs.
 Supports kubeconfig/token/EKS/GKE authentication.
-Only exec uses kubernetes_asyncio WsApiClient; lightkube lacks WebSocket.
+Discovery and WebSocket exec use the existing kubernetes_asyncio client.
 """
 
 import asyncio
@@ -19,6 +19,8 @@ import httpx2 as httpx
 import jmespath
 import yaml
 from botocore.exceptions import ClientError as BotoClientError
+from google.api_core.exceptions import GoogleAPIError
+from google.auth.exceptions import GoogleAuthError
 from jmespath.exceptions import JMESPathError
 from kubernetes_asyncio.client import ApiClient, CoreV1Api, VersionApi
 from kubernetes_asyncio.client.rest import ApiException
@@ -31,7 +33,7 @@ from kubernetes_asyncio.stream.ws_client import (
 )
 from lightkube import ApiError, AsyncClient
 from lightkube.resources.core_v1 import Event
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from azents.core.tools import (
     ClusterConfig,
@@ -57,7 +59,17 @@ from azents.engine.tools.kubernetes_discovery import ResourceDiscoveryCache
 logger = logging.getLogger(__name__)
 
 # Error types caused by user settings/infra issues (warning level)
-_CLIENT_ERRORS = (ConnectionError, TimeoutError, OSError, ApiException, BotoClientError)
+_CLIENT_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+    OSError,
+    ApiException,
+    BotoClientError,
+    GoogleAPIError,
+    GoogleAuthError,
+    aiohttp.ClientError,
+    httpx.HTTPError,
+)
 
 
 class KubernetesClusterClients(NamedTuple):
@@ -257,6 +269,8 @@ def _apply_output_filter(data: object, expression: str) -> str:
 class K8sListInput(BaseModel):
     """k8s_list tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     cluster: str = Field(description="Cluster name")
     api_version: str = Field(default="v1", description="API version (e.g. v1, apps/v1)")
     kind: str = Field(description="Resource kind (e.g. Pod, Deployment, Service)")
@@ -290,6 +304,8 @@ class K8sListInput(BaseModel):
 class K8sGetInput(BaseModel):
     """k8s_get tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     cluster: str = Field(description="Cluster name")
     api_version: str = Field(default="v1", description="API version")
     kind: str = Field(description="Resource kind")
@@ -313,6 +329,8 @@ class K8sGetInput(BaseModel):
 class K8sLogsInput(BaseModel):
     """k8s_logs tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     cluster: str = Field(description="Cluster name")
     namespace: str | None = Field(
         default=None, description="Namespace (uses cluster default if omitted)"
@@ -329,6 +347,8 @@ class K8sLogsInput(BaseModel):
 
 class K8sEventsInput(BaseModel):
     """k8s_events tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     cluster: str = Field(description="Cluster name")
     namespace: str | None = Field(
@@ -356,11 +376,15 @@ class K8sEventsInput(BaseModel):
 class K8sApiResourcesInput(BaseModel):
     """k8s_api_resources tool input."""
 
+    model_config = ConfigDict(extra="forbid")
+
     cluster: str = Field(description="Cluster name")
 
 
 class K8sApplyInput(BaseModel):
     """k8s_apply tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     cluster: str = Field(description="Cluster name")
     manifest: str = Field(description="YAML manifest string")
@@ -368,6 +392,8 @@ class K8sApplyInput(BaseModel):
 
 class K8sDeleteInput(BaseModel):
     """k8s_delete tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     cluster: str = Field(description="Cluster name")
     api_version: str = Field(default="v1", description="API version")
@@ -380,6 +406,8 @@ class K8sDeleteInput(BaseModel):
 
 class K8sExecInput(BaseModel):
     """k8s_exec tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     cluster: str = Field(description="Cluster name")
     namespace: str | None = Field(
@@ -938,9 +966,8 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
                     cluster_cred,
                     proxy_url=self._proxy_url,
                 )
-                httpx_client: httpx.AsyncClient = new_client._client._client
                 new_cache = ResourceDiscoveryCache()
-                await new_cache.discover(httpx_client)
+                await new_cache.discover(new_exec_client)
             except asyncio.CancelledError:
                 await _close_kubernetes_clients(new_client, new_exec_client)
                 raise
@@ -949,15 +976,9 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
                 raise FunctionToolError(
                     f"Failed to initialize Kubernetes cluster '{cluster}': {exc}"
                 ) from None
-            except Exception as exc:
+            except Exception:
                 await _close_kubernetes_clients(new_client, new_exec_client)
-                logger.exception(
-                    "Failed to initialize Kubernetes cluster clients",
-                    extra={"cluster": cluster},
-                )
-                raise FunctionToolError(
-                    f"Failed to initialize Kubernetes cluster '{cluster}': {exc}"
-                ) from None
+                raise
 
             self._clients[cluster] = new_client
             self._exec_clients[cluster] = new_exec_client

@@ -26,6 +26,16 @@ from pydantic import BaseModel, Field, TypeAdapter, model_validator
 from azents.api.public.agent_runtime.v1.data import (
     AgentRuntimeLifecyclePresentationResponse,
 )
+from azents.core.action_execution_data import (
+    ActionExecution,
+    ActionExecutionEvent,
+    ActionExecutionProjection,
+)
+from azents.core.agent_project_preset import AgentProjectPreset
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionUnreadTerminalRunProjection,
+)
 from azents.core.chat_data import (
     ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
@@ -57,6 +67,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     default_historical_execution_options,
 )
+from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_availability import (
     CancelPrimaryModelReservationRequest,
@@ -64,6 +75,7 @@ from azents.core.model_availability import (
     SessionModelAvailability,
 )
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
     ChatAction,
@@ -73,18 +85,6 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import Event, UserMessagePayload, public_event_payload
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
-from azents.rdb.models.event import JSONValue
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionEvent,
-    ActionExecutionProjection,
-)
-from azents.repos.agent_project_preset.data import AgentProjectPreset
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionUnreadTerminalRunProjection,
-)
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.chat.context import (
     SessionContext,
     SessionContextBreakdownSegment,

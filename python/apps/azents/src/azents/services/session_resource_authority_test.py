@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -20,7 +21,6 @@ from azents.core.session_resource_authority import (
     accepts_execution_owner,
 )
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.session_resource_authority import (
     AuthorizedPublicSessionResource,

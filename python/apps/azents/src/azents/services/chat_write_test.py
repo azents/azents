@@ -10,6 +10,11 @@ import sqlalchemy as sa
 from azcommon.result import Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionCreate,
+    SessionAgent,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRunStatus,
@@ -29,7 +34,9 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
 )
+from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem, UserMessageMailboxPayload
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     RunMarkerPayload,
@@ -44,7 +51,7 @@ from azents.engine.run.failure import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session import SessionManager
@@ -53,11 +60,6 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionCreate,
-    SessionAgent,
-)
 from azents.repos.chat_write_operations import ChatWriteOperationsRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
@@ -67,7 +69,6 @@ from azents.repos.chat_write_request.data import (
 from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
-from azents.repos.mailbox.data import MailboxItem, UserMessageMailboxPayload
 from azents.repos.message import MessageRepository
 from azents.repos.session_model_profile.repository import (
     SessionModelProfileRepository,

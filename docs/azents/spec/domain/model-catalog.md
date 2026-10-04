@@ -435,6 +435,14 @@ publication sets it true; a failed refresh does not invalidate an otherwise usab
 listing. Retained rows after invalidation remain diagnostic, but cannot authorize
 new explicit image saves or runtime dispatch.
 
+Image synchronization records its failed attempt before propagating the original
+provider listing exception and cause. It does not return a successful projection
+summary with a failed status. The failure retains provider diagnostics, retry
+policy and recovery hints without replacing current image entries, changing
+configuration authority or clearing an otherwise usable listing. Unexpected
+failures likewise record their attempt and propagate; successful synchronization
+and expected policy/precondition result variants keep their existing contracts.
+
 ### Coordinated data transition
 
 Migration `d9bff320245f` follows `1c42cc5ce89f` in one linear chain. Old readers,

@@ -48,13 +48,13 @@ class RDBAgentRuntimeRemovalOperation(RDBModel):
     __tablename__ = "agent_runtime_removal_operations"
 
     UQ_ACTIVE_AGENT = sa.Index(
-        "uq_agent_runtime_removal_operations_active_agent",
+        "ix_agent_runtime_removal_operations_agent_id",
         "agent_id",
         unique=True,
         postgresql_where=sa.text("status != 'completed'"),
     )
     UQ_AGENT_IDEMPOTENCY_KEY = sa.Index(
-        "uq_agent_runtime_removal_operations_agent_idempotency",
+        "ix_agent_runtime_removal_operations_agent_id_idempotency_key",
         "agent_id",
         "idempotency_key",
         unique=True,
@@ -65,7 +65,7 @@ class RDBAgentRuntimeRemovalOperation(RDBModel):
         "next_attempt_at",
     )
     IX_AGENT_CREATED_AT = sa.Index(
-        "ix_agent_runtime_removal_operations_agent_created_at",
+        "ix_agent_runtime_removal_operations_agent_id_created_at",
         "agent_id",
         "created_at",
     )

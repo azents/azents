@@ -5,11 +5,33 @@ from typing import Annotated, AsyncIterator
 import aioboto3
 from aioboto3.session import Session
 from fastapi import Depends
+from jinja2 import Environment, PackageLoader
 from types_aiobotocore_ses.client import SESClient
 
 from azents.core.config import Config, EmailConfig
 from azents.core.deps import get_appctx, get_email_config
 from azents.utils.appctx import AppContext
+
+
+def create_template_environment() -> Environment:
+    """Construct the standard renderer for explicit application/test composition."""
+    return Environment(
+        loader=PackageLoader("azents.core.email", "resources/templates"),
+        autoescape=True,
+    )
+
+
+async def get_template_environment(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+) -> Environment:
+    """Reuse an application-owned Email renderer and its template cache."""
+
+    async def template_environment_variable() -> AsyncIterator[Environment]:
+        yield create_template_environment()
+
+    return await appctx.get_variable(
+        f"{__name__}.get_template_environment", template_environment_variable
+    )
 
 
 async def get_aws_session(

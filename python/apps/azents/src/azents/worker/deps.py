@@ -13,9 +13,12 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from fastapi import Depends
 from redis.asyncio import Redis
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import (
+    BaseWebSocketBroadcast,
+)
 from azents.broker.redis import RedisBroker
 from azents.broker.types import SessionBroker
+from azents.broker.websocket_deps import get_websocket_broadcast
 from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_appctx, get_config, get_credential_cipher
@@ -92,7 +95,12 @@ from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferSer
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTransferService
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.artifact import ArtifactService
-from azents.services.chat.live_events import RedisLiveEventStore
+from azents.services.chat.live_events import (
+    BaseLiveEventStore,
+)
+from azents.services.chat.live_events import (
+    get_live_event_store as get_app_live_event_store,
+)
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -157,18 +165,10 @@ def get_runtime_tool_operation_client(
 
 async def get_broadcast(
     appctx: Annotated[AppContext[Config], Depends(get_appctx)],
-) -> WebSocketBroadcast:
+) -> BaseWebSocketBroadcast:
     """Worker-only WebSocketBroadcast dependency (cached by AppContext)."""
 
-    async def create() -> AsyncIterator[WebSocketBroadcast]:
-        redis = create_redis_client(appctx.config.redis.url)
-        broadcast = WebSocketBroadcast(redis)
-        try:
-            yield broadcast
-        finally:
-            await redis.aclose()
-
-    return await appctx.get_variable(f"{__name__}.get_broadcast", create)
+    return await get_websocket_broadcast(appctx)
 
 
 def get_skill_toolkit_provider(
@@ -177,7 +177,7 @@ def get_skill_toolkit_provider(
         Depends(get_runtime_tool_operation_client),
     ],
     store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)],
     vfs_projection_service: Annotated[
         VfsProjectionService,
         Depends(get_vfs_projection_service),
@@ -588,11 +588,13 @@ def get_worker_config(
     )
 
 
-def get_live_event_store(
-    worker_redis: Annotated[Redis, Depends(get_worker_redis)],
-) -> RedisLiveEventStore:
+async def get_live_event_store(
+    appctx: Annotated[AppContext[Config], Depends(get_appctx)],
+) -> BaseLiveEventStore:
     """Worker live event store dependency."""
-    return RedisLiveEventStore(worker_redis)
+    store = await get_app_live_event_store(appctx)
+    assert isinstance(store, BaseLiveEventStore)
+    return store
 
 
 def get_command_registry() -> dict[str, CommandHandler]:

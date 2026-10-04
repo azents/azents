@@ -17,12 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.run.executor as run_executor_module
 from azents.broker.types import SessionWakeUp
+from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
 from azents.core.agent import (
     AgentModelSelection,
     SelectableModelCandidate,
     SelectableModelOption,
     SelectableModelSettings,
 )
+from azents.core.agent_session_data import AgentSession, PendingSessionCommand
 from azents.core.chat_data import ChatLiveRunState
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -57,6 +59,7 @@ from azents.core.inference_profile import (
     validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import (
     ModelExecutionOptionId,
     validate_execution_options,
@@ -154,15 +157,10 @@ from azents.engine.tools.dynamic_worktree import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionProjection,
-)
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.engine_read import (
     EngineInvokeReadRepository,
@@ -172,7 +170,6 @@ from azents.repos.engine_read import (
 from azents.repos.engine_resolve import EngineResolveRepositories
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
-from azents.repos.mailbox.data import MailboxItem
 from azents.repos.model_candidate_selection import ModelCandidateSelection
 from azents.repos.model_metadata_source_data import ContextModelRequest
 from azents.repos.session_execution import (
@@ -2210,7 +2207,7 @@ def _executor(
         dynamic_worktree_toolkit_provider=Mock(
             spec=run_executor_module.DynamicWorktreeToolkitProvider
         ),
-        broadcast=Mock(spec=run_executor_module.WebSocketBroadcast),
+        broadcast=Mock(spec=run_executor_module.BaseWebSocketBroadcast),
     )
 
 

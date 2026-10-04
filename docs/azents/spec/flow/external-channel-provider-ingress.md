@@ -98,8 +98,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-03
-spec_version: 65
+last_verified_at: 2026-10-04
+spec_version: 66
 ---
 
 # External Channel Provider Ingress
@@ -218,6 +218,12 @@ interaction tokens, raw bodies, and signatures remain request-local and are neit
 persisted nor replayed.
 
 ## Interactive Admission and Selection
+
+Signed Slack selector and settings metadata preserves compact wire names,
+versions, HMAC authentication, scope bindings and target-generation fences.
+Runtime decoding rejects unknown fields and type coercion; settings variants
+accept only fields belonging to their setup, parent or thread target. Thread
+binding timestamps must be timezone-aware.
 
 Signed Slack interaction callbacks use the same fixed endpoint and App/Team candidate
 selection as Events API payloads. JSON events and form-encoded interactions are

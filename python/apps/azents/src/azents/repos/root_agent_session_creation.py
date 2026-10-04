@@ -7,6 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentRuntimeCapability, AgentSessionKind
 from azents.core.root_agent_session_creation import (
     AgentDefaultRootWorkspaceIntent,
@@ -14,12 +15,11 @@ from azents.core.root_agent_session_creation import (
     RootAgentSessionCreationResult,
     RootWorkspaceIntent,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

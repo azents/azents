@@ -232,7 +232,7 @@ class LinuxPtyTerminalBackend:
     """Linux implementation of the operating-system-neutral PTY boundary."""
 
     def __init__(self, *, launcher: PtyLauncher | None = None) -> None:
-        self._launcher = launcher or _launch_terminal_launcher
+        self.launcher = launcher or _launch_terminal_launcher
 
     async def open(self, spec: TerminalSpec) -> PtyTerminalProcess:
         workspace_root = spec.workspace_root.resolve(strict=True)
@@ -254,7 +254,7 @@ class LinuxPtyTerminalBackend:
             environment = dict(os.environ)
             environment.update(spec.environment)
             environment.update(_TERMINAL_ENVIRONMENT)
-            process = await self._launcher(
+            process = await self.launcher(
                 slave_fd,
                 working_directory,
                 environment,
@@ -440,8 +440,8 @@ class RunnerTerminal:
         self.spec = spec
         self.process = process
         self._limits = limits
-        self._clock = clock
-        self._utc_clock = utc_clock
+        self.clock = clock
+        self.utc_clock = utc_clock
         now = clock()
         self._created_at = now
         self._last_activity_at = now
@@ -533,7 +533,7 @@ class RunnerTerminal:
         self._highest_applied_input_sequence = pending.sequence
         self._pending_input = None
         self._activity_observed = True
-        self._last_activity_at = self._clock()
+        self._last_activity_at = self.clock()
         return TerminalInputResult(
             sequence=sequence,
             applied=True,
@@ -566,7 +566,7 @@ class RunnerTerminal:
         self._unacknowledged_output.append(output)
         self._unacknowledged_output_bytes += len(data)
         self._activity_observed = True
-        self._last_activity_at = self._clock()
+        self._last_activity_at = self.clock()
         return output
 
     def acknowledge_output(self, *, sequence: int) -> None:
@@ -608,7 +608,7 @@ class RunnerTerminal:
 
     def begin_stream_recovery(self) -> None:
         """Start or continue a generation-stable Terminal data-stream grace."""
-        now = self._clock()
+        now = self.clock()
         if self._stream_disconnected_at is None:
             self._stream_disconnected_at = now
         self._stream_attempt_started_at = now
@@ -621,13 +621,13 @@ class RunnerTerminal:
 
     def stream_grace_remaining_seconds(self) -> float | None:
         """Return the exact remaining overall data-stream grace, if active."""
-        now = self._clock()
+        now = self.clock()
         if not self._stream_established:
             local_remaining = self._limits.stream_grace_seconds - (
                 now - self._created_at
             )
             authority_remaining = (
-                self.spec.data_stream_grace_deadline_at - self._utc_clock()
+                self.spec.data_stream_grace_deadline_at - self.utc_clock()
             ).total_seconds()
             return max(0.0, min(local_remaining, authority_remaining))
         if self._stream_disconnected_at is None:
@@ -639,8 +639,8 @@ class RunnerTerminal:
 
     def deadline(self) -> TerminalDeadline | None:
         """Return the current bounded deadline without mutating process state."""
-        now = self._clock()
-        utc_now = self._utc_clock()
+        now = self.clock()
+        utc_now = self.utc_clock()
         if utc_now >= self.spec.maximum_deadline_at:
             return TerminalDeadline.MAXIMUM_LIFETIME
         if now - self._created_at >= self._limits.maximum_lifetime_seconds:
@@ -717,10 +717,10 @@ class RunnerTerminalRegistry:
         clock: Callable[[], float],
         utc_clock: Callable[[], datetime],
     ) -> None:
-        self._backend = backend
+        self.backend = backend
         self._limits = limits
-        self._clock = clock
-        self._utc_clock = utc_clock
+        self.clock = clock
+        self.utc_clock = utc_clock
         self._terminals: dict[str, RunnerTerminal] = {}
         self._reservations: dict[str, _TerminalReservation] = {}
         self._lock = asyncio.Lock()
@@ -751,7 +751,7 @@ class RunnerTerminalRegistry:
             self._reservations[spec.terminal_id] = reservation
         process: PtyTerminalProcess | None = None
         try:
-            process = await self._backend.open(spec)
+            process = await self.backend.open(spec)
         except asyncio.CancelledError:
             await self._remove_reservation(reservation)
             raise
@@ -770,8 +770,8 @@ class RunnerTerminalRegistry:
                         spec=spec,
                         process=process,
                         limits=self._limits,
-                        clock=self._clock,
-                        utc_clock=self._utc_clock,
+                        clock=self.clock,
+                        utc_clock=self.utc_clock,
                     )
                     self._terminals[spec.terminal_id] = terminal
         except asyncio.CancelledError:
@@ -897,7 +897,7 @@ class RunnerTerminalRegistry:
         self._reservations.pop(terminal_id, None)
 
     def _enforce_authority_deadlines(self, spec: TerminalSpec) -> None:
-        now = self._utc_clock()
+        now = self.utc_clock()
         if spec.maximum_deadline_at <= now:
             raise TerminalAdmissionError(
                 "Terminal maximum lifetime authority has already expired."

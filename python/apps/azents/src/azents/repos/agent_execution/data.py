@@ -11,10 +11,10 @@ from azents.core.enums import (
     AgentRunStatus,
     EventKind,
 )
+from azents.core.json_value import JSONValue
 from azents.core.model_operation import ModelOperationState
 from azents.engine.events.types import ActiveToolCall
 from azents.engine.run.failure import FailedRunRetryState
-from azents.rdb.models.event import JSONValue
 
 
 class EventCreate(BaseModel):

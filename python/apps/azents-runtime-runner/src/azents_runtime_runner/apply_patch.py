@@ -99,9 +99,20 @@ ApplyPatchFaultInjector: TypeAlias = Callable[[FaultPoint, int, PatchOperation],
 
 
 @dataclasses.dataclass(frozen=True)
+class _StatSignature:
+    """Named filesystem identity used for patch revalidation."""
+
+    device: int
+    inode: int
+    mode: int
+    size: int
+    mtime_ns: int
+
+
+@dataclasses.dataclass(frozen=True)
 class _PathFingerprint:
     resolved_path: Path
-    stat_signature: tuple[int, int, int, int, int] | None
+    stat_signature: _StatSignature | None
     content_sha256: str | None
 
 
@@ -724,7 +735,7 @@ def _stage_output(base: Path, item: _PreparedOperation) -> Path:
         if item.source is not None and item.fingerprint.stat_signature is not None:
             os.chmod(
                 staged_path,
-                stat.S_IMODE(item.fingerprint.stat_signature[2]),
+                stat.S_IMODE(item.fingerprint.stat_signature.mode),
             )
     except OSError:
         staged_path.unlink(missing_ok=True)
@@ -813,13 +824,13 @@ def _check_deadline(
 
 def _stat_signature(
     value: os.stat_result,
-) -> tuple[int, int, int, int, int]:
-    return (
-        value.st_dev,
-        value.st_ino,
-        value.st_mode,
-        value.st_size,
-        value.st_mtime_ns,
+) -> _StatSignature:
+    return _StatSignature(
+        device=value.st_dev,
+        inode=value.st_ino,
+        mode=value.st_mode,
+        size=value.st_size,
+        mtime_ns=value.st_mtime_ns,
     )
 
 

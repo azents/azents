@@ -1,23 +1,29 @@
 """ModelFileService tests."""
 
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from io import BytesIO
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import IO
 from unittest.mock import AsyncMock
 
 import pytest
+from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Success
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config, WorkspaceS3Config
 from azents.core.enums import AgentRunStatus, AgentSessionStatus, ModelFileStatus
 from azents.core.session_resource_authority import SessionResourceAuthority
-from azents.repos.model_file import model_file_storage_key
+from azents.rdb.session import SessionManager
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.model_file import ModelFileRepository, model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.model_file.operations import ModelFileOperationRepository
+from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.model_file import (
     ModelFileAccessDenied,
     ModelFileInvalidImage,
@@ -26,6 +32,7 @@ from azents.services.model_file import (
     model_file_size_limit_message,
     normalize_model_file_body,
 )
+from azents.testing.types import require_instance
 
 
 class _SessionBoundary:
@@ -39,12 +46,13 @@ class _SessionBoundary:
         """Yield one tracked fake DB session."""
         self.active += 1
         try:
-            yield cast(AsyncSession, object())
+            async with AsyncSession() as session:
+                yield session
         finally:
             self.active -= 1
 
 
-class _ModelFileRepository:
+class _ModelFileRepository(ModelFileRepository):
     """ModelFile repository honoring the service-preallocated ID."""
 
     def __init__(self, boundary: _SessionBoundary) -> None:
@@ -88,17 +96,43 @@ class _ModelFileRepository:
         self,
         session: AsyncSession,
         *,
-        model_file_ids: list[str],
+        model_file_ids: Sequence[str],
         deleted_at: datetime.datetime,
     ) -> list[ModelFile]:
         """Record pending ModelFiles marked for scheduled blob cleanup."""
-        del session, deleted_at
+        del session
         assert self.boundary.active == 1
         self.discarded_ids.extend(model_file_ids)
-        return [cast(ModelFile, object()) for _ in model_file_ids]
+        return [
+            ModelFile(
+                id=model_file_id,
+                workspace_id="workspace-1",
+                session_id="session-1",
+                agent_id="agent-1",
+                name=None,
+                media_type="text/plain",
+                kind="text",
+                size_bytes=5,
+                created_run_id="run-1",
+                created_run_index=1,
+                storage_key=model_file_storage_key(
+                    workspace_id="workspace-1",
+                    session_id="session-1",
+                    model_file_id=model_file_id,
+                ),
+                status=ModelFileStatus.DELETED,
+                normalized_format="original",
+                sha256="a" * 64,
+                metadata={},
+                created_at=deleted_at,
+                deleted_at=deleted_at,
+                blob_deleted_at=None,
+            )
+            for model_file_id in model_file_ids
+        ]
 
 
-class _S3Service:
+class _S3Service(S3Service):
     """Object storage asserting that no DB session is open."""
 
     def __init__(self, boundary: _SessionBoundary) -> None:
@@ -109,13 +143,14 @@ class _S3Service:
         self,
         bucket: str,
         key: str,
-        body: bytes,
+        body: str | bytes | IO[str] | IO[bytes],
         *,
         content_type: str | None = None,
     ) -> None:
         """Store bytes only outside a DB scope."""
         del bucket, content_type
         assert self.boundary.active == 0
+        assert isinstance(body, bytes)
         self.objects[key] = body
 
     async def delete(self, bucket: str, key: str) -> None:
@@ -125,18 +160,48 @@ class _S3Service:
         self.objects.pop(key, None)
 
 
-def _make_service(**kwargs: Any) -> ModelFileService:  # noqa: ANN401
+def _make_service(
+    *,
+    model_file_repository: ModelFileRepository,
+    agent_session_repository: AsyncMock,
+    agent_run_repository: AsyncMock,
+    workspace_user_repository: AsyncMock,
+    session_manager: SessionManager[AsyncSession],
+    s3_service: S3Service,
+    config: Config,
+) -> ModelFileService:
     """Construct ModelFileService with an injected completed operation repository."""
     operation_repository = ModelFileOperationRepository(
-        model_file_repository=kwargs["model_file_repository"],
-        agent_session_repository=kwargs.pop("agent_session_repository"),
-        agent_run_repository=kwargs["agent_run_repository"],
-        workspace_user_repository=kwargs.pop("workspace_user_repository"),
-        session_manager=kwargs["session_manager"],
+        model_file_repository=model_file_repository,
+        agent_session_repository=require_instance(
+            agent_session_repository, AgentSessionRepository
+        ),
+        agent_run_repository=require_instance(agent_run_repository, AgentRunRepository),
+        workspace_user_repository=require_instance(
+            workspace_user_repository, WorkspaceUserRepository
+        ),
+        session_manager=session_manager,
     )
     return ModelFileService(
         operation_repository=operation_repository,
-        **kwargs,
+        model_file_repository=model_file_repository,
+        agent_run_repository=require_instance(agent_run_repository, AgentRunRepository),
+        session_manager=session_manager,
+        s3_service=s3_service,
+        config=config,
+    )
+
+
+def _config() -> Config:
+    """Provide actual typed S3 configuration used by this bounded service."""
+    return Config.model_construct(
+        workspace_s3=WorkspaceS3Config(
+            bucket="test-bucket",
+            prefix="v1",
+            endpoint_url=None,
+            public_endpoint_url=None,
+            credentials=None,
+        )
     )
 
 
@@ -198,7 +263,7 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
     """ModelFile creation uploads outside DB and persists its stable key afterward."""
     boundary = _SessionBoundary()
     s3 = _S3Service(boundary)
-    agent_session_repository = AsyncMock()
+    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         agent_id="agent-1",
@@ -211,7 +276,7 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
     agent_session_repository.get_root_session_agent_by_session_id.return_value = (
         SimpleNamespace(agent_session_id="root-session-1")
     )
-    agent_run_repository = AsyncMock()
+    agent_run_repository = AsyncMock(spec=AgentRunRepository)
     agent_run_repository.get_by_id.return_value = SimpleNamespace(
         session_id="session-1",
         run_index=1,
@@ -221,16 +286,13 @@ async def test_model_file_upload_closes_db_session_before_s3_io() -> None:
         agent_run_repository.get_by_id.return_value
     )
     service = _make_service(
-        model_file_repository=cast(Any, _ModelFileRepository(boundary)),
+        model_file_repository=_ModelFileRepository(boundary),
         agent_session_repository=agent_session_repository,
         agent_run_repository=agent_run_repository,
-        workspace_user_repository=AsyncMock(),
+        workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
         session_manager=boundary.session_manager,
-        s3_service=cast(Any, s3),
-        config=cast(
-            Any,
-            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
-        ),
+        s3_service=s3,
+        config=_config(),
     )
 
     result = await service.create(
@@ -250,7 +312,7 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
     """Accepted attachment promotion is authorized by root lineage, not a User."""
     boundary = _SessionBoundary()
     s3 = _S3Service(boundary)
-    agent_session_repository = AsyncMock()
+    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     agent_session_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1",
         agent_id="agent-1",
@@ -263,7 +325,7 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
     agent_session_repository.get_root_session_agent_by_session_id.return_value = (
         SimpleNamespace(agent_session_id="root-session-1")
     )
-    agent_run_repository = AsyncMock()
+    agent_run_repository = AsyncMock(spec=AgentRunRepository)
     agent_run_repository.get_by_id.return_value = SimpleNamespace(
         session_id="session-1",
         run_index=1,
@@ -272,19 +334,16 @@ async def test_admitted_model_file_creation_ignores_workspace_membership() -> No
     agent_run_repository.lock_by_id.return_value = (
         agent_run_repository.get_by_id.return_value
     )
-    workspace_user_repository = AsyncMock()
+    workspace_user_repository = AsyncMock(spec=WorkspaceUserRepository)
     workspace_user_repository.get_by_workspace_and_user.return_value = None
     service = _make_service(
-        model_file_repository=cast(Any, _ModelFileRepository(boundary)),
+        model_file_repository=_ModelFileRepository(boundary),
         agent_session_repository=agent_session_repository,
         agent_run_repository=agent_run_repository,
         workspace_user_repository=workspace_user_repository,
         session_manager=boundary.session_manager,
-        s3_service=cast(Any, s3),
-        config=cast(
-            Any,
-            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
-        ),
+        s3_service=s3,
+        config=_config(),
     )
 
     result = await service.create(
@@ -305,7 +364,7 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
     """A lineage change after S3 upload aborts metadata creation and compensates."""
     boundary = _SessionBoundary()
     s3 = _S3Service(boundary)
-    agent_session_repository = AsyncMock()
+    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
     agent_session_repository.get_by_id.side_effect = [
         SimpleNamespace(
             workspace_id="workspace-1",
@@ -331,11 +390,12 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
         SimpleNamespace(agent_session_id="new-root-session"),
     ]
     model_file_repository = _ModelFileRepository(boundary)
-    workspace_user_repository = AsyncMock()
+    workspace_user_repository = AsyncMock(spec=WorkspaceUserRepository)
     service = _make_service(
-        model_file_repository=cast(Any, model_file_repository),
+        model_file_repository=model_file_repository,
         agent_session_repository=agent_session_repository,
         agent_run_repository=AsyncMock(
+            spec=AgentRunRepository,
             get_by_id=AsyncMock(
                 return_value=SimpleNamespace(
                     session_id="session-1",
@@ -353,11 +413,8 @@ async def test_admitted_model_file_cleans_object_when_root_lineage_changes() -> 
         ),
         workspace_user_repository=workspace_user_repository,
         session_manager=boundary.session_manager,
-        s3_service=cast(Any, s3),
-        config=cast(
-            Any,
-            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
-        ),
+        s3_service=s3,
+        config=_config(),
     )
 
     result = await service.create(
@@ -381,16 +438,13 @@ async def test_discard_pending_input_marks_files_for_lifecycle_cleanup() -> None
     boundary = _SessionBoundary()
     repository = _ModelFileRepository(boundary)
     service = _make_service(
-        model_file_repository=cast(Any, repository),
-        agent_session_repository=AsyncMock(),
-        agent_run_repository=AsyncMock(),
-        workspace_user_repository=AsyncMock(),
+        model_file_repository=repository,
+        agent_session_repository=AsyncMock(spec=AgentSessionRepository),
+        agent_run_repository=AsyncMock(spec=AgentRunRepository),
+        workspace_user_repository=AsyncMock(spec=WorkspaceUserRepository),
         session_manager=boundary.session_manager,
-        s3_service=cast(Any, _S3Service(boundary)),
-        config=cast(
-            Any,
-            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
-        ),
+        s3_service=_S3Service(boundary),
+        config=_config(),
     )
 
     discarded = await service.discard_pending_input(

@@ -2,28 +2,34 @@
 
 import dataclasses
 import datetime
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.chat_data import (
     NotWorkspaceMember,
     SessionNotFound,
 )
 from azents.core.enums import AgentSessionStatus, EventKind
+from azents.core.json_value import JSONValue
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
 )
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.types import (
     AssistantMessagePayload,
+    AttachmentOutputPart,
     ClientToolCallPayload,
     ClientToolResultPayload,
     Event,
     ExternalChannelMessagePayload,
+    InputTextPart,
+    OutputContentPart,
+    OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
     ScheduledTaskContinuationPayload,
@@ -34,15 +40,14 @@ from azents.engine.events.types import (
     SystemPromptFragmentPayload,
     TokenUsagePayload,
     TurnMarkerPayload,
+    UserContentPart,
     UserMessagePayload,
     public_event_payload,
 )
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
@@ -166,20 +171,19 @@ class SessionContextRawEvent(BaseModel):
     @classmethod
     def from_event(cls, event: Event) -> "SessionContextRawEvent":
         """Convert Event to raw event response model."""
-        return cls(
-            id=event.id,
-            kind=event.kind,
-            payload=cast(
-                dict[str, JSONValue],
-                public_event_payload(event.kind, event.payload),
-            ),
-            external_id=event.external_id,
-            adapter=event.adapter,
-            provider=event.provider,
-            model=event.model,
-            native_format=event.native_format,
-            schema_version=event.schema_version,
-            created_at=event.created_at,
+        return cls.model_validate(
+            {
+                "id": event.id,
+                "kind": event.kind,
+                "payload": public_event_payload(event.kind, event.payload),
+                "external_id": event.external_id,
+                "adapter": event.adapter,
+                "provider": event.provider,
+                "model": event.model,
+                "native_format": event.native_format,
+                "schema_version": event.schema_version,
+                "created_at": event.created_at,
+            }
         )
 
 
@@ -395,26 +399,29 @@ def _system_prompt_chars(system_prompt: SessionContextSystemPrompt) -> int:
     return sum(fragment.length for fragment in fragments if fragment is not None)
 
 
-def _content_chars(content: object) -> int:
+def _content_chars(
+    content: str | list[UserContentPart] | list[OutputContentPart],
+) -> int:
     """Calculate approximate character count from Event content part."""
     if isinstance(content, str):
         return len(content)
-    if isinstance(content, list):
-        total = 0
-        for part in content:
-            part_type = getattr(part, "type", None)
-            if part_type in {"input_text", "output_text"}:
-                total += len(getattr(part, "text", "") or "")
-            else:
-                total += len(str(part_type or ""))
-        return total
-    return len(str(content))
+    total = 0
+    for part in content:
+        if isinstance(part, InputTextPart) or (
+            isinstance(part, OutputTextPart) and part.type == "output_text"
+        ):
+            total += len(part.text)
+        else:
+            total += len(part.type)
+    return total
 
 
-def _output_part_chars(part: object) -> int:
+def _output_part_chars(part: OutputContentPart | str) -> int:
     """Calculate approximate character count from Tool output part."""
-    if getattr(part, "type", None) == "output_text":
-        return len(getattr(part, "text", "") or "")
-    name = getattr(part, "name", None)
-    attachment_id = getattr(part, "attachment_id", None)
-    return len(str(name or attachment_id or getattr(part, "type", "")))
+    if isinstance(part, str):
+        return 0
+    if isinstance(part, OutputTextPart):
+        return len(part.text) if part.type == "output_text" else len(part.type)
+    if isinstance(part, AttachmentOutputPart):
+        return len(part.name or part.attachment_id or part.type)
+    return len(part.name or part.type)

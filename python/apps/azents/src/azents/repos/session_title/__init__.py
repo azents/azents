@@ -14,6 +14,7 @@ from azents.core.active_model_capabilities import (
     identities_for_options,
     require_selection,
 )
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentSessionTitleSource
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.model_operation import (
@@ -29,7 +30,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.model_candidate_selection import select_model_operation_candidate

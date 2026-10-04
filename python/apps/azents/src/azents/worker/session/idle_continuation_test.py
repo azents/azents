@@ -15,6 +15,10 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+)
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
 from azents.engine.hooks.types import (
@@ -32,10 +36,6 @@ from azents.repos.idle_continuation import (
     IdleContinuationAdmission,
     IdleContinuationFinalization,
     IdleContinuationInput,
-)
-from azents.repos.mailbox.data import (
-    MailboxItem,
-    ScheduledTaskContinuationMailboxPayload,
 )
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,

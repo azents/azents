@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.account_access import ActiveAccountSubjectStatus
 from azents.core.auth.permissions import Permissions, has_permission
 from azents.core.auth.roles import get_permissions_for_role
+from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.account_access import evaluate_active_subject
@@ -66,15 +67,14 @@ class ToolkitOAuthOperationRepository:
         installations: tuple[GithubInstallationRecord, ...],
     ) -> Result[None, ToolkitOAuthDenied]:
         """Revalidate admission and complete the ordered full upsert/prune group."""
-        rows: list[dict[str, object]] = [
-            {
-                "id": record.installation_id,
-                "account": {
-                    "login": record.account_login,
-                    "type": record.account_type,
-                    "avatar_url": record.account_avatar_url,
-                },
-            }
+        rows = [
+            GitHubInstallationSnapshot(
+                installation_id=record.installation_id,
+                app_id=None,
+                account_login=record.account_login,
+                account_type=record.account_type,
+                account_avatar_url=record.account_avatar_url,
+            )
             for record in installations
         ]
         async with self.session_manager() as session:

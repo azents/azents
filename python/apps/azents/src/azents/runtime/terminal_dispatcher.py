@@ -40,9 +40,9 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
         runtime_coordination: RuntimeCoordinationStore,
     ) -> None:
         """Initialize Control and volatile settlement dependencies."""
-        self._control_protocol = control_protocol
-        self._terminal_coordination = terminal_coordination
-        self._runtime_coordination = runtime_coordination
+        self.control_protocol = control_protocol
+        self.terminal_coordination = terminal_coordination
+        self.runtime_coordination = runtime_coordination
 
     async def open_terminal(
         self,
@@ -57,7 +57,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
         if not await self._terminal_capability_current(record):
             await self._terminate_unroutable(record, requested_at=requested_at)
             return
-        result = await self._control_protocol.dispatch_runner_operation(
+        result = await self.control_protocol.dispatch_runner_operation(
             RuntimeRunnerOperation(
                 runtime_id=admission.runtime_id,
                 runner_generation=admission.runner_generation,
@@ -95,7 +95,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
         if not await self._terminal_capability_current(record):
             await self._terminate_unroutable(record, requested_at=requested_at)
             return
-        result = await self._control_protocol.dispatch_runner_operation(
+        result = await self.control_protocol.dispatch_runner_operation(
             RuntimeRunnerOperation(
                 runtime_id=admission.runtime_id,
                 runner_generation=admission.runner_generation,
@@ -130,7 +130,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
             if isinstance(result, RuntimeProtocolStaleGeneration)
             else RunnerTerminalTerminationReason.RUNTIME_INVALIDATED
         )
-        await self._terminal_coordination.request_termination(
+        await self.terminal_coordination.request_termination(
             record.admission.terminal_id,
             reason=reason,
             requested_at=requested_at,
@@ -150,7 +150,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
         record: RuntimeTerminalRecord,
     ) -> bool:
         admission = record.admission
-        runner = await self._runtime_coordination.get_connection(
+        runner = await self.runtime_coordination.get_connection(
             kind=RuntimeConnectionKind.RUNNER,
             subject_id=admission.runtime_id,
         )
@@ -168,7 +168,7 @@ class RuntimeTerminalControlDispatcherAdapter(RuntimeTerminalControlDispatcher):
         *,
         requested_at: datetime,
     ) -> None:
-        await self._terminal_coordination.request_termination(
+        await self.terminal_coordination.request_termination(
             record.admission.terminal_id,
             reason=RunnerTerminalTerminationReason.RUNTIME_INVALIDATED,
             requested_at=requested_at,

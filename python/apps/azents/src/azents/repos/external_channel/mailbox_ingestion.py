@@ -11,6 +11,7 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
@@ -83,7 +84,6 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningRepository,
 )
@@ -2305,7 +2305,9 @@ def _response_mode_ignored_reason(
     return None
 
 
-def _approval_url(web_url: str, access_request_id: str) -> str | None:
+def _approval_url(web_url: str | None, access_request_id: str) -> str | None:
+    if web_url is None:
+        return None
     parsed = urlparse(web_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None

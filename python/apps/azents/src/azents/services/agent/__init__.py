@@ -123,7 +123,7 @@ def _get_avatar_cdn_base_url(
 
 def _get_workspace_s3_bucket(
     config: Annotated[Config, Depends(get_config)],
-) -> str:
+) -> str | None:
     """Workspace S3 bucket name DI."""
     return config.workspace_s3.bucket
 
@@ -207,7 +207,7 @@ class AgentService:
     ]
     upload_service: Annotated[UploadService, Depends(get_upload_service)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
-    workspace_s3_bucket: Annotated[str, Depends(_get_workspace_s3_bucket)]
+    workspace_s3_bucket: Annotated[str | None, Depends(_get_workspace_s3_bucket)]
     avatar_cdn_base_url: Annotated[str | None, Depends(_get_avatar_cdn_base_url)]
     terminal_policy_invalidation_publisher: (
         TerminalPolicyInvalidationPublisherDependency
@@ -1240,6 +1240,8 @@ class AgentService:
         if self.avatar_cdn_base_url is not None:
             url = f"{self.avatar_cdn_base_url}/{stored.key}"
         else:
+            if not self.workspace_s3_bucket:
+                raise ValueError("Workspace S3 bucket is not configured")
             url = await self.s3_service.get_download_url(
                 bucket=self.workspace_s3_bucket,
                 key=stored.key,

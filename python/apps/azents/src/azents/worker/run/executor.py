@@ -13,12 +13,17 @@ from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
-from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublishError
+from azents.broker.broadcast import (
+    BaseWebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.broker.types import (
     SessionBroker,
     SessionWakeUp,
 )
+from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
 from azents.core.agent import AgentModelSelection
+from azents.core.agent_session_data import AgentSession, PendingSessionCommand
 from azents.core.chat_data import (
     ChatLiveRunOperation,
     ChatLiveRunRetryAttempt,
@@ -170,12 +175,7 @@ from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
 from azents.engine.tools.wait import WaitToolkit
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionProjection,
-)
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.engine_read_deps import get_engine_model_read_repository
 from azents.repos.engine_resolve import (
@@ -468,7 +468,7 @@ class RunExecutor:
         DynamicWorktreeToolkitProvider,
         Depends(get_dynamic_worktree_toolkit_provider),
     ]
-    broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
+    broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)]
     failed_run_finalizer: Annotated[
         FailedRunErrorFinalizer, Depends(FailedRunErrorFinalizer)
     ]
@@ -786,6 +786,7 @@ class RunExecutor:
         :param dispatch_event: Event publication callback.
         :return: Session-managed toolkits used by execution.
         """
+        operation_logger = bind_extra(logger, {"session_id": snapshot.session_id})
         owner_generation = snapshot.owner_generation
         await self._cancel_leftover_action_executions(
             snapshot.session_id,
@@ -814,7 +815,9 @@ class RunExecutor:
             )
             command_handler = self.command_registry.get(command.name)
             if command_handler is None:
-                logger.warning("Unknown command", extra={"command": command.name})
+                operation_logger.warning(
+                    "Unknown command", extra={"command": command.name}
+                )
                 await self._clear_pending_command(
                     snapshot.session_id,
                     owner_generation=owner_generation,
@@ -895,12 +898,9 @@ class RunExecutor:
                     and not actionable_transcript_pending
                     and recoverable_run is None
                 ):
-                    logger.info(
+                    operation_logger.info(
                         "Session wake-up ignored because no runtime input is pending",
-                        extra={
-                            "session_id": snapshot.session_id,
-                            "agent_id": snapshot.agent_id,
-                        },
+                        extra={"agent_id": snapshot.agent_id},
                     )
                     return RunExecutionResult(
                         toolkits=[],
@@ -1118,10 +1118,9 @@ class RunExecutor:
                     no_actionable_work=True,
                 )
 
-        logger.info(
+        operation_logger.info(
             "Run execution started",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": snapshot.agent_id,
                 "run_id": run_id,
                 "model_target_label": selected_profile.profile.model_target_label,
@@ -1271,10 +1270,9 @@ class RunExecutor:
 
         inference_profile = turn_inference_state.applied_profile
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run invoke input resolved",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": snapshot.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1388,10 +1386,9 @@ class RunExecutor:
             allowed_domains=(), denied_domains=()
         )
 
-        logger.info(
+        operation_logger.info(
             "Run agent tools resolve started",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1441,10 +1438,9 @@ class RunExecutor:
         )
 
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run agent tools resolved",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1473,10 +1469,9 @@ class RunExecutor:
         )
 
         if prepare_toolkits is not None:
-            logger.info(
+            operation_logger.info(
                 "Run session toolkits prepare started",
                 extra={
-                    "session_id": snapshot.session_id,
                     "agent_id": invoke_input.agent_id,
                     "run_id": run_id,
                     "workspace_id": run_request.workspace_id,
@@ -1496,10 +1491,9 @@ class RunExecutor:
         )
 
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run session toolkits prepared",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1514,10 +1508,9 @@ class RunExecutor:
 
         hook_dispatcher = RuntimeHookDispatcher()
         hook_providers = _runtime_hook_provider_refs(run_request.toolkits)
-        logger.info(
+        operation_logger.info(
             "Run lifecycle hooks dispatch started",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1554,10 +1547,9 @@ class RunExecutor:
         )
 
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run lifecycle hooks dispatched",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -1763,10 +1755,9 @@ class RunExecutor:
         )
         await publish_session_tree_changed()
         now = loop.time()
-        logger.info(
+        operation_logger.info(
             "Run started dispatched",
             extra={
-                "session_id": snapshot.session_id,
                 "agent_id": invoke_input.agent_id,
                 "run_id": run_id,
                 "workspace_id": run_request.workspace_id,
@@ -2242,10 +2233,9 @@ class RunExecutor:
                     if await record_user_stop_if_requested():
                         break
                     if isinstance(exc, CompactionModelStreamTimeoutError):
-                        logger.warning(
+                        operation_logger.warning(
                             "Compaction model stream attempt timed out",
                             extra={
-                                "session_id": snapshot.session_id,
                                 "run_id": run_id,
                                 "attempt_number": attempt_number,
                                 "error_type": exc.__class__.__name__,
@@ -2265,7 +2255,7 @@ class RunExecutor:
                             error_log_fields.update(
                                 model_provider_error_log_fields(exc)
                             )
-                        logger.exception(
+                        operation_logger.exception(
                             "Internal error during engine run attempt",
                             extra=error_log_fields,
                         )
@@ -2325,12 +2315,9 @@ class RunExecutor:
                 terminal_run_status=terminal_run_status,
             )
             if not terminal_event_observed:
-                logger.info(
+                operation_logger.info(
                     "Leaving agent run RUNNING until terminal event recovery",
-                    extra={
-                        "session_id": snapshot.session_id,
-                        "run_id": run_id,
-                    },
+                    extra={"run_id": run_id},
                 )
             elif not terminal_state_persisted:
                 await self.session_lifecycle.mark_agent_run_terminal_if_running(
@@ -2351,9 +2338,8 @@ class RunExecutor:
                 ),
             )
             if not terminal_event_observed:
-                logger.info(
-                    "Keeping session activity until terminal event recovery",
-                    extra={"session_id": snapshot.session_id},
+                operation_logger.info(
+                    "Keeping session activity until terminal event recovery"
                 )
             else:
                 await self.live_event_projector.publish_live_run_cleared(
@@ -2570,6 +2556,7 @@ class RunExecutor:
         owner_generation: int,
     ) -> None:
         """Refresh session heartbeat while the engine run is active."""
+        operation_logger = bind_extra(logger, {"session_id": session_id})
         while True:
             try:
                 await self.session_lifecycle.heartbeat_session(
@@ -2579,16 +2566,13 @@ class RunExecutor:
             except asyncio.CancelledError:
                 raise
             except CanonicalExecutionOwnerGenerationStaleError:
-                logger.info(
-                    "Session ownership revoked during active run heartbeat",
-                    extra={"session_id": session_id},
+                operation_logger.info(
+                    "Session ownership revoked during active run heartbeat"
                 )
                 raise
             except Exception:
-                logger.warning(
-                    "Failed to update run heartbeat",
-                    extra={"session_id": session_id},
-                    exc_info=True,
+                operation_logger.warning(
+                    "Failed to update run heartbeat", exc_info=True
                 )
             await asyncio.sleep(_RUN_HEARTBEAT_INTERVAL_SECONDS)
 
@@ -3471,11 +3455,11 @@ class RunExecutor:
         include_action_messages: bool,
     ) -> PromotedMailboxItems:
         """Promote input buffers and publish the matching live-state changes."""
-        started_at = asyncio.get_running_loop().time()
-        logger.info(
-            "Input buffer flush started before model boundary",
-            extra={"session_id": session_id, "model": model},
+        operation_logger = bind_extra(
+            logger, {"session_id": session_id, "model": model}
         )
+        started_at = asyncio.get_running_loop().time()
+        operation_logger.info("Input buffer flush started before model boundary")
         profile_resolution_failure: str | None = None
         try:
             promoted = await self.mailbox_item_service.flush_session_mailbox_items(
@@ -3493,14 +3477,11 @@ class RunExecutor:
             raise CanonicalExecutionOwnerGenerationStaleError(str(exc)) from exc
         except MailboxPreparationStaleError as exc:
             raise CanonicalExecutionWorkDriftError(str(exc)) from exc
-        logger.info(
+        operation_logger.info(
             "Input buffer flush completed before model boundary",
             extra={
-                "session_id": session_id,
-                "model": model,
                 "duration_seconds": round(
-                    asyncio.get_running_loop().time() - started_at,
-                    3,
+                    asyncio.get_running_loop().time() - started_at, 3
                 ),
                 "promoted_event_count": len(promoted.events),
                 "promoted_user_message_count": len(promoted.user_messages),
@@ -3534,9 +3515,8 @@ class RunExecutor:
                     chat_mailbox_item_removed_dump(session_id, buffer_id),
                 )
         except WebSocketBroadcastPublishError:
-            logger.exception(
-                "Failed to broadcast promoted input buffer events",
-                extra={"session_id": session_id},
+            operation_logger.exception(
+                "Failed to broadcast promoted input buffer events"
             )
         return promoted
 

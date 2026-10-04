@@ -2,12 +2,12 @@
 
 from typing import NamedTuple
 
-from azents.core.external_channel_provider_effect import ProviderEffectPlan
-from azents.repos.external_channel.management_data import (
+from azents.core.external_channel_management import (
     ManagedBlock,
     ManagedConnection,
     ManagedGrant,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 
 
 class ManagedConnectionDisconnectResult(NamedTuple):
@@ -15,14 +15,6 @@ class ManagedConnectionDisconnectResult(NamedTuple):
 
     connection: ManagedConnection
     cleanup_plans: tuple[ProviderEffectPlan, ...]
-
-
-class ExternalChannelManagementNotFound(LookupError):
-    """A management resource is unavailable to the caller."""
-
-
-class ExternalChannelManagementGenerationChanged(RuntimeError):
-    """A destructive request observed a newer Multi App generation."""
 
 
 class ManagedAgentAccess(NamedTuple):

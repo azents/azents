@@ -8,6 +8,13 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_project_preset import AgentProjectPreset
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionCreate,
+    AgentSessionUnreadTerminalRunProjection,
+    SessionWorkingFolderContext,
+)
 from azents.core.chat_data import (
     AcknowledgeUnreadTerminalRunError,
     AgentNotFound,
@@ -72,6 +79,7 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.goal import GoalStateSnapshot
+from azents.core.json_value import JSONValue
 from azents.core.root_agent_session_creation import (
     ExplicitRootWorkspaceIntent,
 )
@@ -86,6 +94,7 @@ from azents.core.session_workspace_items import (
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -93,7 +102,6 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import Event
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
@@ -105,15 +113,8 @@ from azents.repos.agent_project_default.data import (
     AgentProjectDefaultCreate,
 )
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
-from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionCreate,
-    AgentSessionUnreadTerminalRunProjection,
-    SessionWorkingFolderContext,
-)
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.goal.store import (
     GoalInvalidStatusTransitionError,
@@ -139,7 +140,6 @@ from azents.repos.session_resource_authority import (
     authorize_public_session_resource,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.repos.workspace_user import WorkspaceUserRepository
 

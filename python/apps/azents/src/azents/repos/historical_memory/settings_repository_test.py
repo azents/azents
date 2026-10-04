@@ -7,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
@@ -21,7 +22,6 @@ from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.historical_memory.settings import (
     HistoricalMemorySettingsRepository,
 )

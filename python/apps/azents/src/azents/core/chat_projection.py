@@ -6,6 +6,7 @@ from typing import NamedTuple, assert_never
 
 from azcommon.result import Failure, Result, Success
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.chat_data import (
     NewSessionDefaultExistingProjectWorkspaceItem,
     NewSessionDefaultGitWorktreeWorkspaceItem,
@@ -37,10 +38,6 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_project_default.data import (
     AgentProjectDefault,
     AgentProjectDefaultCreate,
-)
-from azents.repos.agent_session.data import (
-    AgentSession,
-    SessionAgent,
 )
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationFailedError,

@@ -12,6 +12,7 @@ from azents.core.enums import (
     MailboxItemKind,
     SessionAgentKind,
 )
+from azents.core.mailbox_data import ScheduledTaskContinuationMailboxPayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -20,7 +21,6 @@ from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.repos.mailbox.data import ScheduledTaskContinuationMailboxPayload
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 
 from .data import CanonicalExecutionSnapshot, PendingCommandSnapshot

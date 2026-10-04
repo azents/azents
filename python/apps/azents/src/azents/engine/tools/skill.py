@@ -13,7 +13,7 @@ from typing import Any, NamedTuple, Protocol, assert_never
 import frontmatter
 import yaml
 from azcommon.uuid import uuid7
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState
@@ -28,6 +28,7 @@ from azents.core.session_resource_authority import (
     accepts_execution_authority,
     accepts_execution_owner,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.skill_projection import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
@@ -68,7 +69,6 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
 )
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_working_folder_binding import (
@@ -96,6 +96,8 @@ If a skill's description says 'proactively', use it without waiting for the user
 
 class LoadSkillInput(BaseModel):
     """load_skill tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     skill_path: str = Field(
         min_length=1,

@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionProductMode,
@@ -35,7 +36,6 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )

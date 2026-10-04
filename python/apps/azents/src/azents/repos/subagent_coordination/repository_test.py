@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate, SessionAgent
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -25,7 +26,6 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate, SessionAgent
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,

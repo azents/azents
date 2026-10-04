@@ -109,13 +109,13 @@ class RuntimeTransferS3Cleanup:
         :param bucket: Control-selected workspace bucket
         :param object_prefix: internal transfer-object key namespace
         """
-        self._object_store = object_store
+        self.object_store = object_store
         self._bucket = _required(bucket, "Runtime transfer bucket")
         self._object_prefix = _required(
             _prefix(object_prefix),
             "Runtime transfer object prefix",
         )
-        self._clock = clock or (lambda: datetime.now(UTC))
+        self.clock = clock or (lambda: datetime.now(UTC))
         self._object_continuation_token: str | None = None
         self._multipart_key_marker: str | None = None
         self._multipart_upload_id_marker: str | None = None
@@ -127,7 +127,7 @@ class RuntimeTransferS3Cleanup:
         """
         if record.direct_ingress_handle is not None:
             assert record.direct_ingress_expires_at is not None
-            if self._clock() < (
+            if self.clock() < (
                 max(record.direct_ingress_expires_at, record.admission.deadline_at)
                 + DIRECT_INGRESS_CLEANUP_GRACE
             ):
@@ -138,7 +138,7 @@ class RuntimeTransferS3Cleanup:
             is RuntimeTransferSourceTransport.DIRECT_OBJECT
             and record.admission.source_handle is None
             and record.object is not None
-            and self._clock()
+            and self.clock()
             < record.admission.deadline_at + DIRECT_INGRESS_CLEANUP_GRACE
         ):
             raise RuntimeError("Direct GET transfer cleanup is not yet safe")
@@ -155,7 +155,7 @@ class RuntimeTransferS3Cleanup:
             ):
                 assert record.preparation_multipart_cleanup_handle is not None
                 try:
-                    await self._object_store.abort_multipart_upload(
+                    await self.object_store.abort_multipart_upload(
                         upload=S3MultipartUpload(
                             identity=preparation_identity,
                             upload_id=record.preparation_multipart_cleanup_handle,
@@ -168,7 +168,7 @@ class RuntimeTransferS3Cleanup:
                 is RuntimeTransferPreparationCleanupState.COMPLETED_OBJECT_PENDING
             ):
                 try:
-                    await self._object_store.delete(
+                    await self.object_store.delete(
                         bucket=preparation_identity.bucket,
                         key=preparation_identity.key,
                     )
@@ -181,7 +181,7 @@ class RuntimeTransferS3Cleanup:
                 opaque_key=record.pre_ready_object_handle,
             )
             try:
-                await self._object_store.delete(
+                await self.object_store.delete(
                     bucket=pre_ready_identity.bucket,
                     key=pre_ready_identity.key,
                 )
@@ -195,7 +195,7 @@ class RuntimeTransferS3Cleanup:
                 opaque_key=record.direct_ingress_handle,
             )
             try:
-                await self._object_store.delete(
+                await self.object_store.delete(
                     bucket=ingress_identity.bucket,
                     key=ingress_identity.key,
                 )
@@ -216,7 +216,7 @@ class RuntimeTransferS3Cleanup:
                     "Stale transfer multipart cleanup object is unavailable"
                 )
             try:
-                await self._object_store.abort_multipart_upload(
+                await self.object_store.abort_multipart_upload(
                     upload=S3MultipartUpload(
                         identity=identity,
                         upload_id=record.multipart_cleanup_handle,
@@ -232,12 +232,12 @@ class RuntimeTransferS3Cleanup:
                 )
             try:
                 if object.sha256 is None:
-                    await self._object_store.delete(
+                    await self.object_store.delete(
                         bucket=identity.bucket,
                         key=identity.key,
                     )
                 else:
-                    await self._object_store.delete_verified_transfer_object(
+                    await self.object_store.delete_verified_transfer_object(
                         identity=identity,
                         expected_size=object.size,
                         expected_sha256=object.sha256,
@@ -283,7 +283,7 @@ class RuntimeTransferS3Cleanup:
             )
         cutoff = now - maximum_age
         prefix = f"{self._object_prefix}/"
-        object_page = await self._object_store.list_object_summaries_page(
+        object_page = await self.object_store.list_object_summaries_page(
             bucket=self._bucket,
             prefix=prefix,
             maximum_keys=page_size,
@@ -295,7 +295,7 @@ class RuntimeTransferS3Cleanup:
             if listed.last_modified_at > cutoff:
                 continue
             try:
-                await self._object_store.delete(
+                await self.object_store.delete(
                     bucket=listed.identity.bucket,
                     key=listed.identity.key,
                 )
@@ -322,7 +322,7 @@ class RuntimeTransferS3Cleanup:
                 },
             )
 
-        multipart_page = await self._object_store.list_multipart_uploads_page(
+        multipart_page = await self.object_store.list_multipart_uploads_page(
             bucket=self._bucket,
             prefix=prefix,
             maximum_uploads=page_size,
@@ -334,7 +334,7 @@ class RuntimeTransferS3Cleanup:
             if listed.initiated_at > cutoff:
                 continue
             try:
-                await self._object_store.abort_multipart_upload(upload=listed.upload)
+                await self.object_store.abort_multipart_upload(upload=listed.upload)
                 aborted_multipart_uploads += 1
             except asyncio.CancelledError:
                 raise

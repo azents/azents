@@ -5,7 +5,7 @@ from typing import Annotated
 from azcommon.infra.s3.service import S3Service
 from fastapi import Depends
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.s3.deps import get_s3_service
 from azents.services.uploads import UploadHandler, UploadService
@@ -31,6 +31,6 @@ async def get_upload_service(
     }
     return UploadService(
         s3=s3,
-        bucket=config.workspace_s3.bucket,
+        bucket=require_workspace_s3_bucket(config.workspace_s3),
         handlers=handlers,
     )

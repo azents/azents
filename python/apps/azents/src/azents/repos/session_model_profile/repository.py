@@ -6,6 +6,7 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
@@ -23,7 +24,6 @@ from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
     ChatWriteRequest,

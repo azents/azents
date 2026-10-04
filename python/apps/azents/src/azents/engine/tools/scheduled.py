@@ -12,6 +12,7 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectOutcome
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     accepts_execution_owner,
@@ -39,10 +40,7 @@ from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
-from azents.repos.scheduled_task.data import (
-    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
-    ScheduledTask,
-)
+from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.presentation import (
     render_scheduled_task_compaction_snapshot,
     render_scheduled_task_cycle_guidance,
@@ -84,7 +82,7 @@ class ScheduledToolkitConfig(BaseModel):
 class AddScheduledTaskInput(BaseModel):
     """add_scheduled_task tool input."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str = Field(min_length=1, max_length=120)
     objective: str = Field(
@@ -115,7 +113,7 @@ class AddScheduledTaskInput(BaseModel):
 class DeleteScheduledTaskInput(BaseModel):
     """delete_scheduled_task tool input."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     task_id: str = Field(min_length=32, max_length=32)
 
@@ -123,7 +121,7 @@ class DeleteScheduledTaskInput(BaseModel):
 class SubmitScheduledTaskResultInput(BaseModel):
     """submit_scheduled_task_result tool input."""
 
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     status: Literal["finished", "failed"]
     result: str = Field(min_length=1, max_length=50_000)

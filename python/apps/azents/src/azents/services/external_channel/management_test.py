@@ -24,6 +24,15 @@ from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationLockLease,
     ExternalChannelParticipationLock,
 )
+from azents.core.external_channel_management import (
+    ManagedBinding,
+    ManagedChannelDefault,
+    ManagedConnection,
+    ManagedMultiRoute,
+)
+from azents.core.external_channel_management_errors import (
+    ExternalChannelManagementNotFound,
+)
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_provider import (
     DiscordConnectionConfiguration,
@@ -41,15 +50,6 @@ from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
     _set_discord_thread_auto_archive_duration,
     _set_discord_url_preview_suppression,
-)
-from azents.repos.external_channel.management_data import (
-    ManagedBinding,
-    ManagedChannelDefault,
-    ManagedConnection,
-    ManagedMultiRoute,
-)
-from azents.repos.external_channel.management_operation_data import (
-    ExternalChannelManagementNotFound,
 )
 from azents.repos.external_channel.management_operations import (
     ExternalChannelManagementOperationRepository,

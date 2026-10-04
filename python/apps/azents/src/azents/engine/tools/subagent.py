@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from azents.broker.types import SessionBroker, SessionStopSignal, SessionWakeUp
 from azents.core.agent import SelectableModelOption, SubagentSettings
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import AgentRunStatus, AgentSessionRunState, SessionAgentKind
 from azents.core.inference_profile import (
     SessionInferenceState,
@@ -49,7 +50,6 @@ from azents.engine.events.fork_context import (
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.subagent_tool_operations import (
     SubagentToolOperationError,

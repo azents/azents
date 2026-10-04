@@ -23,6 +23,7 @@ from azents.core.config import (
     SignupTokenConfig,
 )
 from azents.core.credential_read import CredentialReadFact, CredentialReadKind
+from azents.core.email.deps import create_template_environment
 from azents.core.email.service import EmailService
 from azents.rdb.session import SessionManager
 from azents.repos.auth_operation import AuthOperationRepository
@@ -75,7 +76,11 @@ class ClosedEmailService(EmailService):
             else None
         )
         client = create_autospec(SESClient, instance=True) if configured else None
-        super().__init__(config=config, ses_client=client)
+        super().__init__(
+            config=config,
+            ses_client=client,
+            template_environment=create_template_environment(),
+        )
         self.client_probe: Mock | None = client
         self.scope = scope
         self.availability_reads = 0

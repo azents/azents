@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 from azents.core.active_model_capabilities import CompiledActiveChoices
 from azents.core.agent import SelectableModelCandidate, SelectableModelOption
+from azents.core.agent_session_data import AgentSession
 from azents.core.model_operation import ModelOperationSnapshot, ModelOperationState
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.model_candidate_selection import ModelCandidateSelection
 
 if TYPE_CHECKING:

@@ -38,17 +38,42 @@ if [ -n "${GITHUB_INSTALLATION_MAP:-}" ] && [ -n "$owner_lc" ] && command -v pyt
 import json
 import os
 import sys
+from dataclasses import dataclass
 
-owner = sys.argv[1]
-try:
-    mapping = json.loads(os.environ.get("GITHUB_INSTALLATION_MAP", "{}"))
-except json.JSONDecodeError:
-    mapping = {}
-entry = mapping.get(owner)
-if isinstance(entry, dict):
-    env_name = entry.get("env")
-    if isinstance(env_name, str):
-        print(os.environ.get(env_name, ""))
+
+@dataclass(frozen=True)
+class InstallationCredential:
+    environment_name: str
+
+
+def decode_installation_map(raw: str) -> dict[str, InstallationCredential]:
+    """Validate routing entries; ignore compatible installation metadata.
+
+    Missing or malformed maps and entries leave the caller's token fallback
+    available. Empty environment names retain the same fallback semantics.
+    """
+    try:
+        mapping: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(mapping, dict):
+        return {}
+    credentials: dict[str, InstallationCredential] = {}
+    for owner, entry in mapping.items():
+        if not isinstance(owner, str) or not isinstance(entry, dict):
+            continue
+        environment_name = entry.get("env")
+        if isinstance(environment_name, str):
+            credentials[owner] = InstallationCredential(environment_name)
+    return credentials
+
+
+credentials = decode_installation_map(
+    os.environ.get("GITHUB_INSTALLATION_MAP", "{}")
+)
+credential = credentials.get(sys.argv[1])
+if credential is not None:
+    print(os.environ.get(credential.environment_name, ""))
 PY
 )
 fi

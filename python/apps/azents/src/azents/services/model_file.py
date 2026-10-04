@@ -16,7 +16,7 @@ from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import ModelFileStatus
 from azents.core.s3.deps import get_s3_service
@@ -174,7 +174,7 @@ class ModelFileService:
         succeeded = False
         try:
             await self.s3_service.upload(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=uploaded_object_key,
                 body=normalized_body.body,
                 content_type=normalized_body.media_type,
@@ -285,7 +285,7 @@ class ModelFileService:
         if model_file.status != ModelFileStatus.AVAILABLE:
             return Failure(ModelFileUnavailable())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=model_file.storage_key,
         )
         if body is None:
@@ -320,7 +320,7 @@ class ModelFileService:
         if object_key is None:
             return
         await self.s3_service.delete(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=object_key,
         )
 

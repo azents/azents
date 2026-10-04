@@ -35,6 +35,7 @@ from azents.core.external_channel_conversation_preparation import (
     ExternalChannelConversationPreparation,
 )
 from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
+from azents.core.external_channel_labels import decode_external_channel_resource_labels
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
@@ -726,10 +727,9 @@ def _slack_presence_thread_ts(
     resource: ExternalChannelResource,
 ) -> str:
     """Return the exact Slack loading anchor for one admitted Work cycle."""
-    labels = resource.labels or {}
-    retained = labels.get("thread_ts")
-    if isinstance(retained, str) and retained:
-        return retained
+    labels = decode_external_channel_resource_labels(resource.labels)
+    if labels.thread_ts is not None:
+        return labels.thread_ts
     return item.trigger_provider_message_id
 
 

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
@@ -23,7 +24,6 @@ from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeInfrastructureProfile,

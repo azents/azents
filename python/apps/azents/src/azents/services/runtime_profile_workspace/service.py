@@ -27,18 +27,18 @@ from azents.core.runtime_profile import (
     parse_runtime_infrastructure_profile_spec,
     parse_workspace_runtime_profile_policy,
 )
+from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
 from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
-    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,

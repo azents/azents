@@ -8,9 +8,16 @@ from typing import (
     assert_never,
 )
 
+from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.agent_project_preset import AgentProjectPreset
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionUnreadTerminalRunProjection,
+    SessionWorkingFolderContext,
+)
 from azents.core.chat_data import (
     AcknowledgeUnreadTerminalRunError,
     AgentSessionDirectoryPage,
@@ -59,12 +66,6 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import (
     ClientToolCallPayload,
-)
-from azents.repos.agent_project_preset.data import AgentProjectPreset
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionUnreadTerminalRunProjection,
-    SessionWorkingFolderContext,
 )
 from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.mailbox.admission_data import (
@@ -700,19 +701,18 @@ class ChatSessionService:
         summary: str,
     ) -> None:
         """Persist one post-commit folder cleanup result without archive rollback."""
+        L = bind_extra(logger, {"context_id": context_id, "cleanup_status": status})
         try:
             completed = await self.operations.complete_working_folder_cleanup(
                 context_id=context_id, status=status, summary=summary
             )
             if not completed:
-                logger.error(
+                L.error(
                     "Archived Session working-folder cleanup terminal state was lost",
-                    extra={"context_id": context_id, "cleanup_status": status},
                 )
         except Exception:
-            logger.exception(
+            L.exception(
                 "Archived Session working-folder cleanup terminal state failed",
-                extra={"context_id": context_id, "cleanup_status": status},
             )
 
     async def auto_archive_once(self, *, limit: int = 100) -> dict[str, int]:

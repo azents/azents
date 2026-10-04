@@ -33,13 +33,13 @@ from azents.core.external_channel_provider import (
     ExternalChannelProviderIdentity,
 )
 from azents.core.external_model_settings import ExternalModelActorContext
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
-from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.services.external_channel.slack_blocks import projected_slack_blocks
 from azents.services.external_channel.slack_native_protocol import (
     NATIVE_ACTIONS,

@@ -9,6 +9,8 @@ code_paths:
   - python/apps/azents/src/azents/core/agent_errors.py
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
+  - python/apps/azents/src/azents/core/github_auth.py
+  - python/apps/azents/src/azents/core/github_installation.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
   - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
@@ -108,7 +110,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-04
-spec_version: 131
+spec_version: 133
 ---
 
 # Toolkit
@@ -516,6 +518,26 @@ existing `finally` revocation. Persistence keeps duplicate-row order and default
 a missing or non-string avatar to an empty string; the Public list separately
 requires a string avatar.
 
+GitHub App identity, App/user installation listing, installation-token issuance,
+OAuth authorization-code exchange and temporary-token revocation use public
+asynchronous GitHubKit operations. SDK transport retains the current endpoints,
+authentication, `2022-11-28` header, five-second timeout and first-page
+100-installation limit; retries and response caching are disabled. App JWT
+issuance retains RS256, normalized PEM newlines, a 60-second backdate and a
+nine-minute expiry.
+
+Installation/account JSON is decoded at provider ingress into immutable
+`GitHubInstallationSnapshot` records. Domain, persistence and Public projections
+consume declared fields while preserving ordered duplicates, boolean-ID
+compatibility, malformed-record skipping, and the distinction between unknown
+avatars and explicit empty strings. Persistence retains its empty-string
+fallback; Public projections omit unknown avatars. Provider extensions remain
+compatible, and no Public wire field is added or renamed.
+
+Expected HTTP errors retain the caller contract. Revocation handles expected
+HTTP cleanup failures once; unexpected defects and cancellation propagate.
+Validation diagnostics do not expose token-bearing provider payloads.
+
 Toolkit list/detail responses expose an optional redacted `authorization_state` with `status=reconnect_required` and the stable reason `app_identity_changed` when a persisted Toolkit belongs to a different Platform App. Main Web uses this Public API projection to block misleading connect/test actions and guide a manager to reconnect; it does not call the Admin API or depend on the Admin client. Persisted Toolkit configuration and Agent attachments are retained across App identity changes.
 
 ### Shared Connection Test Boundaries
@@ -659,6 +681,27 @@ Strong invariant: **raw credential is never exposed in agent prompt**.
 - **Runtime injection**: credential is passed only to toolkit provider as `ResolveContext.credentials_json`, and is used as header/token only for network calls to MCP server. LLM system prompt includes only administrator-provided `ToolkitConfig.prompt`.
 
 ### Runtime Tool Execution and Network Authority
+
+AWS role credentials use the public STS AssumeRole SDK operation, retaining
+region/endpoint, role/external ID, session name, duration and early-refresh cache.
+Direct access keys do not instantiate STS. Google service-account signing and
+token parsing use the public credential SDK with only the adopted email/private
+key and scopes. The fixed token URI, RS256 and absence of a `kid` header remain
+unchanged; opaque token URI/universe/key-ID fields cannot gain endpoint or signing
+authority. UTC expiry is normalized explicitly. The existing 30-second timeout,
+disabled redirects and one physical authentication dispatch are enforced through
+the public Request boundary, including SDK-eligible retries. Failed refreshes
+do not publish credentials; synchronous SDK work runs off the event loop and
+owns resource closure.
+
+Kubernetes CRUD remains on lightkube. Discovery and WebSocket execution reuse the
+owned Kubernetes SDK client through public typed Core/Groups APIs and the public
+generic operation for installed preferred group versions. Private lightkube HTTP
+internals and handwritten discovery requests are not used. Preferred versions,
+subresource skips, per-group HTTP-failure skips and resource ordering/cache reuse
+remain unchanged. Partial initialization closes both clients before propagating
+unexpected failures or cancellation. GKE discovery uses the public Container SDK
+with current endpoint identity and no additional operation retries.
 
 Runtime mutation/process/transfer tools (`exec_command`, `write_stdin`,
 `write`, `delete`, `edit`, `apply_patch`, `import_file`, `present_file`, and

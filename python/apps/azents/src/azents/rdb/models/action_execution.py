@@ -9,8 +9,8 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
+from azents.core.json_value import JSONValue
 from azents.rdb.models.base import RDBModel
-from azents.rdb.models.event import JSONValue
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 

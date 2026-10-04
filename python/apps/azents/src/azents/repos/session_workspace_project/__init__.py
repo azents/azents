@@ -17,6 +17,10 @@ from azents.core.enums import (
     GitWorktreePathClaimState,
     SessionGitWorktreeStatus,
 )
+from azents.core.session_workspace_project import (
+    SessionWorkspaceProject,
+    SessionWorkspaceProjectCreate,
+)
 from azents.rdb.models.action_execution import RDBActionExecution
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.git_worktree_cleanup_claim import (
@@ -27,11 +31,6 @@ from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContext,
     RDBSessionAgentContextGitWorktree,
     RDBSessionAgentContextProject,
-)
-
-from .data import (
-    SessionWorkspaceProject,
-    SessionWorkspaceProjectCreate,
 )
 
 

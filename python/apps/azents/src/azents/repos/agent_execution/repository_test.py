@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -30,6 +31,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
 )
+from azents.core.json_value import JSONValue
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.model_operation import (
     ModelOperationCandidateOutcome,
@@ -59,12 +61,11 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.compaction_operation import CompactionOperationRepository
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_operation_completion import (

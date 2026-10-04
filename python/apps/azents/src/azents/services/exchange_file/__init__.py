@@ -31,7 +31,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import (
     ExchangeFileOrigin,
@@ -560,7 +560,7 @@ class ExchangeFileService:
     ) -> S3ObjectIdentity:
         """Derive private temporary keys exclusively from persisted ownership."""
         return S3ObjectIdentity(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=f"exchange-uploads/{operation.workspace_id}/{operation.upload_id}/{kind}",
         )
 
@@ -666,7 +666,7 @@ class ExchangeFileService:
             if operation.state is ExchangeUploadState.PENDING:
                 identities.extend(
                     S3ObjectIdentity(
-                        bucket=self.config.workspace_s3.bucket,
+                        bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                         key=exchange_file_object_key(
                             workspace_id=operation.workspace_id, file_id=file_id
                         ),
@@ -1328,7 +1328,9 @@ class ExchangeFileService:
                     await self.s3_service.copy_verified_transfer_object_to_product(
                         source=file.source,
                         destination=S3ObjectIdentity(
-                            bucket=self.config.workspace_s3.bucket,
+                            bucket=require_workspace_s3_bucket(
+                                self.config.workspace_s3
+                            ),
                             key=file.object_key,
                         ),
                         expected_size=file.create.size_bytes,
@@ -1341,7 +1343,7 @@ class ExchangeFileService:
             elif file.body is not None:
                 completed.append(file)
                 await self.s3_service.upload(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=file.object_key,
                     body=file.body,
                     content_type=file.create.media_type,
@@ -1435,7 +1437,7 @@ class ExchangeFileService:
         for file in prepared:
             if file.publication_metadata is None:
                 await self.s3_service.delete(
-                    bucket=self.config.workspace_s3.bucket,
+                    bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                     key=file.object_key,
                 )
 
@@ -1555,7 +1557,7 @@ class ExchangeFileService:
         if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=file.value.object_key,
         )
         if body is None:
@@ -1579,7 +1581,7 @@ class ExchangeFileService:
             return Failure(FileTooLarge())
 
         identity = S3ObjectIdentity(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=file.value.object_key,
         )
         metadata = await self.s3_service.head_with_checksum(identity)
@@ -1643,7 +1645,7 @@ class ExchangeFileService:
         ]
         for file in files_to_delete:
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=file.object_key,
             )
         deleted = await self.operation_repository.delete_family_for_user(
@@ -1812,7 +1814,7 @@ class ExchangeFileService:
         if file.value.status == ExchangeFileStatus.EXPIRED:
             return Failure(FileExpired())
         body = await self.s3_service.download_bytes(
-            bucket=self.config.workspace_s3.bucket,
+            bucket=require_workspace_s3_bucket(self.config.workspace_s3),
             key=file.value.object_key,
         )
         if body is None:
@@ -1923,7 +1925,7 @@ class ExchangeFileService:
         """Delete already uploaded object when metadata commit fails."""
         for object_key in reversed(object_keys):
             await self.s3_service.delete(
-                bucket=self.config.workspace_s3.bucket,
+                bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=object_key,
             )
 

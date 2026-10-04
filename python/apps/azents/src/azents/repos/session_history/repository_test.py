@@ -9,9 +9,10 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
+from azents.core.json_value import JSONValue
 from azents.engine.events.types import ExternalChannelMessagePayload
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.repos.message import MessageRepository
 from azents.repos.message.repository_test import _create_agent_session
 from azents.repos.session_history.repository import (

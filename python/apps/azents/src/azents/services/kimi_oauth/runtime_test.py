@@ -12,6 +12,7 @@ import httpx
 import pytest
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
@@ -674,12 +675,28 @@ class TestEnsureRuntimeTokens:
         async with (
             session_factory() as lock_session,
             session_factory() as waiting_session,
+            session_factory() as observation_session,
         ):
             lock_transaction = await lock_session.begin()
             locked = await repo.get_by_id_with_secrets_for_update(
                 lock_session, integration_id
             )
             assert locked is not None
+            lock_pid = await lock_session.scalar(text("SELECT pg_backend_pid()"))
+            waiting_pid = await waiting_session.scalar(text("SELECT pg_backend_pid()"))
+            assert isinstance(lock_pid, int)
+            assert isinstance(waiting_pid, int)
+
+            async def wait_for_row_lock() -> None:
+                """Observe the waiting backend's actual blocker before releasing it."""
+                while True:
+                    blocked = await observation_session.scalar(
+                        text("SELECT :lock_pid = ANY(pg_blocking_pids(:waiting_pid))"),
+                        {"lock_pid": lock_pid, "waiting_pid": waiting_pid},
+                    )
+                    if blocked is True:
+                        return
+
             waiting_task = asyncio.create_task(
                 repo.get_by_id_with_secrets_for_update(
                     waiting_session,
@@ -687,8 +704,9 @@ class TestEnsureRuntimeTokens:
                 )
             )
             try:
-                with pytest.raises(asyncio.TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(waiting_task), timeout=0.2)
+                # The timeout only bounds a hang; PostgreSQL establishes ordering.
+                await asyncio.wait_for(wait_for_row_lock(), timeout=5)
+                assert not waiting_task.done()
 
                 await lock_transaction.commit()
                 observed = await asyncio.wait_for(waiting_task, timeout=2)

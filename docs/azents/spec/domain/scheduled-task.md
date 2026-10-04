@@ -5,6 +5,7 @@ tags: [backend, engine, scheduler, toolkit, external-channel, api, frontend]
 spec_type: domain
 domain: scheduled-task
 code_paths:
+  - python/apps/azents/src/azents/core/scheduled_task.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
@@ -34,8 +35,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-01
-spec_version: 14
+last_verified_at: 2026-10-04
+spec_version: 15
 ---
 
 # Scheduled Task Domain Spec

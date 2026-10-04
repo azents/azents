@@ -14,7 +14,7 @@ from pathlib import Path
 
 import grpc
 import pytest
-from aiohttp import web
+from aiohttp import ClientError, web
 from aiohttp.test_utils import TestServer
 from azents_runtime_control.grpc_runner_transfer_client import (
     RunnerDirectObjectTicket,
@@ -42,9 +42,11 @@ from azents_runtime_control.transfer import (
 )
 
 import azents_runtime_runner.transfer as transfer_module
+from azents_runtime_runner.main import StructuredLogFormatter
 from azents_runtime_runner.transfer import (
     RunnerTransferManager,
     _OpenedFile,
+    _PendingRunnerTransferResult,
     _TransferKey,
     _validate_direct_ticket,
 )
@@ -92,6 +94,19 @@ class _FailingBlockingControl(_Control):
         self.entered.set()
         await self.release.wait()
         raise RuntimeError("injected result sink failure")
+
+
+class _ObservedResultQueue(asyncio.Queue[_PendingRunnerTransferResult]):
+    """Expose a full-queue put boundary without scheduler timing assumptions."""
+
+    def __init__(self) -> None:
+        super().__init__(maxsize=1)
+        self.blocked_puts: asyncio.Queue[None] = asyncio.Queue()
+
+    async def put(self, item: _PendingRunnerTransferResult) -> None:
+        if self.full():
+            self.blocked_puts.put_nowait(None)
+        await super().put(item)
 
 
 class _Transfer:
@@ -360,7 +375,117 @@ async def test_upload_logs_server_grpc_rejection_reason(
     assert failure.__dict__["failure_source"] == "grpc"
     assert failure.__dict__["failure_reason"] == grpc_detail
     assert failure.__dict__["grpc_status"] == "FAILED_PRECONDITION"
+    assert failure.__dict__["error_type"] == "AioRpcError"
+    assert failure.__dict__["error_frames"][-1]["function"] == "upload"
+    assert failure.exc_info is not None
+    assert failure.exc_info[2] is None
     await manager.close()
+
+
+@pytest.mark.parametrize(
+    ("failure_type", "failure"),
+    [
+        (ClientError, RunnerTransferFailure.STREAM_FAILED),
+        (TimeoutError, RunnerTransferFailure.STREAM_FAILED),
+        (OSError, RunnerTransferFailure.DESTINATION_FAILED),
+        (ValueError, RunnerTransferFailure.PROTOCOL_VIOLATION),
+    ],
+)
+async def test_transfer_failures_preserve_bounded_origin(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    failure_type: type[Exception],
+    failure: RunnerTransferFailure,
+) -> None:
+    class FailureTransfer(_Transfer):
+        def _raise_origin(self) -> RunnerDownloadChunk:
+            raise failure_type("TRANSFER_PRIVATE_VALUE") from RuntimeError(
+                "TRANSFER_PRIVATE_CAUSE"
+            )
+
+        async def download(
+            self,
+            identity: RunnerTransferIdentity,
+            *,
+            timeout: float,
+        ) -> AsyncIterator[RunnerDownloadChunk | RunnerDownloadComplete]:
+            del identity, timeout
+            yield self._raise_origin()
+
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=FailureTransfer(),
+        accepted_generation=lambda: 1,
+        workspace=Workspace(str(tmp_path)),
+        http_proxy=None,
+    )
+    try:
+        await manager.handle_intent(_intent(tmp_path / "destination"))
+        result = await _result(control)
+        record = next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "Runtime Runner transfer failed"
+        )
+        rendered = StructuredLogFormatter().format(record)
+        assert result.failure is failure
+        assert not result.destination_committed
+        assert record.__dict__["error_type"] == failure_type.__name__
+        assert record.__dict__["error_frames"][-1]["function"] == "_raise_origin"
+        assert "runner_transfer_failed" in rendered
+        assert "TRANSFER_PRIVATE_VALUE" not in rendered
+        assert "TRANSFER_PRIVATE_CAUSE" not in rendered
+        assert "raise failure_type" not in rendered
+        assert record.exc_info is not None
+        assert record.exc_info[2] is None
+    finally:
+        await manager.close()
+
+
+async def test_failed_result_delivery_logs_bounded_origin(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    class FailureControl(_Control):
+        async def append_runner_transfer_result(
+            self, result: RunnerTransferResult
+        ) -> None:
+            del result
+            raise RuntimeError("DELIVERY_PRIVATE_VALUE") from ValueError(
+                "DELIVERY_PRIVATE_CAUSE"
+            )
+
+    manager = RunnerTransferManager(
+        control=FailureControl(),
+        transfer=_Transfer(),
+        accepted_generation=lambda: 1,
+        workspace=Workspace(str(tmp_path)),
+        http_proxy=None,
+    )
+    try:
+        await manager.handle_intent(
+            _intent(tmp_path / "destination", deadline_at=datetime.now(UTC))
+        )
+        await asyncio.wait_for(manager._results.join(), timeout=1)
+        record = next(
+            record
+            for record in caplog.records
+            if record.getMessage()
+            == "Runner transfer result delivery became unavailable"
+        )
+        rendered = StructuredLogFormatter().format(record)
+        assert record.__dict__["error_type"] == "RuntimeError"
+        assert record.__dict__["error_frames"][-1]["function"] == (
+            "append_runner_transfer_result"
+        )
+        assert "runner_transfer_delivery_failed" in rendered
+        assert "DELIVERY_PRIVATE_VALUE" not in rendered
+        assert "DELIVERY_PRIVATE_CAUSE" not in rendered
+        assert "raise RuntimeError" not in rendered
+        assert record.exc_info is not None
+        assert record.exc_info[2] is None
+    finally:
+        await manager.close()
 
 
 @pytest.mark.asyncio
@@ -1983,6 +2108,8 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
         http_proxy=None,
         max_tombstones=1,
     )
+    results = _ObservedResultQueue()
+    manager._results = results
     expired_at = datetime.now(UTC)
     first = _intent(
         tmpfs_path / "first.bin",
@@ -2004,11 +2131,9 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
     await asyncio.wait_for(control.entered.wait(), timeout=1)
     await manager.handle_intent(second)
     third_admission = asyncio.create_task(manager.handle_intent(third))
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(
-            asyncio.shield(third_admission),
-            timeout=0.01,
-        )
+    await asyncio.wait_for(results.blocked_puts.get(), timeout=1)
+    assert results.full()
+    assert not third_admission.done()
     control.release.set()
     await asyncio.wait_for(third_admission, timeout=1)
     await asyncio.wait_for(
@@ -2050,6 +2175,8 @@ async def test_failed_result_sink_unblocks_queue_and_shutdown(
         http_proxy=None,
         max_tombstones=1,
     )
+    results = _ObservedResultQueue()
+    manager._results = results
     expired_at = datetime.now(UTC)
     first = _intent(
         tmpfs_path / "first.bin",
@@ -2078,11 +2205,11 @@ async def test_failed_result_sink_unblocks_queue_and_shutdown(
     third_admission = asyncio.create_task(manager.handle_intent(third))
     fourth_admission = asyncio.create_task(manager.handle_intent(fourth))
     pending_admissions = asyncio.gather(third_admission, fourth_admission)
-    with pytest.raises(TimeoutError):
-        await asyncio.wait_for(
-            asyncio.shield(pending_admissions),
-            timeout=0.01,
-        )
+    await asyncio.wait_for(results.blocked_puts.get(), timeout=1)
+    await asyncio.wait_for(results.blocked_puts.get(), timeout=1)
+    assert results.full()
+    assert not third_admission.done()
+    assert not fourth_admission.done()
 
     control.release.set()
     await asyncio.wait_for(

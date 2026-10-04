@@ -205,7 +205,7 @@ class RDBSessionAgentContextProject(RDBModel):
         name="uq_session_agent_context_projects_context_path",
     )
     IX_CONTEXT_ID = sa.Index(
-        "ix_session_agent_context_projects_context_id",
+        "ix_session_agent_context_projects_session_agent_context_id",
         "session_agent_context_id",
     )
 
@@ -243,7 +243,7 @@ class RDBSessionAgentContextGitWorktree(RDBModel):
     __tablename__ = "session_agent_context_git_worktrees"
 
     IX_CONTEXT_ID = sa.Index(
-        "ix_session_agent_context_git_worktrees_context_id",
+        "ix_session_agent_context_git_worktrees_session_agent_context_id",
         "session_agent_context_id",
     )
     IX_STATUS = sa.Index("ix_session_agent_context_git_worktrees_status", "status")

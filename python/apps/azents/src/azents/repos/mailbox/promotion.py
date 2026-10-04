@@ -9,14 +9,15 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import ActionExecution, ActionExecutionCreate
 from azents.core.enums import ActionExecutionStatus, AgentRunStatus, EventKind
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import MailboxItem
 from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
 from azents.engine.events.types import AgentMessagePayload, Event
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecution, ActionExecutionCreate
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -26,7 +27,6 @@ from azents.repos.goal.store import (
     get_goal_state_store,
 )
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem
 from azents.repos.skill_state import SkillStateRepository
 
 logger = logging.getLogger(__name__)

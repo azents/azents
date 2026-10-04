@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunPhase,
@@ -21,7 +22,6 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.data import PendingCommandSnapshot

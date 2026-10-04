@@ -5,6 +5,7 @@ import json
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     EventKind,
@@ -13,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     LLMProvider,
 )
+from azents.core.json_value import JSONValue
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.types import (
     AgentMessagePayload,
@@ -26,10 +28,9 @@ from azents.engine.events.types import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.message import MessageRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.model_selection import (

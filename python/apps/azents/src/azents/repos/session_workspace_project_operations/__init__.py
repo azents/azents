@@ -8,7 +8,12 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentProjectCatalogStatus, AgentSessionStatus
+from azents.core.session_workspace_project import (
+    SessionWorkspaceProject,
+    SessionWorkspaceProjectCreate,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -17,7 +22,6 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )
@@ -28,10 +32,6 @@ from azents.repos.session_working_folder_binding.data import (
 from azents.repos.session_workspace_project import (
     SessionWorkspaceProjectCleanupInProgress,
     SessionWorkspaceProjectRepository,
-)
-from azents.repos.session_workspace_project.data import (
-    SessionWorkspaceProject,
-    SessionWorkspaceProjectCreate,
 )
 from azents.repos.skill_state import SkillStateRepository
 from azents.repos.workspace_user import WorkspaceUserRepository

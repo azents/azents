@@ -4,6 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileDeleteOutcome,
@@ -30,7 +32,6 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileUsage,
 )
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
@@ -118,13 +119,15 @@ def _workspace_profile() -> WorkspaceRuntimeProfile:
     )
 
 
-def _service() -> tuple[
-    RuntimeProfileAdminService,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    dict[str, bool],
-]:
+class _AdminProfileFixture(NamedTuple):
+    service: RuntimeProfileAdminService
+    profiles: AsyncMock
+    providers: AsyncMock
+    workspaces: AsyncMock
+    transaction: dict[str, bool]
+
+
+def _service() -> _AdminProfileFixture:
     """Build the service with transaction-state tracking dependencies."""
     transaction = {"committed": False, "rolled_back": False}
 
@@ -155,12 +158,12 @@ def _service() -> tuple[
         ),
     )
     provider_repository.get_by_provider_id.return_value = _provider()
-    return (
-        service,
-        profile_repository,
-        provider_repository,
-        workspace_repository,
-        transaction,
+    return _AdminProfileFixture(
+        service=service,
+        profiles=profile_repository,
+        providers=provider_repository,
+        workspaces=workspace_repository,
+        transaction=transaction,
     )
 
 

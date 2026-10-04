@@ -7,7 +7,7 @@ import logging
 import uuid
 from pathlib import PurePosixPath
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.io.attachments import RuntimeAttachment
@@ -53,6 +53,8 @@ def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
 
 class PresentFileInput(BaseModel):
     """present_file tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     paths: list[str] = Field(
         description="List of absolute paths to present to the user",

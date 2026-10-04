@@ -17,7 +17,7 @@ import mimetypes
 import time
 from abc import ABC
 from collections.abc import Awaitable, Callable
-from typing import Generic, NamedTuple, TypeVar
+from typing import Generic, NamedTuple, TypeVar, assert_never
 from urllib.parse import urlparse
 
 import httpx2 as httpx
@@ -247,6 +247,8 @@ async def _extract_tool_result(
                     output.append(artifact_part)
             case ResourceLink():
                 text_parts.append(f"[resource link: {item.name}] {item.uri}")
+            case _ as unreachable:
+                assert_never(unreachable)
 
     text = "\n".join(text_parts)
     if result.is_error:

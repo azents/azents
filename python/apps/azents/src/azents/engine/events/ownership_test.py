@@ -8,6 +8,7 @@ import pytest
 from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentRunStatus, AgentSessionProductMode, EventKind
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.context.compaction import CompactionSummaryBudget
@@ -43,7 +44,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.compaction_operation import CompactionOperationRepository
 from azents.repos.engine_event_mutation import EngineEventMutationRepository

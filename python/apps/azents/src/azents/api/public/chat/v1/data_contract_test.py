@@ -12,6 +12,7 @@ from azents.api.public.chat.v1.data import (
     ChatSessionModelProfileUpdateRequest,
     UploadResponse,
 )
+from azents.core.agent_session_data import AgentSession
 from azents.core.chat_data import (
     ChatLiveRunRetryState,
 )
@@ -29,7 +30,6 @@ from azents.core.model_availability import (
     ModelCandidateIdentity,
     SessionModelAvailability,
 )
-from azents.repos.agent_session.data import AgentSession
 
 
 def test_upload_response_does_not_expose_file_part() -> None:

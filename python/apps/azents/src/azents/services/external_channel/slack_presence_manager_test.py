@@ -8,6 +8,7 @@ import pytest
 from azents.repos.external_channel.data import SlackWorkPresenceTarget
 from azents.services.external_channel.slack_presence import SlackPresenceOutcome
 from azents.services.external_channel.slack_presence_manager import (
+    SlackPresenceKey,
     SlackWorkPresenceManagerService,
     _ObservedPresence,
     _presence_key,
@@ -60,7 +61,7 @@ async def test_active_channel_status_is_deduplicated_and_refreshed_before_expiry
     )
     service = _service(client)
     target = _target()
-    observed: dict[tuple[str, str, str], _ObservedPresence] = {}
+    observed: dict[SlackPresenceKey, _ObservedPresence] = {}
 
     await service._reconcile(
         connection_id="connection-1",
@@ -104,7 +105,7 @@ async def test_fresh_owner_applies_finished_thread_idle_once() -> None:
         desired_state="idle",
         status_text=None,
     )
-    observed: dict[tuple[str, str, str], _ObservedPresence] = {}
+    observed: dict[SlackPresenceKey, _ObservedPresence] = {}
 
     await service._reconcile(
         connection_id="connection-1",
@@ -170,7 +171,7 @@ async def test_failed_projection_remains_unobserved_for_later_retry() -> None:
     )
     service = _service(client)
     target = _target(kind="thread_agent")
-    observed: dict[tuple[str, str, str], _ObservedPresence] = {}
+    observed: dict[SlackPresenceKey, _ObservedPresence] = {}
 
     await service._reconcile(
         connection_id="connection-1",

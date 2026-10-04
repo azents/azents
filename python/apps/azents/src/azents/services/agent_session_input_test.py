@@ -17,6 +17,11 @@ from azents.core.agent import (
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionCreate,
+    SessionWorkingFolderContext,
+)
 from azents.core.agent_session_input_data import (
     AgentSessionInputError,
     AgentSessionInputIdempotencyConflict,
@@ -51,7 +56,9 @@ from azents.core.inference_profile import (
     SessionAppliedInferenceProfile,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.mailbox_data import MailboxItem
 from azents.core.model_execution_options import ModelExecutionOptionId
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
@@ -79,11 +86,6 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionCreate,
-    SessionWorkingFolderContext,
-)
 from azents.repos.agent_session_input_operations import (
     AgentSessionInputOperationsRepository,
 )
@@ -92,13 +94,11 @@ from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
-from azents.repos.mailbox.data import MailboxItem
 from azents.repos.mailbox_database import MailboxDatabaseRepository
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository

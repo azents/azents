@@ -10,6 +10,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
   - python/apps/azents/src/azents/engine/events/effective_model_request.py
+  - python/apps/azents/src/azents/core/action_execution_data.py
+  - python/apps/azents/src/azents/core/agent_session_data.py
+  - python/apps/azents/src/azents/core/mailbox_data.py
+  - python/apps/azents/src/azents/core/session_workspace_project.py
+  - python/apps/azents/src/azents/core/json_value.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py

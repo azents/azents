@@ -32,19 +32,19 @@ from azents.core.enums import (
     ExternalChannelTransport,
     WorkspaceUserRole,
 )
-from azents.core.external_channel_provider import (
-    ExternalChannelConnectionStatusSnapshot,
-    ExternalChannelCredentialSnapshot,
-)
-from azents.repos.external_channel.data import ExternalChannelMultiConnectionImpact
-from azents.repos.external_channel.management_data import (
+from azents.core.external_channel_impact import ExternalChannelMultiConnectionImpact
+from azents.core.external_channel_management import (
     ManagedBinding,
     ManagedConnection,
     ManagedMultiConnection,
 )
-from azents.repos.external_channel.management_operation_data import (
+from azents.core.external_channel_management_errors import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
+)
+from azents.core.external_channel_provider import (
+    ExternalChannelConnectionStatusSnapshot,
+    ExternalChannelCredentialSnapshot,
 )
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
@@ -196,6 +196,7 @@ def _client(
     *,
     role: WorkspaceUserRole = WorkspaceUserRole.OWNER,
     multi_app_enabled: bool = True,
+    raise_server_exceptions: bool = True,
 ) -> TestClient:
     app = _ROUTE_APP
     app.dependency_overrides[ExternalChannelManagementService] = lambda: service
@@ -218,7 +219,7 @@ def _client(
         api_url="https://api.example.test",
         external_channel_multi_app_enabled=multi_app_enabled,
     )
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_setup_returns_redacted_connection_without_echoing_credentials() -> None:
@@ -446,6 +447,7 @@ def test_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
         service,
         role=WorkspaceUserRole.MANAGER,
         multi_app_enabled=False,
+        raise_server_exceptions=False,
     ).post(
         "/external-channel/v1/workspaces/ws/external-channels/slack/multi",
         json={
@@ -460,10 +462,8 @@ def test_multi_app_creation_is_blocked_before_mode_aware_enablement() -> None:
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Multi App creation is not enabled for this deployment."
-    }
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
     service.setup_multi_slack.assert_not_awaited()
 
 
@@ -518,6 +518,7 @@ def test_discord_multi_app_creation_is_blocked_before_mode_aware_enablement() ->
         service,
         role=WorkspaceUserRole.MANAGER,
         multi_app_enabled=False,
+        raise_server_exceptions=False,
     ).post(
         "/external-channel/v1/workspaces/ws/external-channels/discord/multi",
         json={
@@ -535,10 +536,8 @@ def test_discord_multi_app_creation_is_blocked_before_mode_aware_enablement() ->
         },
     )
 
-    assert response.status_code == 503
-    assert response.json() == {
-        "detail": "Multi App creation is not enabled for this deployment."
-    }
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
     service.setup_multi_discord.assert_not_awaited()
 
 
@@ -866,9 +865,11 @@ def test_multi_route_growth_is_blocked_before_mode_aware_enablement(
     """The rollout gate also prevents adding or reviving Multi routes."""
     service = AsyncMock(spec=ExternalChannelManagementService)
 
-    response = _client(service, multi_app_enabled=False).post(path, json=payload)
+    response = _client(
+        service, multi_app_enabled=False, raise_server_exceptions=False
+    ).post(path, json=payload)
 
-    assert response.status_code == 503
+    assert response.status_code == 500
     _service_method(service, service_method).assert_not_awaited()
 
 

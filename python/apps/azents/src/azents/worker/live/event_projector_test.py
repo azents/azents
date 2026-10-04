@@ -2,10 +2,13 @@
 
 import asyncio
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 
 import pytest
 
 from azents.broker.broadcast import (
+    BaseWebSocketBroadcast,
     WebSocketBroadcastPublishError,
 )
 from azents.core.chat_data import (
@@ -29,6 +32,7 @@ from azents.engine.events.types import (
 )
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.services.chat.live_events import (
+    BaseLiveEventStore,
     InMemoryLiveEventStore,
     LiveOwnerAdvance,
 )
@@ -109,30 +113,32 @@ class _FailingAdvanceStore(_LiveEventStore):
         raise RuntimeError("live store unavailable")
 
 
-class _Broadcast:
+class _Broadcast(BaseWebSocketBroadcast):
     """WebSocket broadcast test double."""
 
     def __init__(self, *, fail: bool = False) -> None:
         self.events: list[tuple[str, dict[str, object]]] = []
         self.fail = fail
 
-    async def publish(self, session_id: str, event: dict[str, object]) -> None:
+    async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
         """Record a broadcast event or simulate Redis failure."""
         if self.fail:
             raise WebSocketBroadcastPublishError
-        self.events.append((session_id, event))
+        self.events.append((session_id, event_json))
 
     async def publish_live_projection(
-        self,
-        session_id: str,
-        event: dict[str, object],
-        *,
-        owner_generation: int,
+        self, session_id: str, event_json: dict[str, object], *, owner_generation: int
     ) -> bool:
         """Record a generation-gated projection event."""
         del owner_generation
-        await self.publish(session_id, event)
+        await self.publish(session_id, event_json)
         return True
+
+    def subscribe(
+        self, session_id: str
+    ) -> AbstractAsyncContextManager[AsyncIterator[dict[str, object]]]:
+        """Subscriptions are outside this focused broadcast fixture."""
+        raise AssertionError("Unexpected broadcast subscription")
 
 
 class _PausingGenerationBroadcast(_Broadcast):
@@ -145,21 +151,15 @@ class _PausingGenerationBroadcast(_Broadcast):
         self.release_paused_reset = asyncio.Event()
 
     async def publish_live_projection(
-        self,
-        session_id: str,
-        event: dict[str, object],
-        *,
-        owner_generation: int,
+        self, session_id: str, event_json: dict[str, object], *, owner_generation: int
     ) -> bool:
-        if event["type"] == "live_projection_reset" and owner_generation == 2:
+        if event_json["type"] == "live_projection_reset" and owner_generation == 2:
             self.paused_reset_reached.set()
             await self.release_paused_reset.wait()
         if self.owner_generation != owner_generation:
             return False
         return await super().publish_live_projection(
-            session_id,
-            event,
-            owner_generation=owner_generation,
+            session_id, event_json, owner_generation=owner_generation
         )
 
 
@@ -210,7 +210,7 @@ def _running_run(run_id: str) -> AgentRunState:
 
 
 def _projector(
-    store: object,
+    store: BaseLiveEventStore,
     broadcast: _Broadcast,
     *,
     current_run: AgentRunState | None = None,
@@ -219,8 +219,8 @@ def _projector(
 ) -> LiveEventProjector:
     """Create a projector with durable correlation doubles."""
     return LiveEventProjector(
-        live_event_store=store,  # ty: ignore[invalid-argument-type] # Focused stores implement only exercised live-event operations.
-        broadcast=broadcast,  # ty: ignore[invalid-argument-type] # Focused broadcast double implements publish().
+        live_event_store=store,
+        broadcast=broadcast,
         authority_repository=authority_repository
         or _AuthorityRepository(
             owner_generation=owner_generation,

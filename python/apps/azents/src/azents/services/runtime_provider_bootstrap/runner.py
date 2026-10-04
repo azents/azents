@@ -79,6 +79,7 @@ class RuntimeProviderBootstrapRunner:
             )
             logger.warning(
                 "Runtime Provider bootstrap source rejected",
+                exc_info=True,
                 extra={
                     "source_key": error.source_key,
                     "error_code": error.code,

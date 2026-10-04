@@ -19,7 +19,7 @@ from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorSourceTransport,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.client_tools import ClientToolWireDialect
@@ -100,6 +100,8 @@ _TARGET_FAILURE_NOTICE = "No Runtime output was stored."
 
 class RunToolToFileInput(BaseModel):
     """Model-visible higher-order Tool input."""
+
+    model_config = ConfigDict(extra="forbid")
 
     tool_name: str = Field(
         min_length=1,

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -15,13 +16,12 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     SessionAgentKind,
 )
+from azents.core.mailbox_data import MailboxItem
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
-from azents.repos.mailbox.data import MailboxItem
 from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)

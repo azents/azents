@@ -15,11 +15,11 @@ from azents.core.external_channel_conversation_data import (
 from azents.core.external_channel_ingestion import (
     ExternalChannelWakeDispatchUnavailable,
 )
+from azents.core.mailbox_data import MailboxItem
 from azents.repos.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeRepository,
 )
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem
 from azents.services.external_channel.ingress_test_control import (
     ExternalChannelIngressTestControl,
 )
