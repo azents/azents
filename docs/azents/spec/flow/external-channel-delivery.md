@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/thread_title_read.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
   - python/apps/azents/src/azents/core/external_channel_conversation_data.py
   - python/apps/azents/src/azents/core/external_channel_ingestion.py
@@ -62,7 +63,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 66
+spec_version: 67
 ---
 
 # External Channel Delivery and Channel Work
@@ -351,6 +352,12 @@ the remaining match sends one adjacent name-only PATCH. Missing state, provider
 failure, cancellation, ambiguity, or process interruption ends the operation without
 retry, reconciliation, backfill, durable attempt state, or impact on the committed
 Session title and Agent execution.
+
+Thread-title authority is captured by one completed native read-only repository
+operation joining the exact Resource, Binding, Session, route, connection and
+Agent identities. Credential decoding follows scope closure; the existing
+provisional-title check, one GET/at-most-one PATCH and no-retry behavior remain
+unchanged.
 
 ## Activity Tracker Lifecycle
 
@@ -657,6 +664,8 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+- **2026-10-05** (spec_version 67) — Completed exact thread-title authority in a native read-only repository before credential decoding and the one-shot Discord effect.
+
 
 - **2026-10-05** (spec_version 66) — Moved Channel Action and Scheduled Channel
   presentation transaction ownership into completed repository operations, retaining

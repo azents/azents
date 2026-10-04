@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
   - python/apps/azents/src/azents/core/external_channel_interaction.py
   - python/apps/azents/src/azents/core/external_channel_selection.py
   - python/apps/azents/src/azents/core/external_channel_participation.py
@@ -113,7 +115,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-05
-spec_version: 69
+spec_version: 70
 ---
 
 # External Channel Provider Ingress
@@ -240,6 +242,13 @@ Unknown selectors, malformed bodies, invalid signatures, mismatched Application/
 identity, and unsupported interaction types fail before durable interaction state. Discord
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
+
+HTTP interaction/principal admission and durable processing/terminal claims are
+completed repository operations with the existing connection lock order and
+lease/status predicates. Discord callback configuration capture and bounded
+recoverable-owner scans use completed native read-only operations. Signature
+verification, provider callbacks and Local Job Runtime submissions occur only
+after these operations close.
 
 ## Interactive Admission and Selection
 
@@ -700,6 +709,8 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-05** (spec_version 70) — Completed residual interaction admission/claim ownership and native read-only Discord callback/recovery observations before authentication, provider mutation and job wake.
+
 
 - **2026-10-05** (spec_version 69) — Moved interaction/selector scope observations
   and shortcut materialization into completed repository operations, with native

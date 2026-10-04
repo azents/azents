@@ -36,7 +36,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-05
-spec_version: 8
+spec_version: 9
 ---
 
 # Kimi OAuth Flow
@@ -201,6 +201,12 @@ Azents canonical history, native completion evidence, provider-failure classific
 compaction and titles. The `moonshot/` namespace remains a source-metadata lookup key, not a stored
 or reconstructed execution identifier.
 
+Device session persistence, pending-session reads, interval changes and cancellation
+complete inside injected repository operations. Token consumption and Kimi
+integration create/update share one database-only operation, preserving the
+existing transition result and rollback behavior. Provider device requests and
+credential preparation remain outside these operations.
+
 ## Integration-Scoped Model Catalog
 
 A Kimi integration owns an integration-scoped catalog. Synchronization ensures fresh OAuth
@@ -314,6 +320,7 @@ message submission, or integration management.
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-05 | 9 | Completed Device OAuth session and atomic integration-save repository ownership | Preserve existing provider flow, consume predicates and credential outcomes |
 | 2026-10-03 | 6 | Adopted current catalog entries/latest sync without snapshot history | Retain Kimi account visibility and existing synchronization policy |
 | 2026-10-01 | 5 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep Kimi model visibility independent of optional generic metadata |
 | 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |
