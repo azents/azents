@@ -7,10 +7,11 @@ from datetime import datetime, timedelta
 from unittest.mock import create_autospec
 from uuid import uuid4
 
+import httpx
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from fastapi import HTTPException
+from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
 from types_aiobotocore_ses.client import SESClient
@@ -71,6 +72,7 @@ from azents.services.signup_token.data import (
     RedeemSignupTokenInput,
     SignupEmailDeliveryUnavailable,
     SignupTokenOutput,
+    SignupTokenWithPlaintextOutput,
     WeakSignupPassword,
 )
 
@@ -898,11 +900,14 @@ async def test_email_render_send_outcomes_after_close_retain_real_committed_toke
             elif mode == "error":
                 with pytest.raises(RuntimeError, match="synthetic transport failed"):
                     await task
+            elif mode == "false":
+                with pytest.raises(
+                    SignupEmailDeliveryUnavailable, match="did not complete"
+                ):
+                    await task
             else:
                 result = await task
-                assert isinstance(result, Success if mode == "ok" else Failure)
-                if isinstance(result, Failure):
-                    assert result.error == SignupEmailDeliveryUnavailable()
+                assert isinstance(result, SignupTokenWithPlaintextOutput)
             observed = await footprint(dataclasses.replace(fixture, manager=observer))
             assert (
                 len(observed["tokens"]) == 1
@@ -940,7 +945,7 @@ async def test_email_render_send_outcomes_after_close_retain_real_committed_toke
             await cleanup_signup(fixture)
 
 
-async def test_unavailable_email_returns_503_without_create_or_send(
+async def test_unavailable_email_raises_without_create_or_send(
     signup_boundary_pg: SignupFixture,
 ) -> None:
     fixture = signup_boundary_pg
@@ -952,13 +957,46 @@ async def test_unavailable_email_returns_503_without_create_or_send(
         max_days=None,
         pause=False,
     )
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(SignupEmailDeliveryUnavailable, match="not configured"):
         await auth_api.request_signup_email(
             state.service, RequestSignupEmailRequest(email=fixture.email)
         )
-    assert error.value.status_code == 503
     assert state.events == ["configured"] and fixture.scope.sessions == []
     assert fixture.fault.trace == []
+
+
+@pytest.mark.parametrize("mode", ["unconfigured", "false", "error"])
+async def test_signup_email_uses_native_server_error_boundary(
+    signup_boundary_pg: SignupFixture,
+    mode: str,
+) -> None:
+    """Native HTTP failures reveal no transport text or plaintext token."""
+    fixture = signup_boundary_pg
+    state = boundary(
+        fixture,
+        smtp=mode != "unconfigured",
+        mode="ok" if mode == "unconfigured" else mode,
+        registration_mode="signup_token",
+        max_days=None,
+        pause=False,
+    )
+    app = FastAPI()
+    app.include_router(auth_api.router)
+    app.dependency_overrides[SignupTokenService] = lambda: state.service
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://signup.test",
+    ) as client:
+        response = await client.post("/signup/email", json={"email": fixture.email})
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    if mode == "unconfigured":
+        assert state.events == ["configured"]
+        assert fixture.scope.sessions == [] and fixture.fault.trace == []
+    observed = await footprint(fixture)
+    assert len(observed["tokens"]) == (0 if mode == "unconfigured" else 1)
+    assert all(token["revoked_at"] is None for token in observed["tokens"])
+    fixture.scope.assert_closed()
 
 
 @pytest.mark.parametrize("mode", ["signup_token", "closed", "open"])

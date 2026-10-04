@@ -124,7 +124,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-10-04
-spec_version: 26
+spec_version: 27
 ---
 
 # User & Authentication
@@ -319,9 +319,13 @@ TTL or public-schema policy.
 `POST /auth/v1/signup/email` creates email-bound signup token and sends `/signup?token=...` link by email if email service is configured. If email service is not configured, it fails with `SignupEmailDeliveryUnavailable`. Manual delivery uses admin signup token create API.
 
 Email availability is checked before token creation; rendering and delivery follow
-the completed token operation. Delivery returning false, raising or being cancelled
-does not revoke the already-created token. The existing email-request availability
-predicate and error status are unchanged by transaction-ownership migration.
+the completed token operation. Unconfigured email and a false delivery receipt
+raise `SignupEmailDeliveryUnavailable` through the natural server error boundary
+rather than an explicit product 503 mapping. Successful delivery returns the
+typed output; transport exceptions and cancellation propagate unchanged.
+False, raised or cancelled delivery does not revoke or replay the already-created
+token. Ordinary HTTP error handling does not expose transport text or plaintext
+token data. The precreation predicate and postcommit token semantics are unchanged.
 
 ### 3.4 Password login
 
