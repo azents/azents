@@ -30,6 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_terminal/**
   - python/apps/azents/src/azents/services/terminal_policy/**
   - python/apps/azents/src/azents/services/session_working_folder_binding*
+  - python/apps/azents/src/azents/repos/session_working_folder_binding/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/api/public/terminal/**
   - python/apps/azents/src/azents/api/public/chat/**
@@ -94,8 +95,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-02
-spec_version: 92
+last_verified_at: 2026-10-04
+spec_version: 93
 ---
 
 # Agent Runtime Control
@@ -1080,12 +1081,22 @@ applied or desired authority as appropriate. Runner loss, terminal deletion, cap
 change, supersession of the serving applied generation, timeout, cancellation, or authority drift
 fails closed rather than retargeting the operation to another Runtime incarnation.
 
-Runtime Toolkit prompt projection loads the Agent Runtime and its current
-configuration state in one completed repository-owned read transaction. Session
-Project projection uses a separate completed repository-owned read transaction
+Runtime Toolkit prompt projection loads the Agent Runtime and retained
+configuration state in one completed repository-owned read-only transaction. Session
+Project projection uses a separate completed repository-owned read-only transaction
 and preserves repository ordering before the Engine applies its existing
 path-order presentation. These reads return detached results before Runtime
 coordination, Runner operations, or other external work begins.
+
+Model-visible target and folder projection do not invoke Runtime reconciliation
+or actual-operation admission. A retained applied configuration must qualify the
+retained desired generation, ready Runner and Runner-reported workspace; missing,
+terminal or unready evidence projects no target. Existing BOUND context, exact
+Agent/Runtime association and canonical root-derived folder path are read without
+Agent/context locks or PENDING binding. Worktree create/remove visibility shares
+this retained eligibility. Actual Runtime and worktree admission retains current
+capability, target/configuration, binding and execution-owner checks, so a stale
+description cannot retarget an external operation.
 
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes CIDR-only or proxy-owned
 policy/artifact changes may adopt in place through exact aggregate Provider and ordinary Runner

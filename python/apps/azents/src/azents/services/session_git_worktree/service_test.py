@@ -241,6 +241,7 @@ def _readonly_service() -> SessionGitWorktreeService:
         mailbox_item_repository=MailboxRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         session_manager=_session_manager_double,
+        read_session_manager=_session_manager_double,
         runtime_target_resolver=_RuntimeTargetResolver(
             _session_manager_double,
             AgentRuntimeRepository(),
@@ -313,6 +314,28 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
         self.session_manager = session_manager
         self.runtime_repository = runtime_repository
         self.calls: list[dict[str, object]] = []
+
+    async def project_operation_target(
+        self, agent_id: str
+    ) -> RuntimeOperationTarget | None:
+        """Read fixture evidence without recording an actual admission."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+        if (
+            runtime is None
+            or runtime.runner_state is not RuntimeRunnerState.READY
+            or runtime.workspace_path is None
+        ):
+            return None
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            runtime_capability_version=1,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_sequence=1,
+            configuration_digest="a" * 64,
+            workspace_path=runtime.workspace_path,
+        )
 
     async def resolve_operation_target(
         self,
@@ -945,6 +968,7 @@ def _service(
             agent_repository=AgentRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         )
     )
     return SessionGitWorktreeService(
@@ -967,6 +991,7 @@ def _service(
         mailbox_item_repository=MailboxRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         session_manager=session_manager,
+        read_session_manager=session_manager,
         runtime_target_resolver=_RuntimeTargetResolver(
             session_manager,
             runtime_repository,
@@ -993,6 +1018,7 @@ def _project_operations_repository(
             agent_repository=AgentRepository(),
             agent_session_repository=AgentSessionRepository(),
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         skill_state_repository=SkillStateRepository(
             session_manager=session_manager,

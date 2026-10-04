@@ -167,7 +167,10 @@ async def test_update_context_returns_immediately_without_snapshot() -> None:
 
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -191,7 +194,10 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
     """Successful background refresh exposes deterministic tool order."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -215,7 +221,10 @@ async def test_background_refresh_stops_after_owner_rejection() -> None:
     """A detached snapshot writer does not restart after ownership loss."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -272,7 +281,10 @@ async def test_stored_snapshot_restores_model_tool_name() -> None:
     )
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name=state_name,
@@ -290,7 +302,10 @@ async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
     """Failed refresh keeps the previous successful tool snapshot."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -320,7 +335,10 @@ async def test_failed_refresh_without_snapshot_exposes_no_retry_tool_or_prompt()
     """Initial MCP failure exposes no loading/retry/status pseudo-tool."""
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
         state_name="tool_snapshot:test",
@@ -447,7 +465,10 @@ async def test_unexpected_background_failure_is_observed_once(
             server_url="https://user:secret@mcp.example.test/path?token=secret",
             auth_type="none",
         ),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
     )
@@ -492,7 +513,10 @@ async def test_mixed_background_group_keeps_the_unhandled_failure(
         config=McpToolkitConfig(
             server_url="https://mcp.example.test", auth_type="none"
         ),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
     )
@@ -516,7 +540,10 @@ async def test_expected_background_group_remains_nonfatal(
         config=McpToolkitConfig(
             server_url="https://mcp.example.test", auth_type="none"
         ),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
     )
@@ -539,7 +566,10 @@ async def test_background_cancellation_stays_cancellation(
         config=McpToolkitConfig(
             server_url="https://mcp.example.test", auth_type="none"
         ),
-        snapshot_factory=EngineMcpSnapshotFactory(session_manager=_session_manager),
+        snapshot_factory=EngineMcpSnapshotFactory(
+            session_manager=_session_manager,
+            read_session_manager=_session_manager,
+        ),
         agent_id="agent-1",
         session_id="session-1",
     )

@@ -356,6 +356,7 @@ def _tool_repositories(
     """Compose actual completed operations around the existing owned DB fixtures."""
     return get_engine_tool_repositories(
         session_manager=session_manager,
+        read_session_manager=session_manager,
         cipher=CredentialCipher(Fernet.generate_key().decode()),
         memory_repository=memory_repo
         if memory_repo is not None
@@ -1141,6 +1142,31 @@ def _make_toolkit(
     agent_runtime_service.resolve_operation_target.side_effect = (
         resolve_operation_target
     )
+
+    async def project_operation_target(
+        requested_agent_id: str,
+    ) -> RuntimeOperationTarget | None:
+        runtime = await agent_runtime_repo.get_by_agent_id(object(), requested_agent_id)
+        if (
+            runtime.desired_state is not RuntimeDesiredState.RUNNING
+            or runtime.runner_state is not RuntimeRunnerState.READY
+            or runtime.workspace_path is None
+        ):
+            return None
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            runtime_capability_version=1,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_sequence=runtime.configuration_sequence,
+            configuration_digest="a" * 64,
+            workspace_path=runtime.workspace_path,
+        )
+
+    agent_runtime_service.project_operation_target.side_effect = (
+        project_operation_target
+    )
+
     project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
     project_repo.list_projects.return_value = projects or []
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
@@ -1177,6 +1203,23 @@ def _make_toolkit(
     session_working_folder_binding_service.resolve_bound_authority.side_effect = (
         resolve_binding
     )
+
+    async def project_binding(
+        *, agent_id: str, session_id: str, runtime_target: RuntimeOperationTarget
+    ) -> SessionWorkingFolderAuthority:
+        return await resolve_binding(
+            agent_id=agent_id,
+            session_id=session_id,
+            runtime_target=runtime_target,
+            capability_snapshot=RuntimeCapabilitySnapshot(
+                state=AgentRuntimeCapability.MANAGED,
+                version=runtime_target.runtime_capability_version,
+            ),
+        )
+
+    binding_service = session_working_folder_binding_service
+    binding_service.project_bound_authority_for_target.side_effect = project_binding
+
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
     if server_to_runtime_transfer_service is None:
@@ -1290,6 +1333,9 @@ class TestBuiltinToolkitProviderResolve:
             configuration_digest="a" * 64,
             workspace_path="/workspace/agent",
         )
+        runtime_service.project_operation_target.return_value = (
+            runtime_service.resolve_operation_target.return_value
+        )
         binding_service = AsyncMock(spec=SessionWorkingFolderBindingService)
         binding_service.resolve_bound_authority.return_value = (
             SessionWorkingFolderAuthority(
@@ -1299,6 +1345,9 @@ class TestBuiltinToolkitProviderResolve:
                 working_folder_path="/workspace/agent/.azents/sessions/session-1",
                 runtime_capability_version=1,
             )
+        )
+        binding_service.project_bound_authority_for_target.return_value = (
+            binding_service.resolve_bound_authority.return_value
         )
         provider = BuiltinToolkitProvider(
             exchange_file_service=AsyncMock(spec=ExchangeFileService),
@@ -1456,7 +1505,7 @@ class TestRuntimeToolkitUpdateContext:
             return RuntimeCapabilitySnapshot(
                 state=(
                     AgentRuntimeCapability.MANAGED
-                    if provider_calls <= 3
+                    if provider_calls == 0
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,
@@ -1469,6 +1518,7 @@ class TestRuntimeToolkitUpdateContext:
         )
         toolkit = _make_toolkit(runtime_capability_resolver=resolver)
         await toolkit.update_context(_make_context())
+        assert provider_calls == 0
         apply_patch = _find_tool(toolkit.make_mutation_tools(), "apply_patch")
 
         assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
@@ -2911,7 +2961,7 @@ class TestProcessToolHandler:
             return RuntimeCapabilitySnapshot(
                 state=(
                     AgentRuntimeCapability.MANAGED
-                    if provider_calls < 7
+                    if provider_calls < 3
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,
@@ -3347,3 +3397,37 @@ class TestEditHandler:
         assert isinstance(result, str)
         assert runner_operations.files["/workspace/agent/config.txt"] == b"new_value"
         assert runner_operations.file_operation_calls == [("edit", "session-1")]
+
+
+@pytest.mark.asyncio
+async def test_runtime_projection_rejects_retained_configuration_mismatch() -> None:
+    """A lagged target cannot contribute paths from a different prompt authority."""
+    toolkit = _make_toolkit()
+    toolkit._expected_runtime_authority = RuntimeOperationAuthority(
+        configuration_sequence=99, configuration_digest="b" * 64, desired_generation=7
+    )
+    assert await toolkit._resolve_projection_runtime_target() is None
+    service = _runtime_service(toolkit)
+    service.resolve_operation_target.assert_not_awaited()
+    service.ensure_started_for_agent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_projection_rejects_captured_capability_mismatch() -> None:
+    """Description never treats a new version as authority for an old snapshot."""
+    toolkit = _make_toolkit()
+    target = RuntimeOperationTarget(
+        id="runtime-1",
+        runtime_capability_version=2,
+        desired_generation=7,
+        runner_generation=1,
+        configuration_sequence=1,
+        configuration_digest="a" * 64,
+        workspace_path="/workspace/agent",
+    )
+    assert await toolkit._resolve_projection_binding(target) is None
+    binding = require_instance(
+        toolkit.session_working_folder_binding_service, AsyncMock
+    )
+    binding.project_bound_authority_for_target.assert_not_awaited()
+    binding.resolve_authority.assert_not_awaited()

@@ -28,6 +28,16 @@ class SessionWorkingFolderBindingService:
         Depends(SessionWorkingFolderBindingRepository),
     ]
 
+    async def project_bound_authority_for_target(
+        self, *, agent_id: str, session_id: str, runtime_target: RuntimeOperationTarget
+    ) -> SessionWorkingFolderAuthority | None:
+        """Describe a retained BOUND context; never grant execution admission."""
+        return await self.repository.project_bound_authority(
+            agent_id=agent_id,
+            session_id=session_id,
+            target=self.target_evidence(runtime_target),
+        )
+
     async def require_bindable_context(
         self,
         *,

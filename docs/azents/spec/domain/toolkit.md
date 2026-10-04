@@ -20,6 +20,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
+  - python/apps/azents/src/azents/repos/engine_runtime_tool_read.py
   - python/apps/azents/src/azents/repos/historical_memory/context_snapshot_operations.py
   - python/apps/azents/src/azents/repos/historical_memory/source_events.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
@@ -110,7 +111,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-04
-spec_version: 133
+spec_version: 134
 ---
 
 # Toolkit
@@ -172,6 +173,24 @@ repository operations. External tool discovery, credential exchange, and tool
 execution remain outside those operations. Successful snapshot replacement keeps
 the existing optimistic retry and owner-generation fence; runtime still validates
 the stored server/project identity before rebuilding tools.
+
+Saved snapshot and GitHub selection descriptions load through independent,
+database-enforced read-only scopes. Execution-owner binding applies to their
+mutation manager, not their description manager. Description loads neither
+acquire the Session root-tree lock nor require a globally latest view. Missing
+state remains an absent description; retained source identity and schema/executor
+pairing remain mandatory.
+
+Runtime Toolkit availability uses the captured capability projection rather than
+current-operation admission. Retained Runtime/configuration, ready Runner,
+Runner-reported workspace and existing BOUND Session-folder evidence describe
+availability without Runtime reconciliation, start, pending-folder binding or
+Agent/context row locks. Dynamic Worktree preparation shares one retained
+eligibility projection for create and remove; removal additionally requires a
+ready managed allocation. Actual tool invocation still revalidates current
+capability, expected configuration/target, binding and ownership before external
+effects. The general Engine preparation-owner check and unrelated state mutation
+fences remain separate; this read split does not dismantle that lifecycle gate.
 
 All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
 turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
