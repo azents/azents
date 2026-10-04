@@ -9,7 +9,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -18,12 +19,15 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelWorkStatus,
+    ExternalChannelWorkTaskStatus,
 )
 from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
+from azents.core.external_channel_progress import ExternalChannelWorkTask
 from azents.core.external_channel_provider import DiscordConnectionConfiguration
 from azents.core.external_channel_provider_effect import (
     ProviderEffectOutcome,
@@ -33,19 +37,35 @@ from azents.core.external_channel_provider_effect import (
     ProviderTarget,
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadOnlySession,
+    ReadWriteSession,
+    WriteSession,
+    create_read_only_session_manager,
+)
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import (
     _create_agent,
     _create_workspace,
 )
+from azents.repos.external_channel.action_operations import (
+    ExternalChannelActionOperations,
+)
+from azents.repos.external_channel.repository_test import (
+    _create_discord_gateway_typing_binding,
+    _create_discord_gateway_typing_fixture,
+)
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
     AwaitingInputSettlement,
     ChannelActionEffectPlan,
     ChannelActionResult,
     ChannelActionTransition,
+    ChannelWorkSnapshot,
 )
+from azents.repos.external_channel.work_state import ExternalChannelWorkStateStore
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -218,7 +238,6 @@ def _service(
     return require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
             config=SimpleNamespace(
                 web_url="https://azents.example",
                 avatar_cdn_base_url=None,
@@ -316,7 +335,6 @@ async def test_execute_serializes_actions_for_the_same_binding() -> None:
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
             binding_locks={},
             _execute_serialized=execute_mock,
         ),
@@ -363,7 +381,8 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     """Ignore does not apply finish's final-reply gate to Tracker cleanup."""
     session = _session()
     effect = _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE)
-    repository = SimpleNamespace(
+    repository = MagicMock(
+        spec=ExternalChannelWorkRepository,
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -372,7 +391,7 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
                 state_revision=5,
                 effects=(effect,),
             )
-        )
+        ),
     )
     delivered = ProviderEffectOutcome(
         operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
@@ -384,15 +403,24 @@ async def test_ignore_executes_tracker_deletion_without_final_reply() -> None:
     execute_direct_effect = AsyncMock(return_value=delivered)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[object]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
-            session_manager=session_manager,
-            repository=repository,
+            operations=ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
+            _operations_for_authority=lambda _: ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
             _execute_direct_effect=execute_direct_effect,
         ),
         ExternalChannelActionService,
@@ -437,7 +465,8 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
     delete = _effect(ExternalChannelDeliveryOperation.PROGRESS_DELETE)
-    repository = SimpleNamespace(
+    repository = MagicMock(
+        spec=ExternalChannelWorkRepository,
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -446,7 +475,7 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
                 state_revision=5,
                 effects=(reply, delete),
             )
-        )
+        ),
     )
     failed_reply = ProviderEffectOutcome(
         operation=ExternalChannelDeliveryOperation.REPLY,
@@ -458,15 +487,24 @@ async def test_finish_keeps_tracker_when_final_reply_is_not_delivered() -> None:
     execute_direct_effect = AsyncMock(return_value=failed_reply)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[object]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
-            session_manager=session_manager,
-            repository=repository,
+            operations=ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
+            _operations_for_authority=lambda _: ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
             _execute_direct_effect=execute_direct_effect,
         ),
         ExternalChannelActionService,
@@ -501,7 +539,8 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
     """A delivered question establishes awaiting state through a second CAS."""
     session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
-    repository = SimpleNamespace(
+    repository = MagicMock(
+        spec=ExternalChannelWorkRepository,
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -527,15 +566,24 @@ async def test_request_input_settles_only_after_confirmed_reply_delivery() -> No
     )
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[object]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
-            session_manager=session_manager,
-            repository=repository,
+            operations=ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
+            _operations_for_authority=lambda _: ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
             _execute_direct_effect=AsyncMock(return_value=delivered),
         ),
         ExternalChannelActionService,
@@ -578,7 +626,8 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     """A failed question reply leaves Work ready for normal continuation."""
     session = _session()
     reply = _effect(ExternalChannelDeliveryOperation.REPLY)
-    repository = SimpleNamespace(
+    repository = MagicMock(
+        spec=ExternalChannelWorkRepository,
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -599,15 +648,24 @@ async def test_request_input_fails_open_when_reply_is_not_delivered() -> None:
     )
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[object]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
-            session_manager=session_manager,
-            repository=repository,
+            operations=ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
+            _operations_for_authority=lambda _: ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
             _execute_direct_effect=AsyncMock(return_value=failed),
         ),
         ExternalChannelActionService,
@@ -652,7 +710,8 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
         projection_host_kind="standalone",
     )
     create.provider.target.request_payload.pop("provider_message_key", None)
-    repository = SimpleNamespace(
+    repository = MagicMock(
+        spec=ExternalChannelWorkRepository,
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -661,7 +720,7 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
                 state_revision=5,
                 effects=(remove, create, reply),
             )
-        )
+        ),
     )
     captured: list[ChannelActionEffectPlan] = []
 
@@ -684,15 +743,24 @@ async def test_tracker_recreation_needs_only_cleanup() -> None:
         )
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[object]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
-            session_manager=session_manager,
-            repository=repository,
+            operations=ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
+            _operations_for_authority=lambda _: ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
             _execute_direct_effect=AsyncMock(side_effect=execute_effect),
         ),
         ExternalChannelActionService,
@@ -738,7 +806,8 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
         dependencies=(0,),
         projection_host_kind="standalone",
     )
-    repository = SimpleNamespace(
+    repository = MagicMock(
+        spec=ExternalChannelWorkRepository,
         commit_direct_action=AsyncMock(
             return_value=ChannelActionTransition(
                 binding_id="binding-1",
@@ -747,7 +816,7 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
                 state_revision=5,
                 effects=(remove, create, reply),
             )
-        )
+        ),
     )
     failed_cleanup = ProviderEffectOutcome(
         operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
@@ -766,15 +835,24 @@ async def test_tracker_recreation_skips_create_when_cleanup_fails() -> None:
     execute_effect = AsyncMock(side_effect=[failed_cleanup, delivered_reply])
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[object]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     service = require_instance(
         MagicMock(
             spec=ExternalChannelActionService,
-            _owner_for_authority=MagicMock(return_value=None),
-            session_manager=session_manager,
-            repository=repository,
+            operations=ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
+            _operations_for_authority=lambda _: ExternalChannelActionOperations(
+                session_manager=session_manager,
+                read_only_session_manager=MagicMock(),
+                execution_owner=None,
+                repository=require_instance(repository, ExternalChannelWorkRepository),
+            ),
             _execute_direct_effect=execute_effect,
         ),
         ExternalChannelActionService,
@@ -1738,9 +1816,12 @@ def _owned_service(
 ) -> ExternalChannelActionService:
     """Create one concrete service with mocked non-database collaborators."""
     return ExternalChannelActionService(
-        execution_owner=None,
-        session_manager=session_manager,
-        repository=repository,  # ty: ignore[invalid-argument-type] — test double implements only exercised repository methods.
+        operations=ExternalChannelActionOperations(
+            session_manager=session_manager,
+            read_only_session_manager=MagicMock(),
+            execution_owner=None,
+            repository=require_instance(repository, ExternalChannelWorkRepository),
+        ),
         credentials_codec=MagicMock(),
         slack_client=MagicMock(),
         discord_client=MagicMock(),
@@ -1757,7 +1838,7 @@ async def test_stale_execution_cannot_commit_direct_channel_work(
         rdb_session_manager,
         slug="channel-work-stale-admission",
     )
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelWorkRepository)
     repository.commit_direct_action = AsyncMock()
     service = _owned_service(rdb_session_manager, repository).for_execution(authority)
     async with rdb_session_manager() as session:
@@ -1796,11 +1877,11 @@ async def test_stale_execution_cannot_start_direct_provider_effect(
         slug="channel-effect-stale-admission",
     )
     effect = _owned_effect(authority)
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelWorkRepository)
     repository.revalidate_direct_effect = AsyncMock(return_value=effect.provider)
     service = _owned_service(rdb_session_manager, repository).for_execution(authority)
     deliver = AsyncMock()
-    service._deliver = deliver
+    service._deliver = AsyncMock(side_effect=deliver)
     async with rdb_session_manager() as session:
         await AgentSessionRepository().claim_owner_generation(
             session,
@@ -1825,13 +1906,13 @@ async def test_stale_execution_cannot_start_direct_provider_effect(
 async def test_takeover_after_provider_effect_defers_settlement_to_work_cas(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    """Already attempted effects settle by Work cycle/revision, not root ownership."""
+    """Already admitted effects settle by Work cycle/revision after takeover."""
     authority = await _create_execution_authority(
         rdb_session_manager,
         slug="channel-effect-stale-settlement",
     )
     effect = _owned_effect(authority)
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelWorkRepository)
     repository.revalidate_direct_effect = AsyncMock(return_value=effect.provider)
     repository.apply_direct_effect_outcome = AsyncMock()
     service = _owned_service(rdb_session_manager, repository).for_execution(authority)
@@ -1872,3 +1953,211 @@ async def test_takeover_after_provider_effect_defers_settlement_to_work_cas(
     result = await execution
     assert result.status == "delivered"
     repository.apply_direct_effect_outcome.assert_awaited_once()
+
+
+async def test_native_awaiting_input_settlement_preserves_revision_cas(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Completed operations preserve current-cycle revision compare-and-set."""
+    async with rdb_session_manager() as session:
+        fixture = await _create_discord_gateway_typing_fixture(
+            session, suffix="action-awaiting-cas"
+        )
+        binding_id = await _create_discord_gateway_typing_binding(
+            session,
+            fixture,
+            key="action-awaiting-cas-resource",
+            resource_type=ExternalChannelResourceType.THREAD,
+            labels={"channel_id": "100", "thread_id": "101"},
+            work_cycle_id="action-awaiting-cas-cycle",
+        )
+    operations = ExternalChannelActionOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=MagicMock(),
+        execution_owner=None,
+        repository=ExternalChannelWorkRepository(),
+    )
+    stale = await operations.settle_awaiting_input(
+        session_id=fixture.agent_session_id,
+        agent_id=fixture.agent_id,
+        binding_id=binding_id,
+        run_id="awaiting-run",
+        work_cycle_id="action-awaiting-cas-cycle",
+        expected_state_revision=2,
+    )
+    assert stale == AwaitingInputSettlement(established=False, state_revision=1)
+    settled = await operations.settle_awaiting_input(
+        session_id=fixture.agent_session_id,
+        agent_id=fixture.agent_id,
+        binding_id=binding_id,
+        run_id="awaiting-run",
+        work_cycle_id="action-awaiting-cas-cycle",
+        expected_state_revision=1,
+    )
+    assert settled == AwaitingInputSettlement(established=True, state_revision=2)
+    superseded = await operations.settle_awaiting_input(
+        session_id=fixture.agent_session_id,
+        agent_id=fixture.agent_id,
+        binding_id=binding_id,
+        run_id="superseded-run",
+        work_cycle_id="action-awaiting-cas-cycle",
+        expected_state_revision=1,
+    )
+    assert not superseded.established
+    async with rdb_session_manager() as session:
+        state = await ExternalChannelWorkStateStore().load(
+            session,
+            agent_id=fixture.agent_id,
+            session_id=fixture.agent_session_id,
+            binding_id=binding_id,
+        )
+    assert state is not None
+    assert state.awaiting_input_run_id == "awaiting-run"
+    assert state.state_revision == 2
+
+
+async def test_native_descriptive_reads_keep_read_only_scope_after_takeover(
+    rdb_engine: AsyncEngine,
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Bound descriptions remain native RO observations after execution handover."""
+    authority = await _create_execution_authority(
+        rdb_session_manager, slug="channel-read-only-takeover"
+    )
+    async with rdb_session_manager() as session:
+        await AgentSessionRepository().claim_owner_generation(
+            session, authority.session_id
+        )
+    repository = AsyncMock(spec=ExternalChannelWorkRepository)
+
+    async def has_binding(session: ReadOnlySession, **_: object) -> bool:
+        assert isinstance(session, ReadOnlySession)
+        setting = await session.read_session.scalar(
+            sa.text("SHOW transaction_read_only")
+        )
+        assert setting == "on"
+        return True
+
+    async def list_work(
+        session: ReadOnlySession, **_: object
+    ) -> list[ChannelWorkSnapshot]:
+        assert isinstance(session, ReadOnlySession)
+        setting = await session.read_session.scalar(
+            sa.text("SHOW transaction_read_only")
+        )
+        assert setting == "on"
+        return []
+
+    repository.has_active_binding.side_effect = has_binding
+    repository.list_active_work.side_effect = list_work
+    operations = ExternalChannelActionOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=create_read_only_session_manager(rdb_engine),
+        repository=require_instance(repository, ExternalChannelWorkRepository),
+        execution_owner=authority.execution_owner,
+    )
+    assert await operations.has_active_binding(
+        session_id=authority.session_id, agent_id=authority.agent_id
+    )
+    assert (
+        await operations.list_active_work(
+            session_id=authority.session_id, agent_id=authority.agent_id
+        )
+        == []
+    )
+
+
+async def test_native_direct_action_commits_before_provider_effect(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Provider delivery observes committed canonical Work with no retained scope."""
+    async with rdb_session_manager() as session:
+        fixture = await _create_discord_gateway_typing_fixture(
+            session, suffix="action-post-commit"
+        )
+        await session.write_session.execute(
+            sa.update(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == fixture.connection_id)
+            .values(
+                provider_config=DiscordConnectionConfiguration(
+                    target_guild_id="100",
+                    suppress_url_previews=True,
+                    thread_auto_archive_duration_minutes=1440,
+                ).model_dump(mode="json")
+            )
+        )
+        binding_id = await _create_discord_gateway_typing_binding(
+            session,
+            fixture,
+            key="action-post-commit-resource",
+            resource_type=ExternalChannelResourceType.THREAD,
+            labels={
+                "guild_id": "100",
+                "thread_id": "101",
+                "delivery_channel_id": "101",
+            },
+            work_cycle_id="action-post-commit-cycle",
+        )
+    active_sessions: list[WriteSession] = []
+
+    @asynccontextmanager
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
+        async with rdb_session_manager() as session:
+            active_sessions.append(session)
+            try:
+                yield session
+            finally:
+                active_sessions.remove(session)
+
+    service = _owned_service(tracked_manager, ExternalChannelWorkRepository())
+    deliveries: list[ProviderEffectPlan] = []
+
+    async def deliver(plan: ProviderEffectPlan, **_: object) -> ProviderMutationOutcome:
+        assert not active_sessions
+        async with rdb_session_manager() as session:
+            state = await ExternalChannelWorkStateStore().load(
+                session,
+                agent_id=fixture.agent_id,
+                session_id=fixture.agent_session_id,
+                binding_id=binding_id,
+            )
+        assert state is not None
+        assert state.title == "Committed progress…"
+        assert state.state_revision == 2
+        deliveries.append(plan)
+        return ProviderMutationOutcome(
+            status="delivered",
+            provider_message_key="discord:100:101:message",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    service._deliver = AsyncMock(side_effect=deliver)
+    result = await service.execute(
+        session_id=fixture.agent_session_id,
+        agent_id=fixture.agent_id,
+        run_id="action-post-commit-run",
+        client_tool_call_id="action-post-commit-call",
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Committed progress…",
+        tasks=(
+            ExternalChannelWorkTask(
+                id="task-1",
+                title="Verify committed progress",
+                status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                details=None,
+                output=None,
+                sources=[],
+            ),
+        ),
+        files=(),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+    assert deliveries
+    assert all(outcome.status == "delivered" for outcome in result.outcomes)
+    assert not active_sessions
