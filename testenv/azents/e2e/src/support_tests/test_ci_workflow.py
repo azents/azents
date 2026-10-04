@@ -99,8 +99,9 @@ def test_duration_gate_compares_base_once_without_retry() -> None:
     assert "support.ci_duration_gate gate" in gate
     assert "GH_TOKEN: ${{ github.token }}" in gate
     assert "github.event.pull_request.base.sha" in gate
-    assert "--publish-status" in gate
-    assert "statuses: write" in aggregate.split("    steps:\n", 1)[0]
+    assert "--publish-status" not in gate
+    assert "PUBLISH_STATUS" not in gate
+    assert "statuses: write" not in aggregate.split("    steps:\n", 1)[0]
     assert gate.count("ci_duration_gate gate") == 1
     assert "gh run rerun" not in aggregate
     assert "DURATION_RESULT: ${{ steps.duration.outcome }}" in aggregate

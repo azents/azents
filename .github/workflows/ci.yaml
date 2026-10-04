@@ -654,7 +654,6 @@ jobs:
     permissions:
       actions: read
       contents: read
-      statuses: write
     steps:
       - name: Checkout duration gate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -761,14 +760,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          PUBLISH_STATUS: >-
-            ${{ github.event_name == 'pull_request'
-                && github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
-          publish_status=()
-          if [ "$PUBLISH_STATUS" = 'true' ]; then
-            publish_status+=(--publish-status)
-          fi
           PYTHONPATH=testenv/azents/e2e/src \
             python -m support.ci_duration_gate gate \
             --artifacts-root e2e-observability-artifacts \
@@ -778,8 +770,7 @@ jobs:
             --run-id "$GITHUB_RUN_ID" \
             --work-dir e2e-duration-base \
             --report-json e2e-duration-gate/report.json \
-            --report-markdown e2e-duration-gate/summary.md \
-            "${publish_status[@]}"
+            --report-markdown e2e-duration-gate/summary.md
       - name: Publish E2E duration verdict
         if: always()
         run: cat e2e-duration-gate/summary.md >> "$GITHUB_STEP_SUMMARY"
