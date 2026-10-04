@@ -7,6 +7,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from fastapi import HTTPException
 
+from azents.core.archived_session_retention_data import (
+    RetentionApplicationInProgress,
+    RetentionRevisionConflict,
+    RetentionSettingsReadResult,
+    RetentionSettingsUpdateResult,
+)
 from azents.core.auth.deps import SystemAdmin
 from azents.core.enums import ArchivedSessionRetentionApplicationStatus
 from azents.repos.archived_session_retention.data import (
@@ -14,13 +20,7 @@ from azents.repos.archived_session_retention.data import (
     RetentionImpactPreview,
     SystemFileLifecycleSettings,
 )
-from azents.services.archived_session_retention import (
-    ArchivedSessionRetentionService,
-    RetentionApplicationInProgress,
-    RetentionRevisionConflict,
-    RetentionSettingsReadResult,
-    RetentionSettingsUpdateResult,
-)
+from azents.services.archived_session_retention import ArchivedSessionRetentionService
 
 from . import (
     get_archive_retention_application,
