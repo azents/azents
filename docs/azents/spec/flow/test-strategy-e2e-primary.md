@@ -46,7 +46,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-10-04
-spec_version: 82
+spec_version: 83
 ---
 
 # E2E Primary Test Strategy
@@ -607,6 +607,12 @@ Always-on required CI does not depend on external credentials.
   exact-base CI workflow publishes a pending status and linked run, while an absent or
   completed base without compatible artifacts publishes a neutral successful status
   with an unavailable comparison. Candidate CI never waits for base completion.
+  The CI aggregate evaluates and records the local duration verdict without posting
+  a commit status. The existing independent reevaluation workflow owns external
+  `ci-python-e2e` status publication. Publication failures remain visible in that
+  workflow and cannot change a completed local duration verdict or its CI gate result;
+  exact-base pending, terminal unavailable, regression, and invalid-evidence status
+  meanings are unchanged.
   Every CI completion selects all open same-repository pull requests whose current
   head or base SHA matches the completed workflow head SHA. This includes dependent
   stacked pull requests with non-main bases and does not depend on run-associated PR

@@ -1076,7 +1076,6 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("repository", "base-sha", "head-sha"):
         gate.add_argument(f"--{name}", required=True)
     gate.add_argument("--run-id", type=int, required=True)
-    gate.add_argument("--publish-status", action="store_true")
     check = commands.add_parser("recheck")
     check.add_argument("--repository", required=True)
     check.add_argument("--pull-number", type=int, required=True)
@@ -1116,15 +1115,6 @@ def main(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     args.report_markdown.write_text(render(report), encoding="utf-8")
-    if args.publish_status:
-        _publish_status(
-            args.repository,
-            args.head_sha,
-            args.base_sha,
-            report,
-            f"https://github.com/{args.repository}/actions/runs/{args.run_id}",
-            command,
-        )
     return 0 if report["outcome"] in {"pass", "comparison_unavailable"} else 1
 
 

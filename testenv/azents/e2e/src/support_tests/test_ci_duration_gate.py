@@ -341,7 +341,7 @@ def test_missing_base_evidence_reports_neutral_with_current_time(
     assert "⚠️ Comparison unavailable" in render(report)
 
 
-def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
+def test_terminal_missing_base_gate_does_not_publish_status(tmp_path: Path) -> None:
     current = tmp_path / "current"
     _lanes(current, {"web-1": "123"})
     posts: list[list[str]] = []
@@ -353,7 +353,7 @@ def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
             return json.dumps({"workflow_runs": []})
         if "/statuses/" in joined and "--method POST" in joined:
             posts.append(values)
-            return ""
+            raise subprocess.TimeoutExpired(values, 90)
         raise AssertionError(values)
 
     exit_code = main(
@@ -375,13 +375,12 @@ def test_terminal_missing_base_publishes_success(tmp_path: Path) -> None:
             str(tmp_path / "report.json"),
             "--report-markdown",
             str(tmp_path / "summary.md"),
-            "--publish-status",
         ],
         command_runner=command,
     )
 
     assert exit_code == 0
-    assert any("state=success" in item for item in posts[0])
+    assert not posts
     assert "⚠️ Comparison unavailable" in (tmp_path / "summary.md").read_text()
 
 
@@ -438,7 +437,7 @@ def test_invalid_candidate_evidence_remains_a_failure(tmp_path: Path) -> None:
     assert "Candidate timing invalid" in render(report)
 
 
-def test_gate_publishes_pending_without_failing_for_active_base(
+def test_active_base_gate_preserves_verdict_without_status_publication(
     tmp_path: Path,
 ) -> None:
     current = tmp_path / "current"
@@ -483,14 +482,16 @@ def test_gate_publishes_pending_without_failing_for_active_base(
             str(tmp_path / "report.json"),
             "--report-markdown",
             str(tmp_path / "summary.md"),
-            "--publish-status",
         ],
         command_runner=command,
     )
 
     assert exit_code == 0
-    assert any("state=pending" in item for item in posts[0])
-    assert any(f"target_url={run_url}" in item for item in posts[0])
+    assert not posts
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["outcome"] == "comparison_unavailable"
+    assert report["reason"] == "base_workflow_running"
+    assert report["base_run_url"] == run_url
 
 
 def test_markdown_keeps_summary_visible_and_evidence_collapsed() -> None:
@@ -534,7 +535,10 @@ def test_regression_and_unavailable_are_explained_in_plain_language() -> None:
     assert "Base timing artifact unavailable" in unavailable_markdown
 
 
-def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> None:
+@pytest.mark.parametrize("publication_times_out", [False, True])
+def test_recheck_uses_latest_candidate_values_with_new_base(
+    tmp_path: Path, publication_times_out: bool
+) -> None:
     statuses: list[list[str]] = []
     patches: list[list[str]] = []
     comment_reads: list[list[str]] = []
@@ -587,6 +591,8 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
             return ""
         if "/statuses/" in joined and "--method POST" in joined:
             statuses.append(values)
+            if publication_times_out:
+                raise subprocess.TimeoutExpired(values, 90)
             return ""
         if joined.endswith("issues/3/comments?per_page=100"):
             comment_reads.append(values)
@@ -595,6 +601,14 @@ def test_recheck_uses_latest_candidate_values_with_new_base(tmp_path: Path) -> N
             patches.append(values)
             return ""
         raise AssertionError(values)
+
+    if publication_times_out:
+        with pytest.raises(subprocess.TimeoutExpired):
+            recheck("azents/azents", 3, tmp_path, command)
+        assert len(statuses) == 1
+        assert any("state=success" in item for item in statuses[0])
+        assert not patches
+        return
 
     summary = recheck("azents/azents", 3, tmp_path, command)
 
