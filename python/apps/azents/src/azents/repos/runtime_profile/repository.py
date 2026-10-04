@@ -104,18 +104,15 @@ class RuntimeProfileRepository:
 
     async def get_infrastructure_profile(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         profile_id: str,
-        for_update: bool,
     ) -> RuntimeInfrastructureProfile | None:
         """Fetch one infrastructure Profile by globally unique row ID."""
         statement = sa.select(RDBRuntimeInfrastructureProfile).where(
             RDBRuntimeInfrastructureProfile.id == profile_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_infrastructure_profile(rdb) if rdb is not None else None
 
@@ -484,20 +481,17 @@ class RuntimeProfileRepository:
 
     async def get_workspace_runtime_profile(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         profile_id: str,
-        for_update: bool,
     ) -> WorkspaceRuntimeProfile | None:
         """Fetch one Workspace-owned Profile with its ownership boundary."""
         statement = sa.select(RDBWorkspaceRuntimeProfile).where(
             RDBWorkspaceRuntimeProfile.id == profile_id,
             RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_workspace_profile(rdb) if rdb is not None else None
 
@@ -842,18 +836,15 @@ class RuntimeProfileRepository:
 
     async def get_configuration_state(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         runtime_id: str,
-        for_update: bool = False,
     ) -> RuntimeConfigurationState | None:
         """Load one current desired/applied state and decode its documents."""
         statement = sa.select(RDBRuntimeConfigurationState).where(
             RDBRuntimeConfigurationState.runtime_id == runtime_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        row = (await session.write_session.execute(statement)).scalar_one_or_none()
+        row = (await session.read_session.execute(statement)).scalar_one_or_none()
         return self._build_configuration_state(row) if row is not None else None
 
     async def overwrite_desired_configuration_state(
@@ -1071,9 +1062,7 @@ class RuntimeProfileRepository:
         )
         if runtime is None:
             return None
-        state = await self.get_configuration_state(
-            session, runtime_id=runtime_id, for_update=True
-        )
+        state = await self.get_configuration_state(session, runtime_id=runtime_id)
         if (
             state is None
             or state.desired.status is not RuntimeConfigurationStateStatus.READY

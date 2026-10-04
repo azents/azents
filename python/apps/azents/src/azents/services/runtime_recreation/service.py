@@ -149,7 +149,6 @@ class RuntimeRecreationService:
             profile = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile_id,
-                for_update=True,
             )
             if profile is None or profile.provider_id != provider.id:
                 raise RuntimeRecreationUnavailable(
@@ -191,7 +190,6 @@ class RuntimeRecreationService:
                 session,
                 workspace_id=workspace_id,
                 profile_id=profile_id,
-                for_update=True,
             )
             if profile is None:
                 raise RuntimeRecreationUnavailable(
@@ -265,7 +263,6 @@ class RuntimeRecreationService:
                 session,
                 workspace_id=workspace_id,
                 profile_id=operation.target_id,
-                for_update=False,
             )
             if profile is None:
                 raise RuntimeRecreationUnavailable(

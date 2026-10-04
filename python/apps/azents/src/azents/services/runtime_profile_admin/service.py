@@ -161,7 +161,6 @@ class RuntimeProfileAdminService:
             profile = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile_id,
-                for_update=False,
             )
             if profile is None or profile.provider_id != provider.id:
                 raise RuntimeProfileAdminUnavailable(
@@ -267,7 +266,6 @@ class RuntimeProfileAdminService:
             current = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile_id,
-                for_update=False,
             )
             if current is None or current.provider_id != provider.id:
                 raise RuntimeProfileAdminUnavailable(
@@ -310,7 +308,6 @@ class RuntimeProfileAdminService:
                 latest = await self.profile_repository.get_infrastructure_profile(
                     session,
                     profile_id=profile_id,
-                    for_update=False,
                 )
                 raise RuntimeProfileAdminUnavailable(
                     code="profile_version_conflict",
@@ -364,7 +361,6 @@ class RuntimeProfileAdminService:
             profile = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile_id,
-                for_update=False,
             )
             if profile is None or profile.provider_id != provider.id:
                 raise RuntimeProfileAdminUnavailable(
@@ -418,7 +414,6 @@ class RuntimeProfileAdminService:
             current = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile_id,
-                for_update=False,
             )
             if current is None or current.provider_id != provider.id:
                 raise RuntimeProfileAdminUnavailable(
@@ -507,7 +502,6 @@ class RuntimeProfileAdminService:
                 session,
                 workspace_id=workspace_id,
                 profile_id=profile_id,
-                for_update=False,
             )
             if profile is None:
                 raise RuntimeProfileAdminUnavailable(
@@ -517,7 +511,6 @@ class RuntimeProfileAdminService:
             infrastructure = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile.infrastructure_profile_id,
-                for_update=False,
             )
             provider = await self.provider_repository.get_by_id(
                 session,
@@ -574,7 +567,6 @@ class RuntimeProfileAdminService:
         revision = await self.policy_repository.get_contract_by_id(
             session,
             contract_revision_id=revision_id,
-            for_update=False,
         )
         if revision is None or revision.provider_id != provider.id:
             return _CurrentContract(contract=None, revision_id=revision_id)

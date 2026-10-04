@@ -1294,7 +1294,6 @@ class AgentRuntimeService:
             state = await self.runtime_profile_repository.get_configuration_state(
                 session,
                 runtime_id=runtime.id,
-                for_update=False,
             )
             if state is None:
                 return None

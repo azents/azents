@@ -42,18 +42,15 @@ class RuntimeProviderPolicyRepository:
 
     async def get_contract_by_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         contract_revision_id: str,
-        for_update: bool,
     ) -> RuntimeProviderContractRevision | None:
         """Fetch one immutable Provider capability contract revision."""
         statement = sa.select(RDBRuntimeProviderContractRevision).where(
             RDBRuntimeProviderContractRevision.id == contract_revision_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_contract(rdb) if rdb is not None else None
 
@@ -110,18 +107,15 @@ class RuntimeProviderPolicyRepository:
 
     async def get_config_by_id(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         config_revision_id: str,
-        for_update: bool,
     ) -> RuntimeProviderConfigRevision | None:
         """Fetch one immutable Provider configuration revision."""
         statement = sa.select(RDBRuntimeProviderConfigRevision).where(
             RDBRuntimeProviderConfigRevision.id == config_revision_id
         )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.write_session.execute(statement)
+        result = await session.read_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_config(rdb) if rdb is not None else None
 

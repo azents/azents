@@ -65,14 +65,12 @@ class RuntimeProfileAvailabilityRepository:
             session,
             workspace_id=workspace_id,
             profile_id=profile_id,
-            for_update=False,
         )
         if profile is None:
             return "profile_not_found"
         infrastructure = await self.profile_repository.get_infrastructure_profile(
             session,
             profile_id=profile.infrastructure_profile_id,
-            for_update=False,
         )
         if infrastructure is None:
             return "infrastructure_profile_not_found"
@@ -159,7 +157,6 @@ class RuntimeProfileAvailabilityRepository:
         revision = await self.policy_repository.get_contract_by_id(
             session,
             contract_revision_id=revision_id,
-            for_update=False,
         )
         if revision is None or revision.provider_id != provider.id:
             return "provider_capability_unavailable"

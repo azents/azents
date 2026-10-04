@@ -731,7 +731,6 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
             session,
             workspace_id=workspace_id,
             profile_id=profile.id,
-            for_update=False,
         )
         completed_operation = await repository.get_recreation_operation(
             session,
@@ -1167,7 +1166,6 @@ async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
             session,
             workspace_id=workspace_id,
             profile_id=workspace_profile.id,
-            for_update=False,
         )
         completed_operation = await repository.get_recreation_operation(
             session,
