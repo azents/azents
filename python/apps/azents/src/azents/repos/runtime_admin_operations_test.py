@@ -35,6 +35,12 @@ from azents.core.runtime_provider_bootstrap import (
     RuntimeProviderBootstrapReconcileResult,
     RuntimeProviderBootstrapSnapshot,
 )
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialIssued,
+    RuntimeProviderCredentialUnavailable,
+    RuntimeProviderEnrollmentGrantIssued,
+)
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeInfrastructureProfile,
@@ -97,12 +103,6 @@ from azents.services.runtime_provider_bootstrap.enrollment import (
 )
 from azents.services.runtime_provider_bootstrap.service import (
     RuntimeProviderBootstrapService,
-)
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialIssued,
-    RuntimeProviderCredentialUnavailable,
-    RuntimeProviderEnrollmentGrantIssued,
 )
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,

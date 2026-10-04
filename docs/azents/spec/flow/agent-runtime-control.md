@@ -48,6 +48,12 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
+  - python/apps/azents/src/azents/core/runtime_connection_registration.py
+  - python/apps/azents/src/azents/core/runtime_provider_control.py
+  - python/apps/azents/src/azents/core/runtime_recreation.py
+  - python/apps/azents/src/azents/repos/runtime_connection_registration_operations.py
+  - python/apps/azents/src/azents/repos/runtime_runner_auth_operations.py
+  - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
   - python/apps/azents/src/azents/core/runtime_connection_generation.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_control.py
@@ -103,7 +109,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-05
-spec_version: 95
+spec_version: 96
 ---
 
 # Agent Runtime Control
@@ -581,6 +587,21 @@ A final database-only transaction records durable acceptance and Provider connec
 evidence. If final acceptance fails, Control revokes the promoted volatile connection.
 No Redis, HTTP, gRPC, filesystem, object-store, or other external call occurs while any
 of these database transactions is open.
+
+Services sequence completed repository operations for allocation, ordinary authority
+observation and final acceptance. Provider and Runner observations use native read-only
+scopes and do not acquire acceptance fences. Actual acceptance revalidates authority
+under the same write transaction as generation acceptance; Provider acceptance also
+commits credential, binding, connection and audit changes atomically. Failure or
+cancellation rolls back the whole database operation before volatile revocation.
+Replacement callbacks run only after durable acceptance completes.
+
+Recreation creation records the exact version of its validated target snapshot.
+Dispatch alone fences that target version together with the item attempt and Runtime
+configuration-generation mutation. Creation/projection, active/running item reads,
+claims and item processing finish in repository-owned database-only operations.
+Terminal invalidation consumes the detached successful dispatch result after the
+operation commits.
 
 Redis and in-memory coordination do not allocate, persist, restore, infer, or fall back
 for connection generations. An empty coordination store therefore makes prior streams

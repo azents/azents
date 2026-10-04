@@ -21,6 +21,12 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktree
+from azents.repos.session_git_worktree.operations import (
+    SessionGitWorktreeOperationsRepository,
+)
+from azents.repos.session_working_folder_binding import (
+    SessionWorkingFolderBindingRepository,
+)
 from azents.repos.session_working_folder_binding.data import (
     SessionWorkingFolderAuthority,
 )
@@ -218,14 +224,27 @@ def _service(
     if skill_store is None:
         skill_store = _SkillProjection()
     service = SessionGitWorktreeService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=session_repository,
-        workspace_user_repository=WorkspaceUserRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
-        session_git_worktree_repository=allocation_repository,
-        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        repository=SessionGitWorktreeOperationsRepository(
+            agent_repository=AgentRepository(),
+            agent_session_repository=session_repository,
+            workspace_user_repository=WorkspaceUserRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            session_git_worktree_repository=allocation_repository,
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            action_execution_repository=ActionExecutionRepository(),
+            mailbox_item_repository=MailboxRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            session_manager=_reject_write_session_manager,
+            read_session_manager=_read_session_manager,
+            binding_repository=SessionWorkingFolderBindingRepository(
+                agent_repository=AgentRepository(),
+                agent_session_repository=session_repository,
+                session_manager=_reject_write_session_manager,
+                read_session_manager=_read_session_manager,
+            ),
+        ),
         session_workspace_project_operations_repository=_ProjectOperationsProjection(),
-        agent_project_catalog_repository=AgentProjectCatalogRepository(),
         agent_project_catalog_service=AgentProjectCatalogService(
             repository=AgentProjectCatalogOperationsRepository(
                 catalog_repository=AgentProjectCatalogRepository(),
@@ -235,11 +254,6 @@ def _service(
             runtime_target_resolver=resolver,
             runner_operations=runner_operations,
         ),
-        action_execution_repository=ActionExecutionRepository(),
-        mailbox_item_repository=MailboxRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        session_manager=_reject_write_session_manager,
-        read_session_manager=_read_session_manager,
         runtime_target_resolver=resolver,
         session_working_folder_binding_service=binding,
         runner_operations=runner_operations,

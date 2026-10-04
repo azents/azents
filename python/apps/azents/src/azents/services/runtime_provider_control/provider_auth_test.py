@@ -27,6 +27,11 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_control import (
+    KubernetesServiceAccountTokenReview,
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -40,11 +45,6 @@ from azents.repos.runtime_provider_binding.repository import (
 )
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
-)
-from azents.services.runtime_provider_control.data import (
-    KubernetesServiceAccountTokenReview,
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialUnavailable,
 )
 from azents.services.runtime_provider_control.provider_auth import (
     KubernetesApiTokenReviewer,

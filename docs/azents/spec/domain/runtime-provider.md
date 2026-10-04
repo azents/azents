@@ -6,6 +6,9 @@ spec_type: domain
 domain: runtime-provider
 code_paths:
   - python/apps/azents/src/azents/core/runtime_provider_data.py
+  - python/apps/azents/src/azents/core/runtime_provider_control.py
+  - python/apps/azents/src/azents/core/runtime_recreation.py
+  - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
   - python/apps/azents/src/azents/core/runtime_profile_deletion.py
   - python/apps/azents/src/azents/core/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/repos/runtime_provider_bootstrap_operations.py
@@ -65,7 +68,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-05
-spec_version: 39
+spec_version: 40
 ---
 
 # Runtime Provider
@@ -78,6 +81,17 @@ declaration; both origins reconcile into the same Provider aggregate and managem
 controller connections do not create or discover Provider resources.
 
 Provider authentication is a separate durable binding domain. A connection selects one explicit authentication method, verifies its evidence, resolves exactly one active binding, and derives the Provider identity from that binding. Registration payload fields are consistency checks only and cannot select a Provider or grant authority.
+
+Enrollment issuance, grant exchange, credential revocation, connection acceptance,
+heartbeat and disconnect delegate to completed repository operations. Grant
+consumption, credential creation and audit remain atomic. Cryptography and explicit
+authentication-registry composition stay separate from persistence ownership.
+Kubernetes TokenReview precedes the completed workload-binding operation; issued-token
+and workload authentication return detached evidence only after their database owner
+exits. Ordinary connection observation uses native read-only scopes without acceptance
+locks; final acceptance revalidates Provider and binding authority under its write
+transaction, including generation acceptance, credential usage, binding connection,
+connection creation and audit.
 
 Providers are optional. A Provider must be enabled, active, Workspace-eligible, and currently
 advertise a valid capability contract that satisfies the exact selected infrastructure Profile
@@ -435,6 +449,10 @@ network controls, and infrastructure access are operator responsibilities outsid
 Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
+
+- **40 (2026-10-05):** Added completed Provider enrollment, connection acceptance,
+  Runner authentication and recreation operations to the common authority and
+  Admin boundaries, preserving generation/attempt fencing and detached reads.
 
 - **39 (2026-10-05):** Integrated completed resolution/reconciliation, atomic
   explicit Runtime addition, credential verification and read-only Terminal

@@ -14,6 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/scheduled_task_channel_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/action_operations.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/src/azents/repos/vfs_projection_operations.py
   - python/apps/azents/src/azents/repos/vfs_read_authority.py
@@ -60,7 +62,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 65
+spec_version: 66
 ---
 
 # External Channel Delivery and Channel Work
@@ -166,11 +168,16 @@ for Discord multipart file-message create, Discord CDN attachment bytes, Slack
 private-file bytes, and Slack external-upload bytes; each retains its exact origin,
 length, chunk, authority, and one-attempt contract.
 
-`ExternalChannelActionService.execute` commits the canonical Channel Work transition
-before provider I/O and returns an ordered tuple of process-local effect plans. It then
-revalidates the current Agent, Session, binding, resource, route, connection,
-credentials, capability, and effect-specific authority before attempting each effect
-without an open database transaction.
+The action service sequences completed Channel Action repository operations.
+Independent active-Binding availability and Work snapshot reads use native
+PostgreSQL read-only scopes. The action repository commits the canonical Channel
+Work transition and returns ordered process-local effect plans before provider I/O.
+Separate completed operations revalidate the current Agent, Session, binding,
+resource, route, connection, credentials, capability, and effect-specific authority
+before each effect, then settle its outcome through native projection CAS.
+Awaiting-input settlement and Discord delivery-channel retention also complete
+inside repository-owned scopes. Provider, Runtime, and file I/O begin only after
+each scope closes; the service receives no live database handles.
 
 For an Agent execution, effect admission observes the exact PostgreSQL Session
 owner generation without a root-tree lock. An observed stale Worker cannot begin
@@ -613,6 +620,14 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 Scheduled Task provider effects use the same immediate process-local execution
 boundary as other External Channel effects but have Scheduled-owned state.
 
+The Scheduled Channel repository completes exact-Binding registration and deletion
+preparation before provider execution. Terminal reply parts and captured Tracker
+cleanup plans are prepared in one database-only operation; a preparation failure
+rolls back that entire group and publishes no provider effect. Existing completed
+Scheduled progress operations retain their exact Task/cycle and revision CAS.
+Execution-bound clones bind provider admission without imposing a generic Session
+owner fence on Scheduled descriptions or already-admitted result settlement.
+
 - Task creation commits before one registration message is attempted. Slack uses
   native Edit and confirmed Cancel controls. Discord resolves an exact
   authorization-derived Session and Task Web edit URL at delivery time and pairs
@@ -642,6 +657,10 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 66) — Moved Channel Action and Scheduled Channel
+  presentation transaction ownership into completed repository operations, retaining
+  native read-only descriptions, atomic terminal preparation, and post-scope provider I/O.
 
 - **2026-10-05** (spec_version 65) — Documented short nonlocking effect admission and Work cycle/revision CAS settlement independently of exact critical Session output fencing; control delete capture does not claim execution.
 

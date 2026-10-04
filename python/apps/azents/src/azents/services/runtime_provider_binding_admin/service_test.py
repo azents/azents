@@ -20,6 +20,7 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_control import RuntimeProviderCredentialUnavailable
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -39,8 +40,8 @@ from azents.repos.runtime_provider_control.repository import (
 )
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
+from azents.services.runtime_provider_control.deps import (
+    create_runtime_provider_enrollment_service,
 )
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
@@ -56,7 +57,7 @@ def _enrollment_service(
     session_manager: SessionManager[WriteSession],
 ) -> RuntimeProviderEnrollmentService:
     """Build the issued-token enrollment service used by Admin rotation."""
-    return RuntimeProviderEnrollmentService(
+    return create_runtime_provider_enrollment_service(
         session_manager=session_manager,
         repository=RuntimeProviderControlRepository(),
         provider_repository=RuntimeProviderRepository(),

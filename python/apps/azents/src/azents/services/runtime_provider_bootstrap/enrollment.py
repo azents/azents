@@ -8,11 +8,9 @@ from azcommon.datetime import tznow
 from fastapi import Depends
 
 from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSnapshot
+from azents.core.runtime_provider_control import RuntimeProviderCredentialUnavailable
 from azents.repos.runtime_provider.bootstrap_enrollment_read import (
     RuntimeProviderBootstrapEnrollmentReadRepository,
-)
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
 )
 from azents.services.runtime_provider_control.deps import (
     get_runtime_provider_enrollment_service,
