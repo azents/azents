@@ -9,11 +9,9 @@ from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import EventKind
+from azents.core.json_value import JSONValue
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
-
-type JSONScalar = str | int | float | bool | None
-type JSONValue = JSONScalar | list[JSONValue] | dict[str, JSONValue]
 
 
 def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:

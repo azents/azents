@@ -6,6 +6,11 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/core/action_execution_data.py
+  - python/apps/azents/src/azents/core/agent_session_data.py
+  - python/apps/azents/src/azents/core/mailbox_data.py
+  - python/apps/azents/src/azents/core/session_workspace_project.py
+  - python/apps/azents/src/azents/core/json_value.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/agent_session_input_data.py
   - python/apps/azents/src/azents/core/chat_data.py
@@ -171,8 +176,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-03
-spec_version: 179
+last_verified_at: 2026-10-04
+spec_version: 180
 ---
 
 # Conversation & Events

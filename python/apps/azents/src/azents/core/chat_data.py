@@ -6,6 +6,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from azents.core.action_execution_data import ActionExecutionProjection
+from azents.core.agent_session_data import AgentSessionUnreadTerminalRunProjection
 from azents.core.enums import AgentRunPhase, AgentRunStatus, AgentSessionRunState
 from azents.core.goal import GoalStateSnapshot, GoalStatus
 from azents.core.inference_profile import (
@@ -20,8 +22,6 @@ from azents.engine.run.failure import (
     FailedRunRetryability,
 )
 from azents.engine.tools.todo import TodoStateSnapshot
-from azents.repos.action_execution.data import ActionExecutionProjection
-from azents.repos.agent_session.data import AgentSessionUnreadTerminalRunProjection
 
 
 class PendingMailboxUserMessagePresentation(BaseModel):

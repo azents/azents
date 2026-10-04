@@ -17,6 +17,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionCreate,
+    AgentSessionEnsureTeamPrimaryResult,
+    AgentSessionPage,
+    AgentSessionProjectionPage,
+    AgentSessionSidebarSummary,
+    AgentSessionUnreadTerminalRunProjection,
+    PendingSessionCommand,
+    SessionAgent,
+    SessionWorkingFolderContext,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -53,19 +65,6 @@ from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.historical_memory_consolidation.lifecycle import (
     source_availability_in_session,
-)
-
-from .data import (
-    AgentSession,
-    AgentSessionCreate,
-    AgentSessionEnsureTeamPrimaryResult,
-    AgentSessionPage,
-    AgentSessionProjectionPage,
-    AgentSessionSidebarSummary,
-    AgentSessionUnreadTerminalRunProjection,
-    PendingSessionCommand,
-    SessionAgent,
-    SessionWorkingFolderContext,
 )
 
 SESSION_HANDLE_INSERT_ATTEMPTS = 10

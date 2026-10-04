@@ -22,6 +22,7 @@ from PIL import Image
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -47,7 +48,6 @@ from azents.core.exchange_file_errors import (
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.repos.agent.data import Agent
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import (
     ExchangeFile,

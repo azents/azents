@@ -9,11 +9,13 @@ from fastapi import Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.chat_data import (
     NotWorkspaceMember,
     SessionNotFound,
 )
 from azents.core.enums import AgentSessionStatus, EventKind
+from azents.core.json_value import JSONValue
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
 )
@@ -43,11 +45,9 @@ from azents.engine.events.types import (
     public_event_payload,
 )
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )

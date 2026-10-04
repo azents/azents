@@ -15,6 +15,7 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
 
 
 @dataclass(frozen=True)
@@ -176,17 +177,6 @@ class WorkspaceRuntimeProfileReplace:
     terminal_enabled: bool
     digest: str
     actor_workspace_user_id: str | None
-
-
-@dataclass(frozen=True)
-class WorkspaceRuntimeProfileDeletion:
-    """Bounded impact from one committed Workspace Profile deletion."""
-
-    profile_id: str
-    cleared_workspace_default: bool
-    cleared_agent_count: int
-    affected_running_runtime_count: int
-    superseded_recreation_operation_count: int
 
 
 @dataclass(frozen=True)

@@ -18,6 +18,7 @@ from azents.core.enums import (
 )
 from azents.core.historical_memory_consolidation import ConsolidationScope
 from azents.core.historical_memory_context import render_live_consolidated
+from azents.core.json_value import JSONValue
 from azents.core.vfs import VFS_FILE_MAX_BYTES
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.output_parts import iter_output_parts
@@ -36,7 +37,7 @@ from azents.engine.events.types import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.workspace_user import RDBWorkspaceUser

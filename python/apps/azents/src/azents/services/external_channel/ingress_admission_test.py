@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, create_autospec, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -41,7 +42,6 @@ from azents.core.external_channel_ingestion import (
 from azents.job_runtime.types import JobRuntime
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrant,
     ExternalChannelAgentRoute,

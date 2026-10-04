@@ -14,6 +14,7 @@ from fastapi import Depends
 from openai.types.responses.response_text_config_param import ResponseTextConfigParam
 from pydantic import TypeAdapter
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import EventKind, ExternalChannelPrincipalAuthorType, LLMProvider
 from azents.engine.events.model_support_contract import (
     saved_structured_response_support,
@@ -54,7 +55,6 @@ from azents.engine.run.retry_policy import (
     FailedRunRetryPolicy,
     get_failed_run_retry_policy,
 )
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.engine_read_deps import get_engine_model_read_repository
 from azents.repos.session_title import SessionTitleRepository

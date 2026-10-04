@@ -5,7 +5,7 @@ import datetime
 from pydantic import BaseModel, Field
 
 from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
-from azents.rdb.models.event import JSONValue
+from azents.core.json_value import JSONValue
 
 
 class ActionExecution(BaseModel):

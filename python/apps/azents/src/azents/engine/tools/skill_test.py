@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionProductMode,
@@ -23,6 +24,7 @@ from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.skill_projection import (
     SkillProjectionItem,
     SkillProjectionSnapshot,
@@ -54,12 +56,10 @@ from azents.engine.tools.skill import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.skill_state_store import SkillStateStore
 from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,

@@ -27,8 +27,8 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.rdb.session import SessionManager
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import RuntimeProviderAuthBinding
 from azents.repos.runtime_provider_binding.repository import (

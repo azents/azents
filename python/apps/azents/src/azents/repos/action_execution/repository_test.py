@@ -4,6 +4,11 @@ import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import (
+    ActionExecutionCreate,
+    ActionExecutionEventCreate,
+)
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
@@ -21,12 +26,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import (
-    ActionExecutionCreate,
-    ActionExecutionEventCreate,
-)
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,

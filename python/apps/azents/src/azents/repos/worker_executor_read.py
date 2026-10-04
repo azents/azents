@@ -6,15 +6,15 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import ActionExecutionProjection
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecutionProjection
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.worker_executor_read_data import (
     WorkerModelConfigurationSnapshot,
     WorkerModelInputTranscript,

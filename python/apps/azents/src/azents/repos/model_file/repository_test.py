@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionProductMode,
@@ -22,7 +23,6 @@ from azents.rdb.models.model_file_pin import RDBModelFilePin
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFileCreate
 from azents.repos.model_file_pin import ModelFilePinRepository

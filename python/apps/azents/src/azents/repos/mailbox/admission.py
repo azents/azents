@@ -8,12 +8,12 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MailboxSchedulingMode
+from azents.core.mailbox_data import MailboxItemCreate
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
-from azents.repos.mailbox.data import MailboxItemCreate
 
 
 @dataclasses.dataclass

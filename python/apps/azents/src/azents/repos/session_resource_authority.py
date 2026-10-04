@@ -4,13 +4,13 @@ import dataclasses
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStatus,
 )
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 

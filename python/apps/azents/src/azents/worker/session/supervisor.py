@@ -6,6 +6,8 @@ import functools
 import logging
 from collections.abc import Awaitable, Callable
 
+from azcommon.logging import bind_extra
+
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
@@ -139,6 +141,7 @@ class RunTaskSupervisor:
         mailbox_activity_observer: MailboxActivityObserver,
     ) -> RunExecutionResult:
         """Create engine execution task and apply stop/shutdown policy."""
+        operation_logger = bind_extra(logger, {"session_id": snapshot.session_id})
         engine_task: asyncio.Task[RunExecutionResult] = asyncio.create_task(
             self.run_executor.execute(
                 snapshot,
@@ -197,9 +200,8 @@ class RunTaskSupervisor:
                     )
                 return engine_task.result()
             if explicit_stop_waiter in done:
-                logger.info(
-                    "Explicit stop detected during engine run, canceling",
-                    extra={"session_id": snapshot.session_id},
+                operation_logger.info(
+                    "Explicit stop detected during engine run, canceling"
                 )
                 await self.user_stop_finalizer.finalize(
                     snapshot.session_id,
@@ -211,12 +213,9 @@ class RunTaskSupervisor:
 
             self.stop_controller.request_handover_stop()
             await self.stop_controller.tool_admission_barrier.close()
-            logger.info(
+            operation_logger.info(
                 "Shutdown detected during engine run, applying timeout",
-                extra={
-                    "session_id": snapshot.session_id,
-                    "timeout": _SHUTDOWN_TIMEOUT,
-                },
+                extra={"timeout": _SHUTDOWN_TIMEOUT},
             )
             return await self._wait_for_shutdown_completion(
                 engine_task,

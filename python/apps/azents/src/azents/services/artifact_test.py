@@ -17,6 +17,7 @@ from azcommon.infra.s3.service import (
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.config import Config, Settings
 from azents.core.enums import (
     AgentRunPhase,
@@ -33,7 +34,6 @@ from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.events.types import AgentRunState
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.artifact.operations import (

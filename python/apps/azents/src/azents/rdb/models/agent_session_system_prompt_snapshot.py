@@ -6,8 +6,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
+from azents.core.json_value import JSONValue
 from azents.rdb.models.base import RDBModel
-from azents.rdb.models.event import JSONValue
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 

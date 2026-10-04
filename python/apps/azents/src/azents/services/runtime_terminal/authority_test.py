@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -30,7 +31,6 @@ from azents.core.runtime_profile import (
 )
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,

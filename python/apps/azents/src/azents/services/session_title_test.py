@@ -18,6 +18,7 @@ from azents.core.agent import (
     SelectableModelCandidate,
     SelectableModelOption,
 )
+from azents.core.agent_session_data import AgentSession
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -67,7 +68,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.engine_read import EngineModelReadRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository

@@ -11,6 +11,7 @@ from azcommon.infra.s3.service import S3Service
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import BrokerMessage, SessionBroker
+from azents.core.agent_session_data import AgentSession
 from azents.core.config import Config, Settings
 from azents.core.enums import (
     AgentSessionKind,
@@ -32,7 +33,6 @@ from azents.core.session_lifecycle import (
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionPurgeJob,

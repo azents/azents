@@ -7,11 +7,11 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
-from azents.rdb.models.event import JSONValue
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import MailboxItem, MailboxPresentationItem
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem, MailboxPresentationItem
 from azents.repos.mailbox_database import MailboxDatabaseRepository
 
 

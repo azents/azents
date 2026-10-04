@@ -23,6 +23,11 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.core.mailbox_data import (
+    MailboxItemCreate,
+    ScheduledTaskTriggerMailboxPayload,
+)
+from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -34,12 +39,7 @@ from azents.rdb.models.external_channel import (
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
-    MailboxItemCreate,
-    ScheduledTaskTriggerMailboxPayload,
-)
 from azents.repos.scheduled_task.data import (
-    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskReplace,

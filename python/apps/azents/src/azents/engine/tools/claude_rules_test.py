@@ -14,6 +14,7 @@ import pytest
 from azents.core.engine_tool_state import ClaudeRulesAppendixDedupeState
 from azents.core.enums import AgentRuntimeCapability
 from azents.core.runtime_capabilities import RuntimeCapabilityResolver
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import TurnContext
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
@@ -36,7 +37,6 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
 from azents.engine.tools.testing import FakeSharedStorage
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.file_storage import TextReadResult
 from azents.services.runtime_storage_error import RuntimeStorageError

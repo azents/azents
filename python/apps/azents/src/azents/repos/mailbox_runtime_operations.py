@@ -9,12 +9,19 @@ from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     EventKind,
     MailboxItemKind,
     MailboxSchedulingMode,
+)
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
 )
 from azents.core.mailbox_errors import MailboxOwnerGenerationStaleError
 from azents.core.session_resource_authority import SessionResourceAuthority
@@ -25,19 +32,12 @@ from azents.engine.events.types import (
     ScheduledTaskTriggerPayload,
 )
 from azents.rdb.deps import get_session_manager
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import (
-    MailboxItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
-)
 from azents.repos.scheduled_task.presentation import (
     render_scheduled_task_runtime_message,
 )

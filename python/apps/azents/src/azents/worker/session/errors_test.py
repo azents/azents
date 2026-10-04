@@ -1,14 +1,11 @@
 """Session runner error reporting tests."""
 
-from typing import cast
-
 import pytest
 
 from azents.broker.types import PublishedEvent
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.types import Event
-from azents.engine.run.contracts import AgentEngineProtocol
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -31,7 +28,7 @@ class _Engine:
         return make_system_error_event(session_id=session_id, content=content)
 
 
-class _Publisher:
+class _Publisher(WorkerEventPublisher):
     """Worker event publisher test double."""
 
     def __init__(self) -> None:
@@ -84,8 +81,8 @@ async def test_report_unhandled_does_not_invent_terminal_run_event() -> None:
     """A pre-Run error remains an observation without RunComplete."""
     publisher = _Publisher()
     reporter = SessionRunnerErrorReporter(
-        engine=cast(AgentEngineProtocol, _Engine()),
-        event_publisher=cast(WorkerEventPublisher, publisher),
+        engine=_Engine(),
+        event_publisher=publisher,
     )
 
     try:
@@ -107,8 +104,8 @@ async def test_report_unhandled_does_not_publish_fallback_for_stale_owner() -> N
     """Owner rejection does not publish an unfenced synthetic error event."""
     publisher = _Publisher()
     reporter = SessionRunnerErrorReporter(
-        engine=cast(AgentEngineProtocol, _StaleEngine()),
-        event_publisher=cast(WorkerEventPublisher, publisher),
+        engine=_StaleEngine(),
+        event_publisher=publisher,
     )
 
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
@@ -128,8 +125,8 @@ async def test_report_unhandled_does_not_publish_phantom_history_on_save_failure
     """A failed durable append cannot become a synthetic history broadcast."""
     publisher = _Publisher()
     reporter = SessionRunnerErrorReporter(
-        engine=cast(AgentEngineProtocol, _FailingEngine()),
-        event_publisher=cast(WorkerEventPublisher, publisher),
+        engine=_FailingEngine(),
+        event_publisher=publisher,
     )
 
     with pytest.raises(RuntimeError, match="database unavailable"):

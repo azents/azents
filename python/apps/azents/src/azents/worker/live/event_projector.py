@@ -7,7 +7,7 @@ from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
 
-from azents.broker.broadcast import WebSocketBroadcast
+from azents.broker.broadcast import BaseWebSocketBroadcast
 from azents.broker.types import PublishedEvent
 from azents.core.chat_data import (
     ChatLiveRunState,
@@ -25,7 +25,6 @@ from azents.engine.events.types import ActiveToolCall, Event
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.services.chat.live_events import (
     BaseLiveEventStore,
-    RedisLiveEventStore,
     active_tool_call_live_event_id,
     active_tool_call_to_live_event,
 )
@@ -55,8 +54,8 @@ class LiveEventProjector:
     def __init__(
         self,
         *,
-        live_event_store: Annotated[RedisLiveEventStore, Depends(get_live_event_store)],
-        broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
+        live_event_store: Annotated[BaseLiveEventStore, Depends(get_live_event_store)],
+        broadcast: Annotated[BaseWebSocketBroadcast, Depends(get_broadcast)],
         authority_repository: Annotated[
             LiveProjectionAuthorityRepository,
             Depends(LiveProjectionAuthorityRepository),

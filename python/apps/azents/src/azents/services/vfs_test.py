@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import (
@@ -27,7 +28,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,

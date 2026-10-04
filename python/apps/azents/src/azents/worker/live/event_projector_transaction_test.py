@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
+from azents.core.agent_session_data import AgentSession
 from azents.core.chat_data import ChatLiveRunState
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.core.inference_profile import AppliedInferenceProfile
@@ -25,7 +26,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.repos.live_projection_authority_test import _create_session
 from azents.services.chat.live_events import (
@@ -161,7 +161,7 @@ def _fixture(
     store = _Store(boundary, advance_failure=advance_failure)
     broadcast = _Broadcast(boundary, failure=broadcast_failure)
     projector = LiveEventProjector(
-        live_event_store=store,  # ty: ignore[invalid-argument-type] # The supported in-memory store implements the same owner-bound contract.
+        live_event_store=store,
         broadcast=broadcast,
         authority_repository=LiveProjectionAuthorityRepository(
             session_manager=boundary.session_manager,

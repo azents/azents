@@ -15,7 +15,7 @@ from azents.broker.types import (
     SessionWakeUp,
 )
 from azents.core.enums import AgentRunStatus
-from azents.engine.run.contracts import AgentEngineProtocol, ToolkitBinding
+from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
@@ -30,7 +30,7 @@ from azents.services.mailbox import MailboxService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
 from azents.worker.run.results import RunExecutionResult
-from azents.worker.session.errors import SessionRunnerErrorReporter
+from azents.worker.session.errors import ErrorEventEngine, SessionRunnerErrorReporter
 from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.inbox import SessionRunnerInbox
@@ -90,7 +90,7 @@ class SessionRunner:
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
         run_executor: RunExecutor,
-        engine: AgentEngineProtocol,
+        engine: ErrorEventEngine,
         model_transport_state: ModelTransportState,
     ) -> None:
         self.shutdown_event = shutdown_event
@@ -333,13 +333,14 @@ class SessionRunner:
         boundary: _PendingIdleBoundary,
     ) -> bool:
         """Close a terminal boundary through its durable idle outcome."""
-        logger.info(
-            "Session runner marking session idle after terminal run",
-            extra={
+        operation_logger = bind_extra(
+            logger,
+            {
                 "session_id": boundary.message.session_id,
                 "run_status": boundary.run_status,
             },
         )
+        operation_logger.info("Session runner marking session idle after terminal run")
         if boundary.run_status == AgentRunStatus.COMPLETED:
             if boundary.run_id is None:
                 raise RuntimeError("Completed run has no idle continuation boundary ID")
@@ -366,18 +367,15 @@ class SessionRunner:
             boundary.message.session_id,
             owner_generation=boundary.snapshot.owner_generation,
         )
-        logger.info(
+        operation_logger.info(
             "Skipped idle continuation because terminal run did not complete",
-            extra={
-                "session_id": boundary.message.session_id,
-                "run_id": boundary.run_id,
-                "run_status": boundary.run_status,
-            },
+            extra={"run_id": boundary.run_id},
         )
         return True
 
     async def _release_current_session(self) -> None:
         """Release current session ownership or hand it over to another worker."""
+        operation_logger = bind_extra(logger, {"session_id": self.running_session_id})
         session_id = self.running_session_id
         if session_id is None:
             return
@@ -415,9 +413,8 @@ class SessionRunner:
             )
             return
 
-        logger.info(
-            "Session runner stopped during active run, handing over session",
-            extra={"session_id": session_id},
+        operation_logger.info(
+            "Session runner stopped during active run, handing over session"
         )
         await self.session_lifecycle.release_owned_session_lock(
             session_id,
@@ -428,10 +425,7 @@ class SessionRunner:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception(
-                "Failed to enqueue session handover wake-up",
-                extra={"session_id": session_id},
-            )
+            operation_logger.exception("Failed to enqueue session handover wake-up")
 
     def _monotonic_time(self) -> float:
         """Return the current event-loop monotonic time."""

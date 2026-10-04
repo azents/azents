@@ -17,6 +17,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.broker.types import SessionBroker
+from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunPhase,
@@ -28,6 +29,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.mailbox_data import MailboxItemCreate
 from azents.engine.events.types import AgentRunState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -41,11 +43,9 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
-from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository

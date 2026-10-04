@@ -11,12 +11,14 @@ from pydantic import TypeAdapter
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
     EventKind,
     WorkspaceUserRole,
 )
+from azents.core.json_value import JSONValue
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
@@ -27,14 +29,13 @@ from azents.engine.events.types import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.memory_vfs.data import (
     HistoricalMemoryVfsRecord,
     MemoryVfsAuthority,

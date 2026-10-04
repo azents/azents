@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import SessionWorkingFolderContext
 from azents.core.enums import (
     AgentRuntimeCapability,
     SessionWorkingFolderBindingState,
@@ -16,7 +17,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import SessionWorkingFolderContext
 
 from .data import (
     SessionWorkingFolderAuthority,

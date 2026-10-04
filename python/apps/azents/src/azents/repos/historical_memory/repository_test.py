@@ -10,6 +10,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import SelectableModelCandidate, SelectableModelOption
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
@@ -22,6 +23,7 @@ from azents.core.historical_memory import (
     HistoricalMemoryFailure,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.json_value import JSONValue
 from azents.core.model_operation import (
     ModelOperationKind,
     ModelOperationSnapshot,
@@ -31,13 +33,12 @@ from azents.engine.events.types import UserMessagePayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,

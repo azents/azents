@@ -28,6 +28,11 @@ from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
 )
+from azents.core.mailbox_data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+)
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
     ActionMessagePayload,
@@ -53,11 +58,6 @@ from azents.engine.events.types import (
     ToolkitSourceSnapshot,
     UserContentPart,
     UserMessagePayload,
-)
-from azents.repos.mailbox.data import (
-    MailboxItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
 )
 from azents.utils.appctx import AppContext
 
@@ -820,7 +820,7 @@ class BaseLiveEventStore:
         self,
         session_id: str,
         owner_generation: int,
-    ) -> "_OwnerBoundLiveEventStore":
+    ) -> "BaseLiveEventStore":
         """Bind live mutations to one validated PostgreSQL owner generation."""
         return _OwnerBoundLiveEventStore(
             store=self,

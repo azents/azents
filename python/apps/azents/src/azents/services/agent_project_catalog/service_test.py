@@ -6,6 +6,7 @@ import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
     AgentProjectCatalogStatus,
     AgentSessionProductMode,
@@ -20,7 +21,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )

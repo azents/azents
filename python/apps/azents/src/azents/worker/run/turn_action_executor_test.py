@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
 from azents.core.enums import ActionExecutionStatus
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
@@ -17,10 +18,6 @@ from azents.engine.events.action_messages import (
     OperationAction,
 )
 from azents.engine.events.types import Event
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionProjection,
-)
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,

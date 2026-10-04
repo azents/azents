@@ -6,6 +6,7 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -14,7 +15,6 @@ from azents.core.enums import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.message import MessageRepository
 from azents.repos.session_history.repository import (
     VISIBLE_KINDS,

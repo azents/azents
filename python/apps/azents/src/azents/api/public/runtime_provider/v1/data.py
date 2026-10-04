@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.core.runtime_provider_data import RuntimeProvider
 
 
 class RuntimeProviderOptionResponse(BaseModel):

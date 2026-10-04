@@ -25,6 +25,7 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import (
@@ -57,7 +58,6 @@ from .data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
     WorkspaceRuntimeProfileDeleteOutcome,
-    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
     WorkspaceRuntimeProfileUsage,
 )

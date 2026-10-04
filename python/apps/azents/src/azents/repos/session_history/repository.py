@@ -13,8 +13,9 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
 )
+from azents.core.json_value import JSONValue
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.models.event import RDBEvent
 
 SEARCHABLE_KINDS = frozenset(
     {

@@ -13,6 +13,8 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import ActionExecution, ActionExecutionCreate
+from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
@@ -32,9 +34,14 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.mailbox_data import (
+    AgentRemoveGitWorktreeContinuationResult,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.core.skill_projection import SkillProjectionState
 from azents.core.workspace import WorkspaceCreate
 from azents.engine.events.action_messages import (
@@ -59,7 +66,6 @@ from azents.rdb.models.session_agent_context import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecution, ActionExecutionCreate
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -70,7 +76,6 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.agent_session_input_operations import (
     AgentSessionInputOperationsRepository,
 )
@@ -79,10 +84,6 @@ from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
-from azents.repos.mailbox.data import (
-    AgentRemoveGitWorktreeContinuationResult,
-    TurnActionContinuationMailboxPayload,
-)
 from azents.repos.mailbox_database import MailboxDatabaseRepository
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.root_agent_session_creation import (
@@ -102,7 +103,6 @@ from azents.repos.session_working_folder_binding.data import (
     SessionWorkingFolderAuthority,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.session_workspace_project_operations import (
     SessionWorkspaceProjectOperationsRepository,
 )

@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING, Literal, TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from azents.core.action_execution_data import ActionExecutionProjection
 from azents.engine.events.types import Attachment as EventAttachment
 from azents.engine.events.types import Event, public_event_payload
-from azents.repos.action_execution.data import ActionExecutionProjection
 
 if TYPE_CHECKING:
     from azents.core.chat_data import (

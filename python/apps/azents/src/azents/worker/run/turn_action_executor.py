@@ -6,6 +6,7 @@ from typing import Annotated, assert_never
 
 from fastapi import Depends
 
+from azents.core.action_execution_data import ActionExecution, ActionExecutionProjection
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
     AgentRemoveGitWorktreeAction,
@@ -15,10 +16,6 @@ from azents.engine.events.action_messages import (
     OperationAction,
 )
 from azents.engine.events.types import Event
-from azents.repos.action_execution.data import (
-    ActionExecution,
-    ActionExecutionProjection,
-)
 from azents.services.session_git_worktree import (
     GitWorktreeActionExecutionResult,
     SessionGitWorktreeService,

@@ -10,13 +10,13 @@ from psycopg.errors import LockNotAvailable
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,

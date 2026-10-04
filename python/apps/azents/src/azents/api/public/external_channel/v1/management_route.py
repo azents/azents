@@ -25,17 +25,11 @@ from azents.core.external_channel_access import (
     ExternalChannelAccessDecisionError,
     ExternalChannelAccessRequestNotFound,
 )
-from azents.core.external_channel_provider import (
-    DiscordConnectionConfiguration,
-    DiscordConnectionCredentials,
-    ExternalChannelConnectionStatusSnapshot,
-    SlackConnectionCredentials,
-)
-from azents.repos.external_channel.data import (
+from azents.core.external_channel_impact import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
 )
-from azents.repos.external_channel.management_data import (
+from azents.core.external_channel_management import (
     ManagedApprovalRequest,
     ManagedBinding,
     ManagedBlock,
@@ -48,9 +42,15 @@ from azents.repos.external_channel.management_data import (
     ManagedMultiRoute,
     ManagedSlackManagementHandoff,
 )
-from azents.repos.external_channel.management_operation_data import (
+from azents.core.external_channel_management_errors import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
+)
+from azents.core.external_channel_provider import (
+    DiscordConnectionConfiguration,
+    DiscordConnectionCredentials,
+    ExternalChannelConnectionStatusSnapshot,
+    SlackConnectionCredentials,
 )
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionStateChanged,
@@ -1641,10 +1641,7 @@ def _require_workspace_permission(
 def _require_multi_app_enabled(config: Config) -> None:
     """Reject new Multi data until operators complete mode-aware rollout."""
     if not config.external_channel_multi_app_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=("Multi App creation is not enabled for this deployment."),
-        )
+        raise RuntimeError("Multi App creation is not enabled for this deployment.")
 
 
 def _discord_activation_error(

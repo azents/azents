@@ -21,8 +21,8 @@ from azents.core.runtime_profile import (
     parse_workspace_runtime_profile_policy,
 )
 from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
+from azents.core.runtime_provider_data import RuntimeProvider
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,

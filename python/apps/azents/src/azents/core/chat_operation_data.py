@@ -3,14 +3,14 @@
 import dataclasses
 import datetime
 
+from azents.core.action_execution_data import ActionExecutionProjection
+from azents.core.agent_session_data import AgentSession, SessionWorkingFolderContext
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.goal import GoalStateSnapshot
+from azents.core.mailbox_data import MailboxItem
 from azents.core.session_lifecycle import SessionLifecycleTransitionContext
 from azents.engine.events.types import AgentRunState
 from azents.engine.tools.todo import TodoStateSnapshot
-from azents.repos.action_execution.data import ActionExecutionProjection
-from azents.repos.agent_session.data import AgentSession, SessionWorkingFolderContext
-from azents.repos.mailbox.data import MailboxItem
 
 
 @dataclasses.dataclass(frozen=True)

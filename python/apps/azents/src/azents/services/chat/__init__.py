@@ -12,6 +12,12 @@ from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.agent_project_preset import AgentProjectPreset
+from azents.core.agent_session_data import (
+    AgentSession,
+    AgentSessionUnreadTerminalRunProjection,
+    SessionWorkingFolderContext,
+)
 from azents.core.chat_data import (
     AcknowledgeUnreadTerminalRunError,
     AgentSessionDirectoryPage,
@@ -60,12 +66,6 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import (
     ClientToolCallPayload,
-)
-from azents.repos.agent_project_preset.data import AgentProjectPreset
-from azents.repos.agent_session.data import (
-    AgentSession,
-    AgentSessionUnreadTerminalRunProjection,
-    SessionWorkingFolderContext,
 )
 from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.mailbox.admission_data import (

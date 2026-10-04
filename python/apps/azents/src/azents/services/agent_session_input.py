@@ -14,11 +14,11 @@ from azents.core.agent_session_input_data import (
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
+from azents.core.json_value import JSONValue
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
 )
 from azents.engine.run.input import InputMessage
-from azents.rdb.models.event import JSONValue
 from azents.repos.agent_session_input_operations import (
     AgentSessionInputOperationsRepository,
 )

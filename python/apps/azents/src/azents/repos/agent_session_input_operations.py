@@ -9,6 +9,7 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.agent_session_input_data import (
     AgentSessionInputError,
     AgentSessionInputIdempotencyConflict,
@@ -40,6 +41,8 @@ from azents.core.inference_profile import (
     normalize_historical_inference_profile_payload,
     validate_requested_profile_against_options,
 )
+from azents.core.json_value import JSONValue
+from azents.core.mailbox_data import MailboxItem
 from azents.core.root_agent_session_creation import (
     ExplicitRootWorkspaceIntent,
 )
@@ -54,6 +57,7 @@ from azents.core.session_workspace_paths import (
     normalize_session_workspace_path,
     normalize_session_workspace_project_paths,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -61,7 +65,6 @@ from azents.engine.events.action_messages import (
 from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
-from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
@@ -72,20 +75,17 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import ChatWriteRequestCreate
 from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import MailboxEnqueue
-from azents.repos.mailbox.data import MailboxItem
 from azents.repos.mailbox_database import MailboxDatabaseRepository
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 

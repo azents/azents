@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import SessionWorkingFolderContext
 from azents.core.enums import (
     AgentRuntimeCapability,
     SessionWorkingFolderBindingState,
@@ -16,7 +17,6 @@ from azents.core.enums import (
 from azents.core.runtime_capabilities import RuntimeCapabilitySnapshot
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import LockedSessionWorkingFolderBinding
-from azents.repos.agent_session.data import SessionWorkingFolderContext
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )

@@ -39,6 +39,7 @@ from azents.core.session_resource_authority import (
     SessionResourceAuthority,
     accepts_execution_owner,
 )
+from azents.core.session_workspace_project import SessionWorkspaceProject
 from azents.core.tools import (
     PreparedDynamicPrompt,
     ResolveContext,
@@ -125,7 +126,6 @@ from azents.engine.tools.write import make_write_tool
 from azents.repos.engine_runtime_tool_read import EngineRuntimeToolReadRepository
 from azents.repos.engine_tool_repositories import EngineToolRepositories
 from azents.repos.memory.operations import MemoryOperationRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.repos.toolkit_state.engine import (
     ToolkitAgentsAppendixDedupeStateStore,
 )

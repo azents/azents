@@ -11,6 +11,8 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.action_execution_data import ActionExecutionCreate
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
@@ -41,7 +43,6 @@ from azents.rdb.models.git_worktree_cleanup_claim import (
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
-from azents.repos.action_execution.data import ActionExecutionCreate
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -52,7 +53,6 @@ from azents.repos.agent_project_catalog.data import (
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )

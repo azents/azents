@@ -9,6 +9,7 @@ from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentSessionProductMode, LLMProvider
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
@@ -16,7 +17,6 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository

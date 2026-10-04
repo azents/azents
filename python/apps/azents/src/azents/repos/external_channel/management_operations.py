@@ -15,6 +15,24 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_impact import (
+    ExternalChannelMultiConnectionImpact,
+    ExternalChannelMultiRouteImpact,
+)
+from azents.core.external_channel_management import (
+    ManagedApprovalRequest,
+    ManagedBinding,
+    ManagedChannelDefault,
+    ManagedConnection,
+    ManagedGrant,
+    ManagedMultiConnection,
+    ManagedMultiRoute,
+    ManagedSlackManagementHandoff,
+)
+from azents.core.external_channel_management_errors import (
+    ExternalChannelManagementGenerationChanged,
+    ExternalChannelManagementNotFound,
+)
 from azents.core.external_channel_provider import (
     DiscordThreadAutoArchiveDurationMinutes,
 )
@@ -28,8 +46,6 @@ from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelMultiConnectionDisconnect,
-    ExternalChannelMultiConnectionImpact,
-    ExternalChannelMultiRouteImpact,
     ExternalChannelMultiRouteRemoval,
 )
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
@@ -38,19 +54,7 @@ from azents.repos.external_channel.management import (
     ExternalChannelChannelDefaultTransition,
     ExternalChannelManagementRepository,
 )
-from azents.repos.external_channel.management_data import (
-    ManagedApprovalRequest,
-    ManagedBinding,
-    ManagedChannelDefault,
-    ManagedConnection,
-    ManagedGrant,
-    ManagedMultiConnection,
-    ManagedMultiRoute,
-    ManagedSlackManagementHandoff,
-)
 from azents.repos.external_channel.management_operation_data import (
-    ExternalChannelManagementGenerationChanged,
-    ExternalChannelManagementNotFound,
     ManagedAgentAccess,
     ManagedConnectionDisconnectResult,
 )

@@ -3,6 +3,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
+from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -15,7 +16,6 @@ from azents.testing.model_selection import (
 )
 
 from . import SessionWorkspaceProjectRepository
-from .data import SessionWorkspaceProjectCreate
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
