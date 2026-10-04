@@ -51,6 +51,9 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_project_default/**
   - python/apps/azents/src/azents/repos/agent_project_catalog/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
+  - python/apps/azents/src/azents/repos/agent_automatic_project_operations.py
+  - python/apps/azents/src/azents/repos/project_browser_manifest_read.py
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
@@ -488,6 +491,14 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
   current Agent Runtime before the final locked revision check and atomic replace.
   An empty clear requires no Runtime. Validation or revision failure leaves the
   previous ordered policy unchanged.
+- Automatic Project policy management uses a completed, native read-only
+  repository admission/policy snapshot before Runtime directory validation.
+  Non-empty path validation and Runtime target discovery run with that read scope
+  closed. The final repository write rechecks the exact Agent Workspace and
+  explicit AgentAdmin relationship, locks that authority and the current policy,
+  then atomically replaces the ordered policy and catalog availability projection.
+  Revoked management authority, stale revisions, SQL failures and cancellation do
+  not leave a partial policy/catalog change. Empty clears still require no Runtime.
 - Automatic root creation reads the policy inside its caller-owned database
   transaction and writes those paths directly to the new
   `SessionAgentContext`. It performs no Runtime I/O at Session creation time.
@@ -513,6 +524,14 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `GET /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest` returns a backend-owned Project browser manifest for the selected session. It derives Project root entries from `session_agent_context_projects`, joins catalog status projection by Agent/path, and returns backend-provided capabilities. Project root entries allow registry removal when tied to a session Project and disallow filesystem delete, move, and rename. Entries linked to `session_agent_context_git_worktrees` expose `repository_type: "git"` so clients can render Git-specific Project root metadata without probing the filesystem. A non-cleaned Azents-owned worktree Project also exposes `delete_worktree: true`; ordinary Project registry rows and preview entries do not.
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
+- Manifest access checks and Project/worktree/catalog preparation are completed
+  read-only repository operations. Session working-folder binding and Runtime
+  workspace evidence resolution run between closed reads. The final Session or
+  preview read repeats its existing membership/Agent authority after Runtime
+  preparation and returns detached ordered rows. Stored unchecked status,
+  Git/worktree metadata, capability policy and non-blocking refresh hints are
+  presented by the service; no filesystem/Runtime callbacks or live database
+  handles cross the repository boundary.
 - `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected Session's shared context registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate explicit cleanup or archive-time best-effort lifecycle based on `session_agent_context_git_worktrees` ownership metadata, not on the Project registry row alone. Retention purge deletes only the allocation row and never accesses Runtime or Git state.
 - `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, containment under `<current-agent-workspace>/.azents/worktrees`, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory. Failure or cancellation of that final empty-parent removal does not revert otherwise confirmed Git cleanup.
 - `cleanup_orphan_git_worktrees` is a parameterless, explicit chat TurnAction rather than a direct
