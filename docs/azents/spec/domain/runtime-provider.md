@@ -60,7 +60,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-05
-spec_version: 37
+spec_version: 38
 ---
 
 # Runtime Provider
@@ -144,6 +144,23 @@ The service neither owns a database scope nor exposes binding state; descriptive
 does not replace the admission and mutation checks required by Runtime operations.
 
 ## Runtime binding
+
+Infrastructure Profile and authentication-binding administrative services delegate
+their database work to completed repository operations. Independent descriptions
+use native read-only scopes and return detached Profile, binding and compatibility
+evidence. Profile writes retain validation and usage/deletion conflicts; terminal
+policy invalidation runs only after the completed mutation.
+
+Binding creation, rotation and revocation retain the existing expected Admin version,
+bootstrap ownership restrictions and atomic binding/grant/audit/revocation groups.
+Secret preparation precedes the mutation; safe projection and terminal invalidation
+follow completion. Database mutation error translation belongs to the repository
+boundary without changing the service-visible failure contract.
+
+CLI bootstrap enrollment resolves its exact Provider/declaration/source ownership
+in a completed read-only operation before credential authentication, grant issuance
+or exchange orchestration. The preliminary description does not authorize writes
+or replace final enrollment authority checks.
 
 An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
 addition selects one available Workspace Runtime Profile, creates or rearms the one logical Runtime
@@ -389,10 +406,15 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **38 (2026-10-05):** Completed Profile/binding administrative database operations
+  and bootstrap enrollment target reads while preserving atomic authority groups
+  and postcommit terminal invalidation.
+
 - **37 (2026-10-05):** Separated ordinary recreation target description from actual
   dispatch fencing and retained the checked target version and item-attempt identity.
   Moved public Workspace Provider discovery into a completed read-only repository
   operation without changing eligibility or safe output.
+
 - **35 (2026-10-04):** Removed row-lock modes from independent revision, Profile
   and retained configuration-state getters while preserving mutation fencing.
 
