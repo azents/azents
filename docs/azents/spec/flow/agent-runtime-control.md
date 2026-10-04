@@ -12,6 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/core/session_workspace_items.py
   - python/apps/azents/src/azents/core/session_workspace_paths.py
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - proto/azents/runtime_control/v1/**
@@ -23,8 +24,12 @@ code_paths:
   - python/apps/azents/src/azents/repos/runtime_stream_route*
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
+  - python/apps/azents/src/azents/repos/agent_runtime_removal/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_scope/**
   - python/apps/azents/src/azents/repos/agent_runtime_removal_finalizer/**
+  - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
+  - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/agent_runtime_transition/**
   - python/apps/azents/src/azents/services/runtime_terminal/**
@@ -63,6 +68,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/health.py
   - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/repos/session_git_worktree/**
+  - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/core/file_transfer.py
@@ -95,8 +102,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-04
-spec_version: 94
+last_verified_at: 2026-10-05
+spec_version: 95
 ---
 
 # Agent Runtime Control
@@ -265,8 +272,11 @@ admission and Runner forwarding.
 
 Owner acquisition, renewal, resolution, join-nonce consumption, draining, and exact-epoch
 release each finish in a completed database-only route operation before local projection,
-capacity, registry, or transport work. Acquisition retains Runtime-then-route locking;
-renewal, resolution, and join consumption retain route-then-Runtime locking. PostgreSQL
+capacity, registry, or transport work. Resolution uses an ordinary read-only scope for
+the retained route and Runtime, validating both generations, protocol, lease expiry
+and drain state without a row lock. It may observe committed lag and is not route
+acquisition or nonce authority. Acquisition retains Runtime-then-route locking;
+renewal and join consumption retain route-then-Runtime mutation fencing. PostgreSQL
 time remains lease authority. Renewal does not extend the original one-time offer deadline.
 Registry admission checks the local deadline again after committed nonce consumption:
 expiry at that boundary rejects the join without restoring its consumed nonce. Cleanup
@@ -701,13 +711,14 @@ live-stream `OBSERVE` completion reporting `network_enforcement:drifted` may imm
 Provider reconnect, Control restart, stale generation/configuration fence, unsupported evidence, or
 dispatch failure creates no replay or hot loop; the next periodic `OBSERVE` is the only retry.
 The Reconciler prepares every Provider command through a completed claim-free database preflight.
-That operation locks the Agent before the Runtime, validates the selected Runtime snapshot and
-managed/removing capability, and returns detached Provider routing evidence. It closes before
+That operation uses ordinary Agent and Runtime reads, validates the selected Runtime snapshot and
+managed/removing capability, and returns detached Provider routing evidence. A held writer does
+not block this description, and the observation does not authorize dispatch. It closes before
 Runtime Control reads the Redis-or-memory connection registry. A missing live connection records
 `disconnected` through a separately revalidated database operation without consuming the lifecycle
 claim, so an undispatched `stop` or other lifecycle command remains eligible after reconnect.
 
-After resolving a live connection, a second completed database-only operation re-locks the Agent
+After resolving a live connection, a second completed database-only mutation operation locks the Agent
 and Runtime, revalidates the preflight snapshot and live/required Provider generation, checks the
 required observed generation and configuration sequence, atomically claims lifecycle dispatch when
 applicable, and validates the exact configuration document. It returns an immutable admitted
@@ -799,6 +810,19 @@ Provider connection authority remains binding-backed after registration. Heartbe
 Runner authentication uses a signed credential bound to one logical Runtime ID and its durable desired generation. Runtime Control derives its signing key from the existing credential-encryption root and does not require an operator-managed shared Runtime Control token. The Provider receives the plaintext credential only in the lifecycle command and injects it into the Runtime Runner as `AZ_RUNTIME_RUNNER_AUTH_TOKEN`; it is not persisted or logged. A deterministic one-way credential fingerprint may be retained as the non-secret connection credential identifier.
 
 Before accepting a Runner stream, Control verifies the signature, resolves the Runtime ID and desired generation from the verified credential, loads the durable Runtime, and requires the generation to equal the current durable desired generation. A registration `runtime_id` may only match that resolved identity; another Runtime claim is rejected with `PERMISSION_DENIED`. Missing, malformed, tampered, absent-Runtime, or stale-generation Runner credentials are rejected with `UNAUTHENTICATED`. Desired-generation changes invalidate prior credentials without a wall-clock refresh or a shared-token compatibility path. Physical connection generation fencing remains separate from this logical Runtime-incarnation authority.
+
+Credential polling and pre-promotion Runner authorization use ordinary Runtime reads
+without a registration lock. They may observe committed evidence while a writer changes
+the desired generation. Final connection acceptance separately fences that exact Runtime
+generation through durable connection-generation acceptance in the same transaction;
+a replaced desired generation cannot gain accepted connection authority from the earlier
+observation. This fence does not extend across volatile promotion or transport I/O.
+
+Provider pre-promotion authorization likewise uses ordinary Provider/binding reads
+with unchanged method, subject, evidence-expiry and credential checks. Actual final
+connection publication separately fences those identities through credential-use,
+binding-connected, connection/audit and generation-acceptance commit. A binding
+revoked after the observation cannot be accepted as current by that earlier result.
 
 The Runner retries transient Control stream failures with its process-start
 credential. Registration-time `UNAUTHENTICATED` and an accepted connection whose
@@ -969,6 +993,13 @@ non-directory target return `worktree_ownership_ambiguous` without deletion.
 for non-Git paths, invalid refs, collisions, ownership ambiguity, and Git command failures so product
 services can persist bounded setup or cleanup classifications.
 
+Server-side allocation, Project registration and destructive path-claim mutations
+retain transaction-scoped coordination for the exact Runtime and normalized paths.
+The existing overlap check covers ancestor and descendant targets; exact-path
+uniqueness alone does not replace it. Ordinary allocation/Project/cleanup inventory
+does not acquire that coordination. The claim transaction closes before Runner I/O,
+which still revalidates the recorded target, branch or discovery fingerprint.
+
 Session-folder archive cleanup validates the stored exact path against the current
 managed Agent Workspace before Runner I/O and preserves that lexical target through
 deletion. A lexical root symlink is unlinked rather than resolved or traversed; a
@@ -1028,6 +1059,10 @@ ready desired current-configuration slot at a new positive configuration sequenc
 dispatching compute. A later start or authorized Runtime-dependent operation performs ordinary lazy
 provisioning.
 
+Observing an existing logical Runtime does not lock or initialize it. Actual creation
+uses the unique Agent-to-Runtime identity to return one INSERT winner or its retained
+competitor; that creation contract does not turn ordinary getters into admission.
+
 Permanent removal is a separate irreversible product transition. Its PostgreSQL coordinator fences
 Agent work, interrupts active Session trees, clears Runtime-owned product state, requests terminal
 delete, and remains pending through Provider outage or ambiguous dispatch. Finalization requires
@@ -1036,6 +1071,18 @@ logical Runtime ID but advances desired generation and clears Provider/Runner ob
 Workspace path, the bounded configuration-state row, failure, terminal-request, and
 incarnation-scoped dispatch state. The Runtime-owned configuration-sequence high-water mark remains
 monotonic across terminal cleanup and rearm.
+
+Removal and Agent-decommission coordinators retain the `attempt_count` returned by
+each winning claim together with its lease owner. Their phase/progress, retry,
+acknowledgement and completion mutations, including finalization, match that captured
+attempt. Reclaim advances the existing counter even when the Worker or Scheduler
+lease-owner label is unchanged, so an earlier attempt cannot mutate the replacement
+claim. Pending deletion and acknowledgement observation is nonlocking; first target
+recording and actual acknowledgement persistence retain their mutation fences.
+Removal acknowledgement must match the admitted Runtime ID and current
+desired/requested/acknowledged target generation. When physical deletion is required,
+finalization also matches the recorded acknowledgement kind and time. A rearmed target
+cannot be completed by an older ack.
 
 - `start` sets desired state to running.
 - `stop` sets desired state to stopped and must preserve workspace data.
@@ -1106,6 +1153,15 @@ this retained eligibility. Actual Runtime and worktree admission retains current
 capability, target/configuration, binding and execution-owner checks, so a stale
 description cannot retarget an external operation.
 
+Worktree action descriptions, cleanup enumeration and catalog filesystem status
+refresh do not inherit an execution-owned transaction wrapper. Actual action
+admission, resource claims, event/result publication and terminal-history/continuation
+groups explicitly fence the exact Session and captured executing or recovery owner
+generation through their database commit. Pre-I/O owner validation is a separate
+nonlocking observation, not an exclusion spanning Runner work. Existing BOUND folder
+resolution is ordinary; only the actual PENDING-to-BOUND mutation enters its
+capability/context/binding fence.
+
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes CIDR-only or proxy-owned
 policy/artifact changes may adopt in place through exact aggregate Provider and ordinary Runner
 evidence. Mode, Runtime trust, mandatory-host mapping, PodSpec, PVC, and Docker changes remain
@@ -1116,6 +1172,13 @@ applied and the Runtime has the expected desired generation, Provider-running
 observation, connected Provider, ready positive-generation Runner, and current
 Runner-reported Agent Workspace path. Stopped Runtimes skip immediate recreation
 and adopt the current Profile on their next start.
+
+Recreation operation creation keeps the target version already checked at admission
+rather than adopting a newer version through a second lookup. Target descriptions
+have no hidden lock mode. Actual restart dispatch excludes replacement of that exact
+target through its configuration/item mutation; item settlement and retry retain the
+claimed attempt with atomic operation counts, and successful completion requires
+evidence for the exact dispatched generation.
 
 Start, stop, restart, ordinary recreation, recovery, and in-place adoption preserve Agent Workspace
 data. Reset and terminal delete retain their explicit destructive boundaries. Provider or Profile
@@ -1188,6 +1251,11 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-10-05** (spec_version 95) — Separated Runtime, Runner, binding and worktree
+  descriptions from actual mutation fences; retained captured removal/decommission
+  attempts, exact resource acknowledgements, recreation targets and path overlap.
+  Route resolution and Provider pre-promotion observation are nonlocking while
+  actual epoch/nonce and connection acceptance remain separately fenced.
 - **2026-10-02** (spec_version 92) — Moved Runtime stream route, report, and
   reconciliation scopes into completed database-only repository operations,
   preserving lock order, nonce consumption, report atomicity, and dispatch ordering.

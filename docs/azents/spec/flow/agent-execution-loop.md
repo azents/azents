@@ -183,8 +183,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-04
-spec_version: 212
+last_verified_at: 2026-10-05
+spec_version: 214
 ---
 
 # Agent Execution Loop
@@ -1076,17 +1076,19 @@ runner and locked idle transition consider only pending commands, active Runs, i
 mailbox input remains. A later wake-producing input starts one Run and normal FIFO preparation
 promotes the older queue-only rows before or with the triggering input.
 
-Mailbox enqueue holds the root `SessionAgent` row lock, then locks the target `AgentSession`. Every
+Mailbox enqueue admits the exact active target `AgentSession` mutation without a
+generic root `SessionAgent` gate. Every
 mailbox target must still be active; `spawn_agent` and `followup_task` additionally reject a target
 whose stop request is already present before they create input or wake side effects.
 
 Normal terminal database finalization composes `TerminalRunFinalizationRepository`
-and `AgentMailboxRepository`: tree/Session authority is prelocked before the Run
+and `AgentMailboxRepository`: exact critical Session authority is fenced before the Run
 mutation, and an eligible direct-parent delivery inserts one idempotent queue-only
 `agent_result` with activity and Run delivery markers in the same transaction.
 Best-effort historical repair uses separate completed
 `SubagentTerminalResultRepository` candidate, direct-child, and delivery operations.
-Its root-before-Run locking and parent-validation failure semantics remain distinct
+Its exact completed-Run disposition and active-target mutation ordering, and
+parent-validation failure semantics, remain distinct
 from normal finalization's ineligible-parent suppression and User Stop convergence.
 Normal terminal handling attempts this side effect before idle evaluation. Parent `wait_agent`
 polling repairs eligible results from direct children, and a later Run in the source child session
@@ -1388,8 +1390,10 @@ An unmatched request path is unlimited. Preparation does not invent a global sof
 Remaining explicit capacity is filled from the AgentSession's shared deferred working set in most-recent-first order. A smaller model path hides the non-fitting tail without deleting it; a later larger or unlimited path can expose that same state. Tool Search activates only the highest-ranked results that can become visible on the next call under the current explicit deferred capacity and reports when the requested result count was reduced. With no explicit limit, all active currently available deferred names are visible.
 
 Working-set load, activation, invocation touch, and independent clear operations
-complete inside repository-owned transactions. Owner-bound execution uses the
-same persisted identity and optimistic conflict retry behavior.
+complete inside repository-owned transactions with the same persisted identity
+and optimistic conflict retry behavior. These private projections do not inherit
+an execution-tree ownership gate. The successful compaction reset remains part
+of the separately fenced summary/head commit.
 
 Successful manual or automatic context compaction atomically replaces the Session's shared Tool Search working set with an empty list while committing the summary and new model-input head. The reset applies even when Tool Search is disabled at that boundary, so later opt-in cannot recover pre-compaction activation. Skipped, failed, cancelled, or stale compaction preserves the existing working set. The next enabled prepared call after a successful reset contains direct tools and `tool_search`, with deferred tools requiring new activation.
 
@@ -1668,8 +1672,9 @@ adds no new provider, retry, lock or token policy.
 
 Worker Session lifecycle, canonical snapshot loading, stuck-Session selection,
 Runner pending-command reads, and live projection authority reads complete in
-repository-owned scopes. Worker mutations retain the existing tree-ordered
-generation guard: a missing Session raises `ValueError("AgentSession not found")`,
+repository-owned scopes. Hierarchy mutations retain their tree ordering;
+execution-owned critical groups fence the exact executing Session. A missing
+Session raises `ValueError("AgentSession not found")`,
 a changed generation raises `CanonicalExecutionOwnerGenerationStaleError`, and
 invalid canonical snapshots retain `CanonicalExecutionSnapshotError`. Snapshot
 loading remains an unlocked projection after ownership claim. Broker renewal,
@@ -1686,19 +1691,30 @@ does not roll back earlier committed stages, and Stop intent is cleared only
 after the existing dispatch sequence. Passed or Redis-only tool calls do not
 replace durable running-Run ownership.
 
-Execution-local database scopes lock and validate the exact Session owner generation
-before durable operations. Model output, tool results, compaction, tool-search
-working sets, phase changes, and terminal transitions share that authority. Shared
-adapter dependencies remain immutable; per-execution compactor and working-set
-bindings carry the owner scope. Tool handlers run after the admission transaction
-closes, and completed results are fenced again. A stale generation propagates as
-ownership loss rather than a failed tool result or model error.
+Owner identity is passed explicitly to critical completed operations rather than
+every transaction manager. Model output, tool-result publication, mailbox
+consumption, active-call changes, compaction and terminal/Stop groups conditionally
+fence the exact Session ID and owner generation through commit. The no-op owner
+UPDATE preserves `updated_at`; an earlier read or unrelated INSERT with an
+owner-generation EXISTS predicate is not a commit fence. Ordinary preparation,
+phase descriptions and private Toolkit state do not acquire root, Agent, parent
+or executing-Session gates. Shared adapter dependencies remain immutable;
+execution compactor binding carries the captured owner.
 
-The existing root SessionAgent lifecycle gate precedes Agent and Session locks;
-root, parent, and executing Sessions are acquired before Run finalization. Contended
-non-blocking acquisition rolls back its savepoint, and only clean admission scopes
-retry, so a caller holding other locks cannot retry indefinitely inside the same
-transaction.
+Pre-I/O owner validation is a plain observation and holds no transaction across
+tool execution. Actual operation/resource admission and completed results retain
+their own exact mutation conditions. A stale generation propagates as ownership
+loss rather than a failed tool result or model error.
+
+Hierarchy-changing operations retain mutation-only ancestor ordering where
+needed. Multi-Session tool operations acquire their exact Session set in stable
+order inside one NOWAIT savepoint; contention releases every partially acquired
+row before retry. Terminal delivery atomically fences its Run disposition and
+active parent mailbox target; an archived target is suppressed by coordinator
+finalization. Standalone completed-Run repair does not require a source Worker
+owner. PostgreSQL foreign-key and unique constraints remain authoritative and
+can still block real critical writes; removing explicit parent gates does not
+promise lock-free mutation commits.
 
 Run execution sequences completed repository operations for durable reads and
 state transitions; execution itself owns no live database session. Model
@@ -1777,10 +1793,9 @@ clears an earlier pointer because that earlier terminal boundary did not remain 
 `AgentSession.run_state` may become `idle` only after the runner has confirmed that no follow-up work
 exists: no pending command, no pending wake-producing input buffer, no active Run, and no queued
 actionable wake-up. For a completed boundary, the runner dispatches idle hooks only after that
-follow-up check. Both the pre-hook eligibility check and the post-hook commit recheck start fresh
-transactions with the existing tree-ordered execution admission: the root SessionAgent lifecycle
-gate, Agent parent rows, then the root, direct-parent, and executing Session rows. A contended
-non-blocking attempt releases its savepoint locks before retrying. Hook evaluation remains outside
+follow-up check. The pre-hook eligibility check is an ordinary owner-scoped read.
+The post-hook commit recheck fences only the exact executing Session generation
+and repeats mutation predicates under that fence. Hook evaluation remains outside
 these transactions. Owner-generation, Session status, pending pointer, command, wake-producing input,
 active Run, and archived Scheduled Task cycle checks retain their existing semantics. The commit
 recheck confirms that the same pointer remains and that the Session is still free of follow-up work,
@@ -1925,6 +1940,10 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 214) — Replaced blanket execution-tree gates
+  with exact critical commit fences, independent private/preparation operations,
+  mutation-only hierarchy ordering and atomic parent admission.
 
 - **2026-10-04** (spec_version 211) — Promoted isolated RAM-only consolidation
   hosts on the shared core, independent whole-document context and exact revision

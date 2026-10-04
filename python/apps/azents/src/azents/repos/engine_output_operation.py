@@ -7,6 +7,7 @@ from typing import Protocol
 
 from azents.core.enums import AgentRunPhase
 from azents.core.inference_profile import SessionInferenceState
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import (
     ActiveToolCall,
     ClientToolCallPayload,
@@ -30,6 +31,7 @@ from azents.repos.provider_output_operation import (
     ProviderOutputFileMetadata,
     ProviderOutputMetadataAdmission,
 )
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 class EngineRunRepository(AgentRunCreateRepository, RunStateRepository, Protocol):
@@ -101,12 +103,15 @@ class EngineOutputOperationRepository:
     metadata_repository: OutputMetadataRepository
     tool_result_repository: EngineToolResultOperationRepository
     system_prompt_repository: OutputSystemPromptRepository | None
+    owner: SessionExecutionOwner | None
 
     async def admit_model_output(
         self, admission: ModelOutputAdmission
     ) -> AdmittedModelOutput:
         """Commit metadata, Events, provenance, snapshot, retry and Tool state."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             if admission.metadata_admission is not None:
                 await self._admit_metadata(session, admission.metadata_admission)
             events = await self.event_mutation_repository.append_events(
@@ -175,6 +180,8 @@ class EngineOutputOperationRepository:
     ) -> Event:
         """Commit generated metadata and the sole terminal Tool result together."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self._admit_metadata(session, metadata_admission)
             return await self.tool_result_repository.finalize_in_session(
                 session, run_id=run_id, session_id=session_id, call=call, result=result

@@ -43,6 +43,7 @@ class AgentRuntimeRemovalFinalizerRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         now: datetime.datetime,
     ) -> bool:
         """Commit `removing → none` and complete its operation atomically."""
@@ -55,6 +56,7 @@ class AgentRuntimeRemovalFinalizerRepository:
                 RDBAgentRuntimeRemovalOperation.stage
                 == AgentRuntimeRemovalStage.FINALIZING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
             )
             .with_for_update()
         )

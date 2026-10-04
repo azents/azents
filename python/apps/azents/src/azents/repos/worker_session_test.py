@@ -13,7 +13,6 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy import event
 from sqlalchemy.engine import Connection, ExecutionContext
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.broker.types import SessionBroker
@@ -659,10 +658,10 @@ async def test_foreign_terminal_run_is_not_mutated(
     fixture.manager.assert_closed()
 
 
-async def test_worker_tree_lock_order_precedes_run_lock(
+async def test_worker_exact_session_fence_precedes_run_mutation(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    """Capture actual SQL: root gate, ordered Agent/Session set, then Run."""
+    """Critical Run mutation fences only its owner Session before Run locking."""
     fixture = await worker_fixture(rdb_session_manager, "worker-lock-order", child=True)
     run = await create_run(rdb_session_manager, fixture.session_id)
     statements: list[str] = []
@@ -677,7 +676,9 @@ async def test_worker_tree_lock_order_precedes_run_lock(
     ) -> None:
         del connection, cursor, parameters, context, executemany
         normalized = " ".join(statement.lower().split())
-        if normalized.startswith("select") and "for " in normalized:
+        if (
+            normalized.startswith("select") and "for " in normalized
+        ) or normalized.startswith("update agent_sessions"):
             statements.append(normalized)
 
     @asynccontextmanager
@@ -698,13 +699,17 @@ async def test_worker_tree_lock_order_precedes_run_lock(
     )
     # The bridge explicitly locks its predecessor, and mark_terminal retains
     # its existing second lock of the same Run. Both follow Session admission.
-    assert len(statements) == 5
-    root, agents, sessions, runs, terminal_run = statements
-    assert "from session_agents" in root and "for update nowait" in root
-    assert "from agents" in agents
-    assert "order by agents.id for key share nowait" in agents
-    assert "from agent_sessions" in sessions
-    assert "order by agent_sessions.id for no key update nowait" in sessions
+    owner, *dependent_statements = statements
+    assert owner.startswith("update agent_sessions")
+    assert "agent_sessions.id =" in owner
+    assert "agent_sessions.owner_generation =" in owner
+    locking_reads = [
+        statement
+        for statement in dependent_statements
+        if statement.startswith("select")
+    ]
+    assert len(locking_reads) == 2
+    runs, terminal_run = locking_reads
     assert "from agent_runs" in runs and "for update" in runs
     assert terminal_run == runs
     fixture.manager.assert_closed()
@@ -885,19 +890,8 @@ async def test_independent_transactions_serialize_owner_fence(
     )
     locked = asyncio.Event()
     release = asyncio.Event()
-    retry_seen = asyncio.Event()
     second_started = asyncio.Event()
     connection_ids: list[int] = []
-
-    class BarrierSessions(AgentSessionRepository):
-        async def lock_execution_by_id(
-            self, session: WriteSession, agent_session_id: str
-        ) -> AgentSession | None:
-            try:
-                return await super().lock_execution_by_id(session, agent_session_id)
-            except OperationalError:
-                retry_seen.set()
-                raise
 
     async def first_transaction() -> None:
         async with manager() as session:
@@ -934,9 +928,8 @@ async def test_independent_transactions_serialize_owner_fence(
                 second_started.set()
                 yield session
 
-        sessions = BarrierSessions()
         if first == "takeover":
-            repository = worker_repository(second_manager, sessions=sessions)
+            repository = worker_repository(second_manager)
             with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
                 await repository.mark_session_idle(
                     fixture.session_id, owner_generation=fixture.generation
@@ -954,22 +947,17 @@ async def test_independent_transactions_serialize_owner_fence(
             asyncio.create_task(first_transaction()),
             asyncio.create_task(second_transaction()),
         ]
-        if first == "takeover":
-            await asyncio.wait_for(retry_seen.wait(), timeout=10)
-        else:
-            await asyncio.wait_for(second_started.wait(), timeout=10)
-            # The existing claim blocks on the root gate, before its NOWAIT
-            # Session attempt. Observe PostgreSQL rather than changing policy.
-            async with asyncio.timeout(10):
-                async with manager() as observer:
-                    while True:
-                        blockers = await observer.write_session.scalar(
-                            sa.text("SELECT pg_blocking_pids(:pid)"),
-                            {"pid": connection_ids[1]},
-                        )
-                        if connection_ids[0] in blockers:
-                            break
-                        await asyncio.sleep(0.01)
+        await asyncio.wait_for(second_started.wait(), timeout=10)
+        # Both winning claims and critical writes wait on the exact Session row.
+        async with asyncio.timeout(10):
+            async with manager() as observer:
+                while True:
+                    blockers = await observer.read_session.scalar(
+                        sa.text("SELECT pg_blocking_pids(:pid)"),
+                        {"pid": connection_ids[1]},
+                    )
+                    if connection_ids[0] in blockers:
+                        break
         assert not tasks[1].done(), "Contender cannot pass an uncommitted owner fence"
         release.set()
         await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)

@@ -174,15 +174,19 @@ class ExternalChannelLifecycleRepository:
 
     async def validate_restore_session_tree(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelRestoreValidation:
         """Assert restore cannot reactivate prior External Channel state."""
-        bindings = await self._locked_bindings(
-            session,
-            session_ids=session_ids,
-            connected_only=False,
+        bindings = list(
+            (
+                await session.read_session.scalars(
+                    sa.select(RDBExternalChannelBinding)
+                    .where(RDBExternalChannelBinding.agent_session_id.in_(session_ids))
+                    .order_by(RDBExternalChannelBinding.id)
+                )
+            ).all()
         )
         if any(binding.disconnected_at is None for binding in bindings):
             raise RuntimeError("Restored External Channel binding was reactivated")
@@ -325,26 +329,24 @@ class ExternalChannelLifecycleRepository:
 
     async def project_multi_connection_impact(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         connection_id: str,
     ) -> ExternalChannelMultiConnectionImpact | None:
         """Project a sanitized deterministic whole-Multi-App disconnect impact."""
-        connection = await session.write_session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(
+        connection = await session.read_session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == connection_id,
                 RDBExternalChannelConnection.app_mode == ExternalChannelAppMode.MULTI,
                 RDBExternalChannelConnection.status
                 != ExternalChannelConnectionStatus.DISCONNECTED,
             )
-            .with_for_update()
         )
         if connection is None:
             return None
         routes = list(
             (
-                await session.write_session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBExternalChannelAgentRoute)
                     .where(
                         RDBExternalChannelAgentRoute.connection_id == connection.id,
@@ -352,7 +354,6 @@ class ExternalChannelLifecycleRepository:
                         == ExternalChannelAppMode.MULTI,
                     )
                     .order_by(RDBExternalChannelAgentRoute.id)
-                    .with_for_update()
                 )
             ).all()
         )

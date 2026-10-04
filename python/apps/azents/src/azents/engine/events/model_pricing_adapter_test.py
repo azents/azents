@@ -16,7 +16,7 @@ from azents.testing.model_selection import (
     make_test_model_settings,
 )
 
-_owner_lock = fixtures._fake_execution_owner_lock
+_owner_operations = fixtures._fake_execution_owner_operations
 
 
 @pytest.mark.parametrize("provider", [LLMProvider.OPENAI, LLMProvider.ANTHROPIC])

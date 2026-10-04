@@ -923,17 +923,20 @@ def _execution(
     """Wire real completed repositories over each test's recording DB primitives."""
     mutations = EngineEventMutationRepository(transcript_repository=transcript_repo)
     results = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=session_manager,
         run_repository=run_repo,
         transcript_repository=transcript_repo,
     )
     return AgentRunExecution(
         execution_operation_repository=EngineExecutionOperationRepository(
+            owner=None,
             session_manager=session_manager,
             run_repository=run_repo,
             model_file_pin_repository=None,
         ),
         model_input_operation_repository=EngineModelInputOperationRepository(
+            owner=None,
             session_manager=session_manager,
             run_repository=run_repo,
             transcript_repository=transcript_repo,
@@ -943,6 +946,7 @@ def _execution(
         ),
         tool_result_operation_repository=results,
         output_operation_repository=EngineOutputOperationRepository(
+            owner=None,
             session_manager=session_manager,
             run_repository=run_repo,
             event_mutation_repository=mutations,
@@ -951,6 +955,7 @@ def _execution(
             system_prompt_repository=system_prompt_snapshot_repo,
         ),
         run_finalization_operation_repository=EngineRunFinalizationOperationRepository(
+            owner=None,
             session_manager=session_manager,
             run_repository=run_repo,
             event_mutation_repository=mutations,

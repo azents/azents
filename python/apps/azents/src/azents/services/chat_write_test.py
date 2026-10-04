@@ -434,6 +434,13 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
         self.tree_lock_calls = 0
         self.stop_requests: list[str] = []
 
+    async def get_by_id(
+        self, session: ReadSession, agent_session_id: str
+    ) -> AgentSession:
+        del session
+        assert agent_session_id == self.session.id
+        return self.session
+
     async def lock_by_id(
         self,
         session: WriteSession,
@@ -482,13 +489,16 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
 class _ControlAgentRepository(AgentRepository):
     """Return one active Agent whose Workspace matches the Session."""
 
-    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent | None:
+    async def get_by_id(self, session: ReadSession, agent_id: str) -> Agent | None:
         del session
         assert agent_id == "agent-1"
         return Agent.model_construct(
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
             workspace_id="workspace-1",
         )
+
+    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent | None:
+        return await self.get_by_id(session, agent_id)
 
 
 class _ControlWorkspaceUserRepository(WorkspaceUserRepository):

@@ -44,7 +44,7 @@ class ExternalChannelLifecycleService:
     ]
     action_service: Annotated[
         ExternalChannelActionService,
-        Depends(ExternalChannelActionService),
+        Depends(ExternalChannelActionService.create),
     ]
 
     async def archive_participant(

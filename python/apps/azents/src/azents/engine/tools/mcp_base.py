@@ -609,8 +609,6 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         if session_id is None:
             raise ValueError("MCP Session identity must be bound before execution.")
         if accepts_execution_owner(self._execution_owner, owner, session_id=session_id):
-            if self.snapshot_factory is not None:
-                self.snapshot_factory = self.snapshot_factory.with_owner(owner)
             self.snapshot_store = self._make_snapshot_store()
             self._execution_owner = owner
 

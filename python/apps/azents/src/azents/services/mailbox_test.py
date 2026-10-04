@@ -60,10 +60,7 @@ from azents.core.mailbox_data import (
     ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
 )
-from azents.core.mailbox_errors import (
-    MailboxOwnerGenerationStaleError,
-    MailboxPreparationStaleError,
-)
+from azents.core.mailbox_errors import MailboxPreparationStaleError
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.skill_projection import (
     SkillProjectionItem,
@@ -113,6 +110,7 @@ from azents.repos.scheduled_task.data import ScheduledTaskCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
+from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.skill_state import SkillStateRepository
 from azents.repos.skill_state_store import SkillStateStore
 from azents.repos.toolkit_state import ToolkitStateRepository
@@ -1064,7 +1062,7 @@ def _mailbox_item_service(
             ),
             run_repository=AgentRunRepository(),
             action_execution_repository=ActionExecutionRepository(),
-            goal_store=GoalStateStore(session_manager=rdb_session_manager),
+            goal_store=GoalStateStore(session_manager=rdb_session_manager, owner=None),
             skill_state_repository=SkillStateRepository(
                 session_manager=rdb_session_manager
             ),
@@ -2614,7 +2612,7 @@ class TestMailboxService:
             reasoning_effort=None,
         )
 
-        with pytest.raises(MailboxOwnerGenerationStaleError):
+        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
             await _mailbox_item_service(
                 rdb_session_manager
             ).flush_session_mailbox_items(
@@ -2777,7 +2775,9 @@ class TestMailboxService:
             )
             remaining = await MailboxRepository().get_by_id(session, buffer_id)
         assert agent_session is not None
-        goal = await GoalStateStore(session_manager=rdb_session_manager).load(
+        goal = await GoalStateStore(
+            session_manager=rdb_session_manager, owner=None
+        ).load(
             agent_id,
             session_id,
         )
@@ -2821,7 +2821,9 @@ class TestMailboxService:
             active_run_id=None,
         )
 
-        goal = await GoalStateStore(session_manager=rdb_session_manager).load(
+        goal = await GoalStateStore(
+            session_manager=rdb_session_manager, owner=None
+        ).load(
             agent_id,
             session_id,
         )

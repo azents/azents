@@ -407,7 +407,7 @@ class AgentRuntimeRepository:
         create: AgentRuntimeCreate,
     ) -> AgentRuntimeEnsureResult:
         """Create a Runtime once or return the winner of a creation race."""
-        existing = await self.get_by_agent_id_for_update(session, create.agent_id)
+        existing = await self.get_by_agent_id(session, create.agent_id)
         if existing is not None:
             return AgentRuntimeEnsureResult(runtime=existing, created=False)
 
@@ -431,7 +431,7 @@ class AgentRuntimeRepository:
             await session.write_session.flush()
             return AgentRuntimeEnsureResult(runtime=self._build(rdb), created=True)
 
-        raced = await self.get_by_agent_id_for_update(session, create.agent_id)
+        raced = await self.get_by_agent_id(session, create.agent_id)
         if raced is None:
             raise RuntimeError("AgentRuntime ensure failed")
         return AgentRuntimeEnsureResult(runtime=raced, created=False)

@@ -5,12 +5,10 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.enums import AgentSessionRunState
-from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.skill_projection import SkillProjectionSnapshot, SkillProjectionState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.skill_state import SkillStateRepository
 
 
@@ -25,19 +23,6 @@ class SkillStateStore:
         """Create Skill state store."""
         self.session_manager = session_manager
         self.repository = SkillStateRepository(session_manager=session_manager)
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "SkillStateStore":
-        """Bind state reads and writes to one durable Session owner."""
-        return SkillStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
-        )
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Fetch Skill projection state."""

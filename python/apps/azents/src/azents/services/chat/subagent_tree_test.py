@@ -229,7 +229,7 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
         root_session_repository=root,
         mailbox_repository=MailboxRepository(),
         lifecycle_operations=lifecycle,
-        goal_store=GoalStateStore(session_manager=manager),
+        goal_store=GoalStateStore(session_manager=manager, owner=None),
         todo_store=TodoStateStore(session_manager=manager),
         session_manager=manager,
     )

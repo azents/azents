@@ -23,7 +23,7 @@ class ExternalChannelProviderControlService:
 
     action_service: Annotated[
         ExternalChannelActionService,
-        Depends(ExternalChannelActionService),
+        Depends(ExternalChannelActionService.create),
     ]
 
     async def attempt(
@@ -48,7 +48,7 @@ class ExternalChannelProviderControlService:
 def get_external_channel_provider_control_service(
     action_service: Annotated[
         ExternalChannelActionService,
-        Depends(ExternalChannelActionService),
+        Depends(ExternalChannelActionService.create),
     ],
 ) -> ExternalChannelProviderControlService:
     """Compose immediate provider-control execution."""

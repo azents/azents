@@ -6,6 +6,10 @@ spec_type: domain
 domain: conversation
 owner: "@Hardtack"
 code_paths:
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/idle_continuation.py
+  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
+  - python/apps/azents/src/azents/worker/session/idle_continuation_lock_test.py
   - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities.py
   - python/apps/azents/src/azents/repos/active_model_capabilities_data.py
@@ -179,8 +183,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-04
-spec_version: 181
+last_verified_at: 2026-10-05
+spec_version: 182
 ---
 
 # Conversation & Events
@@ -637,6 +641,24 @@ child reuse, terminal-result delivery, observation cursors, and the public
 Subagent Tree. The model-facing `list_agents` result is a separate bounded,
 read-only coordination projection: omission from that result neither removes a
 participant nor prevents path-based targeting of its existing Session.
+
+Tree/path/coordination descriptions are ordinary reads, including validation of
+captured owner identity. Spawn and follow-up capacity are actual root-hierarchy
+claims; send and interrupt admit only the exact source/target Session rows.
+Mutation admission acquires the required Session rows in stable order with
+NOWAIT inside one savepoint, releases every partial admission on collision, and
+then fences the captured source owner generation through the dependent write
+commit. This prevents a parent tool retaining its parent row while waiting for a
+child whose terminal delivery needs that same parent.
+
+Actual Stop/archive/restore/purge admission shares the hierarchy boundary with
+child creation and admits the complete current tree before applying the
+transition. Owner handover advances only the exact claimed Session generation;
+ordinary Session reads do not lock root, parent or Agent rows. Idle eligibility
+is an independent pre-hook view, while final continuation admission and matching
+idle-boundary consumption remain one exact owner-fenced transaction. Pending
+Run activation, terminal state and one disposition plus idempotent parent
+mailbox admission retain their existing atomic winning-claim semantics.
 
 ### SessionWorkspaceProject
 
@@ -1255,9 +1277,12 @@ denied all return 404. The response includes the root `product_mode` (`team` or 
 subagent rows) so clients can resolve Team/My navigation scope from an authorized detail response.
 Child subagent sessions are directly readable through this route and through history/live routes, but
 they are read-only for human chat writes. Before returning an authorized active Session detail or
-list/sidebar projection, the service reconciles any applied model label absent from the current
-Agent option list to the Agent main option and clears fallback-incompatible intent; this repair is
-idempotent and does not alter a prepared current-turn snapshot.
+list/sidebar projection, the service compiles a detached fallback for any applied
+model label absent from the current Agent option list, selecting the Agent main
+option and clearing fallback-incompatible intent in the response. The read does
+not replace stored applied intent, increment `applied_profile_generation`, or
+alter a prepared current-turn snapshot. Mutation admission remains the authority
+for a persisted profile replacement and its real generation.
 `POST /chat/v1/sessions/{session_id}/inputs` accepts one composer input for an existing root
 Session. An input without an action appends a user message, a command action creates an idle-only
 pending command, and other typed actions enter the turn-action flow. The route rejects
@@ -1315,8 +1340,10 @@ and reload. Input admission rejects a label that is already absent from the curr
 an accepted label becomes unavailable before preparation because the Agent options changed, the
 worker falls back to the current Agent main label, replaces the active Session intent, and clears
 fallback-incompatible effort and execution-option intent. Authorized active Session detail, list,
-and sidebar reads perform the same idempotent applied-intent repair before returning a projection,
-so an idle Session does not retain stale UI state until its next worker execution. Read repair never
+and sidebar reads project the same fallback without a hidden setter or ownership
+gate. Directory, unread and Workspace views use the same detached compilation;
+the stored profile and its persisted generation remain unchanged. A read
+projection is not a new accepted profile or compaction authority and never
 changes `current_*` inference state or an active Run's prepared snapshot. A failed model-call attempt
 retains its original selection, while its next automatic retry attempt freshly resolves the latest
 Session-applied model, effort, and execution-option intent after backoff. Historical missing option
@@ -1508,6 +1535,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-10-05** — v182. Removed hidden GET profile replacement while preserving
+  detached fallback responses and persisted generation identity; separated
+  descriptions from exact owner, hierarchy and idle-admission mutation fences.
 - **2026-10-03** — v178. Made new title decisions consume separate saved
   structured-response support and conditions while retaining historical strict
   interpretation and existing typed fallback/retry behavior.

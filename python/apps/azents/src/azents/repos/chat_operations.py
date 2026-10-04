@@ -78,6 +78,7 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.goal import GoalStateSnapshot
+from azents.core.inference_profile import SessionAppliedInferenceProfile
 from azents.core.json_value import JSONValue
 from azents.core.root_agent_session_creation import (
     ExplicitRootWorkspaceIntent,
@@ -105,6 +106,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -150,7 +152,7 @@ def get_chat_goal_state_store(
     ],
 ) -> GoalStateStore:
     """Compose unbound user-managed Goal persistence at the dependency root."""
-    return GoalStateStore(session_manager=session_manager)
+    return GoalStateStore(session_manager=session_manager, owner=None)
 
 
 def get_chat_todo_state_store(
@@ -262,7 +264,7 @@ class ChatOperationsRepository:
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
-            repaired = await self._repair_session_profile_for_read(
+            repaired = await self._project_session_profile_for_read(
                 session,
                 agent_session=root_result.agent_session,
             )
@@ -297,48 +299,40 @@ class ChatOperationsRepository:
             )
             if authorized is not None:
                 return Failure(authorized)
-            agent_session = await self._repair_session_profile_for_read(
+            agent_session = await self._project_session_profile_for_read(
                 session,
                 agent_session=agent_session,
             )
             return Success(agent_session)
 
-    async def _repair_session_profile_for_read(
+    async def _project_session_profile_for_read(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         agent_session: AgentSession,
     ) -> AgentSession:
-        """Repair one stale applied profile before returning a Session read."""
+        """Project fallback intent without publishing a new applied generation."""
         agent = await self.agent_repository.get_by_id(session, agent_session.agent_id)
-        if agent is None or not _session_profile_is_stale(agent, agent_session):
+        if agent is None:
             return agent_session
-        locked_session = await self.agent_session_repository.lock_by_id(
-            session,
-            agent_session.id,
-        )
-        if (
-            locked_session is None
-            or locked_session.status is not AgentSessionStatus.ACTIVE
-        ):
+        return self._project_session_profile(agent, agent_session)
+
+    @staticmethod
+    def _project_session_profile(
+        agent: Agent, agent_session: AgentSession
+    ) -> AgentSession:
+        """Compile fallback intent while retaining the persisted generation."""
+        if not _session_profile_is_stale(agent, agent_session):
             return agent_session
-        locked_agent = await self.agent_repository.lock_by_id(
-            session,
-            locked_session.agent_id,
-        )
-        if (
-            locked_agent is None
-            or not locked_agent.selectable_model_options
-            or not _session_profile_is_stale(locked_agent, locked_session)
-        ):
-            return locked_session
-        model_target_label, reasoning_effort = _session_profile_fallback(locked_agent)
-        return await self.agent_session_repository.set_applied_inference_profile(
-            session,
-            session_id=locked_session.id,
-            model_target_label=model_target_label,
-            reasoning_effort=reasoning_effort,
-            enabled_execution_options=[],
+        model_target_label, reasoning_effort = _session_profile_fallback(agent)
+        return agent_session.model_copy(
+            update={
+                "applied_inference_profile": SessionAppliedInferenceProfile(
+                    model_target_label=model_target_label,
+                    reasoning_effort=reasoning_effort,
+                    enabled_execution_options=[],
+                )
+            }
         )
 
     async def get_agent_session(
@@ -368,7 +362,7 @@ class ChatOperationsRepository:
             )
             if authorized is not None:
                 return Failure(SessionNotFound())
-            agent_session = await self._repair_session_profile_for_read(
+            agent_session = await self._project_session_profile_for_read(
                 session,
                 agent_session=agent_session,
             )
@@ -403,7 +397,7 @@ class ChatOperationsRepository:
             )
             if authorized is not None:
                 return Failure(SessionNotFound())
-            repaired_session = await self._repair_session_profile_for_read(
+            repaired_session = await self._project_session_profile_for_read(
                 session,
                 agent_session=projection.session,
             )
@@ -564,20 +558,7 @@ class ChatOperationsRepository:
                 session,
                 agent_id,
             )
-            stale_sessions = sorted(
-                (item for item in sessions if _session_profile_is_stale(agent, item)),
-                key=lambda item: item.id,
-            )
-            for item in stale_sessions:
-                await self._repair_session_profile_for_read(
-                    session,
-                    agent_session=item,
-                )
-            if stale_sessions:
-                sessions = await self.agent_session_repository.list_active_by_agent_id(
-                    session,
-                    agent_id,
-                )
+            sessions = [self._project_session_profile(agent, item) for item in sessions]
             return Success(sessions)
 
     async def list_agent_sessions_with_unread_terminal_run(
@@ -607,27 +588,12 @@ class ChatOperationsRepository:
                     auto_archive_ttl_days=agent.auto_archive_ttl_days,
                 )
             )
-            stale_sessions = sorted(
-                (
-                    item.session
-                    for item in sessions
-                    if _session_profile_is_stale(agent, item.session)
-                ),
-                key=lambda item: item.id,
-            )
-            for item in stale_sessions:
-                await self._repair_session_profile_for_read(
-                    session,
-                    agent_session=item,
+            sessions = [
+                dataclasses.replace(
+                    item, session=self._project_session_profile(agent, item.session)
                 )
-            if stale_sessions:
-                sessions = await (
-                    self.agent_session_repository.list_active_unread_by_agent_id(
-                        session,
-                        agent_id,
-                        auto_archive_ttl_days=agent.auto_archive_ttl_days,
-                    )
-                )
+                for item in sessions
+            ]
             return Success(sessions)
 
     async def list_agent_user_sessions(
@@ -657,24 +623,7 @@ class ChatOperationsRepository:
                     associated_user_id=user_id,
                 )
             )
-            stale_sessions = sorted(
-                (item for item in sessions if _session_profile_is_stale(agent, item)),
-                key=lambda item: item.id,
-            )
-            for item in stale_sessions:
-                await self._repair_session_profile_for_read(
-                    session,
-                    agent_session=item,
-                )
-            if stale_sessions:
-                list_user_sessions = (
-                    self.agent_session_repository.list_active_user_by_agent_and_user
-                )
-                sessions = await list_user_sessions(
-                    session,
-                    agent_id=agent_id,
-                    associated_user_id=user_id,
-                )
+            sessions = [self._project_session_profile(agent, item) for item in sessions]
             return Success(sessions)
 
     async def list_agent_session_directory(
@@ -711,30 +660,17 @@ class ChatOperationsRepository:
                     offset=offset,
                     limit=limit,
                 )
-                stale_sessions = sorted(
-                    (
-                        item.session
-                        for item in page.items
-                        if _session_profile_is_stale(agent, item.session)
-                    ),
-                    key=lambda item: item.id,
-                )
-                for item in stale_sessions:
-                    await self._repair_session_profile_for_read(
-                        session,
-                        agent_session=item,
-                    )
-                if stale_sessions:
-                    page = await list_active_page(
-                        session,
-                        agent_id,
-                        auto_archive_ttl_days=agent.auto_archive_ttl_days,
-                        offset=offset,
-                        limit=limit,
-                    )
                 return Success(
                     AgentSessionDirectoryPage(
-                        items=page.items,
+                        items=[
+                            dataclasses.replace(
+                                item,
+                                session=self._project_session_profile(
+                                    agent, item.session
+                                ),
+                            )
+                            for item in page.items
+                        ],
                         total_count=page.total_count,
                     )
                 )
@@ -788,30 +724,22 @@ class ChatOperationsRepository:
                 auto_archive_ttl_days=agent.auto_archive_ttl_days,
                 recent_limit=recent_limit,
             )
-            stale_sessions = sorted(
-                (
-                    item.session
-                    for item in [*summary.pinned, *summary.recent]
-                    if _session_profile_is_stale(agent, item.session)
-                ),
-                key=lambda item: item.id,
-            )
-            for item in stale_sessions:
-                await self._repair_session_profile_for_read(
-                    session,
-                    agent_session=item,
-                )
-            if stale_sessions:
-                summary = await get_sidebar_summary(
-                    session,
-                    agent_id,
-                    auto_archive_ttl_days=agent.auto_archive_ttl_days,
-                    recent_limit=recent_limit,
-                )
             return Success(
                 AgentSessionSidebarSummary(
-                    pinned=summary.pinned,
-                    recent=summary.recent,
+                    pinned=[
+                        dataclasses.replace(
+                            item,
+                            session=self._project_session_profile(agent, item.session),
+                        )
+                        for item in summary.pinned
+                    ],
+                    recent=[
+                        dataclasses.replace(
+                            item,
+                            session=self._project_session_profile(agent, item.session),
+                        )
+                        for item in summary.recent
+                    ],
                 )
             )
 
@@ -1329,25 +1257,13 @@ class ChatOperationsRepository:
                 if (agent := await self.agent_repository.get_by_id(session, agent_id))
                 is not None
             }
-            stale_sessions = sorted(
-                (
-                    item
-                    for item in sessions
-                    if item.status is AgentSessionStatus.ACTIVE
-                    and (agent := agents.get(item.agent_id)) is not None
-                    and _session_profile_is_stale(agent, item)
-                ),
-                key=lambda item: (item.agent_id, item.id),
-            )
-            for item in stale_sessions:
-                await self._repair_session_profile_for_read(
-                    session,
-                    agent_session=item,
-                )
-            if stale_sessions:
-                sessions = await self.agent_session_repository.list_by_workspace(
-                    session, workspace_id=workspace_id
-                )
+            sessions = [
+                self._project_session_profile(agent, item)
+                if item.status is AgentSessionStatus.ACTIVE
+                and (agent := agents.get(item.agent_id)) is not None
+                else item
+                for item in sessions
+            ]
             return sessions
 
     async def list_history_events(
@@ -1810,7 +1726,7 @@ class ChatOperationsRepository:
                     > archived_at
                 ):
                     return Failure(SessionNotFound())
-            settings = await self.archived_session_retention_repository.lock_settings(
+            settings = await self.archived_session_retention_repository.get_settings(
                 session
             )
             purge_after = (

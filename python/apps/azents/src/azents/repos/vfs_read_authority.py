@@ -5,10 +5,11 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import validate_session_execution_owner
 
 
 @dataclasses.dataclass(frozen=True)
@@ -21,11 +22,13 @@ class VfsReadAuthorityRepository:
 
     async def assert_current(self, *, session_id: str, owner_generation: int) -> None:
         """Validate the concrete Session generation in a completed DB operation."""
-        await OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=session_id,
-            owner_generation=owner_generation,
-        ).assert_current()
+        async with self.session_manager() as session:
+            await validate_session_execution_owner(
+                session,
+                SessionExecutionOwner(
+                    session_id=session_id, owner_generation=owner_generation
+                ),
+            )
 
 
 def get_vfs_read_authority_repository(

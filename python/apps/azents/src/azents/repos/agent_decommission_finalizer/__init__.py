@@ -50,6 +50,7 @@ class AgentDecommissionFinalizerRepository:
         job_id: str,
         agent_id: str,
         lease_owner: str,
+        expected_attempt: int,
         now: datetime.datetime,
     ) -> bool:
         """Delete verified Agent-owned rows and complete its job tombstone."""
@@ -60,6 +61,7 @@ class AgentDecommissionFinalizerRepository:
                 RDBAgentDecommissionJob.agent_id == agent_id,
                 RDBAgentDecommissionJob.status == AgentDecommissionStatus.FINALIZING,
                 RDBAgentDecommissionJob.lease_owner == lease_owner,
+                RDBAgentDecommissionJob.attempt_count == expected_attempt,
             )
             .with_for_update()
         )

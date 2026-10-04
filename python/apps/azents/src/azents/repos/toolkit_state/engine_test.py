@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.engine_tool_state import (
@@ -22,8 +23,9 @@ from azents.core.engine_tool_state import (
     TodoItem,
     TodoState,
 )
-from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.tooling.toolkit_state_test import _create_agent_and_session
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import (
     ReadSession,
@@ -33,6 +35,8 @@ from azents.rdb.session_capabilities import (
 )
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
+from azents.repos.goal.store import GoalStateStore
+from azents.repos.skill_state_store import SkillStateStore
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.engine import (
     GitHubSelectedInstallationStore,
@@ -294,7 +298,7 @@ async def test_working_set_composition_uses_the_callers_transaction(
     assert manager_call_count == 2
 
 
-async def test_for_execution_snapshot_and_selection_loads_bypass_held_execution_lock(
+async def test_snapshot_and_selection_operations_bypass_held_execution_lock(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
 ) -> None:
@@ -311,10 +315,6 @@ async def test_for_execution_snapshot_and_selection_loads_bypass_held_execution_
             fixture.agent_session_id,
         )
     assert current is not None
-    owner = SessionExecutionOwner(
-        session_id=current.id,
-        owner_generation=current.owner_generation,
-    )
     factory = EngineMcpSnapshotFactory(
         session_manager=write_manager,
         read_session_manager=read_manager,
@@ -340,34 +340,43 @@ async def test_for_execution_snapshot_and_selection_loads_bypass_held_execution_
     await unbound_store.replace(snapshot)
     await unbound_selection.save("installation-1")
 
-    bound = factory.with_owner(owner)
-    store = bound.create(
+    store = factory.create(
         agent_id=fixture.agent_id,
         session_id=fixture.agent_session_id,
         toolkit_namespace="mcp",
         state_name="tool_snapshot:lock",
     )
-    selection = bound.selected_installation(
+    selection = factory.selected_installation(
         agent_id=fixture.agent_id,
         session_id=fixture.agent_session_id,
     )
     assert store is not None
     assert selection is not None
-    assert store.session_manager is not write_manager
+    assert store.session_manager is write_manager
     assert store.read_session_manager is read_manager
     assert selection.read_session_manager is read_manager
 
     lock_acquired = asyncio.Event()
     release_lock = asyncio.Event()
+    todos = TodoStateStore(session_manager=write_manager)
+    goals = GoalStateStore(session_manager=write_manager, owner=None)
+    skills = SkillStateStore(session_manager=write_manager)
+    appendix = ToolkitAgentsAppendixDedupeStateStore(session_manager=write_manager)
 
     async def hold_execution_lock() -> None:
         async with write_manager() as session:
-            locked = await AgentSessionRepository().wait_for_execution_lock_by_id(
-                session,
-                fixture.agent_session_id,
+            locked = await session.write_session.scalar(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == fixture.agent_session_id)
+                .with_for_update(key_share=True),
             )
             assert locked is not None
-            assert locked.owner_generation == owner.owner_generation
+            root = await session.write_session.scalar(
+                sa.select(RDBSessionAgent)
+                .where(RDBSessionAgent.agent_session_id == fixture.agent_session_id)
+                .with_for_update()
+            )
+            assert root is not None
             lock_acquired.set()
             await release_lock.wait()
 
@@ -377,6 +386,60 @@ async def test_for_execution_snapshot_and_selection_loads_bypass_held_execution_
         loaded = await asyncio.wait_for(store.load(), timeout=1)
         assert loaded == snapshot
         assert await asyncio.wait_for(selection.load(), timeout=1) == "installation-1"
+        refreshed = snapshot.model_copy(update={"tool_hash": "private-update"})
+        await asyncio.wait_for(store.replace(refreshed), timeout=1)
+        await asyncio.wait_for(selection.save("installation-2"), timeout=1)
+        assert await store.load() == refreshed
+        assert await selection.load() == "installation-2"
+        state = TodoState(items=[TodoItem(content="Metadata", status="completed")])
+        assert (
+            await asyncio.wait_for(
+                todos.replace(fixture.agent_id, fixture.agent_session_id, state),
+                timeout=1,
+            )
+            == state
+        )
+        assert (
+            await asyncio.wait_for(
+                todos.load(fixture.agent_id, fixture.agent_session_id), timeout=1
+            )
+            == state
+        )
+        goal = await asyncio.wait_for(
+            goals.create(
+                agent_id=fixture.agent_id,
+                session_id=fixture.agent_session_id,
+                objective="Private metadata",
+                updated_at="2026-10-05T00:00:00+00:00",
+            ),
+            timeout=1,
+        )
+        assert goal.objective == "Private metadata"
+        assert (
+            await asyncio.wait_for(
+                goals.load(fixture.agent_id, fixture.agent_session_id), timeout=1
+            )
+        ) == goal
+        await asyncio.wait_for(
+            appendix.replace_appendix_dedupe(
+                fixture.agent_id, fixture.agent_session_id, ["/runtime/AGENTS.md"]
+            ),
+            timeout=1,
+        )
+        assert (
+            await asyncio.wait_for(
+                appendix.load_appendix_dedupe(
+                    fixture.agent_id, fixture.agent_session_id
+                ),
+                timeout=1,
+            )
+        ).appended_paths == ["/runtime/AGENTS.md"]
+        assert (
+            await asyncio.wait_for(
+                skills.adopt_latest(fixture.agent_id, fixture.agent_session_id),
+                timeout=1,
+            )
+        ).active.items == []
     finally:
         release_lock.set()
         await holder

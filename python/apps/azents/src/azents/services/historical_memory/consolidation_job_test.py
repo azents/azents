@@ -100,7 +100,13 @@ async def _host(manager: SessionManager[WriteSession]) -> _PausedHost:
     ownership = ConsolidationOwnershipRepository(manager)
     claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
-    return _PausedHost(claim, ownership, ConsolidationPublicationRepository(manager))
+    return _PausedHost(
+        claim,
+        ownership,
+        ConsolidationPublicationRepository(
+            session_manager=manager, read_session_manager=manager
+        ),
+    )
 
 
 async def test_heartbeat_renews_while_model_is_blocked_without_foreground_lock(

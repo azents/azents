@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
@@ -16,6 +17,7 @@ from azents.core.mailbox_data import (
     MailboxItem,
     MailboxItemCreate,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -23,8 +25,9 @@ from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.session_execution import (
-    CanonicalExecutionOwnerGenerationStaleError,
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
 )
 
 
@@ -104,11 +107,14 @@ class IdleContinuationRepository:
     ) -> IdleBoundaryEligibility:
         """Return completed pre-hook true-idle eligibility."""
         async with self.session_manager() as session:
+            current = await validate_session_execution_owner(
+                session, SessionExecutionOwner(session_id, owner_generation)
+            )
             return await self._eligibility(
                 session,
                 session_id,
                 run_id,
-                owner_generation=owner_generation,
+                current=current,
             )
 
     async def finalize(
@@ -122,11 +128,14 @@ class IdleContinuationRepository:
         """Revalidate, admit continuations, and consume the boundary atomically."""
         try:
             async with self.session_manager() as session:
+                current = await fence_owned_session_mutation(
+                    session, SessionExecutionOwner(session_id, owner_generation)
+                )
                 eligibility = await self._eligibility(
                     session,
                     session_id,
                     run_id,
-                    owner_generation=owner_generation,
+                    current=current,
                 )
                 if not eligibility.eligible:
                     return IdleContinuationFinalization(
@@ -174,19 +183,10 @@ class IdleContinuationRepository:
         session_id: str,
         run_id: str,
         *,
-        owner_generation: int,
+        current: AgentSession,
     ) -> IdleBoundaryEligibility:
-        """Evaluate the canonical true-idle fence in one transaction."""
-        locked = await self.agent_session_repository.wait_for_execution_lock_by_id(
-            session,
-            session_id,
-        )
-        if locked is None:
-            raise ValueError("AgentSession not found")
-        if locked.owner_generation != owner_generation:
-            raise CanonicalExecutionOwnerGenerationStaleError(
-                "Session owner generation is stale during idle continuation"
-            )
+        """Evaluate true-idle state after observation or mutation admission."""
+        locked = current
         archived_cycle_id: str | None = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:

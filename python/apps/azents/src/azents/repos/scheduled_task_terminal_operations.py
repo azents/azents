@@ -16,7 +16,7 @@ from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTrackerProjectionPart
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 ScheduledTaskTerminalStatus = Literal["finished", "failed"]
 
@@ -57,12 +57,14 @@ class ScheduledTaskTerminalOperations:
         event_repository: EventTranscriptRepository,
         task_repository: ScheduledTaskRepository,
         cycle_repository: ScheduledTaskCycleRepository,
+        owner: SessionExecutionOwner | None,
     ) -> None:
         self.session_manager = session_manager
         self.run_repository = run_repository
         self.event_repository = event_repository
         self.task_repository = task_repository
         self.cycle_repository = cycle_repository
+        self.owner = owner
 
     def for_execution(
         self,
@@ -70,11 +72,8 @@ class ScheduledTaskTerminalOperations:
     ) -> "ScheduledTaskTerminalOperations":
         """Bind terminal persistence to one durable Session owner."""
         return ScheduledTaskTerminalOperations(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
+            session_manager=self.session_manager,
+            owner=owner,
             run_repository=self.run_repository,
             event_repository=self.event_repository,
             task_repository=self.task_repository,
@@ -95,6 +94,10 @@ class ScheduledTaskTerminalOperations:
         normalized_result = result
 
         async with self.session_manager() as session:
+            if self.owner is not None:
+                if self.owner.session_id != session_id:
+                    raise ValueError("Scheduled terminal Session does not match owner")
+                await fence_owned_session_mutation(session, self.owner)
             run = await self.run_repository.lock_by_id(session, run_id)
             if (
                 run is None
@@ -252,6 +255,7 @@ def get_scheduled_task_terminal_operations(
 ) -> ScheduledTaskTerminalOperations:
     """Wire completed terminal operations entirely inside repository composition."""
     return ScheduledTaskTerminalOperations(
+        owner=None,
         session_manager=session_manager,
         run_repository=run_repository,
         event_repository=event_repository,

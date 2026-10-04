@@ -6,16 +6,21 @@ from contextlib import asynccontextmanager
 from typing import NamedTuple
 
 import pytest
+from azcommon.di import Container
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.engine_tool_state import ToolWorkingSetState
 from azents.core.enums import EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.engine.events.filters import EventCompactor
 from azents.engine.events.types import Event, validate_event_payload
+from azents.rdb.deps import get_session_manager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
+    get_compaction_operation_repository,
 )
 from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
@@ -224,6 +229,7 @@ def _repository(
     working_set = _ToolWorkingSetStore(manager, completions)
     return _RepositoryFixture(
         repository=CompactionOperationRepository(
+            owner=None,
             session_manager=manager,
             transcript_repository=transcript,
             agent_session_repository=sessions,
@@ -355,3 +361,21 @@ async def test_compaction_commit_state_failure_aborts_final_transaction() -> Non
 
     assert [session.commit_count for session in manager.sessions] == [1, 0]
     assert working_set.cleared == []
+
+
+async def test_compaction_dependency_graph_binds_execution_owner_explicitly() -> None:
+    """Offline production DI requires no caller-supplied owner body or query."""
+    manager = _SessionManager()
+    async with Container(
+        dependency_overrides={get_session_manager: lambda: manager}
+    ) as container:
+        operation = await container.solve(get_compaction_operation_repository)
+        compactor = await container.solve(EventCompactor)
+        assert operation.owner is None
+        assert operation.session_manager is manager
+        assert compactor.operation_repository.owner is None
+        owner = SessionExecutionOwner("captured-session", 7)
+        bound = operation.for_execution(owner)
+        assert bound.owner == owner
+        assert bound.session_manager is manager
+        assert operation.owner is None

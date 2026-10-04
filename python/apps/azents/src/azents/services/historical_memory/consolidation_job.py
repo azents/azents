@@ -30,9 +30,9 @@ from azents.job_runtime.types import (
     JobPayload,
     validate_job_payload,
 )
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.engine_read import EngineModelReadRepository
@@ -203,6 +203,9 @@ class HistoricalMemoryConsolidationService:
     ]
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)]
     watchdog: Annotated[ModelStreamWatchdog, Depends(get_model_stream_watchdog)]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
 
     async def run_unit(
         self,
@@ -219,7 +222,10 @@ class HistoricalMemoryConsolidationService:
             self,
             claim,
             ownership,
-            ConsolidationPublicationRepository(self.session_manager),
+            ConsolidationPublicationRepository(
+                session_manager=self.session_manager,
+                read_session_manager=self.read_session_manager,
+            ),
             execution_policy,
         )
         try:

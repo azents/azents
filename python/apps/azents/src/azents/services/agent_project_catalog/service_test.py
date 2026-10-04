@@ -2,7 +2,6 @@
 
 import datetime
 
-import pytest
 from azcommon.result import Failure, Success
 
 from azents.core.agent_session_data import AgentSessionCreate
@@ -21,9 +20,6 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.session_execution import (
-    CanonicalExecutionOwnerGenerationStaleError,
-)
 from azents.repos.workspace import WorkspaceRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
@@ -367,11 +363,11 @@ class TestAgentProjectCatalogService:
         assert result.value.status == AgentProjectCatalogStatus.MISSING
         assert result.value.status_detail == "Path does not exist."
 
-    async def test_execution_refresh_rejects_takeover_after_runner_stat(
+    async def test_status_description_tolerates_takeover_after_runner_stat(
         self,
         rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
-        """Runner evidence from an old owner cannot update catalog status."""
+        """Descriptive Runner evidence does not inherit a Session owner gate."""
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(
                 session,
@@ -396,7 +392,7 @@ class TestAgentProjectCatalogService:
                     title=None,
                 ),
             )
-            owner_generation = await AgentSessionRepository().claim_owner_generation(
+            await AgentSessionRepository().claim_owner_generation(
                 session,
                 agent_session.id,
             )
@@ -408,17 +404,17 @@ class TestAgentProjectCatalogService:
             ),
         )
 
-        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
-            await service.refresh_project_status_for_execution(
-                agent_id=agent_id,
-                session_id=agent_session.id,
-                owner_generation=owner_generation,
-                path="/workspace/agent/app",
-            )
+        result = await service.refresh_project_status(
+            agent_id=agent_id,
+            path="/workspace/agent/app",
+        )
+        assert isinstance(result, Success)
+        assert result.value.status is AgentProjectCatalogStatus.AVAILABLE
 
         async with rdb_session_manager() as session:
             entries = await AgentProjectCatalogRepository().list_entries(
                 session,
                 agent_id=agent_id,
             )
-        assert entries == []
+        assert len(entries) == 1
+        assert entries[0].status is AgentProjectCatalogStatus.AVAILABLE

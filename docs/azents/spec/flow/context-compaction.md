@@ -46,8 +46,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-04
-spec_version: 51
+last_verified_at: 2026-10-05
+spec_version: 52
 ---
 
 # Context Compaction
@@ -96,7 +96,8 @@ When compaction is required:
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
 7. A completed repository-owned finalization operation opens one short database
-   transaction, locks the Session, and revalidates both captured boundaries. A
+   transaction, fences the exact captured execution-owner generation when
+   execution-bound, locks the Session, and revalidates both captured boundaries. A
    changed head or latest non-reverted event ID makes the plan stale and writes
    no compaction event.
 8. For a current plan, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason at the physical transcript tail. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
@@ -329,6 +330,10 @@ the immediate shape of the recent interaction.
 - Compaction is append-only: success atomically appends one adjacent marker/summary pair; failure or cancellation appends no compaction lifecycle event.
 - Successful compaction resets only the Session's `tool_search/working_set` in the marker/summary/head transaction. A skipped or unsuccessful attempt preserves that working set, and all other Toolkit State remains unchanged.
 - External summary generation and enrichment run before the successful commit transaction opens and do not hold a Session row lock.
+- Planning is an ordinary read, independent of execution-tree locks. The final
+  marker/summary/head/Tool Search reset group retains exact owner exclusion
+  through commit, including execution-bound finalization without a model-operation
+  commit context. Unowned dependency factories pass that absence explicitly.
 - Events appended during external summary work make the plan stale; the attempt writes no marker or summary and leaves the model-input head unchanged.
 - Summary failure or cancellation leaves the model-input head unchanged.
 - Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
@@ -393,6 +398,10 @@ not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 52) — Separated plain compaction planning from
+  explicit execution-owned critical finalization and retained owner exclusion
+  for the complete summary/head/reset commit.
 
 - **2026-10-04** (spec_version 49) — Replaced source ranking/packing with whole
   independently authorized 10k Team/personal documents and up to 20k foreground

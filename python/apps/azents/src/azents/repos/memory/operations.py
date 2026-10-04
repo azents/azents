@@ -4,6 +4,7 @@ import dataclasses
 
 from azents.core.enums import AgentSessionKind, AgentSessionProductMode
 from azents.core.memory_scope import MemoryScope
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
@@ -14,6 +15,7 @@ from azents.repos.memory.data import (
     MemorySearchMatch,
     MemorySummary,
 )
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -37,6 +39,7 @@ class MemoryOperationRepository:
     """Own completed Memory tool and prompt database operations."""
 
     session_manager: SessionManager[WriteSession]
+    owner: SessionExecutionOwner | None
     memory_repository: MemoryRepository
     agent_session_repository: AgentSessionRepository
 
@@ -49,6 +52,8 @@ class MemoryOperationRepository:
     ) -> None:
         """Upsert one Memory in a completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             await self.memory_repository.upsert(
                 session,
                 agent_id=agent_id,
@@ -143,6 +148,8 @@ class MemoryOperationRepository:
     ) -> bool:
         """Delete one Memory by name in a completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             return await self.memory_repository.delete_by_name(
                 session,
                 agent_id=agent_id,

@@ -324,6 +324,7 @@ def _service(
             cycle_repository=require_instance(
                 cycle_proxy, ScheduledTaskCycleRepository
             ),
+            owner=None,
         )
     )
     return _TerminalFixture(

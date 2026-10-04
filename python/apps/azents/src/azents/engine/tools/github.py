@@ -386,20 +386,9 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             session_id=session_id,
         ):
             return
-        if isinstance(
-            self.selected_installation_store,
-            GitHubSelectedInstallationStore,
-        ):
-            self.selected_installation_store = (
-                self.selected_installation_store.for_execution(owner)
-            )
         if self._mcp is not None:
             self._mcp.bind_execution_owner(owner)
         for binding in self._installation_bindings:
-            if binding.snapshot_factory is not None:
-                binding.snapshot_factory = binding.snapshot_factory.with_owner(owner)
-            if binding.snapshot_store is not None:
-                binding.snapshot_store = binding.snapshot_store.for_execution(owner)
             if binding.mcp_toolkit is not None:
                 binding.mcp_toolkit.bind_execution_owner(owner)
         self._execution_owner = owner

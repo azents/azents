@@ -84,8 +84,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-10-04
-spec_version: 57
+last_verified_at: 2026-10-05
+spec_version: 58
 ---
 
 # File Exchange Storage
@@ -170,6 +170,12 @@ publication identity, and cleanup responsibility; it never persists the signed c
 Prepare and finalize remain uploader/Agent-authorized; root/session claiming occurs at
 input acceptance rather than upload preparation. Repeated finalize recovers the same
 publication, including uncertain metadata commits, rather than publishing twice.
+The finalized-publication observer uses an ordinary read-only scope without upload
+or Agent row locks. It retains exact uploader, Agent/Workspace membership,
+publication identity, manifest, availability, expiry and blob-deletion checks;
+missing metadata is never recreated and no object bytes are read or rewritten.
+Actual claim, verified finalization and cleanup transitions retain their exact
+mutation guards, so this lag-tolerant observation does not admit a new publication.
 Browser cancellation aborts local hashing/network work and removes pending state on
 remove, clear, or unmount. Abandoned operations expire into durable scheduler cleanup.
 Chat upload exposes prepare/finalize; Workspace Upload's server status/cancel lifecycle
@@ -502,6 +508,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## Changelog
 
+- **2026-10-05** (spec_version 58) — Separated finalized upload-publication
+  observation from upload/Agent mutation locks while preserving exact uploader,
+  scope, manifest and lifecycle checks and actual claim/finalization fencing.
 - **2026-10-03** (spec_version 56) — Removed the Workspace publication allowlist
   from `present_file`; retained absolute Runtime paths, filesystem permissions,
   Session authority, and verified direct-transfer requirements.

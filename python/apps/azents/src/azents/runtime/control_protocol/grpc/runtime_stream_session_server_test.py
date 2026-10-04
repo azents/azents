@@ -35,7 +35,7 @@ from azents_runtime_control.system_metrics import (
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
 from azents.repos.runtime_stream_route_test import (
@@ -1999,7 +1999,7 @@ async def test_data_plane_route_snapshot_closes_pg_before_local_projection(
     class ReadFailure(RuntimeWebSessionRouteRepository):
         async def resolve(
             self,
-            session: WriteSession,
+            session: ReadSession,
             *,
             runtime_id: str,
             desired_generation: int,
@@ -2031,7 +2031,9 @@ async def test_data_plane_route_snapshot_closes_pg_before_local_projection(
         lease_seconds=90,
     )
     data_plane.route_repository = RuntimeStreamRouteOperationRepository(
-        fixture.manager, ReadFailure()
+        fixture.manager,
+        ReadFailure(),
+        read_session_manager=fixture.manager,
     )
     data_plane.lock = ClosedProjectionLock()
     try:

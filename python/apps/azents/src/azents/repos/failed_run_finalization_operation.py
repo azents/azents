@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.enums import AgentRunStatus, EventKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import Event, RunMarkerPayload, SystemErrorPayload
 from azents.engine.run.failure import (
     FailedRunFailureMetadata,
@@ -20,6 +21,7 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 
 
@@ -69,11 +71,8 @@ class FailedRunFinalizationOperationRepository:
     ) -> FailedRunFinalizationEvents | None:
         """Finish one failure unless the current owned Session has a Stop intent."""
         async with self.session_manager() as session:
-            agent_session = (
-                await self.agent_session_repository.wait_for_execution_lock_by_id(
-                    session,
-                    input.session_id,
-                )
+            agent_session = await fence_owned_session_mutation(
+                session, SessionExecutionOwner(input.session_id, input.owner_generation)
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")

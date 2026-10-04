@@ -269,6 +269,7 @@ def _compactor(
     session_repo.events = transcript_repo.events
     return EventCompactor(
         operation_repository=CompactionOperationRepository(
+            owner=None,
             session_manager=resolved_session_manager,
             transcript_repository=transcript_repo,
             agent_session_repository=session_repo,

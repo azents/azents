@@ -101,6 +101,7 @@ async def test_event_operations_complete_their_sessions_before_returning() -> No
         agent_session_repository=agent_session_repository,
         session_head_repository=session_head_repository,
         transcript_repository=transcript_repository,
+        owner=None,
     )
 
     assert (

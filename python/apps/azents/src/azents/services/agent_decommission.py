@@ -168,6 +168,7 @@ class AgentDecommissionRepositoryProtocol(Protocol):
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         status: AgentDecommissionStatus,
         now: datetime.datetime,
     ) -> bool:
@@ -180,6 +181,7 @@ class AgentDecommissionRepositoryProtocol(Protocol):
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
@@ -252,7 +254,7 @@ class AgentDecommissionRunRepositoryProtocol(Protocol):
 class AgentDecommissionRetentionRepositoryProtocol(Protocol):
     """Retention operations consumed while retiring an idle root tree."""
 
-    async def lock_settings(
+    async def get_settings(
         self,
         session: WriteSession,
     ) -> AgentDecommissionRetentionSettings:
@@ -597,6 +599,7 @@ class AgentDecommissionService:
             await self._set_status(
                 job_id=job.id,
                 lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
                 status=AgentDecommissionStatus.RETIRING_SESSIONS,
             )
             waiting_for_active_run = False
@@ -616,6 +619,7 @@ class AgentDecommissionService:
             await self._set_status(
                 job_id=job.id,
                 lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
                 status=AgentDecommissionStatus.WAITING_RETENTION,
             )
             return AgentDecommissionAdvanceResult(
@@ -626,6 +630,7 @@ class AgentDecommissionService:
         await self._set_status(
             job_id=job.id,
             lease_owner=lease_owner,
+            expected_attempt=job.attempt_count,
             status=AgentDecommissionStatus.FINALIZING,
         )
         await self._cleanup_agent_external_roots(
@@ -638,6 +643,7 @@ class AgentDecommissionService:
                 job_id=job.id,
                 agent_id=job.agent_id,
                 lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
                 now=datetime.datetime.now(datetime.UTC),
             )
         if not completed:
@@ -699,7 +705,7 @@ class AgentDecommissionService:
                 stop_session_ids = session_ids
 
             if not active or preserve_scheduled:
-                settings = await self.retention_repository.lock_settings(session)
+                settings = await self.retention_repository.get_settings(session)
                 if settings.archived_session_retention_days is None:
                     raise RuntimeError(
                         "Agent decommission cannot retire roots under Unlimited "
@@ -767,6 +773,7 @@ class AgentDecommissionService:
                     session,
                     job_id=job.id,
                     lease_owner=lease_owner,
+                    expected_attempt=job.attempt_count,
                     status=AgentDecommissionStatus.RETIRING_SESSIONS,
                     now=archived_at,
                 )
@@ -829,6 +836,7 @@ class AgentDecommissionService:
                 session,
                 job_id=job.id,
                 lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
                 status=AgentDecommissionStatus.FINALIZING,
                 now=now,
             )
@@ -886,6 +894,7 @@ class AgentDecommissionService:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         status: AgentDecommissionStatus,
     ) -> None:
         """Persist an owned job phase or surface a lost lease."""
@@ -894,6 +903,7 @@ class AgentDecommissionService:
                 session,
                 job_id=job_id,
                 lease_owner=lease_owner,
+                expected_attempt=expected_attempt,
                 status=status,
                 now=datetime.datetime.now(datetime.UTC),
             )
@@ -917,6 +927,7 @@ class AgentDecommissionService:
                 session,
                 job_id=job.id,
                 lease_owner=lease_owner,
+                expected_attempt=job.attempt_count,
                 next_attempt_at=now + delay,
                 error_kind=error_kind,
                 error_summary=error_summary,

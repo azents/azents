@@ -86,7 +86,7 @@ class RuntimeRecreationService:
     ) -> RuntimeRecreationOperation:
         """Create one exact Provider-scoped recreation operation."""
         async with self.session_manager() as session:
-            provider = await self.provider_repository.lock_by_provider_id_for_authority(
+            provider = await self.provider_repository.get_by_provider_id(
                 session,
                 provider_logical_id=provider_logical_id,
             )
@@ -105,6 +105,10 @@ class RuntimeRecreationService:
                 session,
                 target_kind=RuntimeRecreationTargetKind.PROVIDER,
                 target_id=provider.id,
+                target_version=(
+                    f"{provider.admin_version}:"
+                    f"{provider.current_contract_revision_id or '-'}"
+                ),
                 concurrency_limit=concurrency_limit,
                 actor_user_id=actor_user_id,
                 actor_workspace_user_id=None,
@@ -168,6 +172,7 @@ class RuntimeRecreationService:
                 session,
                 target_kind=RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
                 target_id=profile.id,
+                target_version=str(profile.version),
                 concurrency_limit=concurrency_limit,
                 actor_user_id=actor_user_id,
                 actor_workspace_user_id=None,
@@ -204,6 +209,7 @@ class RuntimeRecreationService:
                 session,
                 target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
                 target_id=profile.id,
+                target_version=str(profile.version),
                 concurrency_limit=concurrency_limit,
                 actor_user_id=None,
                 actor_workspace_user_id=actor_workspace_user_id,
@@ -280,18 +286,11 @@ class RuntimeRecreationService:
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
+        target_version: str,
         concurrency_limit: int,
         actor_user_id: str | None,
         actor_workspace_user_id: str | None,
     ) -> RuntimeRecreationOperation:
-        target_version = await self.profile_repository.get_recreation_target_version(
-            session,
-            target_kind=target_kind,
-            target_id=target_id,
-            for_share=False,
-        )
-        if target_version is None:
-            raise AssertionError("Locked Runtime recreation target disappeared.")
         operation = await self.profile_repository.create_recreation_operation(
             session,
             target_kind=target_kind,
@@ -434,11 +433,10 @@ class RuntimeRecreationReconciler:
                 operation_id=item.operation_id,
             )
             target_version = (
-                await self.profile_repository.get_recreation_target_version(
+                await self.profile_repository.lock_recreation_target_for_dispatch(
                     session,
                     target_kind=operation.target_kind,
                     target_id=operation.target_id,
-                    for_share=True,
                 )
                 if operation is not None
                 else None

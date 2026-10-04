@@ -229,19 +229,18 @@ class ExternalChannelIngressQueueRepository:
             .with_for_update()
         )
 
-    async def lock_first_authoritative_item(
+    async def get_first_authoritative_item(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         owner_id: str,
     ) -> ExternalChannelIngressItem | None:
-        """Lock the oldest retained trigger while the caller owns the owner lease."""
-        item = await session.write_session.scalar(
+        """Observe the oldest retained trigger without claiming or changing it."""
+        item = await session.read_session.scalar(
             sa.select(RDBExternalChannelIngressItem)
             .where(RDBExternalChannelIngressItem.owner_id == owner_id)
             .order_by(RDBExternalChannelIngressItem.queue_key)
             .limit(1)
-            .with_for_update()
         )
         return (
             ExternalChannelIngressItem.model_validate(item)

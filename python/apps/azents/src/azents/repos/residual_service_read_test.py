@@ -2,14 +2,15 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentSessionStatus
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -66,7 +67,7 @@ async def test_residual_reads_close_their_sessions_before_returning() -> None:
         return None
 
     agent_repository.get_by_id.side_effect = get_agent
-    external_channel_repository.lock_interaction.side_effect = get_interaction
+    external_channel_repository.get_interaction.side_effect = get_interaction
 
     workspace_result = await AgentWorkspaceAccessRepository(
         session_manager=session_manager,
@@ -90,7 +91,9 @@ async def test_residual_reads_close_their_sessions_before_returning() -> None:
     assert not transaction_active
 
 
-async def test_residual_mutation_and_idle_read_finish_before_returning() -> None:
+async def test_residual_mutation_and_idle_read_finish_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Discord mutation and idle eligibility own their transaction lifetimes."""
     _raw_session = AsyncMock(spec=AsyncSession)
     session = ReadWriteSession(_raw_session)
@@ -122,19 +125,28 @@ async def test_residual_mutation_and_idle_read_finish_before_returning() -> None
     _raw_session.commit.assert_awaited_once()
     assert not transaction_active
 
-    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
-    agent_session_repository.wait_for_execution_lock_by_id.return_value = (
-        SimpleNamespace(
+    async def get_current_owner(
+        self: AgentSessionRepository,
+        current_session: ReadSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        del self
+        assert transaction_active
+        assert current_session is session
+        assert agent_session_id == "session-1"
+        return AgentSession.model_construct(
+            id=agent_session_id,
             owner_generation=1,
             status=AgentSessionStatus.ACTIVE,
             pending_idle_continuation_run_id=None,
             pending_command_id=None,
             agent_id="agent-1",
         )
-    )
+
+    monkeypatch.setattr(AgentSessionRepository, "get_by_id", get_current_owner)
     eligibility = await IdleContinuationRepository(
         session_manager=session_manager,
-        agent_session_repository=agent_session_repository,
+        agent_session_repository=AgentSessionRepository(),
         agent_run_repository=AsyncMock(spec=AgentRunRepository),
         mailbox_repository=AsyncMock(spec=MailboxRepository),
         scheduled_task_cycle_repository=AsyncMock(spec=ScheduledTaskCycleRepository),

@@ -110,8 +110,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-04
-spec_version: 135
+last_verified_at: 2026-10-05
+spec_version: 136
 ---
 
 # Toolkit
@@ -157,18 +157,21 @@ slug retain distinct durable executable namespaces.
 
 Resolved Session Toolkits bind a narrow PostgreSQL execution owner
 (`session_id`, `owner_generation`) before Toolkit lifecycle entry. This covers
-lifecycle/background snapshot writes as well as direct Tool state mutations.
+execution identity and actual effect admission, not every private state scope.
 Request-local full resource authority may change between Runs under the same owner,
 while the durable owner token remains fixed; reusing a Toolkit under another
 generation is rejected. Idle-continuation Toolkit preparation uses the same narrow
 binding before entry.
 
-Todo, Goal, Memory, Skill, Subagent, Scheduled Task, GitHub selection,
-MCP/AWS/GCP snapshots, Runtime instruction dedupe, and Claude Rules state commit
-through owner-bound database scopes. External discovery, Runtime/file reads,
-provider calls, and broker publication occur after those scopes close. A stale
-owner rejection terminates hook/tool processing instead of becoming an allowed
-hook result, failed Tool payload, or background refresh retry.
+Todo/Goal payloads, Skill adoption, GitHub selection, MCP/AWS/GCP snapshots and
+instruction appendix dedupe use ordinary completed operations without generic
+root-tree ownership manager binding. Existing state CAS and source/schema
+identity remain. Memory content mutation, durable Goal events, Run VFS publication,
+Memory boundary publication and Scheduled terminal publication explicitly fence
+only their critical exact Session mutation groups. External discovery, Runtime/
+file reads, provider calls and broker publication occur outside database scopes.
+Observed stale admission and critical-owner rejection retain their existing
+failure handling; no row lock is held across external I/O.
 
 Tool Search working-set, AGENTS.md/Claude Rules appendix dedupe, and Todo payload
 models are pure core state. Their ordinary reads and mutations are completed
@@ -179,13 +182,13 @@ Raw MCP, AWS, GCP, and GitHub MCP tool snapshots plus the GitHub selected
 installation are also pure core state loaded and replaced through completed
 repository operations. External tool discovery, credential exchange, and tool
 execution remain outside those operations. Successful snapshot replacement keeps
-the existing optimistic retry and owner-generation fence; runtime still validates
+the existing optimistic retry without a Session root fence; runtime still validates
 the stored server/project identity before rebuilding tools.
 
 Saved snapshot and GitHub selection descriptions load through independent,
-database-enforced read-only scopes. Execution-owner binding applies to their
-mutation manager, not their description manager. Description loads neither
-acquire the Session root-tree lock nor require a globally latest view. Missing
+database-enforced read-only scopes. Their private metadata replacements use
+ordinary write scopes with existing state version predicates. Neither path
+acquires a generic Session ownership fence or requires a globally latest view. Missing
 state remains an absent description; retained source identity and schema/executor
 pairing remain mandatory.
 
@@ -197,8 +200,10 @@ Agent/context row locks. Dynamic Worktree preparation shares one retained
 eligibility projection for create and remove; removal additionally requires a
 ready managed allocation. Actual tool invocation still revalidates current
 capability, expected configuration/target, binding and ownership before external
-effects. The general Engine preparation-owner check and unrelated state mutation
-fences remain separate; this read split does not dismantle that lifecycle gate.
+effects. Model preparation uses a nonlocking current-owner observation rather
+than a generic root/Agent/ancestor gate. Critical persisted outputs separately
+exclude handover through the exact Session mutation commit; no short owner check
+promises exclusion throughout external execution.
 
 All currently implemented AgentSessions execute as Team Sessions. Generic Toolkit, resolve, run, and
 turn contexts contain canonical Workspace, Agent, Session, Run, and resource authority, but no User
@@ -1317,6 +1322,8 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 136) — Separated harmless private state and descriptive scopes from exact critical Session mutation fences; retained immutable Toolkit owner identity, precise effect admission, VFS/Memory-boundary publication and credential finalization.
 
 - **2026-10-04** (spec_version 131) — Promoted single generic mutation routing
   with optional native VFS mutation/atomic-patch protocols and scoped internal

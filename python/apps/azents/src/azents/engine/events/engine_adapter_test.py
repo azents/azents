@@ -61,6 +61,7 @@ from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
     SummaryModelCall,
@@ -247,16 +248,16 @@ class _SessionContext:
 
 
 @pytest.fixture(autouse=True)
-def _fake_execution_owner_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep assembly tests in memory; real lock behavior has repository tests."""
+def _fake_execution_owner_operations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep assembly in memory; PostgreSQL tests verify exact mutation fencing."""
 
-    async def lock_owner(
+    async def get_owner(
         self: AgentSessionRepository,
-        session: WriteSession,
+        session: ReadSession,
         session_id: str,
     ) -> AgentSession | None:
         del self, session_id
-        raw_session = session.write_session
+        raw_session = session.read_session
         assert isinstance(raw_session, _Session)
         if raw_session.owner_generation is None:
             return None
@@ -264,9 +265,31 @@ def _fake_execution_owner_lock(monkeypatch: pytest.MonkeyPatch) -> None:
             update={"owner_generation": raw_session.owner_generation}
         )
 
-    monkeypatch.setattr(
-        AgentSessionRepository, "wait_for_execution_lock_by_id", lock_owner
-    )
+    async def fence_owner(
+        session: WriteSession, owner: SessionExecutionOwner
+    ) -> AgentSession:
+        current = await get_owner(AgentSessionRepository(), session, owner.session_id)
+        if current is None:
+            raise ValueError("AgentSession not found")
+        if current.owner_generation != owner.owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
+        return current
+
+    monkeypatch.setattr(AgentSessionRepository, "get_by_id", get_owner)
+    for module in (
+        "engine_event_operation",
+        "engine_execution_operation",
+        "engine_model_input_operation",
+        "engine_output_operation",
+        "engine_tool_result_operation",
+        "engine_run_finalization_operation",
+        "compaction_operation",
+    ):
+        monkeypatch.setattr(
+            f"azents.repos.{module}.fence_owned_session_mutation", fence_owner
+        )
 
 
 class _Session(AsyncSession):
@@ -3674,6 +3697,7 @@ def _agent_engine_adapter(
         terminal_repository=terminal_operations,
         output_metadata_repository=output_metadata,
         compaction_repository=CompactionOperationRepository(
+            owner=None,
             session_manager=session_manager,
             transcript_repository=transcript,
             agent_session_repository=sessions,

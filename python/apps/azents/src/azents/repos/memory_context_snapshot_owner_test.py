@@ -33,6 +33,7 @@ async def test_takeover_keeps_descriptive_reads_but_rejects_old_owner_writes(
             ToolkitStateRepository(),
             manager,
             manager,
+            owner=None,
         )
     )
     async with manager() as session:

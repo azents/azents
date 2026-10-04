@@ -42,7 +42,6 @@ from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.agent_session import AgentSessionRepository
 
 from .data import (
     AgentRunCreate,
@@ -240,11 +239,6 @@ class EventTranscriptRepository:
         created_at: datetime.datetime,
     ) -> None:
         """Advance the Session user-input projection monotonically."""
-        if not await AgentSessionRepository().lock_agent_parent_for_session(
-            session,
-            session_id,
-        ):
-            return
         await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
@@ -297,11 +291,6 @@ class EventTranscriptRepository:
                 latest_activity_at,
             )
         if not values:
-            return
-        if not await AgentSessionRepository().lock_agent_parent_for_session(
-            session,
-            session_id,
-        ):
             return
         await session.write_session.execute(
             sa.update(RDBAgentSession)

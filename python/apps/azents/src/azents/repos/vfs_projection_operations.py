@@ -13,7 +13,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.deps import get_toolkit_repository
 
@@ -170,15 +170,12 @@ class VfsProjectionOperations:
     agent_run_repository: VfsRunRepository
     agent_session_repository: VfsSessionRepository
     toolkit_repository: VfsToolkitRepository
+    owner: SessionExecutionOwner | None
 
     def with_owner(self, owner: SessionExecutionOwner) -> "VfsProjectionOperations":
         return dataclasses.replace(
             self,
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
+            owner=owner,
         )
 
     async def read_run(self, *, run_id: str, session_id: str) -> VfsRunSnapshot | None:
@@ -200,6 +197,10 @@ class VfsProjectionOperations:
         self, *, run_id: str, session_id: str, projection: VfsProjection
     ) -> VfsProjection:
         async with self.session_manager() as session:
+            if self.owner is not None:
+                if self.owner.session_id != session_id:
+                    raise ValueError("VFS publication Session does not match owner")
+                await fence_owned_session_mutation(session, self.owner)
             published = await self.agent_run_repository.set_vfs_projection_if_unset(
                 session, run_id=run_id, session_id=session_id, projection=projection
             )
@@ -235,6 +236,7 @@ def get_vfs_projection_operations(
 ) -> VfsProjectionOperations:
     """Wire real persistence collaborators behind the completed VFS boundary."""
     return VfsProjectionOperations(
+        owner=None,
         session_manager=session_manager,
         agent_run_repository=agent_run_repository,
         agent_session_repository=agent_session_repository,

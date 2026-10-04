@@ -718,16 +718,13 @@ class _CatalogRefreshService(AgentProjectCatalogService):
     def __init__(self, status: AgentProjectCatalogStatus) -> None:
         self.status = status
 
-    async def refresh_project_status_for_execution(
+    async def refresh_project_status(
         self,
         *,
         agent_id: str,
-        session_id: str,
-        owner_generation: int,
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Return the configured status without touching the runner."""
-        del session_id, owner_generation
         now = datetime.datetime.now(datetime.UTC)
         status_detail = (
             None if self.status is AgentProjectCatalogStatus.AVAILABLE else "Not ready."

@@ -78,6 +78,7 @@ def _service(manager: SessionManager[WriteSession]) -> MemoryContextSnapshotServ
             ToolkitStateRepository(),
             manager,
             manager,
+            owner=None,
         )
     )
 

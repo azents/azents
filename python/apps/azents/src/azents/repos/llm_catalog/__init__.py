@@ -388,9 +388,9 @@ class LLMCatalogRepository:
         self._validate_conversation_capabilities(entries)
         identifiers = {entry.provider_model_identifier for entry in entries}
         existing_result = await session.write_session.execute(
-            sa.select(RDBLLMCatalogEntry.provider_model_identifier)
-            .where(RDBLLMCatalogEntry.catalog_id == owner.id)
-            .with_for_update()
+            sa.select(RDBLLMCatalogEntry.provider_model_identifier).where(
+                RDBLLMCatalogEntry.catalog_id == owner.id
+            )
         )
         obsolete = sorted(set(existing_result.scalars()) - identifiers)
         for start in range(0, len(entries), _ROW_BATCH_SIZE):
@@ -455,9 +455,9 @@ class LLMCatalogRepository:
         self._validate_entry_scope(owner, entries)
         identifiers = {entry.provider_model_identifier for entry in entries}
         existing_result = await session.write_session.execute(
-            sa.select(RDBImageGenerationCatalogEntry.provider_model_identifier)
-            .where(RDBImageGenerationCatalogEntry.catalog_id == owner.id)
-            .with_for_update()
+            sa.select(RDBImageGenerationCatalogEntry.provider_model_identifier).where(
+                RDBImageGenerationCatalogEntry.catalog_id == owner.id
+            )
         )
         obsolete = sorted(set(existing_result.scalars()) - identifiers)
         for start in range(0, len(entries), _ROW_BATCH_SIZE):

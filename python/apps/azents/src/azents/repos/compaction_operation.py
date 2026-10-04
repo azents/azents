@@ -7,6 +7,7 @@ from fastapi import Depends
 
 from azents.core.enums import EventKind
 from azents.core.model_operation import ModelOperationKind
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import (
     CompactionMarkerPayload,
     CompactionSummaryPayload,
@@ -22,6 +23,7 @@ from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
     ModelOperationCompletionRepository,
 )
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 
 
@@ -118,6 +120,34 @@ def _tool_working_set_store(
     return ToolWorkingSetStore(session_manager=session_manager)
 
 
+def get_compaction_operation_repository(
+    session_manager: Annotated[
+        SessionManager[WriteSession], Depends(get_session_manager)
+    ],
+    transcript_repository: Annotated[
+        EventTranscriptRepository, Depends(EventTranscriptRepository)
+    ],
+    agent_session_repository: Annotated[
+        AgentSessionRepository, Depends(AgentSessionRepository)
+    ],
+    model_operation_completion_repository: Annotated[
+        ModelOperationCompletionRepository, Depends(ModelOperationCompletionRepository)
+    ],
+    tool_working_set_store: Annotated[
+        ToolWorkingSetStore, Depends(_tool_working_set_store)
+    ],
+) -> "CompactionOperationRepository":
+    """Build the unbound operation before explicit captured-owner execution binding."""
+    return CompactionOperationRepository(
+        owner=None,
+        session_manager=session_manager,
+        transcript_repository=transcript_repository,
+        agent_session_repository=agent_session_repository,
+        model_operation_completion_repository=model_operation_completion_repository,
+        tool_working_set_store=tool_working_set_store,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class CompactionOperationRepository:
     """Own compaction planning and atomic finalization transactions."""
@@ -142,18 +172,16 @@ class CompactionOperationRepository:
         ToolWorkingSetStore,
         Depends(_tool_working_set_store),
     ]
+    owner: SessionExecutionOwner | None
 
-    def with_session_manager(
+    def for_execution(
         self,
-        session_manager: SessionManager[WriteSession],
+        owner: SessionExecutionOwner,
     ) -> "CompactionOperationRepository":
         """Bind completed operations to one execution authority."""
         return dataclasses.replace(
             self,
-            session_manager=session_manager,
-            tool_working_set_store=self.tool_working_set_store.with_session_manager(
-                session_manager
-            ),
+            owner=owner,
         )
 
     async def prepare(self, *, session_id: str) -> CompactionPlan:
@@ -182,6 +210,8 @@ class CompactionOperationRepository:
     ) -> Event | None:
         """Commit one current compaction plan or return None when stale."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             current = (
                 await self.agent_session_repository.lock_compaction_plan_if_current(
                     session,

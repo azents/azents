@@ -600,7 +600,7 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
         root_session_repository=root,
         mailbox_repository=MailboxRepository(),
         lifecycle_operations=lifecycle,
-        goal_store=GoalStateStore(session_manager=manager),
+        goal_store=GoalStateStore(session_manager=manager, owner=None),
         todo_store=TodoStateStore(session_manager=manager),
         session_manager=manager,
     )
@@ -808,7 +808,7 @@ class TestChatSessionTeamSessions:
             )
         ).session
         await rdb_session.write_session.commit()
-        goal_store = GoalStateStore(session_manager=rdb_session_manager)
+        goal_store = GoalStateStore(session_manager=rdb_session_manager, owner=None)
         await goal_store.create(
             agent_id=agent_id,
             session_id=session.id,
@@ -1436,12 +1436,12 @@ class TestChatSessionTeamSessions:
         assert sessions[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert sessions[1].primary_kind is None
 
-    async def test_session_reads_repair_stale_applied_model_profile(
+    async def test_session_reads_project_fallback_without_replacing_applied_profile(
         self,
         rdb_session: WriteSession,
         rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
-        """Direct and list reads replace labels removed from Agent options."""
+        """Direct/list fallback views preserve stored intent and its generation."""
         workspace_id = await _create_workspace(rdb_session, "team-session-read-repair")
         user_id = await _create_user(
             rdb_session,
@@ -1502,8 +1502,17 @@ class TestChatSessionTeamSessions:
             )
         assert repaired is not None
         assert repaired.applied_inference_profile is not None
-        assert repaired.applied_inference_profile.model_target_label == "default"
+        assert repaired.applied_inference_profile.model_target_label == "removed"
         assert repaired.applied_inference_profile.enabled_execution_options == []
+        assert repaired.applied_profile_generation == (
+            agent_session.applied_profile_generation
+        )
+        assert direct.value.session.applied_profile_generation == (
+            agent_session.applied_profile_generation
+        )
+        assert listed.value[0].applied_profile_generation == (
+            agent_session.applied_profile_generation
+        )
 
     async def test_team_session_read_does_not_repair_private_user_session(
         self,

@@ -96,8 +96,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-10-04
-spec_version: 46
+last_verified_at: 2026-10-05
+spec_version: 47
 ---
 
 # Model Catalog Domain Spec
@@ -125,6 +125,14 @@ revalidates consumed inputs and keeps that exclusion through the persisted
 mutation. Catalog publication retains its producer/input guard. Stale preparation
 can be rejected at actual acceptance; it does not authorize a new operation by
 itself, recapture saved prices or downgrade captured output capabilities.
+
+Source, conversation and image publishers enumerate existing exact keys with
+plain reads beneath their already-held exclusive source/catalog owner guards.
+The enumeration only determines obsolete keys; it does not claim work or
+consume authority. Scoped upserts, obsolete-key deletion, counts and sync
+settlement remain atomic under the existing owner/work-token and credential
+checks. Final accepted-input guards retain their shared source/catalog owner
+exclusion through commit, including absence and newly inserted keys.
 
 ## Catalog scopes
 
@@ -695,6 +703,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-05 | 47 | Removed redundant source/conversation/image key-enumeration locks while retaining exact publisher claims, credential/work-token guards and final accepted-input exclusion. |
 | 2026-10-03 | 42 | Replaced catalog/source revisions with current exact rows and sync state, embedded normalized saved prices, exact context reads, image usability, and destructive history-free transition. |
 | 2026-10-03 | 41 | Completed existing top-k request transport and sampling codec preservation without changing model support authority. |
 | 2026-10-03 | 40 | Preserved route-bounded image/effort/refinement support, complete Google directed billing and truthful codec dependency provenance through audited correction paths. |

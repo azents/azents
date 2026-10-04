@@ -12,6 +12,7 @@ from azents.core.action_execution_data import ActionExecution, ActionExecutionCr
 from azents.core.enums import ActionExecutionStatus, AgentRunStatus, EventKind
 from azents.core.json_value import JSONValue
 from azents.core.mailbox_data import MailboxItem
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.skill_projection import SkillProjectionItem, resolve_active_skill
 from azents.engine.events.types import AgentMessagePayload, Event
 from azents.rdb.deps import get_session_manager
@@ -27,6 +28,7 @@ from azents.repos.goal.store import (
     get_goal_state_store,
 )
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.skill_state import SkillStateRepository
 
 logger = logging.getLogger(__name__)
@@ -141,9 +143,8 @@ class MailboxPromotionRepository:
     async def promote(self, plan: MailboxPromotionPlan) -> MailboxPromotionResult:
         """Validate authority and atomically promote one prepared FIFO head."""
         async with self.session_manager() as session:
-            agent_session = await self.session_repository.lock_by_id(
-                session,
-                plan.session_id,
+            agent_session = await fence_owned_session_mutation(
+                session, SessionExecutionOwner(plan.session_id, plan.owner_generation)
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")

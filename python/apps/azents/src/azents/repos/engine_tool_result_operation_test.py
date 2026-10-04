@@ -157,6 +157,7 @@ async def test_tool_result_finalization_closes_transaction_before_returning() ->
     )
     transcript = _TranscriptRepository(manager)
     repository = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=runs,
         transcript_repository=transcript,
@@ -196,6 +197,7 @@ async def test_terminal_run_result_does_not_rewrite_active_call_state() -> None:
         ),
     )
     repository = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=runs,
         transcript_repository=_TranscriptRepository(manager),
@@ -221,6 +223,7 @@ async def test_identity_mismatch_aborts_completed_operation() -> None:
     """Mismatched result identity commits no transaction."""
     manager = _SessionManager()
     repository = EngineToolResultOperationRepository(
+        owner=None,
         session_manager=manager,
         run_repository=_RunRepository(
             manager,

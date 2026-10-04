@@ -219,7 +219,7 @@ def _service(
     participation: object,
 ) -> _DiscordSettingsServiceFixture:
     repository = AsyncMock(spec=ExternalChannelRepository)
-    repository.lock_interaction.return_value = origin
+    repository.get_interaction.return_value = origin
     config = MagicMock(spec=Config)
     config.auth = SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
     config.web_url = "https://azents.example"
@@ -932,7 +932,7 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
         {"label": "Every message", "value": "all_messages", "default": True},
     ]
     assert _object_dict_list(saved_rows[2]["components"])[0] == navigation_button
-    assert repository.lock_interaction.await_args.kwargs["interaction_id"] == (
+    assert repository.get_interaction.await_args.kwargs["interaction_id"] == (
         "component-interaction-1"
     )
     participation.mutate_parent_settings.assert_awaited_once()

@@ -585,12 +585,12 @@ class TestAgentSessionRepository:
             assert context_count == 0
             assert session_agent_count == 0
 
-    async def test_lock_by_id_acquires_agent_parent_before_session(
+    async def test_lock_by_id_does_not_wait_for_agent_parent_writer(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """An Agent writer cannot deadlock with a concurrent Session lock."""
+        """Exact Session mutation admission does not inherit an Agent gate."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
@@ -644,11 +644,7 @@ class TestAgentSessionRepository:
             assert locked_agent_id == agent_id
             competing_lock = asyncio.create_task(lock_session())
             await asyncio.wait_for(competing_started.wait(), timeout=5)
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(
-                    asyncio.shield(competing_lock),
-                    timeout=0.1,
-                )
+            assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
 
             locked = await asyncio.wait_for(
                 repository.lock_by_id(agent_holder, created.id),
@@ -1140,13 +1136,13 @@ class TestAgentSessionRepository:
         "locked_session_kind",
         ["root", "target"],
     )
-    async def test_claim_owner_generation_avoids_inverse_session_lock_cycle(
+    async def test_claim_owner_generation_only_waits_for_exact_target_session(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
         locked_session_kind: str,
     ) -> None:
-        """Owner claim yields its tree lock when a Session is already locked."""
+        """Root description is independent; only the target row excludes handover."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repo = AgentSessionRepository()
@@ -1189,6 +1185,7 @@ class TestAgentSessionRepository:
             await setup_session.write_session.commit()
 
         claim_started = asyncio.Event()
+        application = f"exact-owner-claim-{suffix}"
 
         async def claim_child_owner() -> int:
             async with AsyncSession(
@@ -1196,6 +1193,10 @@ class TestAgentSessionRepository:
                 expire_on_commit=False,
             ) as _raw_claim_session:
                 claim_session = ReadWriteSession(_raw_claim_session)
+                await claim_session.write_session.execute(
+                    sa.text("SELECT set_config('application_name', :name, true)"),
+                    {"name": application},
+                )
                 claim_started.set()
                 generation = await repo.claim_owner_generation(
                     claim_session,
@@ -1220,24 +1221,38 @@ class TestAgentSessionRepository:
             )
             assert locked_session is not None
             claim_task = asyncio.create_task(claim_child_owner())
-            await asyncio.wait_for(claim_started.wait(), timeout=5)
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(
-                    asyncio.shield(claim_task),
-                    timeout=0.1,
-                )
-
-            locked_root_agent = await asyncio.wait_for(
-                repo.lock_session_agent_by_id(
-                    session_holder,
-                    root_agent.id,
-                ),
-                timeout=5,
-            )
-            assert locked_root_agent is not None
-            await session_holder.write_session.commit()
-
-            assert await asyncio.wait_for(claim_task, timeout=5) == 1
+            try:
+                await asyncio.wait_for(claim_started.wait(), timeout=5)
+                if locked_session_kind == "root":
+                    assert await asyncio.wait_for(claim_task, timeout=5) == 1
+                else:
+                    async with asyncio.timeout(5):
+                        while True:
+                            async with AsyncSession(rdb_engine) as observer:
+                                blocked = await observer.scalar(
+                                    sa.text("""
+                                        SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                                        WHERE application_name=:name
+                                          AND wait_event_type='Lock'
+                                          AND query LIKE 'UPDATE agent_sessions%')
+                                    """),
+                                    {"name": application},
+                                )
+                            if blocked:
+                                break
+                    assert not claim_task.done()
+                    # The blocked claim holds no root-tree row needed by the holder.
+                    locked_root_agent = await asyncio.wait_for(
+                        repo.lock_session_agent_by_id(session_holder, root_agent.id),
+                        timeout=5,
+                    )
+                    assert locked_root_agent is not None
+                await session_holder.write_session.commit()
+                assert await asyncio.wait_for(claim_task, timeout=5) == 1
+            finally:
+                if not claim_task.done():
+                    claim_task.cancel()
+                await asyncio.gather(claim_task, return_exceptions=True)
 
     async def test_fence_purge_owner_generations_covers_entire_root_tree(
         self,
@@ -2362,10 +2377,11 @@ class TestAgentSessionRepository:
             expire_on_commit=False,
         ) as _raw_stop_session:
             stop_session = ReadWriteSession(_raw_stop_session)
-            stopped_session_ids = await repo.list_session_agent_subtree_session_ids(
+            stopped_tree = await repo.lock_root_tree_sessions(
                 stop_session,
-                agent_session_id=root_session.id,
+                root_session_id=root_session.id,
             )
+            stopped_session_ids = [item.id for item in stopped_tree]
             assert stopped_session_ids == [root_session.id]
             await repo.mark_running(stop_session, root_session.id)
             stopped = await repo.request_stop(

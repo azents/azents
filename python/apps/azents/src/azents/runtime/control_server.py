@@ -58,6 +58,7 @@ from azents.core.runtime_transfer_coordinator_credential import (
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import (
     WriteSession,
+    create_read_only_session_manager,
     create_read_write_session_manager,
 )
 from azents.repos.agent import AgentRepository
@@ -967,6 +968,7 @@ async def runtime_control_server_lifespan(
         control_boot_id = uuid.uuid4().hex
         route_repository = RuntimeStreamRouteOperationRepository(
             session_manager=session_manager,
+            read_session_manager=create_read_only_session_manager(engine),
             route_repository=RuntimeWebSessionRouteRepository(),
         )
         owner_manager = RuntimeStreamSessionOwnerManager(

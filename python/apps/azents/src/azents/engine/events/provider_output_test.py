@@ -453,6 +453,7 @@ def _materializer(
             agent_run_repository=exchange_run_repository,
             workspace_user_repository=workspace_user_repository,
             session_manager=session_manager,
+            read_session_manager=session_manager,
         ),
         exchange_file_repository=exchange_repository,
         agent_session_repository=session_repository,

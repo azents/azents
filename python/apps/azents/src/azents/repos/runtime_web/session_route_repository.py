@@ -119,7 +119,7 @@ class RuntimeWebSessionRouteRepository:
 
     async def resolve(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         runtime_id: str,
         desired_generation: int,
@@ -128,7 +128,7 @@ class RuntimeWebSessionRouteRepository:
     ) -> RuntimeWebSessionRoute | None:
         """Resolve the exact live Owner epoch without accepting stale generations."""
         now = await self._database_now(session)
-        route = await self._lock(session, runtime_id)
+        route = await session.read_session.get(RDBRuntimeWebSessionRoute, runtime_id)
         if (
             route is None
             or route.lease_expires_at <= now
@@ -138,14 +138,12 @@ class RuntimeWebSessionRouteRepository:
             or route.protocol_fingerprint != protocol_fingerprint
         ):
             return None
-        try:
-            await self._validate_runtime(
-                session,
-                runtime_id=runtime_id,
-                desired_generation=desired_generation,
-                runner_generation=runner_generation,
-            )
-        except RuntimeWebSessionRouteConflict:
+        runtime = await session.read_session.get(RDBAgentRuntime, runtime_id)
+        if (
+            runtime is None
+            or runtime.desired_generation != desired_generation
+            or runtime.runner_generation != runner_generation
+        ):
             return None
         return self._route(route)
 

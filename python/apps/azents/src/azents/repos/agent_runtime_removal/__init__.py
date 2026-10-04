@@ -166,6 +166,7 @@ class AgentRuntimeRemovalRepository:
             sa.select(RDBAgentRuntimeRemovalOperation)
             .where(RDBAgentRuntimeRemovalOperation.id == operation_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return None if row is None else self._build(row)
 
@@ -240,6 +241,7 @@ class AgentRuntimeRemovalRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         stage: AgentRuntimeRemovalStage,
         now: datetime.datetime,
     ) -> bool:
@@ -251,6 +253,7 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
             )
             .values(stage=stage, updated_at=now)
             .returning(RDBAgentRuntimeRemovalOperation.id)
@@ -263,6 +266,7 @@ class AgentRuntimeRemovalRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         expected_cursor_context_id: str | None,
         cursor_context_id: str | None,
         scanned_count: int,
@@ -312,6 +316,7 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.product_cleanup_completed_at.is_(None),
                 expected_cursor,
             )
@@ -326,6 +331,7 @@ class AgentRuntimeRemovalRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         required: bool,
         target_generation: int | None,
         requested_at: datetime.datetime | None,
@@ -341,6 +347,7 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.physical_deletion_required.is_(None),
             )
             .values(
@@ -359,6 +366,7 @@ class AgentRuntimeRemovalRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         acknowledgement_kind: RuntimeTerminalDeleteAcknowledgementKind,
         acknowledged_at: datetime.datetime,
     ) -> bool:
@@ -370,6 +378,7 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.physical_deletion_required.is_(True),
                 RDBAgentRuntimeRemovalOperation.target_terminal_delete_generation.is_not(
                     None
@@ -396,6 +405,7 @@ class AgentRuntimeRemovalRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
@@ -409,6 +419,7 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
             )
             .values(
                 status=AgentRuntimeRemovalStatus.RETRY_WAIT,
@@ -429,6 +440,7 @@ class AgentRuntimeRemovalRepository:
         *,
         operation_id: str,
         lease_owner: str,
+        expected_attempt: int,
         now: datetime.datetime,
     ) -> bool:
         """Complete an owned operation and release its lease."""
@@ -439,6 +451,7 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.status
                 == AgentRuntimeRemovalStatus.RUNNING,
                 RDBAgentRuntimeRemovalOperation.lease_owner == lease_owner,
+                RDBAgentRuntimeRemovalOperation.attempt_count == expected_attempt,
                 RDBAgentRuntimeRemovalOperation.stage
                 == AgentRuntimeRemovalStage.FINALIZING,
                 RDBAgentRuntimeRemovalOperation.product_cleanup_completed_at.is_not(

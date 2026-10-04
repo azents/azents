@@ -1449,13 +1449,12 @@ class RuntimeProfileRepository:
 
     async def get_recreation_target_version(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
-        for_share: bool,
     ) -> str | None:
-        """Read one recreation target version, optionally blocking mutations."""
+        """Describe the retained version of one recreation target."""
         if target_kind is RuntimeRecreationTargetKind.PROVIDER:
             statement = sa.select(
                 RDBRuntimeProvider.admin_version,
@@ -1471,8 +1470,42 @@ class RuntimeProfileRepository:
             )
         else:
             raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
-        if for_share:
-            statement = statement.with_for_update(read=True)
+        result = await session.read_session.execute(statement)
+        row = result.one_or_none()
+        if row is None:
+            return None
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            admin_version, capability_revision_id = row
+            return _provider_recreation_target_version(
+                admin_version=admin_version,
+                capability_revision_id=capability_revision_id,
+            )
+        return str(row[0])
+
+    async def lock_recreation_target_for_dispatch(
+        self,
+        session: WriteSession,
+        *,
+        target_kind: RuntimeRecreationTargetKind,
+        target_id: str,
+    ) -> str | None:
+        """Exclude replacement of the exact target through dispatch mutation."""
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            statement = sa.select(
+                RDBRuntimeProvider.admin_version,
+                RDBRuntimeProvider.current_contract_revision_id,
+            ).where(RDBRuntimeProvider.id == target_id)
+        elif target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
+            statement = sa.select(RDBRuntimeInfrastructureProfile.version).where(
+                RDBRuntimeInfrastructureProfile.id == target_id
+            )
+        elif target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
+            statement = sa.select(RDBWorkspaceRuntimeProfile.version).where(
+                RDBWorkspaceRuntimeProfile.id == target_id
+            )
+        else:
+            raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
+        statement = statement.with_for_update(read=True)
         result = await session.write_session.execute(statement)
         row = result.one_or_none()
         if row is None:

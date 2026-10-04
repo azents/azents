@@ -196,7 +196,7 @@ async def stop_fixture(
         worker,
         sessions,
         transcripts,
-        EngineToolResultOperationRepository(observed, runs, transcripts),
+        EngineToolResultOperationRepository(observed, runs, transcripts, owner=None),
     )
     return StopFixture(
         UserStopOwnerInput(session_id=session_id, owner_generation=generation),
@@ -302,7 +302,7 @@ def fault_stop(
         fixture.stop,
         event_transcript_repository=transcript,
         tool_result_repository=EngineToolResultOperationRepository(
-            fixture.manager, fixture.runs, transcript
+            fixture.manager, fixture.runs, transcript, owner=None
         ),
     )
 

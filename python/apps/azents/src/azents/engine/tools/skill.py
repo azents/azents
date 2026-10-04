@@ -172,13 +172,6 @@ class SkillExecutionStateStore(
 ):
     """Skill state operations that can bind to one execution authority."""
 
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "SkillExecutionStateStore":
-        """Return an execution-local owner-fenced store."""
-        ...
-
 
 class SkillRuntimeFileReader(Protocol):
     """Runtime file operations required for Skill discovery."""
@@ -567,10 +560,6 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
             session_id=self._session_id,
         ):
             return
-        bound_store = self.store.for_execution(owner)
-        self.store = bound_store
-        if self.projection_service is not None:
-            self.projection_service = self.projection_service.with_store(bound_store)
         self._execution_owner = owner
 
     def bind_execution_authority(

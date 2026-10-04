@@ -196,18 +196,18 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
 
 class _ProviderAuthority:
     def __init__(self) -> None:
-        self.validate_sessions: list[WriteSession] = []
+        self.validate_sessions: list[ReadSession] = []
         self.validated_at: list[datetime] = []
         self.create_session: WriteSession | None = None
 
     async def validate_connection_authority_in_transaction(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         validated_at: datetime,
     ) -> None:
-        assert session.write_session.in_transaction()
+        assert session.read_session.in_transaction()
         self.validate_sessions.append(session)
         self.validated_at.append(validated_at)
         if (
@@ -249,6 +249,15 @@ class _ProviderAuthority:
 
 class _RunnerAuthority:
     async def authorize_runner_in_transaction(
+        self,
+        session: ReadSession,
+        credential: RuntimeRunnerCredential,
+    ) -> bool:
+        del credential
+        assert session.read_session.in_transaction()
+        return True
+
+    async def fence_runner_registration_in_transaction(
         self,
         session: WriteSession,
         credential: RuntimeRunnerCredential,

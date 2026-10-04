@@ -8,16 +8,19 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from uuid6 import uuid7
 
+from azents.core.enums import AgentLifecycleStatus
 from azents.core.historical_memory_consolidation import (
     ConsolidationAttemptState,
     ConsolidationJobPrincipal,
     ConsolidationUnitKey,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationAttempt,
     RDBConsolidationUnit,
     RDBConsolidationWork,
 )
+from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
@@ -26,7 +29,6 @@ from azents.repos.historical_memory_consolidation.authority import (
     consolidation_session,
     database_now,
     lock_unit_authority,
-    require_commit_owner,
     unit_predicate,
 )
 from azents.repos.historical_memory_consolidation.work import (
@@ -55,9 +57,51 @@ class ConsolidationOwnershipRepository:
     session_manager: SessionManager[WriteSession]
 
     async def validate(self, principal: ConsolidationJobPrincipal) -> None:
-        """Finish an admission transaction without leaking a live DB handle."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
-            await require_commit_owner(job.session, job.owner)
+        """Observe current admission; actual evidence and draft writes fence again."""
+        unit = RDBConsolidationUnit
+        attempt = RDBConsolidationAttempt
+        key = principal.unit
+        grant = (
+            sa.select(RDBWorkspaceUser.memory_grant_identity)
+            .where(
+                RDBWorkspaceUser.workspace_id == key.workspace_id,
+                RDBWorkspaceUser.user_id == key.associated_user_id,
+            )
+            .scalar_subquery()
+        )
+        async with consolidation_session(self.session_manager) as session:
+            now = await database_now(session)
+            available = await session.read_session.scalar(
+                sa.select(
+                    sa.select(unit.id)
+                    .join(RDBAgent, RDBAgent.id == unit.agent_id)
+                    .join(attempt, attempt.id == unit.active_attempt_id)
+                    .where(
+                        unit_predicate(key),
+                        RDBAgent.workspace_id == key.workspace_id,
+                        RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                        RDBAgent.memory_enabled.is_(True),
+                        unit.owner_generation == principal.owner_generation,
+                        unit.owner_token == principal.owner_token,
+                        unit.active_attempt_id == principal.attempt_id,
+                        unit.lease_until > now,
+                        attempt.unit_id == unit.id,
+                        attempt.owner_generation == principal.owner_generation,
+                        attempt.owner_token == principal.owner_token,
+                        attempt.state == ConsolidationAttemptState.RUNNING,
+                        attempt.deadline_at > now,
+                        attempt.membership_grant_id.is_not_distinct_from(grant),
+                        sa.true()
+                        if key.associated_user_id is None
+                        else grant.is_not(None),
+                    )
+                    .exists()
+                )
+            )
+            if not available:
+                raise ConsolidationAuthorityError(
+                    "Consolidation owner is no longer current."
+                )
 
     async def claim(
         self, key: ConsolidationUnitKey, *, deadline: datetime.datetime

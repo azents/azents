@@ -111,7 +111,7 @@ class RuntimeConnectionGenerationAuthority(Protocol):
 class RuntimeProviderConnectionAuthority(Protocol):
     async def validate_connection_authority_in_transaction(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         authentication: RuntimeProviderCredentialAuthentication,
         validated_at: datetime,
@@ -139,10 +139,18 @@ class RuntimeProviderConnectionAuthority(Protocol):
 class RuntimeRunnerConnectionAuthority(Protocol):
     async def authorize_runner_in_transaction(
         self,
+        session: ReadSession,
+        credential: RuntimeRunnerCredential,
+    ) -> bool:
+        """Describe Runner authority inside a caller-owned read scope."""
+        ...
+
+    async def fence_runner_registration_in_transaction(
+        self,
         session: WriteSession,
         credential: RuntimeRunnerCredential,
     ) -> bool:
-        """Validate Runner authority inside a caller-owned transaction."""
+        """Fence actual Runner connection acceptance against replacement."""
         ...
 
 
@@ -360,7 +368,10 @@ class RuntimeRunnerConnectionRegistrationService:
 
         try:
             async with self.session_manager() as session:
-                if not await self.runner_authentication.authorize_runner_in_transaction(
+                fence_registration = (
+                    self.runner_authentication.fence_runner_registration_in_transaction
+                )
+                if not await fence_registration(
                     session,
                     authentication,
                 ):

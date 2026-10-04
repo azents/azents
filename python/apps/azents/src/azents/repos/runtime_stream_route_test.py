@@ -19,7 +19,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_web import RDBRuntimeWebSessionRoute
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_stream_route_data import RuntimeStreamRouteEpoch
@@ -106,7 +106,9 @@ async def route_fixture(
         agent_id,
         observed,
         RuntimeStreamRouteOperationRepository(
-            observed, RuntimeWebSessionRouteRepository()
+            observed,
+            RuntimeWebSessionRouteRepository(),
+            read_session_manager=observed,
         ),
     )
 
@@ -366,7 +368,9 @@ async def test_route_lock_order_retains_existing_asymmetry(
                 )
 
     repository = RuntimeStreamRouteOperationRepository(
-        manager, RuntimeWebSessionRouteRepository()
+        manager,
+        RuntimeWebSessionRouteRepository(),
+        read_session_manager=manager,
     )
     route = await acquire(fixture, repository=repository)
     assert len(statements) == 2
@@ -389,9 +393,12 @@ async def test_route_lock_order_retains_existing_asymmetry(
             )
         else:
             await consume(fixture, route, repository=repository)
-        assert len(statements) == 2
-        assert "from runtime_web_session_routes" in statements[0]
-        assert "from agent_runtimes" in statements[1]
+        if operation == "resolve":
+            assert statements == []
+        else:
+            assert len(statements) == 2
+            assert "from runtime_web_session_routes" in statements[0]
+            assert "from agent_runtimes" in statements[1]
     fixture.manager.assert_closed()
 
 
@@ -550,7 +557,9 @@ async def test_real_route_write_fault_or_cancellation_rolls_back_exact_mutation(
         else RuntimeError("after real route write")
     )
     repository = RuntimeStreamRouteOperationRepository(
-        fixture.manager, RouteWriteFault(operation, error)
+        fixture.manager,
+        RouteWriteFault(operation, error),
+        read_session_manager=fixture.manager,
     )
     with pytest.raises(type(error), match="after real route write"):
         if operation == "acquire":
@@ -578,24 +587,28 @@ async def test_resolve_only_suppresses_existing_runtime_route_conflict(
     route = await acquire(fixture)
 
     class FailedRuntimeValidation(RuntimeWebSessionRouteRepository):
-        async def _validate_runtime(
+        async def resolve(
             self,
-            session: WriteSession,
+            session: ReadSession,
             *,
             runtime_id: str,
             desired_generation: int,
             runner_generation: int,
-        ) -> None:
-            await super()._validate_runtime(
+            protocol_fingerprint: str,
+        ) -> RuntimeWebSessionRoute | None:
+            await super().resolve(
                 session,
                 runtime_id=runtime_id,
                 desired_generation=desired_generation,
                 runner_generation=runner_generation,
+                protocol_fingerprint=protocol_fingerprint,
             )
             raise RuntimeError("validation database failure")
 
     repository = RuntimeStreamRouteOperationRepository(
-        fixture.manager, FailedRuntimeValidation()
+        fixture.manager,
+        FailedRuntimeValidation(),
+        read_session_manager=fixture.manager,
     )
     with pytest.raises(RuntimeError, match="validation database failure"):
         await repository.resolve(
@@ -662,7 +675,9 @@ async def test_independent_route_transactions_have_exactly_one_winner(
 
     async def contender(boot: str) -> RuntimeWebSessionRoute:
         repository = RuntimeStreamRouteOperationRepository(
-            contender_manager, RuntimeWebSessionRouteRepository()
+            contender_manager,
+            RuntimeWebSessionRouteRepository(),
+            read_session_manager=contender_manager,
         )
         if operation == "nonce":
             assert route is not None
@@ -714,7 +729,6 @@ async def test_independent_route_transactions_have_exactly_one_winner(
     "change",
     [
         "generation-renew",
-        "generation-resolve",
         "generation-consume",
         "expired-renew",
         "replacement-release",
@@ -803,19 +817,11 @@ async def test_independent_uncommitted_authority_change_blocks_exact_contender(
 
     async def second() -> None:
         repository = RuntimeStreamRouteOperationRepository(
-            second_manager, RuntimeWebSessionRouteRepository()
+            second_manager,
+            RuntimeWebSessionRouteRepository(),
+            read_session_manager=second_manager,
         )
-        if change == "generation-resolve":
-            assert (
-                await repository.resolve(
-                    runtime_id=fixture.runtime_id,
-                    desired_generation=3,
-                    runner_generation=4,
-                    protocol_fingerprint=route.protocol_fingerprint,
-                )
-                is None
-            )
-        elif change == "replacement-release":
+        if change == "replacement-release":
             assert not await repository.release(epoch(route))
         else:
             with pytest.raises(RuntimeWebSessionRouteConflict):

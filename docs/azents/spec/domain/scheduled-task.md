@@ -5,6 +5,8 @@ tags: [backend, engine, scheduler, toolkit, external-channel, api, frontend]
 spec_type: domain
 domain: scheduled-task
 code_paths:
+  - python/apps/azents/src/azents/repos/session_execution/ownership.py
+  - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
   - python/apps/azents/src/azents/core/scheduled_task.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
@@ -35,8 +37,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-04
-spec_version: 15
+last_verified_at: 2026-10-05
+spec_version: 16
 ---
 
 # Scheduled Task Domain Spec
@@ -140,8 +142,14 @@ non-empty result. A Scheduled-bound `channel_action` may report progress only wi
 
 The Toolkit's active-cycle and continuity reads, Task creation, Task listing with
 derived execution state, and Task deletion are completed repository operations.
-Creation and deletion retain exact Session, Agent, and optional Binding
-authority. Deletion preserves the Mailbox → cycle → Task lock order and removes
+Active-cycle, continuity and inventory descriptions validate captured owner
+identity without root, Agent or execution-owner row gates. Creation and deletion
+retain exact Session, Agent, and optional Binding authority. They fence the
+actual target Session mutation through commit, including owner-generation
+equality when bound to an execution. An unbound management mutation still
+excludes the target's concurrent archive transition; an MVCC-only active-status
+read cannot admit a Task after archive has won. Deletion preserves the
+Mailbox → cycle → Task lock order and removes
 an admitted trigger/cycle atomically with the Task. External Channel
 registration and deletion notification execute only after the database
 transaction closes.
@@ -342,6 +350,9 @@ and result text.
 
 ## Changelog
 
+- **2026-10-05** (spec_version 16) — Made Scheduled descriptions independent of
+  ownership gates and retained exact target/owner mutation admission so Task
+  creation cannot escape archive and admitted-versus-started deletion stays atomic.
 - **2026-10-01** (spec_version 14) — Moved Scheduled Toolkit cycle reads and
   management mutations behind completed repository operations while preserving
   authority, mutation lock order, execution-state projection, and post-commit

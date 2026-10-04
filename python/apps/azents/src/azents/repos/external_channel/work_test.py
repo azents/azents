@@ -69,6 +69,25 @@ def _session_mock() -> MagicMock:
     return session
 
 
+async def test_access_control_delete_capture_does_not_claim_request() -> None:
+    """A cleanup plan captures retained identity without claiming provider execution."""
+
+    class CapturedQuery(Exception):
+        pass
+
+    session = _session_mock()
+    session.scalar = AsyncMock(side_effect=CapturedQuery)
+    with pytest.raises(CapturedQuery):
+        await ExternalChannelWorkRepository().prepare_access_control_delete(
+            session, access_request_id="request-1"
+        )
+    captured = session.scalar.await_args
+    assert captured is not None
+    query = captured.args[0]
+    assert "FOR UPDATE" not in str(query.compile(dialect=postgresql.dialect()))
+    assert "external_channel_access_requests.status" in _where_sql(query)
+
+
 class _CommitActionResult(NamedTuple):
     """Committed direct action transition and state-store observation."""
 

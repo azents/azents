@@ -6,8 +6,10 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import azents.repos.idle_continuation as idle_continuation_module
 from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
@@ -25,7 +27,9 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 
 
-async def test_failed_boundary_consume_rolls_back_new_admissions() -> None:
+async def test_failed_boundary_consume_rolls_back_new_admissions(
+    monkeypatch: MonkeyPatch,
+) -> None:
     """Commit-on-exit cannot persist admissions after conditional consume fails."""
     _raw_session = AsyncMock(spec=AsyncSession)
     session = ReadWriteSession(_raw_session)
@@ -44,14 +48,18 @@ async def test_failed_boundary_consume_rolls_back_new_admissions() -> None:
             staged.clear()
 
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
-    agent_session_repository.wait_for_execution_lock_by_id.return_value = (
-        SimpleNamespace(
-            owner_generation=1,
-            status=AgentSessionStatus.ACTIVE,
-            pending_idle_continuation_run_id="run-1",
-            pending_command_id=None,
-            agent_id="agent-1",
-        )
+    monkeypatch.setattr(
+        idle_continuation_module,
+        "fence_owned_session_mutation",
+        AsyncMock(
+            return_value=SimpleNamespace(
+                owner_generation=1,
+                status=AgentSessionStatus.ACTIVE,
+                pending_idle_continuation_run_id="run-1",
+                pending_command_id=None,
+                agent_id="agent-1",
+            )
+        ),
     )
     agent_session_repository.consume_pending_idle_continuation.return_value = False
     agent_run_repository = AsyncMock(spec=AgentRunRepository)

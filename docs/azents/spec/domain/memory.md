@@ -73,8 +73,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
-last_verified_at: 2026-10-04
-spec_version: 15
+last_verified_at: 2026-10-05
+spec_version: 16
 ---
 
 # Memory
@@ -261,7 +261,18 @@ lease renewed every 30 seconds. Source/file/model dispatch checks are fenced
 against stale owners and current evidence. Expired owners stop admitting work;
 late responses cannot commit. Finite-pass bounds survive productive slices;
 newer or late-committed unseen work remains pending. Publication acknowledgement
-loss inspects the durable outcome rather than publishing twice.
+loss inspects the durable outcome rather than publishing twice. This inspection
+uses an independent read-only manager and plain scoped authority observations:
+Agent/Workspace enablement, active status, personal grant, exact unit/attempt
+owner generation and token, and completed revision identity. It acquires no
+Agent or membership locks and does not publish or recover work. Actual claim,
+draft recovery, freezing and publication keep their mutation authority.
+
+The generic consolidation VFS pre-I/O ownership validator is also an ordinary
+scoped read of current owner, lease/deadline and grant identity. It does not
+claim exclusion through external work. Actual source inventory/read and work
+pages persist exposure evidence or presented-work identity and retain their
+own producer mutation fences.
 
 The `historical_memory_execution` System Settings Section supplies the only
 additional execution cutoffs: nullable `max_turns` (unlimited by default) and
@@ -299,6 +310,12 @@ superseded private payloads and drafts without meaningful progress for 24 hours,
 preserving active work, unfinished passes and referenced revisions. Per-process
 limits multiply with worker replicas; they are not a deployment-wide spend cap.
 
+Immutable revision collection uses a bounded ordinary candidate read, then
+rechecks the exact candidate IDs, non-current status and absence of retained
+automatic snapshot references in the DELETE statement. It does not claim
+execution ownership or lock candidate revisions for freshness. Unit/attempt
+cleanup is distinct and retains active-lease protection.
+
 ## Automatic Boundary Snapshot
 
 Before each root Run loop, the existing `on_run_start` preparation hook reselects
@@ -335,6 +352,12 @@ Snapshot refresh remains a write operation, and producer claims, receipts,
 draft/attempt and critical publication acceptance retain their own mutation
 authority. Descriptive lag does not replace current permission/denial filtering
 at subsequent model/tool admission or live VFS use.
+
+Root Run-start and successful-compaction refresh explicitly fences the captured
+Session owner generation through the frozen model-input selection commit.
+Toolkit version CAS alone cannot reject an obsolete worker that reads the new
+head and replacement version after handover. This protects accepted input
+selection, not access grants; ordinary prompt filtering remains independent.
 
 Saved index entries are type/name/ID sorted. Each independently framed whole
 Historical document is at most 10,000 UTF-8 bytes, including headings, scope
@@ -499,6 +522,7 @@ never replayed merely because durable conversation remains.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-05 | 16 | Make uncertain publication inspection read-only and unfenced; condition revision GC on exact current/reference exclusions without candidate locks |
 | 2026-10-04 | 14 | Make consumer/foreground descriptions read-only and unfenced while retaining exact own-manifest denial and producer mutation authority |
 | 2026-10-04 | 13 | Keep concurrent consumer authority locks FK-compatible and preserve writer exclusion |
 | 2026-10-04 | 12 | Promoted isolated agentic consolidation, fenced exact coverage/manifests, independent 10k documents/20k composition, latest-live aliases, denial continuity and coordinated handover |

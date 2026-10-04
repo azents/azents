@@ -171,7 +171,7 @@ class ExternalChannelManagementService:
     ]
     action_service: Annotated[
         ExternalChannelActionService,
-        Depends(ExternalChannelActionService),
+        Depends(ExternalChannelActionService.create),
     ]
     access_service: Annotated[
         ExternalChannelAccessService,

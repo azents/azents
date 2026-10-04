@@ -47,8 +47,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-10-04
-spec_version: 39
+last_verified_at: 2026-10-05
+spec_version: 40
 ---
 
 # Run Resume
@@ -59,9 +59,12 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 
 ### Durable owner revocation
 
-PostgreSQL Session `owner_generation` fences every execution-owned database
-transaction, including model output, tool results, phase/retry/terminal changes,
-input consumption, compaction, and tool-search state. Empty Redis/Valkey replacement
+PostgreSQL Session `owner_generation` fences critical execution-owned commit
+groups, including model output, tool results, active-call/retry/terminal changes,
+input consumption and compaction. Plain preparation, phase descriptions and
+harmless private Toolkit projections do not inherit that fence. Exact owner
+exclusion is retained through the dependent mutation commit, not inferred from
+an earlier read. Empty Redis/Valkey replacement
 may cause another Worker to claim a new generation; retained keys do not authorize
 the old execution to finish.
 
@@ -425,6 +428,10 @@ run to observe `check_stop()` as true.
 
 
 ## Changelog
+
+- **2026-10-05** (spec_version 40) — Scoped durable owner exclusion to critical
+  commit groups while retaining stale-output rejection and independent
+  preparation/private projections.
 
 - **2026-10-02** (spec_version 38) — Completed reconciliation snapshot, marker,
   repair-read, and timeout ownership while preserving convergence and dispatch authority.

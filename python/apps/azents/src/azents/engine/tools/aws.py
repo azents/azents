@@ -321,8 +321,6 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             owner,
             session_id=self._session_id,
         ):
-            if self.snapshot_store is not None:
-                self.snapshot_store = self.snapshot_store.for_execution(owner)
             self._execution_owner = owner
 
     def _current_artifact_sink(self) -> McpArtifactSink | None:

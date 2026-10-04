@@ -61,6 +61,7 @@ from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleE
 from azents.repos.compaction_operation import (
     CompactionCommitContext,
     CompactionOperationRepository,
+    get_compaction_operation_repository,
 )
 
 logger = logging.getLogger(__name__)
@@ -183,7 +184,7 @@ class EventCompactor:
 
     operation_repository: Annotated[
         CompactionOperationRepository,
-        Depends(CompactionOperationRepository),
+        Depends(get_compaction_operation_repository),
     ]
     summary_context_window_tokens: int | None = None
 

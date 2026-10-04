@@ -43,7 +43,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     ActiveProfileCaptureRequired,
@@ -502,7 +502,7 @@ class ChatWriteOperationsRepository:
         stop_request_id = uuid7().hex
         runtime_was_running = False
         async with self.session_manager() as session:
-            locked = await self._lock_and_reauthorize_session(
+            observed = await self._read_and_authorize_session(
                 session,
                 agent_id=agent_id,
                 session_id=session_id,
@@ -510,7 +510,13 @@ class ChatWriteOperationsRepository:
             )
             locked_tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
-                root_session_id=locked.id,
+                root_session_id=observed.id,
+            )
+            locked = await self._lock_and_reauthorize_session(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
             )
             if not locked_tree or any(
                 target.agent_id != locked.agent_id
@@ -598,6 +604,50 @@ class ChatWriteOperationsRepository:
             raise ValueError("Client request ID already used for another write type")
         if record.payload != payload:
             raise ValueError("Client request ID already used for another payload")
+
+    async def _read_and_authorize_session(
+        self,
+        session: ReadSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+    ) -> AgentSession:
+        """Authorize Stop admission before acquiring any hierarchy mutation rows."""
+        observed = await self.agent_session_repository.get_by_id(session, session_id)
+        if observed is None:
+            raise ValueError("AgentSession not found")
+        if observed.agent_id != agent_id:
+            raise ValueError("AgentSession does not belong to the agent")
+        if observed.session_kind is AgentSessionKind.SUBAGENT:
+            raise ValueError("Subagent sessions are read-only")
+        if observed.status is not AgentSessionStatus.ACTIVE:
+            raise ValueError("AgentSession is not active")
+        if (
+            observed.product_mode is AgentSessionProductMode.USER
+            and observed.associated_user_id != user_id
+        ):
+            raise ValueError("Requester does not have session access")
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if (
+            agent is None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.workspace_id != observed.workspace_id
+        ):
+            raise ValueError("AgentSession is not active")
+        root = await self.agent_session_repository.get_root_session_agent_by_session_id(
+            session, session_id
+        )
+        if root is None or root.agent_session_id != observed.id:
+            raise ValueError("AgentSession root lineage is invalid")
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=observed.workspace_id,
+            user_id=user_id,
+        )
+        if workspace_user is None:
+            raise ValueError("Requester does not have session access")
+        return observed
 
     async def _lock_and_reauthorize_session(
         self,

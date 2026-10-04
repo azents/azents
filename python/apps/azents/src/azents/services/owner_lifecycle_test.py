@@ -280,7 +280,7 @@ class _RetentionRepositoryDouble:
     def __init__(self) -> None:
         self.scheduled: list[tuple[str, datetime.datetime]] = []
 
-    async def lock_settings(self, session: ReadSession) -> _RetentionSettings:
+    async def get_settings(self, session: ReadSession) -> _RetentionSettings:
         """Return fixed settings."""
         del session
         return _RetentionSettings()

@@ -45,6 +45,7 @@ from azents.core.mailbox_data import (
     MailboxPresentationItem,
     TurnActionContinuationMailboxPayload,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.core.session_workspace_items import NewSessionWorkspaceItem
 from azents.core.session_workspace_paths import (
@@ -80,7 +81,10 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import (
     SessionGitWorktree,
@@ -537,35 +541,6 @@ class SessionGitWorktreeService:
         None
     )
 
-    def _owner_bound_session_manager(
-        self,
-        *,
-        session_id: str,
-        owner_generation: int,
-    ) -> OwnerBoundSessionManager:
-        """Bind one short action persistence scope to its current actor."""
-        return OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=session_id,
-            owner_generation=owner_generation,
-        )
-
-    def _action_owner_session_manager(
-        self,
-        execution: ActionExecution,
-        *,
-        actor_generation: int | None = None,
-    ) -> OwnerBoundSessionManager:
-        """Bind an action mutation to its executing or recovery actor generation."""
-        return self._owner_bound_session_manager(
-            session_id=execution.session_id,
-            owner_generation=(
-                execution.owner_generation
-                if actor_generation is None
-                else actor_generation
-            ),
-        )
-
     async def _assert_action_actor_current(
         self,
         execution: ActionExecution,
@@ -573,10 +548,14 @@ class SessionGitWorktreeService:
         actor_generation: int,
     ) -> None:
         """Reject action admission after a durable ownership takeover."""
-        await self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        ).assert_current()
+        async with self.read_session_manager() as session:
+            await validate_session_execution_owner(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=actor_generation,
+                ),
+            )
 
     async def project_agent_git_worktree_availability(
         self,
@@ -679,10 +658,14 @@ class SessionGitWorktreeService:
             tool_name="create_git_worktree",
             client_tool_call_id=client_tool_call_id,
         )
-        async with self._owner_bound_session_manager(
-            session_id=session_id,
-            owner_generation=owner_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=session_id,
+                    owner_generation=owner_generation,
+                ),
+            )
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -816,10 +799,14 @@ class SessionGitWorktreeService:
             tool_name="remove_git_worktree",
             client_tool_call_id=client_tool_call_id,
         )
-        async with self._owner_bound_session_manager(
-            session_id=session_id,
-            owner_generation=owner_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=session_id,
+                    owner_generation=owner_generation,
+                ),
+            )
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -1233,7 +1220,7 @@ class SessionGitWorktreeService:
             actor_generation=owner_generation,
         )
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.read_session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -1250,7 +1237,14 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
                 complete_run=False,
             )
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=execution.owner_generation,
+                ),
+            )
             execution = await self.action_execution_repository.mark_running(
                 session,
                 action_execution_id=execution.id,
@@ -1413,10 +1407,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> ActionExecution:
         """Persist and project one bounded Session-folder setup result."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             updated = await self.action_execution_repository.update_result(
                 session,
                 action_execution_id=execution.id,
@@ -1487,7 +1489,14 @@ class SessionGitWorktreeService:
             actor_generation=owner_generation,
         )
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=execution.owner_generation,
+                ),
+            )
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -2034,10 +2043,18 @@ class SessionGitWorktreeService:
         discovery_fingerprint: str,
     ) -> Literal["claimed", "active_connection", "cleanup_in_progress"]:
         """Atomically check protection and claim one path before Runner I/O."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=owner_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if owner_generation is None
+                        else owner_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             result = await project_repository.try_claim_orphan_git_worktree(
                 session,
@@ -2058,10 +2075,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Mark one claimed target as undergoing Runner removal."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             await project_repository.mark_orphan_git_worktree_claim_removing(
                 session,
@@ -2079,10 +2104,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Release one cleanup claim after its Runner operation terminalizes."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             await project_repository.release_orphan_git_worktree_claim(
                 session,
@@ -2099,10 +2132,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Release every cleanup claim after a settled terminal action."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             await project_repository.release_orphan_git_worktree_claims(
                 session,
@@ -2117,10 +2158,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Retain in-flight removal claims through their bounded cancellation lease."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             await project_repository.release_nonremoving_orphan_git_worktree_claims(
                 session,
@@ -2137,10 +2186,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Release one Agent removal claim after a settled outcome."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             await project_repository.release_agent_git_worktree_claim(
                 session,
@@ -2157,10 +2214,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Release Agent claims that cannot still own Runner removal."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             project_repository = self.session_workspace_project_repository
             await project_repository.release_nonremoving_agent_git_worktree_claims(
                 session,
@@ -2215,10 +2280,18 @@ class SessionGitWorktreeService:
     ) -> ActionExecution:
         """Persist and project one cleanup result snapshot."""
         encoded_result = result.to_json()
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             updated = await self.action_execution_repository.update_result(
                 session,
                 action_execution_id=execution.id,
@@ -2272,10 +2345,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> None:
         """Record unresolved cleanup candidates before cancellation terminalization."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             current = await self.action_execution_repository.get_by_id(
                 session,
                 action_execution_id=execution.id,
@@ -2326,7 +2407,7 @@ class SessionGitWorktreeService:
             actor_generation=owner_generation,
         )
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.read_session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -2391,7 +2472,14 @@ class SessionGitWorktreeService:
             )
             return _bridge_remove_terminal_result()
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=execution.owner_generation,
+                ),
+            )
             execution = await self.action_execution_repository.mark_running(
                 session,
                 action_execution_id=execution.id,
@@ -2472,7 +2560,14 @@ class SessionGitWorktreeService:
         allocation: SessionGitWorktree | None = None
         project: SessionWorkspaceProject | None = None
         try:
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
                     agent_id=agent_id,
@@ -2643,7 +2738,14 @@ class SessionGitWorktreeService:
                     start_if_stopped=False,
                 )
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
                     agent_id=agent_id,
@@ -2758,7 +2860,14 @@ class SessionGitWorktreeService:
 
         cleaned_at = datetime.now(UTC)
         try:
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 current_allocation = (
                     await self.session_git_worktree_repository.lock_by_id_for_session(
                         session,
@@ -2964,7 +3073,7 @@ class SessionGitWorktreeService:
             actor_generation=owner_generation,
         )
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.read_session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -3019,7 +3128,14 @@ class SessionGitWorktreeService:
             )
             return _bridge_create_terminal_result()
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=execution.owner_generation,
+                ),
+            )
             execution = await self.action_execution_repository.mark_running(
                 session,
                 action_execution_id=execution.id,
@@ -3152,7 +3268,14 @@ class SessionGitWorktreeService:
             return _bridge_create_terminal_result()
 
         try:
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
                     agent_id=agent_id,
@@ -3344,7 +3467,7 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
 
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.read_session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
@@ -3362,7 +3485,14 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
                 complete_run=False,
             )
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=execution.owner_generation,
+                ),
+            )
             execution = await self.action_execution_repository.mark_running(
                 session,
                 action_execution_id=execution.id,
@@ -3431,7 +3561,14 @@ class SessionGitWorktreeService:
             )
         working_folder_path = binding.working_folder_path
         try:
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 binding_service = self.session_working_folder_binding_service
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
@@ -3738,7 +3875,14 @@ class SessionGitWorktreeService:
                 exit_code=None,
                 on_projection_updated=on_projection_updated,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 current = await self.session_git_worktree_repository.mark_creating(
                     session,
                     worktree_id=current.id,
@@ -3805,7 +3949,14 @@ class SessionGitWorktreeService:
                 exit_code=0,
                 on_projection_updated=on_projection_updated,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 await self.session_git_worktree_repository.mark_ready(
                     session,
                     worktree_id=current.id,
@@ -3860,7 +4011,14 @@ class SessionGitWorktreeService:
             branch_name = (
                 generated_branch_name if generated_branch else allocation.branch_name
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 project_repository = self.session_workspace_project_repository
                 await project_repository.acquire_runtime_path_coordination_lock(
                     session,
@@ -3995,7 +4153,14 @@ class SessionGitWorktreeService:
                 exit_code=None,
                 on_projection_updated=on_projection_updated,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 await self.session_git_worktree_repository.mark_creating(
                     session,
                     worktree_id=current.id,
@@ -4058,7 +4223,14 @@ class SessionGitWorktreeService:
                 exit_code=0,
                 on_projection_updated=on_projection_updated,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 await self.session_git_worktree_repository.mark_ready(
                     session,
                     worktree_id=current.id,
@@ -4113,7 +4285,14 @@ class SessionGitWorktreeService:
                 expected_authority=expected_authority,
                 start_if_stopped=False,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 binding_service = self.session_working_folder_binding_service
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
@@ -4174,7 +4353,14 @@ class SessionGitWorktreeService:
                     start_if_stopped=False,
                 )
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 binding_service = self.session_working_folder_binding_service
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
@@ -4251,7 +4437,14 @@ class SessionGitWorktreeService:
                 expected_authority=expected_authority,
                 start_if_stopped=False,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 binding_service = self.session_working_folder_binding_service
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
@@ -4312,7 +4505,14 @@ class SessionGitWorktreeService:
                     start_if_stopped=False,
                 )
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 binding_service = self.session_working_folder_binding_service
                 await binding_service.resolve_bound_authority_in_transaction(
                     session,
@@ -4359,13 +4559,9 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
         try:
-            result = await (
-                self.agent_project_catalog_service.refresh_project_status_for_execution(
-                    agent_id=agent_id,
-                    session_id=execution.session_id,
-                    owner_generation=execution.owner_generation,
-                    path=path,
-                )
+            result = await self.agent_project_catalog_service.refresh_project_status(
+                agent_id=agent_id,
+                path=path,
             )
         except CanonicalExecutionOwnerGenerationStaleError:
             raise
@@ -4448,10 +4644,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> ActionExecutionEvent:
         """Append one action execution event in a short transaction."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             event = await self.action_execution_repository.append_event(
                 session,
                 ActionExecutionEventCreate(
@@ -4479,10 +4683,7 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> ActionExecutionProjection:
         """Publish the current action execution projection when requested."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.read_session_manager() as session:
             repository = self.action_execution_repository
             projection = await repository.get_projection_by_mailbox_item_id(
                 session,
@@ -4563,10 +4764,18 @@ class SessionGitWorktreeService:
         external_id = f"action_execution_result:{execution.id}"
         continuation_idempotency_key = f"turn_action_continuation:{execution.id}"
         terminal_at = datetime.now(UTC)
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             projection = await self.action_execution_repository.lock_projection_by_id(
                 session,
                 action_execution_id=execution.id,
@@ -4723,10 +4932,7 @@ class SessionGitWorktreeService:
                 execution=execution,
                 actor_generation=owner_generation,
             )
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=owner_generation,
-        )() as session:
+        async with self.read_session_manager() as session:
             allocation = (
                 await self.session_git_worktree_repository.get_by_action_execution_id(
                     session,
@@ -4779,10 +4985,7 @@ class SessionGitWorktreeService:
         predecessor_run_id: str | None,
     ) -> list[Event]:
         """Cancel leftover live executions before a processing boundary starts."""
-        async with self._owner_bound_session_manager(
-            session_id=session_id,
-            owner_generation=owner_generation,
-        )() as session:
+        async with self.read_session_manager() as session:
             executions = await self.action_execution_repository.list_by_session_id(
                 session,
                 session_id=session_id,
@@ -4851,10 +5054,18 @@ class SessionGitWorktreeService:
         actor_generation: int | None = None,
     ) -> ActionExecution:
         """Persist and project one bounded worktree action result."""
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             updated = await self.action_execution_repository.update_result(
                 session,
                 action_execution_id=execution.id,
@@ -4983,7 +5194,14 @@ class SessionGitWorktreeService:
         reason: str,
     ) -> None:
         """Record confirmed checkout removal when later Project cleanup fails."""
-        async with self._action_owner_session_manager(execution)() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=execution.owner_generation,
+                ),
+            )
             await self.session_git_worktree_repository.mark_cleanup_failed(
                 session,
                 worktree_id=allocation.id,
@@ -5008,10 +5226,18 @@ class SessionGitWorktreeService:
         """Remove generated Project state when Agent creation does not complete."""
         if allocation is None:
             return
-        async with self._action_owner_session_manager(
-            execution,
-            actor_generation=actor_generation,
-        )() as session:
+        async with self.session_manager() as session:
+            await fence_owned_session_mutation(
+                session,
+                SessionExecutionOwner(
+                    session_id=execution.session_id,
+                    owner_generation=(
+                        execution.owner_generation
+                        if actor_generation is None
+                        else actor_generation
+                    ),
+                ),
+            )
             current_allocation = (
                 await self.session_git_worktree_repository.get_by_action_execution_id(
                     session,
@@ -5643,7 +5869,14 @@ class SessionGitWorktreeService:
                 path_suffix=current_path_suffix,
                 branch_suffix=current_branch_suffix,
             )
-            async with self._action_owner_session_manager(execution)() as session:
+            async with self.session_manager() as session:
+                await fence_owned_session_mutation(
+                    session,
+                    SessionExecutionOwner(
+                        session_id=execution.session_id,
+                        owner_generation=execution.owner_generation,
+                    ),
+                )
                 project_repository = self.session_workspace_project_repository
                 await project_repository.acquire_runtime_path_coordination_lock(
                     session,

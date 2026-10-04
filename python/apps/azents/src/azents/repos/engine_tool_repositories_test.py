@@ -6,10 +6,8 @@ from contextlib import asynccontextmanager
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 
 
 @asynccontextmanager
@@ -85,15 +83,13 @@ def test_optional_no_db_snapshot_factory_stays_unavailable() -> None:
     )
 
 
-def test_snapshot_owner_binding_is_immutable_and_repo_scoped() -> None:
-    """Owner binding fences stores without mutating the shared factory."""
-    owner = SessionExecutionOwner(session_id="session-1", owner_generation=7)
+def test_snapshot_factory_keeps_description_and_mutation_scopes_plain() -> None:
+    """Private snapshot and selection metadata never inherit an owner gate."""
     factory = EngineMcpSnapshotFactory(
         session_manager=_session_manager,
         read_session_manager=_session_manager,
     )
-    bound = factory.with_owner(owner)
-    store = bound.create(
+    store = factory.create(
         agent_id="agent-1",
         session_id="session-1",
         toolkit_namespace="mcp",
@@ -102,11 +98,10 @@ def test_snapshot_owner_binding_is_immutable_and_repo_scoped() -> None:
     assert store is not None
     assert factory.session_manager is _session_manager
     assert store.read_session_manager is _session_manager
-    assert isinstance(store.session_manager, OwnerBoundSessionManager)
-    assert store.session_manager.session_id == "session-1"
-    assert store.session_manager.owner_generation == 7
-    selection = bound.selected_installation(agent_id="agent-1", session_id="session-1")
+    assert store.session_manager is _session_manager
+    selection = factory.selected_installation(
+        agent_id="agent-1", session_id="session-1"
+    )
     assert selection is not None
     assert selection.read_session_manager is _session_manager
-    assert isinstance(selection.session_manager, OwnerBoundSessionManager)
-    assert selection.session_manager.owner_generation == 7
+    assert selection.session_manager is _session_manager

@@ -15,6 +15,7 @@ from azents.core.enums import (
     MailboxItemKind,
 )
 from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -34,6 +35,10 @@ from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
+)
+from azents.repos.session_execution.ownership import (
+    fence_owned_session_mutation,
+    validate_session_execution_owner,
 )
 
 ScheduledTaskExecutionState = Literal[
@@ -70,6 +75,26 @@ class ScheduledTaskToolOperationRepository:
     cycle_repository: ScheduledTaskCycleRepository
     mailbox_repository: MailboxRepository
     run_repository: AgentRunRepository
+    owner: SessionExecutionOwner | None
+
+    async def _validate_owner(self, session: ReadSession) -> None:
+        if self.owner is not None:
+            await validate_session_execution_owner(session, self.owner)
+
+    async def _fence_mutation(self, session: WriteSession, *, session_id: str) -> None:
+        if self.owner is not None:
+            if self.owner.session_id != session_id:
+                raise ValueError("Session execution owner mismatch")
+            await fence_owned_session_mutation(session, self.owner)
+        else:
+            current_id = await session.write_session.scalar(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session_id)
+                .values(updated_at=RDBAgentSession.updated_at)
+                .returning(RDBAgentSession.id)
+            )
+            if current_id is None:
+                raise ValueError("AgentSession not found")
 
     async def active_cycle(
         self,
@@ -81,6 +106,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> ScheduledTaskCycleRecord | None:
         """Resolve the current Run's exact started cycle in one transaction."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             run = await self.run_repository.get_by_id(session, run_id)
             if (
                 run is None
@@ -110,6 +136,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> list[ScheduledTaskCycleState]:
         """Return current started cycle states after the transaction closes."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             records = await self.cycle_repository.list_started(
                 session,
                 agent_id=agent_id,
@@ -139,6 +166,7 @@ class ScheduledTaskToolOperationRepository:
             now=now,
         )
         async with self.session_manager() as session:
+            await self._fence_mutation(session, session_id=session_id)
             await self._validate_target(
                 session,
                 workspace_id=workspace_id,
@@ -175,6 +203,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> list[ScheduledTaskToolProjection]:
         """List Session Tasks and derive execution state in one transaction."""
         async with self.session_manager() as session:
+            await self._validate_owner(session)
             tasks = await self.task_repository.list_by_session_id(session, session_id)
             return [
                 await self._task_projection(
@@ -194,6 +223,7 @@ class ScheduledTaskToolOperationRepository:
     ) -> ScheduledTask | None:
         """Delete one Session-owned Task and return its committed snapshot."""
         async with self.session_manager() as session:
+            await self._fence_mutation(session, session_id=session_id)
             target = await self._lock_mutation_target(
                 session,
                 session_id=session_id,

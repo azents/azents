@@ -113,7 +113,9 @@ async def publish_context_overview(
             ),
         ],
     )
-    repository = ConsolidationPublicationRepository(manager)
+    repository = ConsolidationPublicationRepository(
+        session_manager=manager, read_session_manager=manager
+    )
     frozen = await repository.freeze(principal)
     await work.record_coverage(
         principal,

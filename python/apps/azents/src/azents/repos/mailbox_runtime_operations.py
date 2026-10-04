@@ -23,7 +23,10 @@ from azents.core.mailbox_data import (
     ScheduledTaskTriggerMailboxPayload,
 )
 from azents.core.mailbox_errors import MailboxOwnerGenerationStaleError
-from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.core.session_resource_authority import (
+    SessionExecutionOwner,
+    SessionResourceAuthority,
+)
 from azents.engine.events.types import (
     AgentRunState,
     Event,
@@ -44,6 +47,7 @@ from azents.repos.scheduled_task.presentation import (
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleRecord
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 
@@ -171,8 +175,8 @@ class MailboxRuntimeOperations:
     ) -> ScheduledMailboxDatabaseAdmission | None:
         """Commit cycle/Run/input/delete with the unchanged FIFO ownership fences."""
         async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.lock_by_id(
-                session, session_id
+            agent_session = await fence_owned_session_mutation(
+                session, SessionExecutionOwner(session_id, owner_generation)
             )
             if agent_session is None:
                 raise ValueError("AgentSession not found")

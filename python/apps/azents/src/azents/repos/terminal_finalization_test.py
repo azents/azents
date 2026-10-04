@@ -190,19 +190,6 @@ class _Sessions(AgentSessionRepository):
         self.stop_requested = stop_requested
         self.parent_status = parent_status
 
-    async def lock_execution_by_id(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        transaction = _transaction(session)
-        assert agent_session_id == self.source.agent_session_id
-        transaction.state.lock_order.append("execution")
-        return AgentSession.model_construct(
-            id=agent_session_id,
-            status=AgentSessionStatus.ACTIVE,
-        )
-
     async def has_stop_request(
         self,
         session: ReadSession,
@@ -250,6 +237,31 @@ class _Sessions(AgentSessionRepository):
             status=self.parent_status,
             stop_requested_at=None,
         )
+
+    async def get_by_id(
+        self,
+        session: ReadSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        _transaction(session)
+        if agent_session_id != self.parent.agent_session_id:
+            return None
+        return AgentSession.model_construct(
+            id=agent_session_id,
+            status=self.parent_status,
+            stop_requested_at=None,
+        )
+
+    async def fence_active_mailbox_target(
+        self,
+        session: WriteSession,
+        agent_session_id: str,
+    ) -> AgentSession | None:
+        _transaction(session).state.lock_order.append("target_admission")
+        current = await self.get_by_id(session, agent_session_id)
+        if current is None or current.status is not AgentSessionStatus.ACTIVE:
+            return None
+        return current
 
     async def mark_session_agent_message_activity(
         self,
@@ -433,13 +445,10 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
     outcome = await fixture.terminal.finalize_run(_RUN_ID)
     assert outcome.disposition is TerminalDeliveryDisposition.ENQUEUED
     assert fixture.state.lock_order == [
-        "execution",
-        "session_agent",
         "run",
-        "session_agent",
-        "parent_session",
-        "session_agent",
-        "parent_session",
+        "run",
+        "target_admission",
+        "target_admission",
         "mailbox",
         "delivery_marker",
     ]

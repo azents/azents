@@ -14,7 +14,10 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
-from azents.repos.compaction_operation import CompactionOperationRepository
+from azents.repos.compaction_operation import (
+    CompactionOperationRepository,
+    get_compaction_operation_repository,
+)
 from azents.repos.engine_event_contracts import (
     EventPayloadRepository,
     SessionHeadRepository,
@@ -43,7 +46,6 @@ from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.provider_output_operation import ProviderOutputOperationRepository
 from azents.repos.session_execution.ownership import (
-    OwnerBoundSessionManager,
     SessionExecutionAuthorityRepository,
 )
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
@@ -114,7 +116,7 @@ class EngineEventRepositoryFactory:
         ProviderOutputOperationRepository, Depends(ProviderOutputOperationRepository)
     ]
     compaction_repository: Annotated[
-        CompactionOperationRepository, Depends(CompactionOperationRepository)
+        CompactionOperationRepository, Depends(get_compaction_operation_repository)
     ]
     exchange_file_repository: Annotated[
         ExchangeFileRepository, Depends(ExchangeFileRepository)
@@ -125,15 +127,12 @@ class EngineEventRepositoryFactory:
         self, owner: SessionExecutionOwner
     ) -> OwnerBoundEngineRepositories:
         """Bind all operations before Engine begins external work."""
-        manager = OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=owner.session_id,
-            owner_generation=owner.owner_generation,
-        )
+        manager = self.session_manager
         mutations = EngineEventMutationRepository(
             transcript_repository=self.transcript_repository
         )
         tool_results = EngineToolResultOperationRepository(
+            owner=owner,
             session_manager=manager,
             run_repository=self.run_repository,
             transcript_repository=self.transcript_repository,
@@ -149,6 +148,7 @@ class EngineEventRepositoryFactory:
                 owner=owner,
             ),
             events=EngineEventOperationRepository(
+                owner=owner,
                 session_manager=manager,
                 run_repository=self.run_repository,
                 agent_session_repository=self.agent_session_repository,
@@ -158,13 +158,15 @@ class EngineEventRepositoryFactory:
             tool_working_set=self.tool_working_set_repository.with_session_manager(
                 manager
             ),
-            compaction=self.compaction_repository.with_session_manager(manager),
+            compaction=self.compaction_repository.for_execution(owner),
             execution=EngineExecutionOperationRepository(
+                owner=owner,
                 session_manager=manager,
                 run_repository=self.run_repository,
                 model_file_pin_repository=self.model_file_pin_repository,
             ),
             model_input=EngineModelInputOperationRepository(
+                owner=owner,
                 session_manager=manager,
                 run_repository=self.run_repository,
                 transcript_repository=self.transcript_repository,
@@ -174,6 +176,7 @@ class EngineEventRepositoryFactory:
             ),
             tool_results=tool_results,
             output=EngineOutputOperationRepository(
+                owner=owner,
                 session_manager=manager,
                 run_repository=self.run_repository,
                 event_mutation_repository=mutations,
@@ -182,6 +185,7 @@ class EngineEventRepositoryFactory:
                 system_prompt_repository=self.system_prompt_repository,
             ),
             finalization=EngineRunFinalizationOperationRepository(
+                owner=owner,
                 session_manager=manager,
                 run_repository=self.run_repository,
                 event_mutation_repository=mutations,

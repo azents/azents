@@ -6,9 +6,11 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import ActiveToolCall
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 
 
 class ExecutionRunState(Protocol):
@@ -78,6 +80,7 @@ class EngineExecutionOperationRepository:
     session_manager: SessionManager[WriteSession]
     run_repository: ExecutionRunRepository
     model_file_pin_repository: ExecutionModelFilePinRepository | None
+    owner: SessionExecutionOwner | None
 
     async def update_phase(
         self,
@@ -88,6 +91,8 @@ class EngineExecutionOperationRepository:
     ) -> datetime.datetime | None:
         """Update one Run phase in a completed transaction."""
         async with self.session_manager() as session:
+            if active_tool_calls is not None and self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             run = await self.run_repository.update_phase(
                 session,
                 run_id,
@@ -105,6 +110,8 @@ class EngineExecutionOperationRepository:
     ) -> ConditionalPhaseUpdate:
         """Update phase only while the current Run remains running."""
         async with self.session_manager() as session:
+            if active_tool_calls is not None and self.owner is not None:
+                await fence_owned_session_mutation(session, self.owner)
             run = await self.run_repository.get_by_id(session, run_id)
             if run is None or run.status is not AgentRunStatus.RUNNING:
                 return ConditionalPhaseUpdate(

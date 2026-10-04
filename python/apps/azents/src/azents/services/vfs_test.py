@@ -362,6 +362,7 @@ def _projection_service(
                 agent_run_repository=_RunRepository(projection),
                 agent_session_repository=_SessionRepository(),
                 toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={},
@@ -390,6 +391,7 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
                 agent_run_repository=_UnusedRunRepository(),
                 agent_session_repository=_UnusedSessionRepository(),
                 toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={},
@@ -415,6 +417,7 @@ async def test_preview_includes_required_scheduled_skill_without_attachment() ->
                 agent_run_repository=_UnusedRunRepository(),
                 agent_session_repository=_UnusedSessionRepository(),
                 toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={},
@@ -444,6 +447,7 @@ async def test_preview_includes_effective_agent_owned_provider_source() -> None:
                 agent_run_repository=_UnusedRunRepository(),
                 agent_session_repository=_UnusedSessionRepository(),
                 toolkit_repository=_OneToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={"scheduled": provider},
@@ -468,6 +472,7 @@ async def test_preview_fails_closed_on_duplicate_effective_slug() -> None:
                 agent_run_repository=_UnusedRunRepository(),
                 agent_session_repository=_UnusedSessionRepository(),
                 toolkit_repository=_ConflictingToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={},
@@ -516,6 +521,7 @@ async def test_run_projection_scopes_required_source_to_root_execution(
                     }
                 ),
                 toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={},
@@ -574,6 +580,7 @@ async def test_run_projection_commit_rejects_owner_takeover_after_build_starts(
             agent_run_repository=run_repository,
             agent_session_repository=session_repository,
             toolkit_repository=ToolkitRepository(),
+            owner=None,
         ),
         toolkit_registry={},
         catalog=catalog,
@@ -744,6 +751,7 @@ async def test_subagent_run_loads_its_own_projection() -> None:
                     }
                 ),
                 toolkit_repository=_EmptyToolkitRepository(),
+                owner=None,
             )
         ),
         toolkit_registry={},

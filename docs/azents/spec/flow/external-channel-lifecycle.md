@@ -53,8 +53,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-03
-spec_version: 46
+last_verified_at: 2026-10-05
+spec_version: 47
 ---
 
 # External Channel Lifecycle
@@ -132,14 +132,17 @@ connected parent Binding with its process-local provider cleanup plans, and pres
 Resource, Binding, Session, and concrete mode. The replacement route starts without a
 participation setting; a later eligible top-level mention begins setup. Stale impact
 previews fail with conflict instead of applying a destructive mutation against newer
-state.
+state. Impact previews use ordinary connection/route/count reads, tolerate
+committed lag, and never acquire destructive transition locks. The actual confirmed
+mutation still validates its existing generation and exact lifecycle references.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
 identity, capability, health, Socket lease, Work presence lease, and gap projections,
 increments the configuration generation, and immediately validates the replacement
-configuration. No lifecycle status prevents editing a visible connection, and no
-transport fallback occurs.
+configuration. Single and Multi replacement serialize the actual configuration
+generation transition and reject a connection already disconnecting or disconnected;
+a stale replacement cannot resurrect it. No transport fallback occurs.
 
 Editing a visible Discord connection replaces the submitted Application identity,
 target Guild configuration, and complete Bot credential set in one fenced operation.
@@ -357,6 +360,8 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 47) — Made Multi disconnect impact previews independent of connection/route locks and kept exact Single/Multi credential-generation transitions separate from ordinary metadata captures.
 
 - **2026-10-03** (spec_version 46) — Restricted typing restoration and renewal to
   Work with running execution, including after stop-request cleanup.

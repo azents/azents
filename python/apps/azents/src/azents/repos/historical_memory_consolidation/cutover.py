@@ -75,9 +75,7 @@ class MemoryHandoverRepository:
                 query = query.where(RDBToolkitState.id > after)
             ids = list(
                 await session.write_session.scalars(
-                    query.order_by(RDBToolkitState.id)
-                    .limit(request.batch_size)
-                    .with_for_update(nowait=True)
+                    query.order_by(RDBToolkitState.id).limit(request.batch_size)
                 )
             )
             if ids:

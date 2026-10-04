@@ -1,86 +1,97 @@
-"""PostgreSQL contention regression for completed-run idle admission."""
+"""Real PostgreSQL observation and exact idle-finalization contention tests."""
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from psycopg.errors import LockNotAvailable
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from azents.core.agent_session_data import AgentSession, AgentSessionCreate
-from azents.core.enums import AgentSessionProductMode
+from azents.core.agent_session_data import AgentSessionCreate
+from azents.core.enums import AgentRuntimeCapability, AgentSessionProductMode
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.repository_test import (
-    _create_agent,
-    _create_workspace,
-)
-from azents.worker.session.idle_continuation_test import (
-    _Broker,
-    _ContinuationRecorder,
-    _EventPublisher,
-    _service,
-)
+from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
+from azents.repos.idle_continuation import IdleContinuationRepository
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
+from azents.repos.toolkit_state import ToolkitStateRepository
 
 
-class _ObservedSessionRepository(AgentSessionRepository):
-    """Observe a real NOWAIT admission collision without altering retry behavior."""
-
-    def __init__(self) -> None:
-        self.tree_admission_deferred = asyncio.Event()
-
-    async def lock_execution_by_id(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Record the database's nonblocking tree-admission rejection."""
-        try:
-            return await super().lock_execution_by_id(session, agent_session_id)
-        except OperationalError as error:
-            if isinstance(error.orig, LockNotAvailable):
-                self.tree_admission_deferred.set()
-            raise
+async def _cleanup_workspace_fixture(engine: AsyncEngine, workspace_id: str) -> None:
+    """Remove only this fixture in the existing restrictive FK order."""
+    async with AsyncSession(engine) as cleanup:
+        context_ids = sa.select(RDBSessionAgentContext.id).where(
+            RDBSessionAgentContext.workspace_id == workspace_id
+        )
+        await cleanup.execute(
+            sa.update(RDBSessionAgentContext)
+            .where(RDBSessionAgentContext.workspace_id == workspace_id)
+            .values(root_session_agent_id=None)
+        )
+        await cleanup.execute(
+            sa.delete(RDBSessionAgent).where(
+                RDBSessionAgent.context_id.in_(context_ids)
+            )
+        )
+        await cleanup.execute(
+            sa.delete(RDBSessionAgentContext).where(
+                RDBSessionAgentContext.workspace_id == workspace_id
+            )
+        )
+        await cleanup.execute(
+            sa.delete(RDBAgentSession).where(
+                RDBAgentSession.workspace_id == workspace_id
+            )
+        )
+        await cleanup.execute(
+            sa.delete(RDBAgent).where(RDBAgent.workspace_id == workspace_id)
+        )
+        await cleanup.execute(
+            sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+        )
+        await cleanup.commit()
 
 
 async def _wait_for_database_blocker(
-    engine: AsyncEngine,
-    *,
-    blocked_pid: int,
-    blocker_pid: int,
+    engine: AsyncEngine, *, blocked_pid: int, blocker_pid: int
 ) -> None:
-    """Observe an actual lock dependency instead of guessing scheduler timing."""
-    async with AsyncSession(engine) as raw_observer:
-        observer = ReadWriteSession(raw_observer)
-        while True:
-            blocked = await observer.read_session.scalar(
-                sa.text("SELECT :blocker_pid = ANY(pg_blocking_pids(:blocked_pid))"),
-                {"blocker_pid": blocker_pid, "blocked_pid": blocked_pid},
-            )
-            if blocked:
-                return
+    """Observe an actual lock dependency rather than scheduler timing."""
+    async with AsyncSession(engine) as observer:
+        while not await observer.scalar(
+            sa.text("SELECT :blocker_pid = ANY(pg_blocking_pids(:blocked_pid))"),
+            {"blocker_pid": blocker_pid, "blocked_pid": blocked_pid},
+        ):
+            pass
 
 
 @pytest.mark.asyncio
-async def test_idle_admission_yields_to_child_terminal_parent_lock(
-    rdb_engine: AsyncEngine,
-    latest_db_schema: None,
+async def test_idle_description_does_not_wait_for_held_owner_or_hierarchy_rows(
+    rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> None:
-    """Idle evaluation cannot invert Agent/Session locks held by child execution."""
+    """A pre-hook eligibility view is independent of all prior execution gates."""
     del latest_db_schema
-    repository = _ObservedSessionRepository()
     suffix = uuid4().hex[:8]
+    sessions = AgentSessionRepository()
     async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_setup:
         setup = ReadWriteSession(raw_setup)
-        workspace_id = await _create_workspace(setup, f"idle-lock-order-{suffix}")
+        workspace_id = await _create_workspace(setup, f"idle-read-{suffix}")
         agent_id = await _create_agent(
             setup,
             workspace_id,
-            f"idle-lock-order-{suffix}",
+            f"idle-read-{suffix}",
+            runtime_capability=AgentRuntimeCapability.NONE,
         )
-        root = await repository.create(
+        root = await sessions.create(
             setup,
             AgentSessionCreate(
                 workspace_id=workspace_id,
@@ -90,93 +101,144 @@ async def test_idle_admission_yields_to_child_terminal_parent_lock(
                 title=None,
             ),
         )
-        root_node = await repository.get_session_agent_by_session_id(setup, root.id)
-        assert root_node is not None
-        child = await repository.create_child_session_agent(
-            setup,
-            parent_session_agent_id=root_node.id,
-            name="idle-lock-child",
-            agent_type="default",
-            title=None,
-            last_task_message=None,
-        )
-        await setup.write_session.commit()
+        await raw_setup.commit()
 
-    service = _service(
-        continuation_recorder=_ContinuationRecorder(),
-        event_publisher=_EventPublisher(),
-        broker=_Broker(),
-        agent_session_repository=repository,
+    @asynccontextmanager
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+            try:
+                yield ReadWriteSession(raw)
+                await raw.commit()
+            except BaseException:
+                await raw.rollback()
+                raise
+
+    repository = IdleContinuationRepository(
+        manager,
+        sessions,
+        AgentRunRepository(),
+        MailboxRepository(),
+        ScheduledTaskCycleRepository(ToolkitStateRepository()),
     )
-    idle_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
-
-    async def evaluate_idle() -> bool:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_idle_session:
-            idle_session = ReadWriteSession(raw_idle_session)
-            backend_pid = await idle_session.read_session.scalar(
-                sa.text("SELECT pg_backend_pid()")
-            )
-            assert isinstance(backend_pid, int)
-            idle_pid.set_result(backend_pid)
-            eligibility = await service.repository._eligibility(
-                idle_session,
-                root.id,
-                "0" * 32,
-                owner_generation=root.owner_generation,
-            )
-            await idle_session.write_session.commit()
-            return eligibility.eligible
-
-    tasks: list[asyncio.Task[object]] = []
     try:
-        async with AsyncSession(
-            rdb_engine, expire_on_commit=False
-        ) as raw_terminal_session:
-            terminal_session = ReadWriteSession(raw_terminal_session)
-            locked_child = await repository.wait_for_execution_lock_by_id(
-                terminal_session,
-                child.agent_session_id,
+        async with AsyncSession(rdb_engine) as holder:
+            await holder.execute(
+                sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
             )
-            assert locked_child is not None
-            terminal_pid = await terminal_session.read_session.scalar(
-                sa.text("SELECT pg_backend_pid()")
+            await holder.execute(
+                sa.select(RDBSessionAgent)
+                .where(RDBSessionAgent.agent_session_id == root.id)
+                .with_for_update()
             )
-            assert isinstance(terminal_pid, int)
+            await holder.execute(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == root.id)
+                .with_for_update()
+            )
+            result = await asyncio.wait_for(
+                repository.get_eligibility(
+                    root.id,
+                    "0" * 32,
+                    owner_generation=root.owner_generation,
+                ),
+                timeout=5,
+            )
+            assert not result.eligible
+            assert result.archived_cycle_id is None
+    finally:
+        await _cleanup_workspace_fixture(rdb_engine, workspace_id)
 
-            idle_task = asyncio.create_task(evaluate_idle())
-            tasks.append(idle_task)
-            waiting_pid = await asyncio.wait_for(idle_pid, timeout=5)
-            deferred = asyncio.create_task(repository.tree_admission_deferred.wait())
-            blocked = asyncio.create_task(
-                _wait_for_database_blocker(
-                    rdb_engine,
-                    blocked_pid=waiting_pid,
-                    blocker_pid=terminal_pid,
+
+@pytest.mark.asyncio
+async def test_idle_finalization_waits_for_exact_owner_handover_then_rejects(
+    rdb_engine: AsyncEngine, latest_db_schema: None
+) -> None:
+    """An obsolete finalizer cannot admit work after a concurrent owner commit."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    sessions = AgentSessionRepository()
+    async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_setup:
+        setup = ReadWriteSession(raw_setup)
+        workspace_id = await _create_workspace(setup, f"idle-fence-{suffix}")
+        agent_id = await _create_agent(
+            setup,
+            workspace_id,
+            f"idle-fence-{suffix}",
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+        root = await sessions.create(
+            setup,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        await raw_setup.commit()
+
+    finalizer_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+    @asynccontextmanager
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+            pid = await raw.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(pid, int)
+            finalizer_pid.set_result(pid)
+            try:
+                yield ReadWriteSession(raw)
+                await raw.commit()
+            except BaseException:
+                await raw.rollback()
+                raise
+
+    repository = IdleContinuationRepository(
+        manager,
+        sessions,
+        AgentRunRepository(),
+        MailboxRepository(),
+        ScheduledTaskCycleRepository(ToolkitStateRepository()),
+    )
+    task: asyncio.Task[object] | None = None
+    try:
+        async with AsyncSession(rdb_engine) as holder:
+            await holder.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == root.id)
+                .values(owner_generation=RDBAgentSession.owner_generation + 1)
+            )
+            holder_pid = await holder.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(holder_pid, int)
+            task = asyncio.create_task(
+                repository.finalize(
+                    session_id=root.id,
+                    run_id="0" * 32,
+                    owner_generation=root.owner_generation,
+                    inputs=[],
                 )
             )
-            tasks.extend([deferred, blocked])
-            observed, _ = await asyncio.wait(
-                [deferred, blocked],
-                timeout=5,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            assert observed, "Idle admission never reached a database lock boundary"
-            for observation in observed:
-                observation.result()
-
-            # Terminal finalization reads its parent after canonical child admission.
-            # The old idle lock holds Agent while waiting on this same parent Session.
-            locked_parent = await asyncio.wait_for(
-                repository.lock_by_id(terminal_session, root.id),
+            pid = await asyncio.wait_for(finalizer_pid, timeout=5)
+            await asyncio.wait_for(
+                _wait_for_database_blocker(
+                    rdb_engine,
+                    blocked_pid=pid,
+                    blocker_pid=holder_pid,
+                ),
                 timeout=5,
             )
-            assert locked_parent is not None
-            await terminal_session.write_session.commit()
-
-            assert await asyncio.wait_for(idle_task, timeout=5) is False
-            assert repository.tree_admission_deferred.is_set()
+            await holder.commit()
+            with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+                await asyncio.wait_for(task, timeout=5)
+        async with AsyncSession(rdb_engine) as verifier:
+            assert (
+                await MailboxRepository().list_by_session_id(
+                    ReadWriteSession(verifier), root.id
+                )
+                == []
+            )
     finally:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await _cleanup_workspace_fixture(rdb_engine, workspace_id)

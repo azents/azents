@@ -19,7 +19,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.toolkit_state.store import ToolkitStateHandle, ToolkitStateStore
 
 
@@ -67,21 +67,20 @@ class GoalStateStore:
         self,
         *,
         session_manager: SessionManager[WriteSession],
+        owner: SessionExecutionOwner | None,
     ) -> None:
         """Create Goal state store."""
         self.session_manager = session_manager
+        self.owner = owner
 
     def for_execution(
         self,
         owner: SessionExecutionOwner,
     ) -> "GoalStateStore":
-        """Bind Goal operations to one durable Session owner."""
+        """Bind critical Goal event publication without gating private state."""
         return GoalStateStore(
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            )
+            session_manager=self.session_manager,
+            owner=owner,
         )
 
     async def load(self, agent_id: str, session_id: str) -> GoalState:
@@ -306,6 +305,10 @@ class GoalStateStore:
     ) -> None:
         """Add Goal completion briefing event in a completed transaction."""
         async with self.session_manager() as session:
+            if self.owner is not None:
+                if self.owner.session_id != session_id:
+                    raise ValueError("Goal event Session does not match owner")
+                await fence_owned_session_mutation(session, self.owner)
             await EventTranscriptRepository().append(
                 session,
                 EventCreate(
@@ -349,4 +352,4 @@ def get_goal_state_store(
     ],
 ) -> GoalStateStore:
     """Create the repository-owned Goal state store dependency."""
-    return GoalStateStore(session_manager=session_manager)
+    return GoalStateStore(session_manager=session_manager, owner=None)

@@ -150,6 +150,7 @@ class AgentDecommissionRepository:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         status: AgentDecommissionStatus,
         now: datetime.datetime,
     ) -> bool:
@@ -159,6 +160,7 @@ class AgentDecommissionRepository:
             .where(
                 RDBAgentDecommissionJob.id == job_id,
                 RDBAgentDecommissionJob.lease_owner == lease_owner,
+                RDBAgentDecommissionJob.attempt_count == expected_attempt,
             )
             .values(
                 status=status,
@@ -174,6 +176,7 @@ class AgentDecommissionRepository:
         *,
         job_id: str,
         lease_owner: str,
+        expected_attempt: int,
         next_attempt_at: datetime.datetime,
         error_kind: str,
         error_summary: str,
@@ -185,6 +188,7 @@ class AgentDecommissionRepository:
             .where(
                 RDBAgentDecommissionJob.id == job_id,
                 RDBAgentDecommissionJob.lease_owner == lease_owner,
+                RDBAgentDecommissionJob.attempt_count == expected_attempt,
             )
             .values(
                 status=AgentDecommissionStatus.RETRY_WAIT,

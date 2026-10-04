@@ -17,7 +17,7 @@ from azents.core.enums import (
     ExchangeFileStatus,
 )
 from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.exchange_upload_operation import RDBExchangeUploadOperation
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -96,6 +96,10 @@ class ExchangeFileOperationRepository:
     ]
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
 
     @property
@@ -235,12 +239,12 @@ class ExchangeFileOperationRepository:
         upload_id: str,
         now: datetime.datetime,
     ) -> Result[ExchangeFile, ExchangeUploadError]:
-        """Reauthorize a finalized retry without reading or rewriting S3 bytes."""
+        """Describe the exact finalized publication without claim or parent locks."""
         if now.tzinfo is None or now.utcoffset() is None:
             return Failure(ExchangeUploadError.INVALID_REQUEST)
-        async with self.session_manager() as session:
-            row = await self._lock_upload(session, upload_id)
-            authorized = await self._authorize_upload_row(
+        async with self.read_session_manager() as session:
+            row = await session.read_session.get(RDBExchangeUploadOperation, upload_id)
+            authorized = await self._authorize_upload_row_read(
                 session, row=row, agent_id=agent_id, user_id=user_id
             )
             if isinstance(authorized, Failure):
@@ -455,6 +459,31 @@ class ExchangeFileOperationRepository:
         ):
             return Failure(ExchangeUploadError.MANIFEST_MISMATCH)
         return Success(file)
+
+    async def _authorize_upload_row_read(
+        self,
+        session: ReadSession,
+        *,
+        row: RDBExchangeUploadOperation | None,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[str, ExchangeUploadError]:
+        """Authorize an observation without admitting a new upload mutation."""
+        if row is None:
+            return Failure(ExchangeUploadError.NOT_FOUND)
+        if row.agent_id != agent_id or row.uploader_user_id != user_id:
+            return Failure(ExchangeUploadError.ACCESS_DENIED)
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(ExchangeUploadError.NOT_FOUND)
+        if agent.workspace_id != row.workspace_id:
+            return Failure(ExchangeUploadError.ACCESS_DENIED)
+        membership = await self.workspace_user_repository.get_by_workspace_and_user(
+            session, workspace_id=agent.workspace_id, user_id=user_id
+        )
+        if membership is None:
+            return Failure(ExchangeUploadError.ACCESS_DENIED)
+        return Success(agent.workspace_id)
 
     async def load_verified_publication(
         self,

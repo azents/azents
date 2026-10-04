@@ -659,6 +659,7 @@ def _make_service(
         agent_run_repository=AsyncMock(),
         workspace_user_repository=workspace_user_repository,
         session_manager=session_boundary.session_manager,
+        read_session_manager=session_boundary.session_manager,
     )
     service = _make_exchange_file_service(
         operation_repository=operation_repository,

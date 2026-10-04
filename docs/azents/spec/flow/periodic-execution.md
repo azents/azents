@@ -65,8 +65,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-04
-spec_version: 28
+last_verified_at: 2026-10-05
+spec_version: 29
 ---
 
 # Periodic Execution Flow Spec
@@ -393,15 +393,21 @@ No Saved Memory is created or mutated. See
 ## External account OAuth attempt cleanup task
 
 `external_account_oauth_cleanup` runs hourly with a two-minute timeout and bounded
-five-minute-to-one-hour retry backoff. Each pass deletes at most 500 terminal or
-expired OAuth attempts whose ten-minute attempt lifetime has ended and whose rows
-are older than the 24-hour retention window. The result reports the bounded
-deleted-attempt count.
+five-minute-to-one-hour retry backoff. Each pass deletes at most 500 OAuth
+attempts whose `created_at` or `expires_at` is at or before the 24-hour retention
+cutoff, preserving the existing OR predicate. The ten-minute attempt lifetime
+continues to control synchronous OAuth expiry independently. The result reports
+the bounded deleted-attempt count.
 
 Attempt expiry is enforced synchronously by every OAuth operation. This scheduled
 task is storage reclamation only: delayed execution, lease recovery, Redis loss, or
 a failed cleanup pass cannot make an expired, claimed, completed, or failed attempt
 usable again.
+
+Expired-attempt housekeeping performs a bounded conditional DELETE using the
+existing cutoff/expiry predicates rather than locking candidates before
+selection. It is not callback claim or one-time authentication consumption;
+those operations retain their exact attempt and revocation guards.
 
 ## Session automatic archive task
 
@@ -499,6 +505,9 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 29) — Removed candidate freshness locks from
+  expired OAuth housekeeping while preserving exact claim/consumption authority.
 
 - **2026-10-04** (spec_version 26) — Promoted consolidation discovery/recovery/
   cleanup and PostgreSQL ownership, preparation12/consolidation2 combined14

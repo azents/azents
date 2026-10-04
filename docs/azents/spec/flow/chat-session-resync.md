@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [conversation, agent, external-channel]
 code_paths:
+  - python/apps/azents/src/azents/services/chat/team_session_test.py
   - python/apps/azents/src/azents/services/active_model_capabilities.py
   - typescript/apps/azents-web/src/shared/lib/model-capability-support.ts
   - typescript/apps/azents-web/src/shared/lib/reasoning-effort.ts
@@ -42,8 +43,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/agent-session/**
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
-last_verified_at: 2026-10-04
-spec_version: 54
+last_verified_at: 2026-10-05
+spec_version: 55
 ---
 
 # Chat Session Resync
@@ -325,6 +326,16 @@ Session intent or historical applied profiles. NEW operations capture compiled
 metadata; durable turn-marker provenance and replay continue to use the actual
 captured operation.
 
+Authorized Session detail, list, unread, directory, sidebar and Workspace
+baseline reads also remain descriptions. When a saved applied label has been
+removed from the Agent options, the response compiles the current Agent fallback
+and safe effort/options without persisting a replacement. The baseline retains
+the actual stored `applied_profile_generation`; it does not synthesize a new
+generation or initialize durable intent while resyncing. Actual accepted input
+or profile mutation owns persistence and generation advancement. Ordinary
+baseline and Subagent coordination reads therefore do not wait on held Agent,
+root hierarchy or execution-owner row gates.
+
 Composer profile edits and both settings-only apply and ordinary input submission
 drop execution options unsupported by the currently selected target's primary
 candidate. Supported options and the explicitly selected effort remain intact.
@@ -581,6 +592,9 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-10-05** — v55. Kept stale applied-label fallback in detached REST
+  projections without hidden profile writes or fabricated generations, and
+  removed inherited ownership/tree gates from baseline descriptions.
 - **2026-09-15** — v52. Replaced Runtime Web approval cards and Session-keyed
   projections with known-tool summaries plus managed-Runtime-gated Agent service
   management.

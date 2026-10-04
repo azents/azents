@@ -98,8 +98,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-10-04
-spec_version: 66
+last_verified_at: 2026-10-05
+spec_version: 67
 ---
 
 # External Channel Provider Ingress
@@ -425,13 +425,16 @@ durable queue content.
    whose lease is absent or expired. Callbacks within one active owner lifecycle
    coalesce, while empty-owner deletion and recreation starts a distinct lifecycle.
    Submission and scans are wake mechanisms rather than durable job authority.
+   Inventory, owner presence and bounded diagnostics use ordinary reads even while
+   a winning drain holds its lease row; they never inherit a claim lock.
 4. A drain first conditionally claims the owner lease. If the owner is not ready, it
    prepares the provider conversation outside a database transaction. Discord
    per-thread mode reconciles or creates the actual delivery thread through the public
    SDK; Discord parent-channel mode and Slack use their existing provider conversation
    identity without an artificial mutation.
-5. One short ready transaction re-locks the owner, its first authoritative queued
-   item, and current routing authority, retains the prepared Discord delivery thread on
+5. One short ready transaction validates and locks the exact current owner lease
+   and routing authority, observes its oldest queued trigger without a separate
+   item claim, retains the prepared Discord delivery thread on
    the target Resource when needed, reuses a compatible connected Binding/active
    Session or creates one root Session, Binding, Channel Work, and initial controls,
    then records the Binding/Session on the same owner without moving its items. Slack
@@ -657,6 +660,8 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
 
 - **2026-10-03** (spec_version 65) — Added Session and AgentRun execution authority
   to the Gateway typing target projection.

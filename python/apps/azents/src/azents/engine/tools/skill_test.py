@@ -58,9 +58,6 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
-from azents.repos.session_execution import (
-    CanonicalExecutionOwnerGenerationStaleError,
-)
 from azents.repos.skill_state_store import SkillStateStore
 from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTarget,
@@ -455,15 +452,6 @@ class _SkillStore:
 
     def __init__(self, state: SkillProjectionState) -> None:
         self.state = state
-        self.bound_owners: list[SessionExecutionOwner] = []
-
-    def for_execution(
-        self,
-        owner: SessionExecutionOwner,
-    ) -> "_SkillStore":
-        """Record the execution binding while preserving in-memory state."""
-        self.bound_owners.append(owner)
-        return self
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Return configured state."""
@@ -584,9 +572,9 @@ class TestSkillToolkit:
         toolkit.bind_execution_authority(authority)
         toolkit.bind_execution_authority(authority)
 
-        assert store.bound_owners == [authority.execution_owner]
+        assert toolkit._execution_owner == authority.execution_owner
         assert toolkit.store is store
-        assert toolkit.projection_service is not projection_service
+        assert toolkit.projection_service is projection_service
         assert toolkit.projection_service is not None
         assert toolkit.projection_service.store is store
 
@@ -630,7 +618,7 @@ class TestSkillToolkit:
         toolkit.bind_execution_owner(owner)
         toolkit.bind_execution_owner(owner)
 
-        assert store.bound_owners == [owner]
+        assert toolkit._execution_owner == owner
 
     @pytest.mark.asyncio
     async def test_turn_workspace_authorizes_managed_skill_reads(self) -> None:
@@ -972,11 +960,11 @@ class TestSkillProjectionService:
             )
         ]
 
-    async def test_takeover_after_runtime_scan_rejects_skill_state_commit(
+    async def test_private_skill_discovery_does_not_inherit_owner_commit_fence(
         self,
         rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
-        """Runtime discovery cannot commit after its Session owner is superseded."""
+        """Private Skill descriptions remain independent of owner handover."""
         sessions = AgentSessionRepository()
         async with rdb_session_manager() as session:
             workspace_id = await _create_workspace(session, "skill-owner-fence")
@@ -991,22 +979,11 @@ class TestSkillProjectionService:
                     title=None,
                 ),
             )
-            owner_generation = await sessions.claim_owner_generation(
+            await sessions.claim_owner_generation(
                 session,
                 created.id,
             )
-        authority = SessionResourceAuthority(
-            workspace_id=workspace_id,
-            agent_id=agent_id,
-            session_id=created.id,
-            root_session_id=created.id,
-            run_id="1" * 32,
-            run_index=1,
-            owner_generation=owner_generation,
-        )
-        store = SkillStateStore(session_manager=rdb_session_manager).for_execution(
-            authority.execution_owner
-        )
+        store = SkillStateStore(session_manager=rdb_session_manager)
         project_path = "/workspace/agent/project"
         skill_dir = f"{project_path}/.agents/skills/review"
         skill_path = f"{skill_dir}/SKILL.md"
@@ -1030,17 +1007,16 @@ class TestSkillProjectionService:
             runner_operations=runner,
         )
 
-        with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
-            await service.sync_latest(
-                agent_id=agent_id,
-                session_id=created.id,
-                reason="run_end",
-            )
+        await service.sync_latest(
+            agent_id=agent_id,
+            session_id=created.id,
+            reason="run_end",
+        )
 
         state = await SkillStateStore(session_manager=rdb_session_manager).load(
             agent_id, created.id
         )
-        assert state.latest.items == []
+        assert [item.skill_path for item in state.latest.items] == [skill_path]
         assert state.active.items == []
 
 

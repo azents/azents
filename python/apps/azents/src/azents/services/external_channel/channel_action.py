@@ -66,7 +66,7 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
-from azents.repos.session_execution.ownership import OwnerBoundSessionManager
+from azents.repos.session_execution.ownership import validate_session_execution_owner
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatch,
     RuntimeToProviderCleanupError,
@@ -265,24 +265,59 @@ class ExternalChannelActionService:
         Depends(ExchangeFileService),
     ]
     config: Annotated[Config, Depends(get_config)]
+    execution_owner: SessionExecutionOwner | None
     binding_locks: dict[str, asyncio.Lock] = dataclass_field(
         default_factory=dict,
         init=False,
         repr=False,
     )
 
+    @classmethod
+    def create(
+        cls,
+        session_manager: Annotated[
+            SessionManager[WriteSession], Depends(get_session_manager)
+        ],
+        repository: Annotated[
+            ExternalChannelWorkRepository, Depends(ExternalChannelWorkRepository.create)
+        ],
+        credentials_codec: Annotated[
+            ExternalChannelCredentialsCodec,
+            Depends(get_external_channel_credentials_codec),
+        ],
+        slack_client: Annotated[
+            SlackConversationClient, Depends(get_slack_delivery_client)
+        ],
+        discord_client: Annotated[
+            DiscordDeliveryClient, Depends(get_discord_delivery_client)
+        ],
+        exchange_file_service: Annotated[
+            ExchangeFileService, Depends(ExchangeFileService)
+        ],
+        config: Annotated[Config, Depends(get_config)],
+    ) -> "ExternalChannelActionService":
+        """Construct the non-execution service with explicit absent owner authority."""
+        return cls(
+            session_manager=session_manager,
+            repository=repository,
+            credentials_codec=credentials_codec,
+            slack_client=slack_client,
+            discord_client=discord_client,
+            exchange_file_service=exchange_file_service,
+            config=config,
+            execution_owner=None,
+        )
+
     def for_execution_owner(
         self,
         owner: SessionExecutionOwner,
     ) -> "ExternalChannelActionService":
         """Return a request-local service bound to one durable execution owner."""
+        if self.execution_owner is not None and self.execution_owner != owner:
+            raise ValueError("External Channel service cannot change execution owner")
         bound = dataclass_replace(
             self,
-            session_manager=OwnerBoundSessionManager(
-                session_manager=self.session_manager,
-                session_id=owner.session_id,
-                owner_generation=owner.owner_generation,
-            ),
+            execution_owner=owner,
         )
         bound.binding_locks = self.binding_locks
         return bound
@@ -294,28 +329,18 @@ class ExternalChannelActionService:
         """Bind direct Channel Work operations to complete execution authority."""
         return self.for_execution_owner(authority.execution_owner)
 
-    def _session_manager_for_authority(
-        self,
-        authority: SessionResourceAuthority | None,
-    ) -> SessionManager[WriteSession]:
-        """Resolve an owner-bound DB scope when execution authority is available."""
+    def _owner_for_authority(
+        self, authority: SessionResourceAuthority | None
+    ) -> SessionExecutionOwner | None:
+        """Resolve actual effect admission identity without wrapping DB descriptions."""
         if authority is None:
-            return self.session_manager
+            return self.execution_owner
         owner = authority.execution_owner
-        if isinstance(self.session_manager, OwnerBoundSessionManager):
-            if (
-                self.session_manager.session_id != owner.session_id
-                or self.session_manager.owner_generation != owner.owner_generation
-            ):
-                raise ValueError(
-                    "External Channel execution authority does not match service"
-                )
-            return self.session_manager
-        return OwnerBoundSessionManager(
-            session_manager=self.session_manager,
-            session_id=owner.session_id,
-            owner_generation=owner.owner_generation,
-        )
+        if self.execution_owner is not None and self.execution_owner != owner:
+            raise ValueError(
+                "External Channel execution authority does not match service"
+            )
+        return owner
 
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         """Return whether the tool should be exposed for this root Session."""
@@ -405,12 +430,10 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ChannelActionResult:
         """Commit canonical state, then execute ordered provider effects once."""
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
-        )
-        async with session_manager() as session:
+        async with self.session_manager() as session:
+            owner = self._owner_for_authority(authority)
+            if owner is not None:
+                await validate_session_execution_owner(session, owner)
             transition = await self.repository.commit_direct_action(
                 session,
                 session_id=session_id,
@@ -487,7 +510,7 @@ class ExternalChannelActionService:
             and reply_requested
             and reply_delivered
         ):
-            async with session_manager() as session:
+            async with self.session_manager() as session:
                 settlement = await self.repository.settle_awaiting_input(
                     session,
                     session_id=session_id,
@@ -548,12 +571,10 @@ class ExternalChannelActionService:
             agent_id=agent_id,
             session_id=session_id,
         )
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
-        )
-        async with session_manager() as session:
+        async with self.session_manager() as session:
+            owner = self._owner_for_authority(authority)
+            if owner is not None:
+                await validate_session_execution_owner(session, owner)
             current = await self.repository.revalidate_direct_effect(
                 session,
                 effect=effect,
@@ -575,7 +596,7 @@ class ExternalChannelActionService:
             provider_delivery_service=provider_delivery_service,
             resolve_runtime_target=resolve_runtime_target,
         )
-        async with session_manager() as session:
+        async with self.session_manager() as session:
             await self.repository.apply_direct_effect_outcome(
                 session,
                 effect=effect,
@@ -668,12 +689,10 @@ class ExternalChannelActionService:
             agent_id=agent_id,
             session_id=session_id,
         )
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
-        )
-        async with session_manager() as session:
+        async with self.session_manager() as session:
+            owner = self._owner_for_authority(authority)
+            if owner is not None:
+                await validate_session_execution_owner(session, owner)
             current = await self.repository.revalidate_binding_effect(
                 session,
                 plan=plan,
@@ -1274,12 +1293,7 @@ class ExternalChannelActionService:
         authority: SessionResourceAuthority | None,
     ) -> None:
         """Persist a provisioned Discord thread outside the provider mutation."""
-        session_manager = (
-            self.session_manager
-            if authority is None
-            else self._session_manager_for_authority(authority)
-        )
-        async with session_manager() as session:
+        async with self.session_manager() as session:
             await self.repository.record_discord_delivery_channel(
                 session,
                 resource_id=resource_id,
