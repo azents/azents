@@ -9,6 +9,14 @@ from dataclasses import dataclass, field
 from typing import Annotated, Literal, assert_never
 
 from fastapi import Depends
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
@@ -172,6 +180,71 @@ class _SettingsMetadata:
     binding_id: str | None
     binding_response_mode: ExternalChannelResponseMode | None
     binding_updated_at: datetime.datetime | None
+
+
+type _SettingsID = Annotated[str, Field(min_length=1, max_length=255)]
+type _SelectorID = Annotated[str, Field(min_length=1, max_length=64)]
+type _PositiveGeneration = Annotated[int, Field(gt=0)]
+
+
+class _SettingsWire(BaseModel):
+    """Closed compact settings scope shared by all signed target variants."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    version: int = Field(
+        alias="v", ge=_SETTINGS_METADATA_VERSION, le=_SETTINGS_METADATA_VERSION
+    )
+    connection_id: _SettingsID = Field(alias="c")
+    provider_parent_channel_id: _SettingsID = Field(alias="h")
+    principal_id: _SettingsID = Field(alias="p")
+    interaction_id: _SettingsID = Field(alias="i")
+
+
+class _SetupSettingsWire(_SettingsWire):
+    target: Literal["setup"] = Field(alias="k")
+    setup_claim_id: _SettingsID = Field(alias="a")
+    claim_generation: _PositiveGeneration = Field(alias="g")
+    source_revision: _PositiveGeneration = Field(alias="s")
+
+
+class _ParentSettingsWire(_SettingsWire):
+    target: Literal["parent"] = Field(alias="k")
+    setting_id: _SettingsID = Field(alias="e")
+    settings_generation: _PositiveGeneration = Field(alias="n")
+
+
+class _ThreadSettingsWire(_SettingsWire):
+    target: Literal["thread"] = Field(alias="k")
+    resource_id: _SettingsID = Field(alias="r")
+    binding_id: _SettingsID = Field(alias="b")
+    binding_response_mode: ExternalChannelResponseMode = Field(alias="m")
+    binding_updated_at: AwareDatetime = Field(alias="u")
+
+
+type _SettingsWirePayload = Annotated[
+    _SetupSettingsWire | _ParentSettingsWire | _ThreadSettingsWire,
+    Field(discriminator="target"),
+]
+_SETTINGS_WIRE_ADAPTER: TypeAdapter[_SettingsWirePayload] = TypeAdapter(
+    _SettingsWirePayload
+)
+
+
+class _SelectorWire(BaseModel):
+    """Closed compact signed selector scope."""
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    version: int = Field(
+        alias="v", ge=_SELECTOR_METADATA_VERSION, le=_SELECTOR_METADATA_VERSION
+    )
+    connection_id: _SelectorID = Field(alias="c")
+    resource_id: _SelectorID = Field(alias="r")
+    selector_interaction_id: _SelectorID = Field(alias="a")
+    interaction_id: _SelectorID = Field(alias="i")
+    principal_id: _SelectorID = Field(alias="p")
+    offset: int = Field(alias="o", ge=0)
 
 
 @dataclass(frozen=True)
@@ -1238,104 +1311,65 @@ def _parse_settings_metadata(
     secret: str,
 ) -> _SettingsMetadata:
     """Verify one settings modal envelope before reading its durable scope."""
-    encoded_part, separator, signature_part = metadata.partition(".")
-    if not separator or not encoded_part or not signature_part:
-        raise ValueError("Slack settings metadata is invalid.")
-    try:
-        encoded = _base64url_decode(encoded_part)
-        signature = _base64url_decode(signature_part)
-        payload = json.loads(encoded)
-    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
-        raise ValueError("Slack settings metadata is invalid.") from error
-    if not isinstance(payload, dict):
-        raise ValueError("Slack settings metadata is invalid.")
-    expected_signature = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
-    if not hmac.compare_digest(signature, expected_signature):
-        raise ValueError("Slack settings metadata is invalid.")
-    if payload.get("v") != _SETTINGS_METADATA_VERSION:
-        raise ValueError("Slack settings metadata is invalid.")
-    target = payload.get("k")
-    if target not in {"setup", "parent", "thread"}:
-        raise ValueError("Slack settings metadata is invalid.")
-    common = {
-        key: _settings_metadata_string(payload, field)
-        for key, field in {
-            "connection_id": "c",
-            "provider_parent_channel_id": "h",
-            "principal_id": "p",
-            "interaction_id": "i",
-        }.items()
-    }
-    if target == "setup":
-        return _SettingsMetadata(
-            target="setup",
-            setup_claim_id=_settings_metadata_string(payload, "a"),
-            claim_generation=_settings_metadata_positive_int(payload, "g"),
-            source_revision=_settings_metadata_positive_int(payload, "s"),
-            setting_id=None,
-            settings_generation=None,
-            resource_id=None,
-            binding_id=None,
-            binding_response_mode=None,
-            binding_updated_at=None,
-            **common,
-        )
-    if target == "parent":
-        return _SettingsMetadata(
-            target="parent",
-            setup_claim_id=None,
-            claim_generation=None,
-            source_revision=None,
-            setting_id=_settings_metadata_string(payload, "e"),
-            settings_generation=_settings_metadata_positive_int(payload, "n"),
-            resource_id=None,
-            binding_id=None,
-            binding_response_mode=None,
-            binding_updated_at=None,
-            **common,
-        )
-    mode_value = _settings_metadata_string(payload, "m")
-    updated_value = _settings_metadata_string(payload, "u")
-    try:
-        mode = ExternalChannelResponseMode(mode_value)
-        updated_at = datetime.datetime.fromisoformat(updated_value)
-    except ValueError as error:
-        raise ValueError("Slack settings metadata is invalid.") from error
-    if updated_at.tzinfo is None:
-        raise ValueError("Slack settings metadata is invalid.")
-    return _SettingsMetadata(
-        target="thread",
-        setup_claim_id=None,
-        claim_generation=None,
-        source_revision=None,
-        setting_id=None,
-        settings_generation=None,
-        resource_id=_settings_metadata_string(payload, "r"),
-        binding_id=_settings_metadata_string(payload, "b"),
-        binding_response_mode=mode,
-        binding_updated_at=updated_at,
-        **common,
+    message = "Slack settings metadata is invalid."
+    encoded = _signed_metadata_bytes(
+        metadata=metadata, secret=secret, error_message=message
     )
-
-
-def _settings_metadata_string(
-    payload: dict[str, object],
-    key: str,
-) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str) or not value or len(value) > 255:
-        raise ValueError("Slack settings metadata is invalid.")
-    return value
-
-
-def _settings_metadata_positive_int(
-    payload: dict[str, object],
-    key: str,
-) -> int:
-    value = payload.get(key)
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError("Slack settings metadata is invalid.")
-    return value
+    try:
+        payload = _SETTINGS_WIRE_ADAPTER.validate_json(encoded)
+    except ValidationError as error:
+        raise ValueError(message) from error
+    common = {
+        "connection_id": payload.connection_id,
+        "provider_parent_channel_id": payload.provider_parent_channel_id,
+        "principal_id": payload.principal_id,
+        "interaction_id": payload.interaction_id,
+    }
+    match payload:
+        case _SetupSettingsWire():
+            return _SettingsMetadata(
+                target="setup",
+                setup_claim_id=payload.setup_claim_id,
+                claim_generation=payload.claim_generation,
+                source_revision=payload.source_revision,
+                setting_id=None,
+                settings_generation=None,
+                resource_id=None,
+                binding_id=None,
+                binding_response_mode=None,
+                binding_updated_at=None,
+                **common,
+            )
+        case _ParentSettingsWire():
+            return _SettingsMetadata(
+                target="parent",
+                setup_claim_id=None,
+                claim_generation=None,
+                source_revision=None,
+                setting_id=payload.setting_id,
+                settings_generation=payload.settings_generation,
+                resource_id=None,
+                binding_id=None,
+                binding_response_mode=None,
+                binding_updated_at=None,
+                **common,
+            )
+        case _ThreadSettingsWire():
+            return _SettingsMetadata(
+                target="thread",
+                setup_claim_id=None,
+                claim_generation=None,
+                source_revision=None,
+                setting_id=None,
+                settings_generation=None,
+                resource_id=payload.resource_id,
+                binding_id=payload.binding_id,
+                binding_response_mode=payload.binding_response_mode,
+                binding_updated_at=payload.binding_updated_at,
+                **common,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _settings_view(
@@ -1718,39 +1752,38 @@ def _parse_selector_metadata(
     secret: str,
 ) -> _SelectorMetadata:
     """Verify one signed metadata envelope before reading opaque identifiers."""
+    message = "Slack selector metadata is invalid."
+    encoded = _signed_metadata_bytes(
+        metadata=metadata, secret=secret, error_message=message
+    )
+    try:
+        payload = _SelectorWire.model_validate_json(encoded)
+    except ValidationError as error:
+        raise ValueError(message) from error
+    return _SelectorMetadata(
+        connection_id=payload.connection_id,
+        resource_id=payload.resource_id,
+        selector_interaction_id=payload.selector_interaction_id,
+        interaction_id=payload.interaction_id,
+        principal_id=payload.principal_id,
+        offset=payload.offset,
+    )
+
+
+def _signed_metadata_bytes(*, metadata: str, secret: str, error_message: str) -> bytes:
+    """Authenticate the exact wire bytes before interpreting protocol fields."""
     encoded_part, separator, signature_part = metadata.partition(".")
     if not separator or not encoded_part or not signature_part:
-        raise ValueError("Slack selector metadata is invalid.")
+        raise ValueError(error_message)
     try:
         encoded = _base64url_decode(encoded_part)
         signature = _base64url_decode(signature_part)
-        payload = json.loads(encoded)
-    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
-        raise ValueError("Slack selector metadata is invalid.") from error
-    if not isinstance(payload, dict):
-        raise ValueError("Slack selector metadata is invalid.")
-    expected_signature = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
-    if not hmac.compare_digest(signature, expected_signature):
-        raise ValueError("Slack selector metadata is invalid.")
-    required = {
-        "c": "connection_id",
-        "r": "resource_id",
-        "a": "selector_interaction_id",
-        "i": "interaction_id",
-        "p": "principal_id",
-    }
-    if payload.get("v") != _SELECTOR_METADATA_VERSION:
-        raise ValueError("Slack selector metadata is invalid.")
-    values: dict[str, str] = {}
-    for payload_key, attribute in required.items():
-        value = payload.get(payload_key)
-        if not isinstance(value, str) or not value or len(value) > 64:
-            raise ValueError("Slack selector metadata is invalid.")
-        values[attribute] = value
-    offset = payload.get("o")
-    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
-        raise ValueError("Slack selector metadata is invalid.")
-    return _SelectorMetadata(offset=offset, **values)
+    except ValueError as error:
+        raise ValueError(error_message) from error
+    expected = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected):
+        raise ValueError(error_message)
+    return encoded
 
 
 def _selector_view(

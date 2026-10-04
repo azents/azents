@@ -4,15 +4,14 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import NamedTuple, cast
+from typing import NamedTuple
 
 import pytest
 from azcommon.infra.s3.service import S3Service
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionBroker, SessionStopSignal
-from azents.core.config import Config
+from azents.broker.types import BrokerMessage, SessionBroker
+from azents.core.config import Config, Settings
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -26,8 +25,11 @@ from azents.core.enums import (
     ExchangeFileStatus,
     ModelFileStatus,
 )
+from azents.core.session_lifecycle import (
+    SessionLifecycleParticipantDefinition,
+    SessionLifecyclePurgeContext,
+)
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
-from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
@@ -41,8 +43,16 @@ from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.external_channel.data import (
+    ExternalChannelPurgeCleanup,
+    ExternalChannelPurgeVerification,
+)
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.scheduled_task.lifecycle import (
+    ScheduledTaskLifecycleCleanup,
+    ScheduledTaskLifecycleVerification,
+)
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
@@ -56,8 +66,9 @@ from azents.services.session_lifecycle.registry import (
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
-    """Yield a placeholder transaction for repository doubles."""
-    yield cast(AsyncSession, object())
+    """Yield a declared session for repository-only lifecycle doubles."""
+    async with AsyncSession() as session:
+        yield session
 
 
 def _participant_execution(
@@ -86,7 +97,7 @@ def _participant_execution(
     )
 
 
-class _RetentionRepository:
+class _RetentionRepository(ArchivedSessionRetentionRepository):
     """Durable purge job repository double."""
 
     def __init__(
@@ -168,7 +179,7 @@ class _RetentionRepository:
         job_id: str,
         lease_owner: str,
         participants: tuple[ArchivedSessionPurgeParticipantSnapshot, ...],
-    ) -> list[object]:
+    ) -> list[ArchivedSessionPurgeParticipantExecution]:
         del session, lease_owner
         self.events.append("materialize_participants")
         materialization_failure = self.materialization_failures.pop(job_id, None)
@@ -312,7 +323,7 @@ class _RetentionRepository:
         return True
 
 
-class _AgentSessionRepository:
+class _AgentSessionRepository(AgentSessionRepository):
     """AgentSession repository double for one purge subtree."""
 
     def __init__(self, sessions: list[AgentSession], events: list[str]) -> None:
@@ -374,7 +385,7 @@ class _AgentSessionRepository:
         self.deleted = True
 
 
-class _LifecycleFinalizerRepository:
+class _LifecycleFinalizerRepository(SessionLifecycleFinalizerRepository):
     """Finalizer repository double that records the root-tree boundary."""
 
     def __init__(self, agent_session_repository: _AgentSessionRepository) -> None:
@@ -393,7 +404,7 @@ class _LifecycleFinalizerRepository:
         await self.agent_session_repository.delete_by_id(session, root_session_id)
 
 
-class _AgentRunRepository:
+class _AgentRunRepository(AgentRunRepository):
     """AgentRun activity repository double."""
 
     def __init__(self, active_checks: Sequence[bool]) -> None:
@@ -409,7 +420,7 @@ class _AgentRunRepository:
         return self.active_checks.pop(0) if self.active_checks else False
 
 
-class _ModelFileRepository:
+class _ModelFileRepository(ModelFileRepository):
     """ModelFile lifecycle repository double."""
 
     def __init__(
@@ -478,7 +489,7 @@ class _ModelFileRepository:
         return len(deleted)
 
 
-class _ArtifactRepository:
+class _ArtifactRepository(ArtifactRepository):
     """Artifact lifecycle repository double."""
 
     def __init__(self, artifacts: list[Artifact], events: list[str]) -> None:
@@ -538,7 +549,7 @@ class _ArtifactRepository:
         return len(deleted)
 
 
-class _ExchangeFileRepository:
+class _ExchangeFileRepository(ExchangeFileRepository):
     """ExchangeFile lifecycle repository double."""
 
     def __init__(self, files: list[ExchangeFile], events: list[str]) -> None:
@@ -627,14 +638,14 @@ class _WorktreeService:
         return self.count
 
 
-class _Broker:
+class _Broker(SessionBroker):
     """Session broker cleanup double."""
 
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.purged_session_ids: list[str] = []
 
-    async def send_message(self, message: SessionStopSignal) -> None:
+    async def send_message(self, message: BrokerMessage) -> None:
         self.events.append(f"signal:{message.session_id}")
 
     async def purge_session_state(self, session_id: str) -> None:
@@ -642,7 +653,7 @@ class _Broker:
         self.purged_session_ids.append(session_id)
 
 
-class _S3Service:
+class _S3Service(S3Service):
     """Object deletion double."""
 
     def __init__(self, events: list[str], *, fail_key: str | None = None) -> None:
@@ -659,65 +670,88 @@ class _S3Service:
         self.deleted_keys.append(key)
 
 
-class _ExternalChannelLifecycleService:
-    """External Channel lifecycle double that records durable phase dispatch."""
+class _ExternalPurgeCleanup(ExternalChannelPurgeCleanup):
+    phase: str
+
+
+class _ExternalPurgeVerification(ExternalChannelPurgeVerification):
+    phase: str
+
+
+class _ExternalChannelLifecycleService(ExternalChannelLifecycleService):
+    """Typed lifecycle fake with observable durable phase dispatch."""
 
     def __init__(self, *, fail_phase: str | None = None) -> None:
-        """Initialize optional one-shot participant failure."""
         self.calls: list[str] = []
         self.fail_phase = fail_phase
 
-    async def prepare_purge_participant(
-        self,
-        session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Record preparation without a provider operation."""
-        del session, participant, context
-        return self._summary("prepared")
-
-    async def cleanup_purge_participant(
-        self,
-        session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Record cleanup without a provider operation."""
-        del session, participant, context
-        return self._summary("cleanup")
-
-    async def verify_purge_participant(
-        self,
-        session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Record verification without a provider operation."""
-        del session, participant, context
-        return self._summary("verified")
-
-    async def finalize_purge_participant(
-        self,
-        session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Record the final absence recheck before Session deletion."""
-        del session, participant, context
-        return self._summary("finalized")
-
-    def _summary(self, phase: str) -> SimpleNamespace:
-        """Return a minimal lifecycle summary compatible with Pydantic records."""
+    def _record(self, phase: str) -> None:
         self.calls.append(phase)
         if self.fail_phase == phase:
             self.fail_phase = None
             raise RuntimeError(f"external lifecycle {phase} failed")
-        return SimpleNamespace(model_dump=lambda: {"phase": phase})
+
+    async def prepare_purge_participant(
+        self,
+        session: AsyncSession,
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> None:
+        del session, definition, context
+        self._record("prepared")
+
+    async def cleanup_purge_participant(
+        self,
+        session: AsyncSession,
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ExternalChannelPurgeCleanup:
+        del session, definition, context
+        self._record("cleanup")
+        return _ExternalPurgeCleanup(
+            phase="cleanup",
+            deleted_session_grant_count=0,
+            preserved_agent_grant_reference_count=0,
+            deleted_access_request_count=0,
+            deleted_work_count=0,
+            deleted_binding_count=0,
+        )
+
+    async def verify_purge_participant(
+        self,
+        session: AsyncSession,
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ExternalChannelPurgeVerification:
+        del session, definition, context
+        self._record("verified")
+        return _ExternalPurgeVerification(
+            phase="verified",
+            remaining_binding_count=0,
+            remaining_work_count=0,
+            remaining_access_request_count=0,
+            remaining_session_grant_count=0,
+        )
+
+    async def finalize_purge_participant(
+        self,
+        session: AsyncSession,
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ExternalChannelPurgeVerification:
+        del session, definition, context
+        self._record("finalized")
+        return _ExternalPurgeVerification(
+            phase="finalized",
+            remaining_binding_count=0,
+            remaining_work_count=0,
+            remaining_access_request_count=0,
+            remaining_session_grant_count=0,
+        )
 
 
-class _ScheduledTaskLifecycleService:
-    """Scheduled Task lifecycle double for purge participant dispatch."""
+class _ScheduledTaskLifecycleService(ScheduledTaskLifecycleService):
+    """Typed Scheduled Task lifecycle fake returning declared count records."""
 
     def __init__(self, *, allows_active_runs: bool = False) -> None:
         self.allows_active_runs = allows_active_runs
@@ -730,58 +764,60 @@ class _ScheduledTaskLifecycleService:
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
     ) -> bool:
-        """Keep existing ordinary active-run stop behavior in baseline tests."""
         del session, session_ids, running_session_ids
         return self.allows_active_runs
 
     async def prepare_purge_participant(
         self,
         session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Return one prepared summary."""
-        del session, participant, context
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ScheduledTaskLifecycleVerification:
+        del session, definition, context
         self.calls.append("prepared")
-        return SimpleNamespace(phase="prepared")
+        return ScheduledTaskLifecycleVerification(
+            task_count=0, trigger_count=0, admitted_cycle_count=0, started_cycle_count=0
+        )
 
     async def cleanup_purge_participant(
         self,
         session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Return one cleanup summary."""
-        del session, participant, context
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ScheduledTaskLifecycleCleanup:
+        del session, definition, context
         self.calls.append("cleanup")
-        return SimpleNamespace(phase="cleanup")
+        return ScheduledTaskLifecycleCleanup(
+            deleted_task_count=0,
+            deleted_admitted_cycle_count=0,
+            deleted_trigger_count=0,
+            preserved_started_cycle_count=0,
+            cleanup_plans=(),
+        )
 
     async def verify_purge_participant(
         self,
         session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Return one verification summary."""
-        del session, participant, context
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ScheduledTaskLifecycleVerification:
+        del session, definition, context
         self.calls.append("verified")
-        return SimpleNamespace(phase="verified")
+        return ScheduledTaskLifecycleVerification(
+            task_count=0, trigger_count=0, admitted_cycle_count=0, started_cycle_count=0
+        )
 
     async def finalize_purge_participant(
         self,
         session: AsyncSession,
-        participant: object,
-        context: object,
-    ) -> SimpleNamespace:
-        """Return one final verification summary."""
-        del session, participant, context
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecyclePurgeContext,
+    ) -> ScheduledTaskLifecycleVerification:
+        del session, definition, context
         self.calls.append("finalized")
-        return SimpleNamespace(phase="finalized")
-
-    @staticmethod
-    def summary_dict(summary: SimpleNamespace) -> dict[str, object]:
-        """Project a durable summary."""
-        return {"phase": summary.phase}
+        return ScheduledTaskLifecycleVerification(
+            task_count=0, trigger_count=0, admitted_cycle_count=0, started_cycle_count=0
+        )
 
 
 def _job(now: datetime.datetime) -> ArchivedSessionPurgeJob:
@@ -972,45 +1008,33 @@ def _build_service(
         fail_phase=external_lifecycle_fail_phase,
     )
     service = ArchivedSessionPurgeService(
-        session_manager=cast(SessionManager[AsyncSession], _session_manager),
-        retention_repository=cast(
-            ArchivedSessionRetentionRepository,
-            retention_repository,
+        session_manager=_session_manager,
+        retention_repository=retention_repository,
+        agent_session_repository=agent_session_repository,
+        agent_run_repository=_AgentRunRepository(active_checks),
+        model_file_repository=model_file_repository,
+        artifact_repository=artifact_repository,
+        exchange_file_repository=exchange_file_repository,
+        lifecycle_finalizer_repository=_LifecycleFinalizerRepository(
+            agent_session_repository
         ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        agent_run_repository=cast(
-            AgentRunRepository,
-            _AgentRunRepository(active_checks),
-        ),
-        model_file_repository=cast(ModelFileRepository, model_file_repository),
-        artifact_repository=cast(ArtifactRepository, artifact_repository),
-        exchange_file_repository=cast(
-            ExchangeFileRepository,
-            exchange_file_repository,
-        ),
-        lifecycle_finalizer_repository=cast(
-            SessionLifecycleFinalizerRepository,
-            _LifecycleFinalizerRepository(agent_session_repository),
-        ),
-        broker=cast(SessionBroker, broker),
-        s3_service=cast(S3Service, s3_service),
-        config=cast(
-            Config,
-            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
+        broker=broker,
+        s3_service=s3_service,
+        config=Config.from_settings(
+            Settings(
+                _env_file=None,
+                rdb_host="unused",
+                rdb_user="unused",
+                rdb_db_name="unused",
+                auth_jwt_secret_key="test-secret-key-for-purge",
+                credential_encryption_key="unused",
+                workspace_s3_bucket="test-bucket",
+            )
         ),
         lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
-        external_channel_lifecycle_service=cast(
-            ExternalChannelLifecycleService,
-            external_channel_lifecycle_service,
-        ),
-        scheduled_task_lifecycle_service=cast(
-            ScheduledTaskLifecycleService,
-            _ScheduledTaskLifecycleService(
-                allows_active_runs=scheduled_allows_active_runs
-            ),
+        external_channel_lifecycle_service=external_channel_lifecycle_service,
+        scheduled_task_lifecycle_service=_ScheduledTaskLifecycleService(
+            allows_active_runs=scheduled_allows_active_runs
         ),
     )
     return _ArchivedSessionPurgeFixture(
@@ -1085,10 +1109,8 @@ async def test_existing_purge_snapshot_is_not_expanded_after_registry_growth() -
         if participant.key != "session.external-channel"
     ]
     retention_repository.preserve_participant_executions = True
-    external_lifecycle_service = cast(
-        _ExternalChannelLifecycleService,
-        service.external_channel_lifecycle_service,
-    )
+    external_lifecycle_service = service.external_channel_lifecycle_service
+    assert isinstance(external_lifecycle_service, _ExternalChannelLifecycleService)
 
     summary = await service.purge_once(
         lease_owner="worker-1",
@@ -1131,10 +1153,8 @@ async def test_purge_snapshot_with_missing_dependency_retries_before_cleanup() -
         )
     ]
     retention_repository.preserve_participant_executions = True
-    external_lifecycle_service = cast(
-        _ExternalChannelLifecycleService,
-        service.external_channel_lifecycle_service,
-    )
+    external_lifecycle_service = service.external_channel_lifecycle_service
+    assert isinstance(external_lifecycle_service, _ExternalChannelLifecycleService)
 
     summary = await service.purge_once(
         lease_owner="worker-1",
@@ -1261,10 +1281,8 @@ async def test_purge_checkpoints_external_channel_participant_phases() -> None:
         events=events,
         active_checks=[False, False],
     )
-    external_lifecycle_service = cast(
-        _ExternalChannelLifecycleService,
-        service.external_channel_lifecycle_service,
-    )
+    external_lifecycle_service = service.external_channel_lifecycle_service
+    assert isinstance(external_lifecycle_service, _ExternalChannelLifecycleService)
 
     summary = await service.purge_once(
         lease_owner="worker-1",
@@ -1284,7 +1302,13 @@ async def test_purge_checkpoints_external_channel_participant_phases() -> None:
         if execution.participant_key == "session.external-channel"
     )
     assert external_execution.phase is ArchivedSessionPurgeParticipantPhase.VERIFIED
-    assert external_execution.operational_summary == {"phase": "verified"}
+    assert external_execution.operational_summary == {
+        "phase": "verified",
+        "remaining_binding_count": 0,
+        "remaining_work_count": 0,
+        "remaining_access_request_count": 0,
+        "remaining_session_grant_count": 0,
+    }
 
 
 async def test_external_channel_purge_failure_is_attributed_for_retry() -> None:

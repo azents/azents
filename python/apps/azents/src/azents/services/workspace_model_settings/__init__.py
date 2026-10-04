@@ -69,10 +69,10 @@ class WorkspaceModelSettingsService:
         current = await self.repository.get(workspace_id)
 
         model_options: NormalizedSelectableModelOptions | None = None
-        if (
-            "default_selectable_model_options" in update.model_fields_set
-            and update.default_selectable_model_options is None
-        ):
+        option_inputs = update.get("default_selectable_model_options")
+        main_model_label = update.get("default_main_model_label")
+        lightweight_model_label = update.get("default_lightweight_model_label")
+        if "default_selectable_model_options" in update and option_inputs is None:
             if (
                 current is not None
                 and current.default_selectable_model_options is not None
@@ -80,12 +80,12 @@ class WorkspaceModelSettingsService:
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             current_or_empty = await self.repository.get_or_create(workspace_id)
             return Success(self._build_output_from_settings(current_or_empty))
-        if update.default_selectable_model_options is not None:
+        if option_inputs is not None:
             options_result = await self._normalize_option_inputs(
                 workspace_id,
-                update.default_selectable_model_options,
-                main_model_label=update.default_main_model_label,
-                lightweight_model_label=update.default_lightweight_model_label,
+                option_inputs,
+                main_model_label=main_model_label,
+                lightweight_model_label=lightweight_model_label,
             )
             match options_result:
                 case Success(value):
@@ -94,16 +94,15 @@ class WorkspaceModelSettingsService:
                     return Failure(error)
                 case _:
                     assert_never(options_result)
-        elif "default_main_model_label" in update.model_fields_set or (
-            "default_lightweight_model_label" in update.model_fields_set
+        elif "default_main_model_label" in update or (
+            "default_lightweight_model_label" in update
         ):
             if current is None or current.default_selectable_model_options is None:
                 return Failure(DefaultModelCannotBeCleared(workspace_id=workspace_id))
             model_options = normalize_stored_selectable_model_options(
                 selectable_model_options=current.default_selectable_model_options,
-                main_model_label=update.default_main_model_label
-                or current.default_main_model_label,
-                lightweight_model_label=update.default_lightweight_model_label
+                main_model_label=main_model_label or current.default_main_model_label,
+                lightweight_model_label=lightweight_model_label
                 or current.default_lightweight_model_label,
             )
 

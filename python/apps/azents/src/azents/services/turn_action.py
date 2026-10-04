@@ -394,6 +394,7 @@ class TurnActionCapabilityRegistry:
                 except (VfsFileResolutionError, ValueError) as exc:
                     logger.warning(
                         "Managed Skill action resolution failed",
+                        exc_info=True,
                         extra={
                             "agent_id": context.agent_id,
                             "session_id": context.session_id,

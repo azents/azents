@@ -3,18 +3,20 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelPrincipalAuthorType,
+    ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
     ExternalChannelSetupClaimStatus,
 )
 from azents.core.external_channel_selector_state import (
@@ -22,15 +24,18 @@ from azents.core.external_channel_selector_state import (
     projection_with_selector_state,
     selector_state_from_interaction,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
+    ExternalChannelAccessGrant,
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
+    ExternalChannelBlock,
     ExternalChannelCatalogRoute,
+    ExternalChannelChannelDefault,
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnection,
     ExternalChannelInteraction,
     ExternalChannelPrincipal,
+    ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -43,8 +48,9 @@ from azents.services.external_channel.selector import (
 _NOW = datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)
 
 
-class _Session:
+class _Session(AsyncSession):
     def __init__(self) -> None:
+        super().__init__()
         self.committed = False
 
     async def commit(self) -> None:
@@ -87,7 +93,7 @@ def _selector(
     )
 
 
-class _Repository:
+class _Repository(ExternalChannelRepository):
     def __init__(
         self,
         *,
@@ -97,6 +103,7 @@ class _Repository:
             ExternalChannelConnectionStatus.ACTIVE
         ),
     ) -> None:
+        super().__init__()
         self.rows = rows
         self.binding = binding
         self.selector = _selector()
@@ -183,11 +190,25 @@ class _Repository:
         agent_id: str,
         principal_id: str,
         agent_session_id: str | None,
-    ) -> object | None:
+    ) -> ExternalChannelAccessGrant | None:
         del session
         assert principal_id == "principal-1"
         assert agent_session_id is None
-        return object() if agent_id in self.granted_agents else None
+        if agent_id not in self.granted_agents:
+            return None
+        return ExternalChannelAccessGrant(
+            id="grant-1",
+            agent_id=agent_id,
+            principal_id=principal_id,
+            scope=ExternalChannelAccessGrantScope.AGENT,
+            agent_session_id=agent_session_id,
+            granted_by_user_id="user-1",
+            source_access_request_id=None,
+            revoked_by_user_id=None,
+            revoked_at=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
 
     async def lock_connection_for_routing(
         self,
@@ -212,16 +233,25 @@ class _Repository:
         session: AsyncSession,
         *,
         resource_id: str,
-    ) -> object | None:
+    ) -> ExternalChannelResource | None:
         del session
         self.calls.append("resource_lock")
         if resource_id != "resource-1":
             return None
-        return type(
-            "Resource",
-            (),
-            {"id": "resource-1", "connection_id": "connection-1"},
-        )()
+        return ExternalChannelResource(
+            id=resource_id,
+            connection_id="connection-1",
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key=resource_id,
+            labels=None,
+            status=ExternalChannelResourceStatus.ACTIVE,
+            discovered_at=_NOW,
+            latest_activity_at=_NOW,
+            unavailable_at=None,
+            deleted_at=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
 
     async def lock_connected_binding_by_resource(
         self,
@@ -263,11 +293,18 @@ class _Repository:
         self,
         session: AsyncSession,
         create: ExternalChannelChannelDefaultCreate,
-    ) -> object:
+    ) -> ExternalChannelChannelDefault:
         del session
         self.calls.append("channel_default_create")
         self.created_default = create
-        return object()
+        return ExternalChannelChannelDefault.model_validate(
+            {
+                **create.model_dump(),
+                "id": "default-1",
+                "created_at": _NOW,
+                "updated_at": _NOW,
+            }
+        )
 
     async def assign_setup_claim_route(
         self,
@@ -300,11 +337,23 @@ class _Repository:
         *,
         agent_id: str,
         principal_id: str,
-    ) -> object | None:
+    ) -> ExternalChannelBlock | None:
         del session
         self.calls.append("block")
         assert principal_id == "principal-1"
-        return object() if agent_id in self.blocked_agents else None
+        if agent_id not in self.blocked_agents:
+            return None
+        return ExternalChannelBlock(
+            id="block-1",
+            agent_id=agent_id,
+            principal_id=principal_id,
+            blocked_by_user_id="user-1",
+            reason=None,
+            removed_by_user_id=None,
+            removed_at=None,
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
 
     async def replace_interaction_projection(
         self,
@@ -328,7 +377,7 @@ class _Repository:
         status: ExternalChannelInteractionStatus,
         error_kind: str | None,
         error_summary: str | None,
-        transitioned_at: datetime.datetime,
+        transitioned_at: datetime.datetime | None = None,
     ) -> ExternalChannelInteraction | None:
         del session, error_kind, error_summary, transitioned_at
         self.calls.append("interaction_transition")
@@ -343,11 +392,11 @@ def _service(
 ) -> ExternalChannelSelectorService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+        yield session
 
     return ExternalChannelSelectorService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
+        session_manager=session_manager,
+        repository=repository,
     )
 
 

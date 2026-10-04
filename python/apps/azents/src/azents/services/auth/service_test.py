@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -68,6 +69,17 @@ _TEST_AUTH_CONFIG = AuthConfig(
     ),
     signup_token=SignupTokenConfig(default_expire_hours=168, default_max_uses=1),
 )
+
+
+class _SessionTokens(NamedTuple):
+    access_token: str
+    refresh_token: str
+
+
+class _AuthenticatedSession(NamedTuple):
+    service: AuthService
+    session_id: str
+    refresh_token: str
 
 
 def _make_email_service() -> EmailService:
@@ -438,8 +450,8 @@ class TestAuthServiceRefreshToken:
 
     async def _create_session(
         self, service: AuthService, session_manager: SessionManager[AsyncSession]
-    ) -> tuple[str, str]:
-        """Create session for tests and return (access_token, refresh_token)."""
+    ) -> _SessionTokens:
+        """Create an explicit token pair for session tests."""
         email = f"refresh-{id(self)}@example.com"
         async with session_manager() as session:
             await UserRepository().create(session, UserCreate(email=email))
@@ -459,7 +471,10 @@ class TestAuthServiceRefreshToken:
             )
         )
         assert isinstance(result, Success)
-        return result.value.access_token, result.value.refresh_token
+        return _SessionTokens(
+            access_token=result.value.access_token,
+            refresh_token=result.value.refresh_token,
+        )
 
     async def test_refresh_token(
         self,
@@ -470,7 +485,8 @@ class TestAuthServiceRefreshToken:
         # Given: create session
         observed_session_manager = _ObservedSessionManager(rdb_session_manager)
         service = _make_auth_service(observed_session_manager)
-        _, refresh_token = await self._create_session(service, rdb_session_manager)
+        tokens = await self._create_session(service, rdb_session_manager)
+        refresh_token = tokens.refresh_token
         generate_token = Mock(return_value="unused-candidate-token")
         create_token = Mock(return_value="refreshed-access-token")
 
@@ -526,7 +542,7 @@ class TestAuthServiceLogout:
     @pytest.fixture
     async def session_with_tokens(
         self, rdb_session_manager: SessionManager[AsyncSession]
-    ) -> tuple[AuthService, str, str]:
+    ) -> _AuthenticatedSession:
         """Return AuthService with created session + session_id + refresh_token."""
         service = _make_auth_service(rdb_session_manager)
         email = "logout-test@example.com"
@@ -554,16 +570,22 @@ class TestAuthServiceLogout:
             config=_TEST_AUTH_CONFIG.jwt,
             token=result.value.access_token,
         )
-        return service, payload.session_id, result.value.refresh_token
+        return _AuthenticatedSession(
+            service=service,
+            session_id=payload.session_id,
+            refresh_token=result.value.refresh_token,
+        )
 
     async def test_logout(
         self,
-        session_with_tokens: tuple[AuthService, str, str],
+        session_with_tokens: _AuthenticatedSession,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
         """Revoke session."""
         # Given: valid session
-        service, session_id, refresh_token = session_with_tokens
+        service = session_with_tokens.service
+        session_id = session_with_tokens.session_id
+        refresh_token = session_with_tokens.refresh_token
         service.terminal_invalidation_publisher = AsyncMock()
 
         # When: logout

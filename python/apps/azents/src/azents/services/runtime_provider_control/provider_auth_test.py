@@ -5,7 +5,7 @@ import datetime
 import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -480,3 +480,91 @@ async def test_kubernetes_verifier_rejects_concurrent_binding_revocation() -> No
         match="binding_unavailable",
     ):
         await verifier.verify(secret="service-account-token", now=_NOW)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        None,
+        {},
+        {
+            "namespace": "azents-runtime",
+            "service_account_name": "provider",
+        },
+        {
+            "audience": "azents-runtime-control",
+            "namespace": 1,
+            "service_account_name": "provider",
+        },
+        {
+            "audience": "azents-runtime-control",
+            "namespace": "azents-runtime",
+            "service_account_name": None,
+        },
+    ],
+)
+async def test_kubernetes_binding_payload_fails_closed_before_provider_read(
+    config: dict[str, object] | None,
+) -> None:
+    """Consumed configuration fields are required strings, not generic fallbacks."""
+    session = AsyncMock(spec=AsyncSession)
+    bindings = AsyncMock(spec=RuntimeProviderAuthBindingRepository)
+    providers = AsyncMock(spec=RuntimeProviderRepository)
+    bindings.get_active_by_subject.return_value = replace(
+        _kubernetes_binding(), config=config
+    )
+    verifier = KubernetesServiceAccountProviderAuthVerifier(
+        session_manager=_session_manager(session),
+        provider_repository=providers,
+        binding_repository=bindings,
+        token_reviewer=_TokenReviewer(
+            KubernetesServiceAccountTokenReview(
+                authenticated=True,
+                username=_SUBJECT,
+                audiences=frozenset({"azents-runtime-control"}),
+                evidence_expires_at=_NOW + datetime.timedelta(minutes=5),
+            )
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeProviderCredentialUnavailable, match="binding_unavailable"
+    ):
+        await verifier.verify(secret="service-account-token", now=_NOW)
+    providers.get_by_id.assert_not_awaited()
+    bindings.mark_authenticated.assert_not_awaited()
+
+
+async def test_kubernetes_binding_payload_retains_unconsumed_extension_fields() -> None:
+    """The typed decoder preserves the original unknown-field compatibility."""
+    session = AsyncMock(spec=AsyncSession)
+    bindings = AsyncMock(spec=RuntimeProviderAuthBindingRepository)
+    providers = AsyncMock(spec=RuntimeProviderRepository)
+    bindings.get_active_by_subject.return_value = replace(
+        _kubernetes_binding(),
+        config={
+            "audience": "azents-runtime-control",
+            "namespace": "azents-runtime",
+            "service_account_name": "provider",
+            "provider_extension": {"opaque": True},
+        },
+    )
+    bindings.mark_authenticated.return_value = True
+    providers.get_by_id.return_value = _kubernetes_provider()
+    verifier = KubernetesServiceAccountProviderAuthVerifier(
+        session_manager=_session_manager(session),
+        provider_repository=providers,
+        binding_repository=bindings,
+        token_reviewer=_TokenReviewer(
+            KubernetesServiceAccountTokenReview(
+                authenticated=True,
+                username=_SUBJECT,
+                audiences=frozenset({"azents-runtime-control"}),
+                evidence_expires_at=_NOW + datetime.timedelta(minutes=5),
+            )
+        ),
+    )
+
+    result = await verifier.verify(secret="service-account-token", now=_NOW)
+    assert result.auth_subject == _SUBJECT
+    bindings.mark_authenticated.assert_awaited_once()

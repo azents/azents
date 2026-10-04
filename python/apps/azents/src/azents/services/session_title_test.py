@@ -661,6 +661,7 @@ class TestSessionTitleHelpers:
     async def test_retry_after_transition_stays_in_plain_text_mode(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """A transient failure after transition retries only plain text."""
         calls: list[dict[str, object]] = []
@@ -717,6 +718,23 @@ class TestSessionTitleHelpers:
             TitleOutputMode.PLAIN_TEXT,
         ]
         assert [call["attempt_number"] for call in calls] == [1, 1, 2]
+        records = [
+            record
+            for record in caplog.records
+            if record.name == session_title_module.logger.name
+        ]
+        assert [record.__dict__["title_output_mode"] for record in records] == [
+            "structured",
+            "plain_text",
+        ]
+        assert all(
+            record.__dict__["title_output_mode_transitioned"] for record in records
+        )
+        assert all(record.__dict__["session_id"] == "session-001" for record in records)
+        assert all(record.__dict__["agent_id"] == "agent-001" for record in records)
+        assert all(record.__dict__["provider"] == "openai" for record in records)
+        assert all(record.__dict__["model"] == "gpt-test" for record in records)
+        assert all(record.exc_info is not None for record in records)
 
     @pytest.mark.parametrize("capability", [True, None])
     async def test_schema_decode_fallback_is_unknown_only(
@@ -918,6 +936,10 @@ class TestSessionTitleHelpers:
         assert fields["provider_failure_message"] == "Stream must be set to true"
         assert fields["provider_failure_fingerprint"] == failure.fingerprint
         assert fields["provider_failure_retry_outcome"] == "exhausted"
+        assert fields["provider"] == "openai"
+        # Bound selection context remains distinct from provider error diagnostics.
+        assert fields["model"] == "gpt-test"
+        assert records[0].exc_info is not None
 
     async def test_generate_title_propagates_unclassified_provider_failure(
         self,

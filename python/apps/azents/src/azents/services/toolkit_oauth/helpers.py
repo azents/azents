@@ -1,7 +1,6 @@
 """Canonical pure projections and external helpers for Toolkit OAuth setup."""
 
 import json
-import logging
 from collections.abc import Mapping, Sequence
 from typing import Any, NamedTuple
 
@@ -40,7 +39,6 @@ from azents.services.toolkit_oauth.data import (
     ToolkitOAuthFailureReason,
 )
 
-logger = logging.getLogger(__name__)
 _OAuthSecretsUnion = McpSecretsOAuth2 | McpSecretsOAuth2Token | McpSecretsOAuth2Dcr
 _oauth_secrets_adapter = TypeAdapter[_OAuthSecretsUnion](_OAuthSecretsUnion)
 _credentials_adapter = TypeAdapter(dict[str, object])
@@ -154,11 +152,6 @@ async def exchange_and_handle_errors(
             f"Token exchange failed: {exc}",
         ) from exc
     except ValidationError as exc:
-        logger.warning(
-            "Invalid token response from provider",
-            extra={"toolkit_id": toolkit_id, "user_id": user_id},
-            exc_info=True,
-        )
         raise ToolkitOAuthError(
             ToolkitOAuthFailureReason.TOKEN_REJECTED,
             f"Invalid token response from provider: {exc}",

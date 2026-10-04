@@ -15,7 +15,7 @@ from io import BytesIO
 from typing import ClassVar
 
 from azcommon.infra.s3.service import S3Service
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 from azents.services.uploads import UploadValidationError
 from azents.services.uploads.schema import (
@@ -61,7 +61,7 @@ class AvatarUploadHandler:
         try:
             img = Image.open(BytesIO(body))
             img.load()
-        except Exception as err:
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as err:
             raise UploadValidationError("invalid image bytes") from err
 
         if img.width != img.height:

@@ -651,13 +651,13 @@ class AgentWorkspaceFileService:
         *,
         config: Annotated[Config, Depends(get_config)],
     ) -> None:
-        self._agent_repository = agent_repository
-        self._workspace_user_repository = workspace_user_repository
-        self._runner_operations = runner_operations
-        self._runtime_target_resolver = runtime_target_resolver
-        self._session_manager = session_manager
+        self.agent_repository = agent_repository
+        self.workspace_user_repository = workspace_user_repository
+        self.runner_operations = runner_operations
+        self.runtime_target_resolver = runtime_target_resolver
+        self.session_manager = session_manager
         self._runner_file_operation_timeout = runner_file_operation_timeout
-        self._runtime_workspace_download_service = runtime_workspace_download_service
+        self.runtime_workspace_download_service = runtime_workspace_download_service
         self.config = config
 
     async def get_workspace(
@@ -675,7 +675,7 @@ class AgentWorkspaceFileService:
             case _:
                 assert_never(access_result)
 
-        snapshot = await self._runtime_target_resolver.get_lifecycle_snapshot(agent.id)
+        snapshot = await self.runtime_target_resolver.get_lifecycle_snapshot(agent.id)
         return await self._workspace_panel_state(
             agent,
             snapshot=snapshot,
@@ -690,9 +690,9 @@ class AgentWorkspaceFileService:
     ) -> Result[Agent, AgentWorkspaceError]:
         """Fetch Agent and check workspace membership."""
         result = await AgentWorkspaceAccessRepository(
-            session_manager=self._session_manager,
-            agent_repository=self._agent_repository,
-            workspace_user_repository=self._workspace_user_repository,
+            session_manager=self.session_manager,
+            agent_repository=self.agent_repository,
+            workspace_user_repository=self.workspace_user_repository,
         ).get_agent_for_user(
             agent_id,
             user_id=user_id,
@@ -822,7 +822,7 @@ class AgentWorkspaceFileService:
                 reason="RUNTIME_NOT_RUNNING",
             )
         try:
-            runtime = await self._runtime_target_resolver.resolve_operation_target(
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent.id,
                 wait_timeout_seconds=0.0,
                 start_if_stopped=False,
@@ -1041,7 +1041,7 @@ class AgentWorkspaceFileService:
                 )
             )
         try:
-            result = await self._runner_operations.mkdir_file(
+            result = await self.runner_operations.mkdir_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1083,7 +1083,7 @@ class AgentWorkspaceFileService:
                 )
             )
         try:
-            result = await self._runner_operations.delete_file(
+            result = await self.runner_operations.delete_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1141,7 +1141,7 @@ class AgentWorkspaceFileService:
                 )
             )
         try:
-            result = await self._runner_operations.move_file(
+            result = await self.runner_operations.move_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1205,7 +1205,7 @@ class AgentWorkspaceFileService:
                 AgentWorkspaceInvalidOperation(detail="At least one path is required.")
             )
         try:
-            result = await self._runner_operations.bulk_delete_files(
+            result = await self.runner_operations.bulk_delete_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1269,7 +1269,7 @@ class AgentWorkspaceFileService:
                 )
             )
         try:
-            result = await self._runner_operations.bulk_move_files(
+            result = await self.runner_operations.bulk_move_files(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
@@ -1344,7 +1344,7 @@ class AgentWorkspaceFileService:
                     size=stat.size_bytes, limit=self.config.general_file_maximum_bytes
                 )
             )
-        service = self._runtime_workspace_download_service
+        service = self.runtime_workspace_download_service
         if service is None:
             return Failure(
                 AgentWorkspaceFileReadError(
@@ -1464,7 +1464,7 @@ class AgentWorkspaceFileService:
                 assert_never(access_result)
 
         try:
-            runtime = await self._runtime_target_resolver.resolve_operation_target(
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent.id
             )
         except RuntimeStorageError as error:
@@ -1561,7 +1561,7 @@ class AgentWorkspaceFileService:
         """Stat a path through the active Runtime Runner."""
         try:
             return Success(
-                await self._runner_operations.stat_file(
+                await self.runner_operations.stat_file(
                     runtime_id=runtime.id,
                     runner_generation=runtime.runner_generation,
                     owner_session_id=None,
@@ -1586,7 +1586,7 @@ class AgentWorkspaceFileService:
         """List files through the active Runtime Runner."""
         try:
             return Success(
-                await self._runner_operations.list_files(
+                await self.runner_operations.list_files(
                     runtime_id=runtime.id,
                     runner_generation=runtime.runner_generation,
                     owner_session_id=None,
@@ -1613,7 +1613,7 @@ class AgentWorkspaceFileService:
     ) -> Result[RuntimeFileTextReadResult, AgentWorkspaceError]:
         """Read bounded decoded preview characters through the active Runner."""
         try:
-            result = await self._runner_operations.read_text_file(
+            result = await self.runner_operations.read_text_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,

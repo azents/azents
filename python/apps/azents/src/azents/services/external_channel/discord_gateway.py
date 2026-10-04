@@ -15,6 +15,7 @@ from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
     project_discord_sdk_gateway_message,
 )
+from azents.utils.logging import sanitized_exception_info
 
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
 _TYPING_RECONCILE_INTERVAL_SECONDS = 5.0
@@ -338,6 +339,9 @@ class _DiscordGatewayTypingRuntime:
             self.error = DiscordGatewayError("Discord typing target processing failed.")
             logger.warning(
                 "Discord typing target processing failed.",
+                exc_info=sanitized_exception_info(
+                    error, message="Discord typing failure details redacted."
+                ),
                 extra={"error_type": type(error).__name__},
             )
             await self._deactivate()
@@ -406,10 +410,14 @@ class _DiscordGatewayTypingRuntime:
                 await channel.typing()
             except asyncio.CancelledError:
                 raise
-            except discord.HTTPException, OSError:
+            except (discord.HTTPException, OSError) as error:
                 retry = True
                 logger.warning(
                     "Discord typing refresh failed.",
+                    exc_info=sanitized_exception_info(
+                        error,
+                        message="Discord typing refresh failure details redacted.",
+                    ),
                     extra={
                         "discord_guild_id": target.guild_id,
                         "discord_channel_id": target.channel_id,
