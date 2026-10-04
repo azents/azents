@@ -7,7 +7,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession, AgentSessionCreate
 from azents.core.agent_session_input_data import (
@@ -65,6 +64,7 @@ from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     ActiveProfileCaptureRequired,
@@ -153,7 +153,7 @@ class AgentSessionInputOperationsRepository:
         ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def create_buffered_agent_input(
@@ -402,7 +402,7 @@ class AgentSessionInputOperationsRepository:
                         case Success():
                             pass
                         case Failure(error):
-                            await session.rollback()
+                            await session.write_session.rollback()
                             return Failure(error)
                         case _:
                             assert_never(claim)
@@ -700,7 +700,7 @@ class AgentSessionInputOperationsRepository:
                         case Success(mailbox_item):
                             pass
                         case Failure(error):
-                            await session.rollback()
+                            await session.write_session.rollback()
                             return Failure(error)
                         case _:
                             assert_never(enqueue_result)
@@ -726,7 +726,7 @@ class AgentSessionInputOperationsRepository:
                             # Another creator won the Agent-scoped unique key.
                             # Discard the
                             # losing Session tree and return the durable winner.
-                            await session.rollback()
+                            await session.write_session.rollback()
                             return await self._resolve_existing_session_creation(
                                 session,
                                 agent_id=agent_id,
@@ -1006,7 +1006,7 @@ class AgentSessionInputOperationsRepository:
                         case Success(mailbox_item):
                             pass
                         case Failure(error):
-                            await session.rollback()
+                            await session.write_session.rollback()
                             return Failure(error)
                         case _:
                             assert_never(enqueue_result)
@@ -1032,7 +1032,7 @@ class AgentSessionInputOperationsRepository:
                             # Another creator won the Agent-scoped unique key.
                             # Discard the
                             # losing Session tree and return the durable winner.
-                            await session.rollback()
+                            await session.write_session.rollback()
                             return await self._resolve_existing_session_creation(
                                 session,
                                 agent_id=agent_id,
@@ -1070,7 +1070,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _enqueue_setup_actions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_session: AgentSession,
         workspace_items: list[NewSessionWorkspaceItem],
@@ -1152,7 +1152,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _enqueue_working_folder_adoption_if_needed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_session: AgentSession,
     ) -> None:
@@ -1203,7 +1203,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _enqueue_user_message(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_session: AgentSession,
         message: InputMessage,
@@ -1300,7 +1300,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _create_session_workspace_items(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1357,7 +1357,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _create_session_projects(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -1384,7 +1384,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _resolve_existing_session_creation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         user_id: str,
@@ -1492,7 +1492,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _reapply_existing_mailbox_wake(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         mailbox_item: MailboxItem | None,
     ) -> None:
         """Repair the Session transition for one replayed wake-producing item."""
@@ -1508,7 +1508,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _resolve_runtime_for_input(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         runtime_dependent: bool,
@@ -1538,7 +1538,7 @@ class AgentSessionInputOperationsRepository:
 
     async def _lock_workspace_access(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         user_id: str,

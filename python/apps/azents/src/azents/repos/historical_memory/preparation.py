@@ -6,7 +6,6 @@ from typing import Annotated
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     apply_to_options,
@@ -30,6 +29,7 @@ from azents.core.model_operation import (
 from azents.engine.run.provider_failure import ModelProviderFailure
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
@@ -58,7 +58,7 @@ class HistoricalMemoryPreparationRepository:
         ActiveModelCapabilitiesRepository, Depends(ActiveModelCapabilitiesRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
 
@@ -123,7 +123,7 @@ class HistoricalMemoryPreparationRepository:
                     failure_code="lightweight_option_unavailable",
                     operation=source.model_operation_state,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return None
             operation = source.model_operation_state
             metadata_repository = self.active_capabilities_repository
@@ -184,7 +184,7 @@ class HistoricalMemoryPreparationRepository:
                     failure_code="candidate_chain_exhausted",
                     operation=exc.operation,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return None
             if compiled is not None:
                 require_selection(
@@ -206,7 +206,7 @@ class HistoricalMemoryPreparationRepository:
                 attempted_at=attempted_at,
                 operation=selected.operation,
             )
-            await session.commit()
+            await session.write_session.commit()
             return prepared
 
     async def advance_after_quota(
@@ -288,7 +288,7 @@ class HistoricalMemoryPreparationRepository:
                     failure_code="candidate_chain_exhausted",
                     operation=exc.operation,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return None
             persist_operation = (
                 self.historical_repository.persist_preparation_operation_in_session
@@ -299,7 +299,7 @@ class HistoricalMemoryPreparationRepository:
                 attempted_at=attempted_at,
                 operation=selected.operation,
             )
-            await session.commit()
+            await session.write_session.commit()
             return prepared
 
     async def record_failure(
@@ -319,11 +319,11 @@ class HistoricalMemoryPreparationRepository:
                 failure_code=failure_code,
                 operation=source.model_operation_state,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _record_failure_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_session_id: str,
         failure_count: int,

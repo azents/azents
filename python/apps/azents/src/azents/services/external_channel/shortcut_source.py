@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -29,6 +28,7 @@ from azents.core.external_channel_selector_state import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConversationPosition,
@@ -66,7 +66,7 @@ class ExternalChannelShortcutSourceService:
     """Resolve a shortcut source and attach typed selector state to its interaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -220,7 +220,7 @@ class ExternalChannelShortcutSourceService:
                 resource_id=resource.id,
             )
             if binding is not None:
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelShortcutSourceMaterialization(
                     selector_interaction=None
                 )
@@ -262,7 +262,7 @@ class ExternalChannelShortcutSourceService:
                     trigger_position=normalized.provider_position,
                     now=now,
                 )
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelShortcutSourceMaterialization(
                     selector_interaction=selector
                 )
@@ -286,7 +286,7 @@ class ExternalChannelShortcutSourceService:
                 )
                 if existing_state != expected_state:
                     raise ValueError("Shortcut selector state is incompatible.")
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelShortcutSourceMaterialization(
                     selector_interaction=interaction
                 )
@@ -300,14 +300,14 @@ class ExternalChannelShortcutSourceService:
             )
             if updated is None:
                 raise RuntimeError("Shortcut interaction disappeared.")
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelShortcutSourceMaterialization(
                 selector_interaction=updated
             )
 
     async def _ensure_setup_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection: ExternalChannelConnection,
         interaction: ExternalChannelInteraction,
@@ -426,7 +426,7 @@ class ExternalChannelShortcutSourceService:
 
     async def _ensure_setup_selector(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection: ExternalChannelConnection,
         interaction: ExternalChannelInteraction,

@@ -6,11 +6,11 @@ from typing import NamedTuple
 
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.workspace import WorkspaceCreate
 from azents.core.xai_oauth import XaiOAuthConnectionMethod
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -29,7 +29,7 @@ class _OAuthSessionFixture(NamedTuple):
 
 
 async def _create_session(
-    session: AsyncSession,
+    session: WriteSession,
 ) -> _OAuthSessionFixture:
     """Create a pending xAI OAuth session for tests."""
     suffix = uuid.uuid4().hex[:12]
@@ -68,7 +68,7 @@ async def _create_session(
 
 
 async def test_increase_poll_interval_accumulates_slow_down(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Apply the RFC 8628 five-second increment on every slow_down."""
     repo, session_id = await _create_session(rdb_session)

@@ -5,7 +5,6 @@ import uuid
 
 from azcommon.result import Failure, Result, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
@@ -15,6 +14,7 @@ from azents.core.credentials import ChatGPTOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogPurpose, LLMCatalogScope, LLMProvider
 from azents.core.workspace import WorkspaceCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.chatgpt_oauth_session import ChatGPTOAuthSessionRepository
 from azents.repos.chatgpt_oauth_session.operations import ChatGPTOAuthOperations
 from azents.repos.llm_catalog import LLMCatalogRepository
@@ -41,13 +41,13 @@ _TEST_KEY = Fernet.generate_key().decode()
 class _SessionManager:
     """Expose single test DB session as context manager."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self._session = session
 
     def __call__(self) -> "_SessionManager":
         return self
 
-    async def __aenter__(self) -> AsyncSession:
+    async def __aenter__(self) -> WriteSession:
         return self._session
 
     async def __aexit__(self, *_args: object) -> None:
@@ -120,7 +120,7 @@ class _FakeClient(ChatGPTOAuthClient):
         return self.token_result
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(session: WriteSession) -> str:
     """Create workspace for tests."""
     suffix = uuid.uuid4().hex[:12]
     repo = WorkspaceRepository()
@@ -136,7 +136,7 @@ async def _create_workspace(session: AsyncSession) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession) -> str:
+async def _create_user(session: WriteSession) -> str:
     """Create user for tests."""
     email = f"chatgpt-oauth-service-{uuid.uuid4().hex}@example.com"
     user = await UserRepository().create(session, UserCreate(email=email))
@@ -144,7 +144,7 @@ async def _create_user(session: AsyncSession) -> str:
 
 
 def _make_service(
-    rdb_session: AsyncSession, fake_client: _FakeClient
+    rdb_session: WriteSession, fake_client: _FakeClient
 ) -> ChatGPTOAuthService:
     """Create service for tests."""
     cipher = CredentialCipher(_TEST_KEY)
@@ -163,7 +163,7 @@ class TestChatGPTOAuthService:
     """ChatGPTOAuthService tests."""
 
     async def test_device_start_pending_success_and_cancel(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Handle Device flow pending, success, and cancel states."""
         workspace_id = await _create_workspace(rdb_session)
@@ -218,7 +218,7 @@ class TestChatGPTOAuthService:
         assert cancelled.value.status == ChatGPTOAuthSessionStatus.CANCELLED
 
     async def test_reauthentication_preserves_existing_integration(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """A healthy connection can rotate credentials without changing its identity."""
         workspace_id = await _create_workspace(rdb_session)

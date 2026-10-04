@@ -11,6 +11,7 @@ from azents.core.enums import (
     AgentSessionRunState,
     SessionAgentKind,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.subagent_coordination.data import (
     SubagentCoordinationSnapshot,
     SubagentCoordinationSnapshotRow,
@@ -58,7 +59,7 @@ class _Repository(SubagentCoordinationRepository):
 
     async def project_root_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         current_session_id: str,
         configured_capacity: int,
@@ -69,7 +70,7 @@ class _Repository(SubagentCoordinationRepository):
         return self.snapshot
 
 
-def _session() -> AsyncSession:
+def _session() -> WriteSession:
     """Build one unused typed session double."""
     return AsyncMock(spec=AsyncSession)
 

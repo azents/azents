@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -24,6 +23,7 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
@@ -402,7 +402,7 @@ class ScheduledTaskProviderControlService:
     """Reload and reauthorize registered Scheduled Task provider controls."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     external_repository: Annotated[
         ExternalChannelRepository, Depends(ExternalChannelRepository.create)
@@ -480,7 +480,7 @@ class ScheduledTaskProviderControlService:
                     raise ScheduledTaskProviderControlError(
                         "Scheduled Task is no longer available."
                     )
-                await session.commit()
+                await session.write_session.commit()
                 return ScheduledTaskProviderControlResult(
                     action="delete",
                     task=target.task,
@@ -502,7 +502,7 @@ class ScheduledTaskProviderControlService:
                 raise ScheduledTaskProviderControlError(
                     "Scheduled Task is no longer available."
                 )
-            await session.commit()
+            await session.write_session.commit()
             return ScheduledTaskProviderControlResult(action="edit", task=replacement)
 
     async def load_for_control(
@@ -533,7 +533,7 @@ class ScheduledTaskProviderControlService:
 
     async def _authorize(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         interaction_id: str,
         locator: ScheduledTaskControlLocator,
@@ -637,7 +637,7 @@ class ScheduledTaskProviderControlService:
 
     async def _slack_modal_origin_matches_binding(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         origin_interaction_id: str | None,
         interaction: ExternalChannelInteraction,

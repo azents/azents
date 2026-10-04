@@ -6,7 +6,6 @@ import re
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory import HistoricalMemoryCompletion
@@ -25,6 +24,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.cleanup import (
@@ -59,7 +59,7 @@ def _markdown(scope: ConsolidationScope, source_id: str, text: str) -> str:
 
 
 async def _consumer(
-    manager: SessionManager[AsyncSession], source: str
+    manager: SessionManager[WriteSession], source: str
 ) -> MemorySnapshotConsumer:
     async with manager() as session:
         result = await HistoricalMemoryRepository(
@@ -69,7 +69,7 @@ async def _consumer(
         return result
 
 
-def _service(manager: SessionManager[AsyncSession]) -> MemoryContextSnapshotService:
+def _service(manager: SessionManager[WriteSession]) -> MemoryContextSnapshotService:
     return MemoryContextSnapshotService(
         MemoryContextSnapshotRepository(
             HistoricalMemoryRepository(manager),
@@ -95,7 +95,7 @@ def _context(corpus: ConsolidationCorpus, *, personal: bool) -> VfsReadContext:
 
 
 async def test_independent_aliases_latest_live_read_glob_and_grep(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -167,7 +167,7 @@ async def test_independent_aliases_latest_live_read_glob_and_grep(
 
 
 async def test_selected_old_revision_cannot_borrow_new_current_manifest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -210,11 +210,14 @@ async def test_selected_old_revision_cannot_borrow_new_current_manifest(
             )
             is None
         )
-        assert await session.get(RDBConsolidationRevision, old.revision_id) is not None
+        assert (
+            await session.write_session.get(RDBConsolidationRevision, old.revision_id)
+            is not None
+        )
 
 
 async def test_purge_keeps_denial_evidence_and_recreated_grant_cannot_revive_personal(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -231,7 +234,7 @@ async def test_purge_keeps_denial_evidence_and_recreated_grant_cannot_revive_per
             session, consumer=consumer, scope=ConsolidationScope.USER, selected=None
         )
         assert selected is not None
-        grant = await session.scalar(
+        grant = await session.write_session.scalar(
             sa.select(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.user_id == corpus.personal.associated_user_id
             )
@@ -249,14 +252,14 @@ async def test_purge_keeps_denial_evidence_and_recreated_grant_cannot_revive_per
             )
             is None
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBHistoricalMemorySource).where(
                 RDBHistoricalMemorySource.source_session_id == corpus.personal_source
             )
         )
     async with manager() as session:
         assert (
-            await session.scalar(
+            await session.write_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBConsolidationRevisionDependency)
                 .where(
@@ -278,7 +281,7 @@ async def test_purge_keeps_denial_evidence_and_recreated_grant_cannot_revive_per
 
 
 async def test_collection_protects_selected_revision_and_its_full_manifest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -314,9 +317,11 @@ async def test_collection_protects_selected_revision_and_its_full_manifest(
     collector = ConsolidationCleanupRepository(manager)
     assert await collector.collect_revisions(limit=10) == 0
     async with manager() as session:
-        assert await session.get(RDBConsolidationRevision, old) is not None
         assert (
-            await session.scalar(
+            await session.write_session.get(RDBConsolidationRevision, old) is not None
+        )
+        assert (
+            await session.write_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBConsolidationRevisionDependency)
                 .where(RDBConsolidationRevisionDependency.revision_id == old)
@@ -337,17 +342,19 @@ async def test_collection_protects_selected_revision_and_its_full_manifest(
     )
     # No live lookup silently refreshes the automatic selection.
     async with manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBToolkitState).where(
                 RDBToolkitState.session_id == corpus.team_source
             )
         )
     assert await collector.collect_revisions(limit=1) == 1
     async with manager() as session:
-        assert await session.get(RDBConsolidationRevision, old) is None
-        assert await session.get(RDBConsolidationRevision, new) is not None
+        assert await session.write_session.get(RDBConsolidationRevision, old) is None
         assert (
-            await session.scalar(
+            await session.write_session.get(RDBConsolidationRevision, new) is not None
+        )
+        assert (
+            await session.write_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBConsolidationRevisionDependency)
                 .where(RDBConsolidationRevisionDependency.revision_id == old)

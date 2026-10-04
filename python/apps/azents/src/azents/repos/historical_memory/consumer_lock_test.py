@@ -18,6 +18,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory.repository_test import (
@@ -35,7 +36,7 @@ async def _committed_source(
     """Own committed fixture rows across independent connections and remove them."""
     async with AsyncSession(engine, expire_on_commit=False) as setup:
         source = await _create_source(
-            setup,
+            ReadWriteSession(setup),
             slug=f"consumer-lock-{uuid4().hex[:8]}",
             activity_at=_NOW,
         )
@@ -45,7 +46,7 @@ async def _committed_source(
     finally:
         async with AsyncSession(engine) as cleanup:
             await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
-                cleanup,
+                ReadWriteSession(cleanup),
                 root_session_id=source.session_id,
                 session_ids=[source.session_id],
             )
@@ -65,7 +66,7 @@ async def _committed_source(
 
 async def test_snapshot_consumer_coexists_with_agent_parent_key_share(
     rdb_engine: AsyncEngine,
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Reading Memory authority must not conflict with a Session parent FK lock."""
     repository = HistoricalMemoryRepository(rdb_session_manager)
@@ -75,11 +76,11 @@ async def test_snapshot_consumer_coexists_with_agent_parent_key_share(
         AsyncSession(rdb_engine, expire_on_commit=False) as consumer,
     ):
         assert await AgentSessionRepository().lock_agent_parent_for_session(
-            parent, source.session_id
+            ReadWriteSession(parent), source.session_id
         )
         snapshot = await asyncio.wait_for(
             repository.get_snapshot_consumer_in_session(
-                consumer, session_id=source.session_id
+                ReadWriteSession(consumer), session_id=source.session_id
             ),
             timeout=2,
         )
@@ -95,7 +96,7 @@ async def _committed_peer(
     """Own a second root Session sharing the first source's Agent authority."""
     async with AsyncSession(engine, expire_on_commit=False) as setup:
         peer = await AgentSessionRepository().create(
-            setup,
+            ReadWriteSession(setup),
             AgentSessionCreate(
                 workspace_id=source.workspace_id,
                 product_mode=AgentSessionProductMode.TEAM,
@@ -110,7 +111,9 @@ async def _committed_peer(
     finally:
         async with AsyncSession(engine) as cleanup:
             await SessionLifecycleFinalizerRepository().finalize_purged_root_tree(
-                cleanup, root_session_id=peer.id, session_ids=[peer.id]
+                ReadWriteSession(cleanup),
+                root_session_id=peer.id,
+                session_ids=[peer.id],
             )
             await cleanup.commit()
 
@@ -118,7 +121,7 @@ async def _committed_peer(
 @pytest.mark.parametrize("distinct_sessions", [False, True])
 async def test_concurrent_snapshot_consumers_keep_parent_fk_locks(
     rdb_engine: AsyncEngine,
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     distinct_sessions: bool,
 ) -> None:
     """Two canonical parent-lock holders must not deadlock during Memory access."""
@@ -130,11 +133,11 @@ async def test_concurrent_snapshot_consumers_keep_parent_fk_locks(
             async def consume(session_id: str) -> None:
                 async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
                     assert await AgentSessionRepository().lock_agent_parent_for_session(
-                        session, session_id
+                        ReadWriteSession(session), session_id
                     )
                     await ready.wait()
                     snapshot = await repository.get_snapshot_consumer_in_session(
-                        session, session_id=session_id
+                        ReadWriteSession(session), session_id=session_id
                     )
                     assert snapshot is not None
                     assert snapshot.session_id == session_id
@@ -154,7 +157,7 @@ async def test_concurrent_snapshot_consumers_keep_parent_fk_locks(
 @pytest.mark.parametrize("entity", ["agent", "session"])
 async def test_snapshot_consumer_still_fences_authority_writers(
     rdb_engine: AsyncEngine,
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     entity: Literal["agent", "session"],
 ) -> None:
     """FK-compatible reads still exclude changes to Memory and Session authority."""
@@ -165,7 +168,7 @@ async def test_snapshot_consumer_still_fences_authority_writers(
         AsyncSession(rdb_engine, expire_on_commit=False) as writer,
     ):
         snapshot = await repository.get_snapshot_consumer_in_session(
-            consumer, session_id=source.session_id
+            ReadWriteSession(consumer), session_id=source.session_id
         )
         assert snapshot is not None
         statement = (

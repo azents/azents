@@ -47,6 +47,7 @@ from azents.core.exchange_file_errors import (
     exchange_object_key_from_uri,
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent.data import Agent
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import (
@@ -87,7 +88,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def create(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ExchangeFileCreate,
     ) -> ExchangeFile:
         """Store create input as domain model as-is."""
@@ -132,7 +133,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         file_id: str,
     ) -> ExchangeFile | None:
         """Fetch file by ID."""
@@ -141,7 +142,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_object_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         object_key: str,
     ) -> ExchangeFile | None:
         """Fetch file by object key."""
@@ -153,7 +154,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def get_by_object_key_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_key: str,
         agent_id: str,
@@ -166,7 +167,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         file_id: str,
     ) -> None:
         """Delete file metadata."""
@@ -175,7 +176,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def set_preview_thumbnail_file_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         preview_thumbnail_file_id: str,
@@ -202,7 +203,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def claim_for_retention_root(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         object_keys: Sequence[str],
         workspace_id: str,
@@ -252,7 +253,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -276,7 +277,7 @@ class _FakeExchangeFileRepository(ExchangeFileRepository):
 
     async def expire_file_family(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         expired_at: datetime.datetime,
@@ -508,11 +509,11 @@ class _SessionBoundary:
             """Avoid opening a real database session."""
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager(self) -> AsyncGenerator[WriteSession, None]:
         """Yield a test DB session while tracking its lifetime."""
         self.active += 1
         try:
-            yield self._DBSession()
+            yield ReadWriteSession(self._DBSession())
         finally:
             self.active -= 1
 
@@ -525,7 +526,7 @@ class _AuthorityExchangeFileService(ExchangeFileService):
 
     async def _has_valid_resource_authority(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: SessionResourceAuthority,
         *,
         lock: bool = False,
@@ -1291,7 +1292,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
         workspace_user_repository=service.workspace_user_repository,
     )
     claim = await claim_repository.claim_input_attachments(
-        _SessionBoundary._DBSession(),
+        ReadWriteSession(_SessionBoundary._DBSession()),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",
@@ -1306,7 +1307,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
     assert claimed_preview.retention_bound_at == claimed_source.retention_bound_at
 
     retry = await claim_repository.claim_input_attachments(
-        _SessionBoundary._DBSession(),
+        ReadWriteSession(_SessionBoundary._DBSession()),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",
@@ -1321,7 +1322,7 @@ async def test_claim_input_attachment_binds_preview_and_rejects_another_root() -
         agent_session_id="another-root-session"
     )
     conflict = await claim_repository.claim_input_attachments(
-        _SessionBoundary._DBSession(),
+        ReadWriteSession(_SessionBoundary._DBSession()),
         agent_id="agent-1",
         session_id="session-1",
         user_id="user-1",

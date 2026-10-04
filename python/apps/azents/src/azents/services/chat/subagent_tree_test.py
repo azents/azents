@@ -4,7 +4,6 @@ import datetime
 from typing import Any
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.chat_data import (
@@ -24,6 +23,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
@@ -74,7 +74,7 @@ from . import (
 )
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     result = await WorkspaceRepository().create(
         session, WorkspaceCreate(name="Subagent Tree test", handle=handle)
@@ -86,7 +86,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _add_workspace_user(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     email: str,
@@ -106,7 +106,7 @@ async def _add_workspace_user(
     return user.id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     """Create Agent for tests."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -115,8 +115,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -150,15 +150,15 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return agent.id
 
 
@@ -236,7 +236,7 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
     return ChatSessionService(operations=operations, **kwargs)
 
 
-def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionService:
+def _service(rdb_session_manager: SessionManager[WriteSession]) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return _make_chat_service(
         message_repository=MessageRepository(),
@@ -337,7 +337,7 @@ class TestSubagentTreeProjection:
 
     async def test_projects_nested_tree_from_child_session_access(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Build a reconnect-safe tree projection from durable DB state."""
         repo = AgentSessionRepository()
@@ -466,7 +466,7 @@ class TestSubagentTreeProjection:
 
     async def test_interrupted_parent_projects_all_descendants_interrupted(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Propagate interrupted status from a parent to every descendant."""
         repo = AgentSessionRepository()
@@ -621,7 +621,7 @@ class TestSubagentTreeProjection:
 
     async def test_denies_tree_projection_without_workspace_membership(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Do not expose hidden subagent sessions to non-members."""
         repo = AgentSessionRepository()

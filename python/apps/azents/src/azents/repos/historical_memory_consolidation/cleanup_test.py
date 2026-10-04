@@ -4,7 +4,6 @@ import datetime
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import (
     ConsolidationDisposition,
@@ -24,6 +23,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory_consolidation.cleanup import (
     ConsolidationCleanupRepository,
@@ -56,7 +56,7 @@ class _Ready:
 
 
 async def _ready(
-    manager: SessionManager[AsyncSession], *, extra_source: bool
+    manager: SessionManager[WriteSession], *, extra_source: bool
 ) -> _Ready:
     corpus = await seed_consolidation_corpus(manager)
     if extra_source:
@@ -110,9 +110,9 @@ async def _ready(
     return _Ready(claim.principal, claim.unit_id, corpus.team_source, work_id)
 
 
-async def _age(manager: SessionManager[AsyncSession], ready: _Ready) -> None:
+async def _age(manager: SessionManager[WriteSession], ready: _Ready) -> None:
     async with manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBConsolidationDraft)
             .where(RDBConsolidationDraft.unit_id == ready.unit_id)
             .values(
@@ -123,7 +123,7 @@ async def _age(manager: SessionManager[AsyncSession], ready: _Ready) -> None:
 
 
 async def test_live_owner_protects_even_expired_draft_and_receipts(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=False)
     await _age(rdb_session_manager, ready)
@@ -137,7 +137,7 @@ async def test_live_owner_protects_even_expired_draft_and_receipts(
 
 
 async def test_expired_inactive_draft_resets_unpublished_choices_not_sources(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=False)
     await ConsolidationOwnershipRepository(rdb_session_manager).fail(
@@ -149,7 +149,7 @@ async def test_expired_inactive_draft_resets_unpublished_choices_not_sources(
     assert result.drafts == 1 and result.expired_owners == 0
     assert (await cleanup.sweep(limit=50)).units == 0
     async with rdb_session_manager() as session:
-        work = await session.get(RDBConsolidationWork, ready.work_id)
+        work = await session.read_session.get(RDBConsolidationWork, ready.work_id)
         assert work is not None and work.state is ConsolidationWorkState.PENDING
         assert (
             work.considered_draft_id
@@ -158,7 +158,7 @@ async def test_expired_inactive_draft_resets_unpublished_choices_not_sources(
             is None
         )
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(RDBConsolidationDraft.id).where(
                     RDBConsolidationDraft.unit_id == ready.unit_id
                 )
@@ -168,7 +168,7 @@ async def test_expired_inactive_draft_resets_unpublished_choices_not_sources(
 
 
 async def test_recent_failed_work_is_recoverable_not_terminal_body_archive(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=False)
     await ConsolidationOwnershipRepository(rdb_session_manager).fail(
@@ -178,7 +178,7 @@ async def test_recent_failed_work_is_recoverable_not_terminal_body_archive(
     assert result.drafts == 0
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(RDBConsolidationDraft.id).where(
                     RDBConsolidationDraft.unit_id == ready.unit_id
                 )
@@ -188,7 +188,7 @@ async def test_recent_failed_work_is_recoverable_not_terminal_body_archive(
 
 
 async def test_completed_private_payload_cleanup_keeps_published_bytes_and_manifest(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=False)
     publication = ConsolidationPublicationRepository(rdb_session_manager)
@@ -206,10 +206,12 @@ async def test_completed_private_payload_cleanup_keeps_published_bytes_and_manif
     ).drafts == 1
     assert await publication.inspect_outcome(ready.principal) == outcome
     async with rdb_session_manager() as session:
-        revision = await session.get(RDBConsolidationRevision, outcome.revision_id)
+        revision = await session.read_session.get(
+            RDBConsolidationRevision, outcome.revision_id
+        )
         assert revision is not None and revision.markdown == frozen.markdown
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBConsolidationRevisionDependency)
                 .where(
@@ -222,7 +224,7 @@ async def test_completed_private_payload_cleanup_keeps_published_bytes_and_manif
 
 
 async def test_denied_draft_is_removed_as_whole_even_before_24_hours(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=False)
     await ConsolidationOwnershipRepository(rdb_session_manager).fail(
@@ -237,19 +239,19 @@ async def test_denied_draft_is_removed_as_whole_even_before_24_hours(
     ).drafts == 1
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(RDBConsolidationDraft.id).where(
                     RDBConsolidationDraft.unit_id == ready.unit_id
                 )
             )
             is None
         )
-        unit = await session.get(RDBConsolidationUnit, ready.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, ready.unit_id)
         assert unit is not None and unit.published_revision_id is None
 
 
 async def test_completed_slice_cleanup_preserves_its_unfinished_finite_pass(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, extra_source=True)
     publication = ConsolidationPublicationRepository(rdb_session_manager)
@@ -263,16 +265,16 @@ async def test_completed_slice_cleanup_preserves_its_unfinished_finite_pass(
         ),
     )
     async with rdb_session_manager() as session:
-        unit = await session.get(RDBConsolidationUnit, ready.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, ready.unit_id)
         assert unit is not None and unit.pass_upper_sequence is not None
         upper = unit.pass_upper_sequence
     assert (
         await ConsolidationCleanupRepository(rdb_session_manager).sweep(limit=50)
     ).drafts == 1
     async with rdb_session_manager() as session:
-        unit = await session.get(RDBConsolidationUnit, ready.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, ready.unit_id)
         assert unit is not None and unit.pass_upper_sequence == upper
-        pending = await session.scalar(
+        pending = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBConsolidationWork)
             .where(

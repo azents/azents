@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from typing import Literal
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -27,6 +26,7 @@ from azents.engine.events.types import (
     ReasoningPayload,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_mailbox import AgentMailboxRepository
@@ -52,19 +52,19 @@ from azents.repos.worker_session import WorkerSessionOperationRepository
 class ObservedStopManager:
     """Observe genuine transaction completion, including failed Stop stages."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.resolved: list[bool] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, (
             "A completed operation was nested inside the Stop transaction"
         )
         self.active = True
-        current: AsyncSession | None = None
+        current: WriteSession | None = None
         try:
             async with self.manager() as session:
                 current = session
@@ -73,22 +73,24 @@ class ObservedStopManager:
         finally:
             self.active = False
             if current is not None:
-                self.resolved.append(not current.in_transaction())
+                self.resolved.append(not current.write_session.in_transaction())
 
     def assert_closed(self) -> None:
         assert not self.active
         assert all(self.resolved)
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 @dataclasses.dataclass(frozen=True)
 class _ObservedWorker(WorkerSessionOperationRepository):
-    guard_sessions: list[AsyncSession] = dataclasses.field(
+    guard_sessions: list[WriteSession] = dataclasses.field(
         default_factory=list, init=False
     )
 
     async def assert_owner_generation_in_session(
-        self, session: AsyncSession, *, session_id: str, owner_generation: int
+        self, session: WriteSession, *, session_id: str, owner_generation: int
     ) -> None:
         self.guard_sessions.append(session)
         await super().assert_owner_generation_in_session(
@@ -111,7 +113,7 @@ class StopFixture:
 
 
 async def stop_fixture(
-    manager: SessionManager[AsyncSession], name: str, *, child: bool
+    manager: SessionManager[WriteSession], name: str, *, child: bool
 ) -> StopFixture:
     observed = ObservedStopManager(manager)
     sessions = AgentSessionRepository()
@@ -271,7 +273,7 @@ class FaultTranscript(EventTranscriptRepository):
         self.error = error
         self.writes: list[EventCreate] = []
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: WriteSession, create: EventCreate) -> Event:
         result = await super().append(session, create)
         self.writes.append(create)
         if (
@@ -288,7 +290,7 @@ class FaultClear(AgentSessionRepository):
     def __init__(self, error: BaseException) -> None:
         self.error = error
 
-    async def clear_stop_request(self, session: AsyncSession, session_id: str) -> None:
+    async def clear_stop_request(self, session: WriteSession, session_id: str) -> None:
         await super().clear_stop_request(session, session_id=session_id)
         raise self.error
 
@@ -306,7 +308,7 @@ def fault_stop(
 
 
 async def test_partial_eligibility_metadata_and_repeat_are_guarded_and_idempotent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await stop_fixture(
         rdb_session_manager, "stop-partial-repeat", child=False
@@ -341,7 +343,7 @@ async def test_partial_eligibility_metadata_and_repeat_are_guarded_and_idempoten
 
 
 async def test_cancelled_calls_deduplicate_in_same_tool_result_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await stop_fixture(rdb_session_manager, "stop-cancel-repeat", child=False)
     call = fixture.calls[0]
@@ -369,7 +371,7 @@ async def test_cancelled_calls_deduplicate_in_same_tool_result_transaction(
 
 
 async def test_empty_actions_skip_factories_and_missing_run_keeps_runtime_error(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await stop_fixture(rdb_session_manager, "stop-empty-actions", child=False)
     await fixture.stop.append_partial_events(
@@ -443,7 +445,7 @@ async def perform_action(
 @pytest.mark.parametrize("action", ["partial", "cancelled", "markers", "clear"])
 @pytest.mark.parametrize("missing", [False, True])
 async def test_all_four_actions_keep_guard_missing_vs_stale_before_writes(
-    rdb_session_manager: SessionManager[AsyncSession], action: Action, missing: bool
+    rdb_session_manager: SessionManager[WriteSession], action: Action, missing: bool
 ) -> None:
     fixture = await stop_fixture(
         rdb_session_manager, f"stop-guard-{action}-{missing}", child=False
@@ -471,7 +473,7 @@ async def test_all_four_actions_keep_guard_missing_vs_stale_before_writes(
 
 
 async def test_missing_run_rolls_back_result_append_but_preserves_prior_partial_commit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await stop_fixture(rdb_session_manager, "stop-missing-run", child=False)
     event = partial(fixture.owner.session_id, "a" * 32)
@@ -498,7 +500,7 @@ async def test_missing_run_rolls_back_result_append_but_preserves_prior_partial_
 @pytest.mark.parametrize("action", ["partial", "cancelled", "markers", "clear"])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_stage_write_failure_or_cancellation_rolls_back_only_that_stage(
-    rdb_session_manager: SessionManager[AsyncSession], action: Action, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], action: Action, cancel: bool
 ) -> None:
     fixture = await stop_fixture(
         rdb_session_manager, f"stop-failure-{action}-{cancel}", child=False
@@ -532,7 +534,7 @@ async def test_stage_write_failure_or_cancellation_rolls_back_only_that_stage(
 
 
 async def test_interrupted_marker_pair_is_idempotent_in_one_guarded_stage(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await stop_fixture(rdb_session_manager, "stop-marker-repeat", child=False)
     input = UserStopMarkerInput(
@@ -556,7 +558,7 @@ class _PausedTranscript(EventTranscriptRepository):
         self.written = asyncio.Event()
         self.release = asyncio.Event()
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: WriteSession, create: EventCreate) -> Event:
         event = await super().append(session, create)
         self.written.set()
         await self.release.wait()
@@ -564,7 +566,7 @@ class _PausedTranscript(EventTranscriptRepository):
 
 
 async def test_actual_task_cancellation_after_partial_write_abandons_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await stop_fixture(
         rdb_session_manager, "stop-task-cancellation", child=False

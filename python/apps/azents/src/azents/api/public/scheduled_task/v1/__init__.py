@@ -4,11 +4,11 @@ from textwrap import dedent
 from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.management import (
@@ -43,7 +43,7 @@ router = APIRouter()
 
 def get_scheduled_task_management_service(
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ],
     agent_repository: Annotated[AgentRepository, Depends()],

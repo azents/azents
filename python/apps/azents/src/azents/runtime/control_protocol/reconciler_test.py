@@ -24,7 +24,6 @@ from azents_runtime_control.provider import (
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -55,6 +54,7 @@ from azents.rdb.models.runtime_provider_policy import (
     RDBRuntimeProviderContractRevision,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
@@ -120,7 +120,7 @@ class ReadTrackingAgentRuntimeRepository(AgentRuntimeRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Record one lock-free Runtime read."""
@@ -129,7 +129,7 @@ class ReadTrackingAgentRuntimeRepository(AgentRuntimeRepository):
 
     async def get_by_id_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
         """Record one locked Runtime authority recheck."""
@@ -142,15 +142,15 @@ class SessionBoundaryProbe:
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> None:
         """Initialize the probe around the real test session manager."""
         self.base_session_manager = session_manager
         self.active_contexts = 0
-        self.completed_sessions: list[AsyncSession] = []
+        self.completed_sessions: list[WriteSession] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncGenerator[AsyncSession]:
+    async def session_manager(self) -> AsyncGenerator[WriteSession]:
         """Track one complete repository-owned transaction context."""
         self.active_contexts += 1
         try:
@@ -164,7 +164,10 @@ class SessionBoundaryProbe:
         """Assert every repository context completed before external work."""
         assert self.active_contexts == 0
         assert self.completed_sessions
-        assert all(not session.in_transaction() for session in self.completed_sessions)
+        assert all(
+            not session.write_session.in_transaction()
+            for session in self.completed_sessions
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -180,7 +183,7 @@ def _dispatch_repository(
     *,
     runtime_repository: AgentRuntimeRepository,
     profile_repository: RuntimeProfileRepository,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> RuntimeLifecycleDispatchRepository:
     """Build the repository-owned Runtime dispatch boundary for tests."""
     return RuntimeLifecycleDispatchRepository(
@@ -193,7 +196,7 @@ def _dispatch_repository(
 
 async def _prepare_start_dispatch(
     *,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     slug: str,
 ) -> PreparedRuntimeDispatch:
     """Create and commit one configured pending Runtime START."""
@@ -233,7 +236,7 @@ async def _prepare_start_dispatch(
 
 async def _prepare_stop_dispatch(
     *,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     slug: str,
 ) -> PreparedRuntimeDispatch:
     """Create and commit one configured pending Runtime STOP."""
@@ -275,8 +278,8 @@ def _direct_dispatch_reconciler(
     *,
     runtime_repository: AgentRuntimeRepository,
     profile_repository: RuntimeProfileRepository,
-    session_manager: SessionManager[AsyncSession],
-    dispatch_session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
+    dispatch_session_manager: SessionManager[WriteSession],
     store: InMemoryRuntimeCoordinationStore,
     control_protocol: RuntimeControlProtocolService,
 ) -> RuntimeLifecycleReconciler:
@@ -306,7 +309,7 @@ def _direct_dispatch_reconciler(
 
 
 async def test_dispatch_repository_rejects_stale_selected_snapshot_before_claim(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Claim cannot consume a Runtime generation changed after preflight."""
     prepared = await _prepare_start_dispatch(
@@ -354,7 +357,7 @@ async def test_dispatch_repository_rejects_stale_selected_snapshot_before_claim(
 
 
 async def test_stop_without_provider_keeps_claim_for_reconnect_dispatch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An unavailable Provider cannot consume the only pending STOP dispatch."""
     prepared = await _prepare_stop_dispatch(
@@ -412,7 +415,7 @@ async def test_stop_without_provider_keeps_claim_for_reconnect_dispatch(
 
 
 async def test_dispatch_releases_database_transaction_before_coordination_and_provider(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Redis and Provider I/O run after preflight and claim locks are released."""
@@ -494,7 +497,7 @@ async def test_dispatch_releases_database_transaction_before_coordination_and_pr
 
 
 async def test_dispatch_success_does_not_apply_stale_connection_outcome(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A successful old-generation append cannot overwrite newer Runtime state."""
@@ -570,7 +573,7 @@ async def test_dispatch_success_does_not_apply_stale_connection_outcome(
 
 
 async def test_dispatch_route_unavailable_records_disconnected_after_revalidation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A connection lost after lookup records only the current Runtime outcome."""
@@ -646,7 +649,7 @@ async def test_dispatch_route_unavailable_records_disconnected_after_revalidatio
 
 
 async def test_dispatch_unknown_outcome_propagates_without_connection_write(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An ambiguous Provider dispatch failure remains visible and unreplayed."""
@@ -719,7 +722,7 @@ async def test_dispatch_unknown_outcome_propagates_without_connection_write(
 
 
 async def test_dispatch_cancellation_propagates_without_connection_write(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Cancellation after admission remains cancellation and writes no outcome."""
@@ -800,7 +803,7 @@ async def test_dispatch_cancellation_propagates_without_connection_write(
 
 
 async def test_reconciler_refreshes_stale_provider_connection_before_start_timeout(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A Control restart must not trust the previous process's connection cache."""
     runtime_repository = AgentRuntimeRepository()
@@ -843,7 +846,7 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
         old_state_change_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(last_state_change_at=old_state_change_at)
@@ -895,7 +898,7 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
     ],
 )
 async def test_reconciler_observes_active_runtime_without_restarting_it(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     provider_observed_state: RuntimeProviderObservedState,
 ) -> None:
     """Control observes a starting/running Runtime without repeating START."""
@@ -943,7 +946,7 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1010,7 +1013,7 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
     assert updated.provider_observe_requested_at is not None
 
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == agent_id)
             .values(
@@ -1022,7 +1025,7 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
                 ),
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1048,7 +1051,7 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
     ["network_policy", "network_enforcement"],
 )
 async def test_reconciler_repairs_current_network_drift_once(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     caplog: pytest.LogCaptureFixture,
     reconciliation_kind: str,
 ) -> None:
@@ -1175,7 +1178,7 @@ async def test_reconciler_repairs_current_network_drift_once(
 
 
 async def test_reconcile_observe_completion_rejects_stale_provider_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A reconnect requires a later current OBSERVE before it can repair drift."""
     runtime_repository = AgentRuntimeRepository()
@@ -1270,7 +1273,7 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
 
 
 async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A desired-state race cannot dispatch an old drift-repair configuration."""
     runtime_repository = AgentRuntimeRepository()
@@ -1363,7 +1366,7 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
 
 
 async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Configuration adoption and restart convergence never compete."""
     runtime_repository = AgentRuntimeRepository()
@@ -1398,7 +1401,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
             expected_generation=initial.desired_generation,
         )
         assert restart is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
             .values(
@@ -1423,7 +1426,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1482,7 +1485,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
             restart.desired_generation,
         )
         assert observed is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1512,7 +1515,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
 
 
 async def test_reconciler_observes_recreated_configuration_missing_provider_evidence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A running replacement is observed until Provider evidence is complete."""
     runtime_repository = AgentRuntimeRepository()
@@ -1606,7 +1609,7 @@ async def test_reconciler_observes_recreated_configuration_missing_provider_evid
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1667,7 +1670,7 @@ async def test_reconciler_observes_recreated_configuration_missing_provider_evid
 
 
 async def test_reconciler_repairs_stale_stop_configuration_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """STOP reuses usable state without rewriting the bounded desired slot."""
     runtime_repository = AgentRuntimeRepository()
@@ -1776,7 +1779,7 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
 
 
 async def test_dispatch_repository_records_mismatched_provider_reference(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Dispatch validates resolved references against the current state document."""
     runtime_repository = AgentRuntimeRepository()
@@ -1815,7 +1818,7 @@ async def test_dispatch_repository_records_mismatched_provider_reference(
         document = state.desired.document.model_copy(
             update={"resolved_configuration": configuration}
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeConfigurationState)
             .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
             .values(desired_document=document.model_dump(mode="json"))
@@ -1854,7 +1857,7 @@ async def test_dispatch_repository_records_mismatched_provider_reference(
 
 
 async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A reconnected Provider reconciles a stopped-desired Runtime."""
     runtime_repository = AgentRuntimeRepository()
@@ -1898,7 +1901,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -1941,7 +1944,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
     throttled = await reconciler.reconcile_once(limit=10)
     async with rdb_session_manager() as session:
         waiting = await runtime_repository.get_by_agent_id(session, agent_id)
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(provider_observe_requested_at=old_observe_at)
@@ -1977,7 +1980,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
 
 
 async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Terminal deletion uses the internal Provider command rather than STOP."""
     runtime_repository = AgentRuntimeRepository()
@@ -2006,7 +2009,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
             RuntimeProviderConnectionState.CONNECTED,
         )
         assert connected is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgent)
             .where(RDBAgent.id == agent_id)
             .values(
@@ -2155,7 +2158,7 @@ def _runner_credential_verifier() -> RuntimeRunnerCredentialVerifier:
     return RuntimeRunnerCredentialVerifier(Fernet.generate_key().decode())
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     repo = WorkspaceRepository()
     result = await repo.create(
         session, WorkspaceCreate(name="Reconciler", handle=handle)
@@ -2167,7 +2170,7 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     slug: str,
 ) -> str:
@@ -2178,8 +2181,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -2213,17 +2216,17 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
 async def _bind_runtime_provider(
-    session: AsyncSession,
+    session: WriteSession,
     runtime_id: str,
 ) -> None:
     """Bind the legacy dispatch fixture at the Runtime ownership layer."""
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentRuntime)
         .where(RDBAgentRuntime.id == runtime_id)
         .values(runtime_provider_id="provider-1")
@@ -2231,12 +2234,12 @@ async def _bind_runtime_provider(
 
 
 async def _attach_runtime_configuration(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     runtime_id: str,
     target_desired_generation: int,
 ) -> RuntimeConfigurationState:
-    runtime = await session.get(RDBAgentRuntime, runtime_id)
+    runtime = await session.read_session.get(RDBAgentRuntime, runtime_id)
     assert runtime is not None
     provider = await RuntimeProviderRepository().create(
         session,
@@ -2284,8 +2287,8 @@ async def _attach_runtime_configuration(
         },
         compatibility={},
     )
-    session.add(contract)
-    await session.flush()
+    session.write_session.add(contract)
+    await session.write_session.flush()
 
     effective_profile = {
         "profile_kind": "kubernetes_pod",
@@ -2378,7 +2381,7 @@ async def _attach_runtime_configuration(
             "effective_profile": effective_profile,
         },
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentRuntime)
         .where(RDBAgentRuntime.id == runtime_id)
         .values(

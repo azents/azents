@@ -1,39 +1,47 @@
 """Typed DB-only Toolkit State handles."""
 
 from collections.abc import Callable
-from typing import Generic
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Generic, TypeVar
 
 from azents.core.toolkit_state import (
     ToolkitStateIdentity,
     ToolkitStateModelT,
     ToolkitStateSaved,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.toolkit_state import (
     ToolkitStateConflictError,
     ToolkitStateRepository,
 )
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
 
+SessionT_co = TypeVar(
+    "SessionT_co", bound=ReadSession, default=WriteSession, covariant=True
+)
 
-class ToolkitStateHandle(Generic[ToolkitStateModelT]):
+
+class ToolkitStateHandle(Generic[ToolkitStateModelT, SessionT_co]):
     """State handle bound to a specific identity and Pydantic model."""
 
     def __init__(
         self,
         *,
-        session: AsyncSession,
+        session: SessionT_co,
         repository: ToolkitStateRepository,
         identity: ToolkitStateIdentity,
         model_type: type[ToolkitStateModelT],
     ) -> None:
         """Create Toolkit State handle."""
-        self.session = session
+        self._session = session
         self.repository = repository
         self.identity = identity
         self.model_type = model_type
         self.loaded_version: int | None = None
+
+    @property
+    def session(self) -> SessionT_co:
+        """Return the captured capability without permitting reassignment."""
+        return self._session
 
     async def load(
         self,
@@ -54,7 +62,7 @@ class ToolkitStateHandle(Generic[ToolkitStateModelT]):
         return self.model_type.model_validate(record.state_json)
 
     async def save(
-        self,
+        self: "ToolkitStateHandle[ToolkitStateModelT, WriteSession]",
         state: ToolkitStateModelT,
         *,
         max_retries: int = 3,
@@ -67,7 +75,7 @@ class ToolkitStateHandle(Generic[ToolkitStateModelT]):
         )
 
     async def update(
-        self,
+        self: "ToolkitStateHandle[ToolkitStateModelT, WriteSession]",
         default_factory: Callable[[], ToolkitStateModelT],
         mutator: Callable[[ToolkitStateModelT], ToolkitStateModelT],
         *,
@@ -90,7 +98,10 @@ class ToolkitStateHandle(Generic[ToolkitStateModelT]):
             raise ToolkitStateConflictError("Toolkit State update failed")
         raise last_error
 
-    async def _save(self, state: ToolkitStateModelT) -> ToolkitStateSaved:
+    async def _save(
+        self: "ToolkitStateHandle[ToolkitStateModelT, WriteSession]",
+        state: ToolkitStateModelT,
+    ) -> ToolkitStateSaved:
         """Replace and store entire state."""
         record = await self.repository.save(
             self.session,
@@ -117,24 +128,29 @@ class ToolkitStateHandle(Generic[ToolkitStateModelT]):
         )
 
 
-class ToolkitStateStore:
+class ToolkitStateStore(Generic[SessionT_co]):
     """Toolkit State handle factory."""
 
     def __init__(
         self,
         *,
-        session: AsyncSession,
+        session: SessionT_co,
         repository: ToolkitStateRepository | None = None,
     ) -> None:
         """Create Toolkit State Store."""
-        self.session = session
+        self._session = session
         self.repository = repository or ToolkitStateRepository()
+
+    @property
+    def session(self) -> SessionT_co:
+        """Return the captured capability without permitting reassignment."""
+        return self._session
 
     def handle(
         self,
         identity: ToolkitStateIdentity,
         model_type: type[ToolkitStateModelT],
-    ) -> ToolkitStateHandle[ToolkitStateModelT]:
+    ) -> ToolkitStateHandle[ToolkitStateModelT, SessionT_co]:
         """Return typed handle for identity."""
         return ToolkitStateHandle(
             session=self.session,

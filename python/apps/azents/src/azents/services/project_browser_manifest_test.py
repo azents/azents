@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentProjectCatalogStatus,
@@ -21,6 +20,7 @@ from azents.core.session_workspace_project import SessionWorkspaceProjectCreate
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
@@ -61,11 +61,11 @@ from .project_browser_manifest import (
 class _SessionManager:
     """Session manager for tests."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: WriteSession) -> None:
         self.session = session
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncGenerator[AsyncSession]:
+    async def __call__(self) -> AsyncGenerator[WriteSession]:
         """Return the same session as context manager."""
         yield self.session
 
@@ -111,7 +111,7 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
 
 
 async def _create_fixture(
-    session: AsyncSession,
+    session: WriteSession,
     slug: str,
     *,
     create_workspace_user: bool = True,
@@ -133,8 +133,8 @@ async def _create_fixture(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Project browser manifest agent",
@@ -167,8 +167,8 @@ async def _create_fixture(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime_repository = AgentRuntimeRepository()
     runtime = await runtime_repository.ensure_for_agent(session, agent.id)
     await runtime_repository.record_runner_state(
@@ -208,7 +208,7 @@ async def _create_fixture(
     return _Fixture(agent_id=agent.id, session_id=agent_session.id, user_id=user_id)
 
 
-def _service(session: AsyncSession) -> ProjectBrowserManifestService:
+def _service(session: WriteSession) -> ProjectBrowserManifestService:
     """Create service for tests."""
     session_manager = _SessionManager(session)
     catalog_repository = AgentProjectCatalogRepository()
@@ -247,7 +247,7 @@ class TestProjectBrowserManifestService:
 
     async def test_session_manifest_returns_project_entries_with_capabilities(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Existing-session manifest returns Project roots and backend action policy."""
         fixture = await _create_fixture(rdb_session, "pbm-session")
@@ -305,7 +305,7 @@ class TestProjectBrowserManifestService:
 
     async def test_session_manifest_marks_git_worktree_projects(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Project roots linked to Git worktree allocations expose Git metadata."""
         fixture = await _create_fixture(rdb_session, "pbm-git-worktree")
@@ -345,7 +345,7 @@ class TestProjectBrowserManifestService:
 
     async def test_session_manifest_empty_projects_has_empty_state(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Empty Project sessions do not fall back to Agent Workspace root entries."""
         fixture = await _create_fixture(rdb_session, "pbm-empty")
@@ -370,7 +370,7 @@ class TestProjectBrowserManifestService:
 
     async def test_preview_manifest_normalizes_and_marks_missing_projection_stale(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Pre-session preview uses the same entry model without a session row."""
         fixture = await _create_fixture(rdb_session, "pbm-preview")
@@ -398,7 +398,7 @@ class TestProjectBrowserManifestService:
 
     async def test_session_manifest_rejects_agent_mismatch(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Existing-session manifests require a matching AgentSession Agent."""
         fixture = await _create_fixture(rdb_session, "pbm-agent-mismatch")
@@ -414,7 +414,7 @@ class TestProjectBrowserManifestService:
 
     async def test_session_manifest_rejects_non_member(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Existing-session manifests require workspace membership."""
         fixture = await _create_fixture(

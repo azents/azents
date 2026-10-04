@@ -57,6 +57,7 @@ from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     CapturedProfileAdmission,
@@ -95,9 +96,10 @@ from azents.testing.model_selection import (
 
 
 @asynccontextmanager
-async def _session_manager_double() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager_double() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder DB session for service-double tests."""
-    async with AsyncSession() as session:
+    async with AsyncSession() as _raw_session:
+        session = ReadWriteSession(_raw_session)
         yield session
 
 
@@ -110,7 +112,7 @@ class _SubagentLockRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
         *,
         nowait: bool = False,
@@ -145,7 +147,7 @@ class _SubagentLockRepository(AgentSessionRepository):
         )
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     repo = WorkspaceRepository()
     result = await repo.create(
         session,
@@ -157,12 +159,12 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession, email: str) -> str:
+async def _create_user(session: WriteSession, email: str) -> str:
     user = await UserRepository().create(session, UserCreate(email=email))
     return user.id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(session: WriteSession, workspace_id: str, slug: str) -> str:
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
         provider=LLMProvider.ANTHROPIC,
@@ -170,8 +172,8 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -205,15 +207,15 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return agent.id
 
 
@@ -226,7 +228,7 @@ class _WorkspaceUserRepository(WorkspaceUserRepository):
 
     async def lock_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         user_id: str,
@@ -244,7 +246,7 @@ class _WorkspaceUserRepository(WorkspaceUserRepository):
 
 
 def _service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     *,
     workspace_user_repository: WorkspaceUserRepository | None = None,
 ) -> ChatWriteService:
@@ -294,7 +296,7 @@ class _ExchangeFileService(InputAttachmentClaimRepository):
 
     async def claim_input_attachments(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -351,7 +353,7 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
 
     async def create_idempotent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ChatWriteRequestCreate,
     ) -> _IdempotentWriteResult:
         """Return an existing idempotency record for another session."""
@@ -435,7 +437,7 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
         *,
         nowait: bool = False,
@@ -447,7 +449,7 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
 
     async def get_root_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent:
         del session
@@ -456,7 +458,7 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
 
     async def lock_root_tree_sessions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
     ) -> list[AgentSession]:
@@ -467,7 +469,7 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         stop_request_id: str,
@@ -481,7 +483,7 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
 class _ControlAgentRepository(AgentRepository):
     """Return one active Agent whose Workspace matches the Session."""
 
-    async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
+    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent | None:
         del session
         assert agent_id == "agent-1"
         return Agent.model_construct(
@@ -499,7 +501,7 @@ class _ControlWorkspaceUserRepository(WorkspaceUserRepository):
 
     async def lock_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         user_id: str,
@@ -525,7 +527,7 @@ class _ControlWriteRequestRepository(ChatWriteRequestRepository):
 
     async def get_by_client_request_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         requester_user_id: str,
@@ -546,7 +548,7 @@ class _ControlMailboxService(MailboxRepository):
 
     async def list_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> list[MailboxItem]:
         del session, session_id
@@ -624,7 +626,7 @@ class TestChatWriteService:
 
     async def test_model_profile_replacement_is_idempotent_and_side_effect_free(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Apply, replay, and conflict without creating execution work."""
         async with rdb_session_manager() as session:
@@ -711,7 +713,7 @@ class TestChatWriteService:
             )
             assert changed is not None
             assert changed.applied_profile_generation == 2
-            mailbox_count = await session.scalar(
+            mailbox_count = await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBMailboxItem)
                 .where(RDBMailboxItem.session_id == agent_session.id)
@@ -763,7 +765,7 @@ class TestChatWriteService:
                 current.applied_inference_profile.model_target_label == "later-profile"
             )
             assert (
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(sa.func.count())
                     .select_from(RDBMailboxItem)
                     .where(RDBMailboxItem.session_id == agent_session.id)
@@ -773,7 +775,7 @@ class TestChatWriteService:
 
     async def test_model_profile_user_root_requires_associated_owner(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """User Session writes are restricted to the durable associated owner."""
         async with rdb_session_manager() as session:
@@ -826,7 +828,7 @@ class TestChatWriteService:
 
     async def test_model_profile_rejects_invalid_profile_and_subagent(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Invalid labels/efforts and subagent Sessions fail without mutation."""
         async with rdb_session_manager() as session:
@@ -1173,7 +1175,7 @@ class TestChatWriteService:
 
     async def test_idempotency_record_for_another_session_is_rejected(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject existing idempotency records from another explicit session."""
         service = ChatWriteService(
@@ -1231,7 +1233,7 @@ class TestChatWriteService:
 
     async def test_stop_request_targets_session_agent_subtree(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Stop requests cover the requested SessionAgent subtree."""
         async with rdb_session_manager() as session:
@@ -1295,7 +1297,7 @@ class TestChatWriteService:
 
     async def test_edit_allows_rewriting_message_at_model_input_head(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Idle edit rewrites consumed transcript from the target message."""
         async with rdb_session_manager() as session:
@@ -1364,14 +1366,14 @@ class TestChatWriteService:
         assert result.mailbox_item.requested_reasoning_effort is None
         async with rdb_session_manager() as session:
             rows = (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBEvent).where(RDBEvent.id.in_([target.id, later.id]))
                 )
             ).scalars()
             reverted_by_id = {row.id: row.reverted for row in rows}
             assert reverted_by_id == {target.id: True, later.id: True}
             buffers = (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBMailboxItem).where(
                         RDBMailboxItem.session_id == agent_session.id
                     )
@@ -1392,7 +1394,7 @@ class TestChatWriteService:
 
     async def test_failed_run_retry_reverts_latest_failed_error_and_marks_running(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Manual failed-run retry soft-reverts terminal failure output."""
         async with rdb_session_manager() as session:
@@ -1479,7 +1481,7 @@ class TestChatWriteService:
         assert result.failed_event_id == failed_event.id
         async with rdb_session_manager() as session:
             rows = (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBEvent).where(
                         RDBEvent.id.in_([user_event.id, failed_event.id, marker.id])
                     )
@@ -1529,7 +1531,7 @@ class TestChatWriteService:
 
     async def test_failed_run_retry_rejects_stale_failed_error(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Manual retry rejects a failed-run card that has newer visible history."""
         async with rdb_session_manager() as session:
@@ -1585,7 +1587,7 @@ class TestChatWriteService:
 
     async def test_idempotent_command_key_is_session_scoped(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Allow the same client request ID in a different explicit session."""
         async with rdb_session_manager() as session:
@@ -1649,14 +1651,14 @@ class TestChatWriteService:
 
 
 def _active_profile_repository(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ActiveProfileAdmissionRepository:
     """Keep these lifecycle-only fixtures scoped to their declared option contract."""
     del manager
     repository = create_autospec(ActiveProfileAdmissionRepository, instance=True)
 
     async def validate(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         profile: RequestedInferenceProfile,

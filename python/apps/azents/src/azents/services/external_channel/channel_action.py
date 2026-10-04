@@ -14,7 +14,6 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -59,6 +58,7 @@ from azents.core.slack_external_channel_progress import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
     ChannelActionEffectPlan,
@@ -241,7 +241,7 @@ class ExternalChannelActionService:
     """Commit Channel Work before attempting provider operations once."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -297,7 +297,7 @@ class ExternalChannelActionService:
     def _session_manager_for_authority(
         self,
         authority: SessionResourceAuthority | None,
-    ) -> SessionManager[AsyncSession]:
+    ) -> SessionManager[WriteSession]:
         """Resolve an owner-bound DB scope when execution authority is available."""
         if authority is None:
             return self.session_manager
@@ -425,7 +425,7 @@ class ExternalChannelActionService:
                 files=files,
                 now=datetime.datetime.now(datetime.UTC),
             )
-            await session.commit()
+            await session.write_session.commit()
         reply_requested = any(
             effect.provider.target.operation is ExternalChannelDeliveryOperation.REPLY
             for effect in transition.effects
@@ -497,7 +497,7 @@ class ExternalChannelActionService:
                     work_cycle_id=transition.work_id,
                     expected_state_revision=transition.state_revision,
                 )
-                await session.commit()
+                await session.write_session.commit()
             awaiting_input = settlement.established
             state_revision = settlement.state_revision
         return ChannelActionResult(
@@ -581,7 +581,7 @@ class ExternalChannelActionService:
                 effect=effect,
                 outcome=result,
             )
-            await session.commit()
+            await session.write_session.commit()
         return ProviderEffectOutcome(
             operation=current.target.operation,
             part=effect.part,
@@ -636,7 +636,7 @@ class ExternalChannelActionService:
                     ),
                     outcome=outcome,
                 )
-                await session.commit()
+                await session.write_session.commit()
         elif isinstance(
             current.target.request_payload.get("access_request_id"),
             str,
@@ -647,7 +647,7 @@ class ExternalChannelActionService:
                     plan=current,
                     outcome=outcome,
                 )
-                await session.commit()
+                await session.write_session.commit()
         return outcome
 
     async def execute_binding_effect(
@@ -736,7 +736,7 @@ class ExternalChannelActionService:
                     ),
                     outcome=outcome,
                 )
-                await session.commit()
+                await session.write_session.commit()
         return outcome
 
     async def _deliver(
@@ -1286,7 +1286,7 @@ class ExternalChannelActionService:
                 delivery_channel_id=delivery_channel_id,
                 initial_thread_title=initial_thread_title,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _deliver_slack(
         self,

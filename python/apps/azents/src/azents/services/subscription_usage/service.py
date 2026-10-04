@@ -10,7 +10,6 @@ from typing import Annotated, assert_never
 import httpx
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import (
     CHATGPT_USAGE_BASE_URL,
@@ -39,6 +38,7 @@ from azents.core.xai_oauth import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -168,7 +168,7 @@ class SubscriptionUsageService:
         RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)]
     chatgpt_usage_base_url: Annotated[str, Depends(get_chatgpt_usage_base_url)]

@@ -4,7 +4,6 @@ from typing import Annotated
 
 from fastapi import Depends
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
@@ -21,6 +20,7 @@ from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_profile_admission import (
     ActiveProfileAdmissionRepository,
     ActiveProfileCaptureRequired,
@@ -59,7 +59,7 @@ class SessionModelProfileRepository:
             ActiveProfileAdmissionRepository, Depends(ActiveProfileAdmissionRepository)
         ],
         session_manager: Annotated[
-            SessionManager[AsyncSession], Depends(get_session_manager)
+            SessionManager[WriteSession], Depends(get_session_manager)
         ],
     ) -> None:
         self.agent_repository = agent_repository
@@ -167,7 +167,7 @@ class SessionModelProfileRepository:
 
     async def lock_writable_root(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -241,7 +241,7 @@ class SessionModelProfileRepository:
 
     async def get_readable_root(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,

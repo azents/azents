@@ -3,7 +3,6 @@
 import dataclasses
 
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
     AgentModelSelection,
@@ -13,6 +12,7 @@ from azents.core.agent import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -92,7 +92,7 @@ class EngineInvokeModelSnapshot:
 class EngineModelReadRepository:
     """Own completed model integration reads."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     integration_repository: LLMProviderIntegrationRepository
 
     async def get_integration(
@@ -111,7 +111,7 @@ class EngineModelReadRepository:
 class EngineInvokeReadRepository:
     """Own the atomic Agent, model-selection, and integration snapshot read."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     agent_repository: AgentRepository
     integration_repository: LLMProviderIntegrationRepository
 
@@ -255,7 +255,7 @@ class EngineInvokeReadRepository:
 class EngineToolkitReadRepository:
     """Own completed effective Toolkit reads."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     toolkit_repository: ToolkitRepository
 
     async def list_effective_for_agent(

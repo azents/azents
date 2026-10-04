@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.chat_data import (
@@ -46,6 +45,7 @@ from azents.engine.events.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
@@ -216,7 +216,7 @@ class SessionContextService:
         Depends(AgentSessionSystemPromptSnapshotRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def get_session_context(

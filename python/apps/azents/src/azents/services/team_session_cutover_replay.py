@@ -7,13 +7,13 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshotError,
@@ -95,7 +95,7 @@ class TeamSessionCutoverReplayService:
         Depends(SessionExecutionRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     broker_provider: Annotated[
@@ -209,9 +209,9 @@ class TeamSessionCutoverReplayService:
                 if _snapshot_work_drifted(current, snapshot):
                     failures.update(("durable_work_changed",))
             if failures:
-                await session.rollback()
+                await session.write_session.rollback()
             else:
-                await session.commit()
+                await session.write_session.commit()
         if failures:
             raise TeamSessionCutoverReplayInvariantFailure(
                 invariant_failures=tuple(sorted(failures.items()))

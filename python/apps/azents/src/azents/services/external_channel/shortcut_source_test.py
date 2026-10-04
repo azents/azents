@@ -22,6 +22,7 @@ from azents.core.external_channel_selector_state import (
     projection_with_selector_state,
     selector_state_from_interaction,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConversationPositionCreate,
     ExternalChannelInteraction,
@@ -288,8 +289,8 @@ def _service(
     repository: _Repository,
 ) -> ExternalChannelShortcutSourceService:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield MagicMock(spec=AsyncSession, wraps=session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(MagicMock(spec=AsyncSession, wraps=session))
 
     return ExternalChannelShortcutSourceService(
         session_manager=session_manager,

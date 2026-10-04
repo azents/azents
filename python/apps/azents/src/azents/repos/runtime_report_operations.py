@@ -7,7 +7,6 @@ from typing import Annotated
 
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -17,6 +16,7 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
@@ -28,7 +28,7 @@ class RuntimeReportOperationRepository:
     """Own the five existing report transactions and their evidence compositions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
@@ -137,7 +137,7 @@ class RuntimeReportOperationRepository:
 
     async def _record_provider_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime: AgentRuntime,
         report: ProviderReportInput,
@@ -327,7 +327,7 @@ class RuntimeReportOperationRepository:
 
     async def _record_runner_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime: AgentRuntime,
         report: RunnerReportInput,
@@ -360,7 +360,7 @@ class RuntimeReportOperationRepository:
 
     async def _runner_evidence_matches_applied(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime: AgentRuntime,
         evidence: RuntimeConfigurationEvidence,

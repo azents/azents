@@ -4,9 +4,9 @@ import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.email_verification import RDBEmailVerification
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     AlreadyVerified,
@@ -22,7 +22,7 @@ class EmailVerificationRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: EmailVerificationCreate,
     ) -> EmailVerification:
         """Create verification record.
@@ -37,12 +37,12 @@ class EmailVerificationRepository:
             csrf_token=create.csrf_token,
             expires_at=create.expires_at,
         )
-        session.add(rdb_verification)
-        await session.flush()
+        session.write_session.add(rdb_verification)
+        await session.write_session.flush()
         return self._build(rdb_verification)
 
     async def get(
-        self, session: AsyncSession, verification_id: str
+        self, session: ReadSession, verification_id: str
     ) -> EmailVerification | None:
         """Fetch verification record by ID.
 
@@ -50,13 +50,13 @@ class EmailVerificationRepository:
         :param verification_id: Verification ID
         :return: EmailVerification or None
         """
-        rdb = await session.get(RDBEmailVerification, verification_id)
+        rdb = await session.read_session.get(RDBEmailVerification, verification_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_email_and_csrf(
-        self, session: AsyncSession, email: str, csrf_token: str
+        self, session: ReadSession, email: str, csrf_token: str
     ) -> EmailVerification | None:
         """Fetch by email + CSRF token.
 
@@ -65,7 +65,7 @@ class EmailVerificationRepository:
         :param csrf_token: CSRF token
         :return: EmailVerification or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEmailVerification).where(
                 RDBEmailVerification.email == email,
                 RDBEmailVerification.csrf_token == csrf_token,
@@ -77,7 +77,7 @@ class EmailVerificationRepository:
         return self._build(rdb)
 
     async def mark_verified(
-        self, session: AsyncSession, verification_id: str
+        self, session: WriteSession, verification_id: str
     ) -> Result[EmailVerification, NotFound | AlreadyVerified]:
         """Mark as verification complete.
 
@@ -85,13 +85,13 @@ class EmailVerificationRepository:
         :param verification_id: Verification ID
         :return: Updated EmailVerification or error
         """
-        rdb = await session.get(RDBEmailVerification, verification_id)
+        rdb = await session.write_session.get(RDBEmailVerification, verification_id)
         if rdb is None:
             return Failure(NotFound(verification_id=verification_id))
         if rdb.verified_at is not None:
             return Failure(AlreadyVerified(verification_id=verification_id))
         now = tznow()
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBEmailVerification)
             .where(
                 RDBEmailVerification.id == verification_id,
@@ -106,7 +106,7 @@ class EmailVerificationRepository:
             return Failure(AlreadyVerified(verification_id=verification_id))
         return Success(self._build(updated))
 
-    async def delete_stale_by_email(self, session: AsyncSession, email: str) -> int:
+    async def delete_stale_by_email(self, session: WriteSession, email: str) -> int:
         """Delete stale verification records for email, either unverified or expired.
 
         :param session: Database session
@@ -114,7 +114,7 @@ class EmailVerificationRepository:
         :return: Deleted record count
         """
         now = tznow()
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBEmailVerification).where(
                 RDBEmailVerification.email == email,
                 sa.or_(
@@ -130,7 +130,7 @@ class EmailVerificationRepository:
 
     async def list_all(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         offset: int = 0,
         limit: int = 50,
@@ -142,12 +142,12 @@ class EmailVerificationRepository:
         :param limit: Maximum record count to return
         :return: EmailVerification list
         """
-        count_result = await session.execute(
+        count_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(RDBEmailVerification)
         )
         total = count_result.scalar() or 0
 
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEmailVerification)
             .order_by(RDBEmailVerification.created_at.desc())
             .offset(offset)
@@ -158,7 +158,7 @@ class EmailVerificationRepository:
 
     async def list_by_email(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         email: str,
         *,
         offset: int = 0,
@@ -179,14 +179,14 @@ class EmailVerificationRepository:
             RDBEmailVerification.verified_at.is_(None),
         )
 
-        count_result = await session.execute(
+        count_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(
                 sa.select(RDBEmailVerification).where(base_filter).subquery()
             )
         )
         total = count_result.scalar() or 0
 
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEmailVerification)
             .where(base_filter)
             .order_by(RDBEmailVerification.created_at.desc())

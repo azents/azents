@@ -3,7 +3,6 @@
 import json
 
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -30,6 +29,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -63,7 +63,7 @@ def _native_artifact() -> NativeArtifact:
     )
 
 
-async def _create_agent_session(session: AsyncSession) -> str:
+async def _create_agent_session(session: WriteSession) -> str:
     """Create an AgentSession for message repository tests."""
     handle = "message-pagination"
     await WorkspaceRepository().create(
@@ -79,8 +79,8 @@ async def _create_agent_session(session: AsyncSession) -> str:
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     model_selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -98,15 +98,15 @@ async def _create_agent_session(session: AsyncSession) -> str:
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     agent_session = await AgentSessionRepository().create(
         session,
         AgentSessionCreate(
@@ -120,7 +120,7 @@ async def _create_agent_session(session: AsyncSession) -> str:
     return agent_session.id
 
 
-async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
+async def _create_events(session: WriteSession, session_id: str) -> list[str]:
     """Create five ordered durable events and one reverted event."""
     ids = [f"{order:032x}" for order in range(1, 6)]
     for order, event_id in enumerate(ids, start=1):
@@ -135,7 +135,7 @@ async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
             payload=payload,
         )
         event.id = event_id
-        session.add(event)
+        session.write_session.add(event)
 
     reverted = RDBEvent(
         session_id=session_id,
@@ -148,8 +148,8 @@ async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
         reverted=True,
     )
     reverted.id = f"{6:032x}"
-    session.add(reverted)
-    await session.flush()
+    session.write_session.add(reverted)
+    await session.write_session.flush()
     return ids
 
 
@@ -158,7 +158,7 @@ class TestMessageRepositoryPagination:
 
     async def test_default_before_and_after_pages_have_directional_flags(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         session_id = await _create_agent_session(rdb_session)
         event_ids = await _create_events(rdb_session, session_id)
@@ -195,7 +195,7 @@ class TestMessageRepositoryPagination:
 
     async def test_empty_boundary_pages_still_report_opposite_direction(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         session_id = await _create_agent_session(rdb_session)
         event_ids = await _create_events(rdb_session, session_id)
@@ -229,7 +229,7 @@ class TestMessageRepositoryPagination:
 
 
 async def test_historical_memory_retrieval_bounds_semantic_lanes_independently(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Higher semantic evidence survives newer lower-tier lane rows."""
     session_id = await _create_agent_session(rdb_session)
@@ -368,8 +368,8 @@ async def test_historical_memory_retrieval_bounds_semantic_lanes_independently(
             ),
         )
         row.id = event_id
-        rdb_session.add(row)
-    await rdb_session.flush()
+        rdb_session.write_session.add(row)
+    await rdb_session.write_session.flush()
 
     events = await MessageRepository().list_historical_memory_events_by_tier(
         rdb_session,
@@ -393,7 +393,7 @@ async def test_historical_memory_retrieval_bounds_semantic_lanes_independently(
 
 
 async def test_historical_memory_retrieval_stops_after_ineligible_row_budget(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Long empty histories return fewer results instead of scanning unboundedly."""
     session_id = await _create_agent_session(rdb_session)
@@ -408,7 +408,7 @@ async def test_historical_memory_retrieval_stops_after_ineligible_row_budget(
         ),
     )
     valid.id = f"{1:032x}"
-    rdb_session.add(valid)
+    rdb_session.write_session.add(valid)
     for index in range(2, 53):
         row = RDBEvent(
             session_id=session_id,
@@ -421,8 +421,8 @@ async def test_historical_memory_retrieval_stops_after_ineligible_row_budget(
             ),
         )
         row.id = f"{index:032x}"
-        rdb_session.add(row)
-    await rdb_session.flush()
+        rdb_session.write_session.add(row)
+    await rdb_session.write_session.flush()
 
     events = await MessageRepository().list_historical_memory_events_by_tier(
         rdb_session,
@@ -435,7 +435,7 @@ async def test_historical_memory_retrieval_stops_after_ineligible_row_budget(
 
 
 async def test_registered_tool_scan_stops_after_ignored_call_budget(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Ignored calls cannot trigger a complete-history search for conversation."""
     session_id = await _create_agent_session(rdb_session)
@@ -459,7 +459,7 @@ async def test_registered_tool_scan_stops_after_ignored_call_budget(
         ),
     )
     valid.id = f"{1:032x}"
-    rdb_session.add(valid)
+    rdb_session.write_session.add(valid)
     for index in range(2, 53):
         row = RDBEvent(
             session_id=session_id,
@@ -480,8 +480,8 @@ async def test_registered_tool_scan_stops_after_ignored_call_budget(
             ),
         )
         row.id = f"{index:032x}"
-        rdb_session.add(row)
-    await rdb_session.flush()
+        rdb_session.write_session.add(row)
+    await rdb_session.write_session.flush()
 
     events = await MessageRepository().list_historical_memory_events_by_tier(
         rdb_session,

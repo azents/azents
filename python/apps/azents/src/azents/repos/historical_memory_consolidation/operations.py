@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.active_model_capabilities import (
@@ -27,6 +26,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.historical_memory_consolidation.authority import (
@@ -42,7 +42,7 @@ from azents.repos.model_candidate_selection import select_model_operation_candid
 
 
 async def finish_consolidation_model_operation(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     owner: LockedConsolidationOwner,
     health_repository: ModelCandidateHealthRepository,
@@ -86,7 +86,7 @@ async def finish_consolidation_model_operation(
 class ConsolidationModelOperationRepository:
     """Use existing Lightweight settings/health without a fabricated Session or Main."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     agent_repository: AgentRepository
     health_repository: ModelCandidateHealthRepository
     active_capabilities_repository: ActiveModelCapabilitiesRepository

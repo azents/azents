@@ -8,6 +8,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState
+from azents.rdb.session_capabilities import ReadWriteSession
 
 from .cutover_replay import (
     CutoverReplayCandidateProjection,
@@ -66,7 +67,7 @@ async def test_candidate_batch_uses_cursor_and_limit_without_content_tables() ->
     repository = SessionCutoverReplayRepository()
 
     batch = await repository.read_candidate_batch(
-        cast(AsyncSession, session),
+        ReadWriteSession(cast(AsyncSession, session)),
         batch_size=1,
         after_session_id="session-0",
     )

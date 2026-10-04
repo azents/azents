@@ -22,6 +22,7 @@ from azents.core.workspace import WorkspaceCreate
 from azents.core.xai_oauth import XaiOAuthConnectionMethod
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationCreate,
@@ -65,11 +66,12 @@ class _Sessions:
         self.active_transactions = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(self.engine, expire_on_commit=False) as session:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        async with AsyncSession(self.engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             self.active_transactions += 1
             try:
-                async with session.begin():
+                async with session.write_session.begin():
                     yield session
             finally:
                 self.active_transactions -= 1
@@ -135,12 +137,12 @@ async def harness(
     finally:
         if workspace_id is not None:
             async with sessions() as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBLLMProviderIntegration).where(
                         RDBLLMProviderIntegration.workspace_id == workspace_id
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
                 )
 
@@ -318,9 +320,11 @@ class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
         self.backend_pid: int | None = None
 
     async def get_by_id_with_secrets_for_update(
-        self, session: AsyncSession, integration_id: str
+        self, session: WriteSession, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
-        self.backend_pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+        self.backend_pid = await session.read_session.scalar(
+            sa.text("SELECT pg_backend_pid()")
+        )
         if self.lock_before_pause:
             latest = await super().get_by_id_with_secrets_for_update(
                 session, integration_id
@@ -328,7 +332,9 @@ class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
             self.read_complete.set()
             await self.resume.wait()
             return latest
-        stale_row = await session.get(RDBLLMProviderIntegration, integration_id)
+        stale_row = await session.read_session.get(
+            RDBLLMProviderIntegration, integration_id
+        )
         assert stale_row is not None
         self.read_complete.set()
         await self.resume.wait()
@@ -369,8 +375,9 @@ async def test_concurrent_success_cannot_replace_first_committed_refresh(
         )
         if lock_before_pause:
             async with asyncio.timeout(10):
-                async with AsyncSession(harness.sessions.engine) as observer:
-                    while not await observer.scalar(
+                async with AsyncSession(harness.sessions.engine) as _raw_observer:
+                    observer = ReadWriteSession(_raw_observer)
+                    while not await observer.read_session.scalar(
                         sa.text(
                             "SELECT EXISTS (SELECT 1 FROM pg_locks "
                             "WHERE NOT granted AND :pid = ANY(pg_blocking_pids(pid)))"
@@ -448,8 +455,9 @@ async def test_concurrent_success_preserves_fresh_credentials_and_metadata(
         if lock_before_pause:
             # Observe actual row-lock blocking instead of relying on scheduler timing.
             async with asyncio.timeout(10):
-                async with AsyncSession(harness.sessions.engine) as observer:
-                    while not await observer.scalar(
+                async with AsyncSession(harness.sessions.engine) as _raw_observer:
+                    observer = ReadWriteSession(_raw_observer)
+                    while not await observer.read_session.scalar(
                         sa.text(
                             "SELECT EXISTS (SELECT 1 FROM pg_locks "
                             "WHERE NOT granted AND :pid = ANY(pg_blocking_pids(pid)))"

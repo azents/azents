@@ -13,6 +13,7 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
@@ -48,7 +49,7 @@ class _InteractionRepositoryDouble:
 
     async def transition_interaction(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         interaction_id: str,
         status: ExternalChannelInteractionStatus,
@@ -72,7 +73,7 @@ class _InteractionAdmissionRepositoryDouble:
 
     async def lock_connection_for_interaction_admission(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
     ) -> None:
@@ -82,7 +83,7 @@ class _InteractionAdmissionRepositoryDouble:
 
     async def create_principal_idempotent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ExternalChannelPrincipalCreate,
     ) -> ExternalChannelPrincipal:
         del session, create
@@ -91,7 +92,7 @@ class _InteractionAdmissionRepositoryDouble:
 
     async def admit_interaction(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: ExternalChannelInteractionCreate,
     ) -> ExternalChannelInteractionAdmission:
         del session
@@ -107,11 +108,11 @@ async def test_interaction_admission_locks_connection_before_principal_upsert() 
     repository = _InteractionAdmissionRepositoryDouble()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(cast(AsyncSession, session))
 
     result = await ExternalChannelAdmissionService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
+        session_manager=cast(SessionManager[WriteSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
     ).admit_interaction(
         create=ExternalChannelInteractionCreate.model_construct(
@@ -153,8 +154,8 @@ async def test_post_claim_mutation_terminalizes_once_without_trigger_retention(
     repository = _InteractionRepositoryDouble()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(cast(AsyncSession, session))
 
     handoff = ExternalChannelInteractionHandoff(
         native_control=None,
@@ -175,7 +176,7 @@ async def test_post_claim_mutation_terminalizes_once_without_trigger_retention(
             raise callback_error
 
     await ExternalChannelAdmissionService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
+        session_manager=cast(SessionManager[WriteSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
     ).run_interaction_provider_mutation(
         handoff=handoff,
@@ -216,7 +217,7 @@ class _InteractionClaimRepositoryDouble:
 
     async def lock_interaction(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         interaction_id: str,
     ) -> ExternalChannelInteraction | None:
@@ -225,7 +226,7 @@ class _InteractionClaimRepositoryDouble:
 
     async def transition_interaction(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         interaction_id: str,
         status: ExternalChannelInteractionStatus,
@@ -266,11 +267,11 @@ async def test_processing_interaction_retry_terminalizes_only_stale_claim(
     session = _SessionDouble()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(cast(AsyncSession, session))
 
     claim = await ExternalChannelAdmissionService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
+        session_manager=cast(SessionManager[WriteSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
         provider_mutation_timeout=datetime.timedelta(milliseconds=500),
         processing_lease=datetime.timedelta(seconds=1),
@@ -302,14 +303,14 @@ async def test_provider_mutation_timeout_terminalizes_without_replay() -> None:
     repository = _InteractionRepositoryDouble()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(cast(AsyncSession, session))
 
     async def callback(_: ExternalChannelInteractionHandoff) -> None:
         await asyncio.Event().wait()
 
     await ExternalChannelAdmissionService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
+        session_manager=cast(SessionManager[WriteSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
         provider_mutation_timeout=datetime.timedelta(milliseconds=1),
         processing_lease=datetime.timedelta(seconds=1),

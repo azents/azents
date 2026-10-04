@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 
@@ -17,7 +17,7 @@ class LiveProjectionAuthorityRepository:
     """Close PostgreSQL reads before volatile store and broadcast effects."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     agent_session_repository: Annotated[

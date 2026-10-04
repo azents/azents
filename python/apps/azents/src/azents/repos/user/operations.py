@@ -6,13 +6,13 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import SystemUserRole
 from azents.core.system_user_role import LastSystemAdmin
 from azents.core.user import UserDeletionStatus, UserUpdate
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.session import SessionRepository
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
@@ -25,7 +25,7 @@ class UserOperationRepository:
     """Own User reads/writes and the complete disable-and-revoke transaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     user_repository: Annotated[UserRepository, Depends()]
     system_role_repository: Annotated[SystemUserRoleRepository, Depends()]

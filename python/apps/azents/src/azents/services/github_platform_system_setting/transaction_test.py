@@ -7,7 +7,6 @@ from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.github_system_setting import PlatformGitHubAppEffective
 from azents.core.system_setting import (
@@ -26,6 +25,7 @@ from azents.core.system_setting_data import (
 )
 from azents.rdb.models.github_user_installation import RDBGithubUserInstallation
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -59,7 +59,7 @@ def _client() -> PlatformGitHubAppValidationClient:
 
 
 async def _installation(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     installation_id: int,
 ) -> None:
@@ -68,7 +68,7 @@ async def _installation(
             session,
             UserCreate(email=f"settings-{installation_id}@example.com"),
         )
-        session.add(
+        session.write_session.add(
             RDBGithubUserInstallation(
                 user_id=user.id,
                 installation_id=installation_id,
@@ -87,7 +87,7 @@ class _PendingIdentityChange(NamedTuple):
 
 
 async def _pending_identity_change(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> _PendingIdentityChange:
     service = _service(manager, _client())
     private_key = _private_key()
@@ -113,7 +113,7 @@ async def _pending_identity_change(
 
 
 async def test_confirmation_checks_aggregate_impact_drift_under_section_lock(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """New bound installations invalidate the captured aggregate, not just version."""
     service, pending = await _pending_identity_change(rdb_session_manager)
@@ -145,7 +145,7 @@ async def test_confirmation_checks_aggregate_impact_drift_under_section_lock(
 
 
 async def test_confirmation_actions_and_json_list_equality_are_preserved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Only captured actions activate; reconnect counts stay redacted."""
     service, pending = await _pending_identity_change(rdb_session_manager)
@@ -179,7 +179,7 @@ async def test_confirmation_actions_and_json_list_equality_are_preserved(
 class _ActivationAuditFailure(SystemSettingRepository):
     async def append_audit_event(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: SystemSettingAuditEventCreate,
     ) -> StoredSystemSettingAuditEvent:
@@ -190,7 +190,7 @@ class _ActivationAuditFailure(SystemSettingRepository):
 
 
 async def test_confirmation_partial_activation_rolls_back_candidate_and_current(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Impact confirmation does not split activation, candidate deletion, and audit."""
     service, pending = await _pending_identity_change(rdb_session_manager)
@@ -220,14 +220,14 @@ async def test_confirmation_partial_activation_rolls_back_candidate_and_current(
 
 
 async def test_github_validation_and_health_http_run_after_every_db_context_ends(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Provider callbacks observe no retained or implicitly restarted transaction."""
-    sessions: list[AsyncSession] = []
-    active: list[AsyncSession] = []
+    sessions: list[WriteSession] = []
+    active: list[WriteSession] = []
 
     @asynccontextmanager
-    async def tracked_manager() -> AsyncIterator[AsyncSession]:
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
         async with rdb_session_manager() as session:
             sessions.append(session)
             active.append(session)
@@ -244,7 +244,7 @@ async def test_github_validation_and_health_http_run_after_every_db_context_ends
         nonlocal calls
         assert effective.app_id == "123"
         assert not active
-        assert all(not session.in_transaction() for session in sessions)
+        assert all(not session.write_session.in_transaction() for session in sessions)
         calls += 1
         return _valid()
 
@@ -260,11 +260,11 @@ async def test_github_validation_and_health_http_run_after_every_db_context_ends
     assert detail.health is not None
     assert calls == 2
     assert not active
-    assert all(not session.in_transaction() for session in sessions)
+    assert all(not session.write_session.in_transaction() for session in sessions)
 
 
 async def test_github_health_rejects_generation_changed_during_provider_check(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A completed provider check cannot persist health for stale environment inputs."""
     service = _service(rdb_session_manager, _client())

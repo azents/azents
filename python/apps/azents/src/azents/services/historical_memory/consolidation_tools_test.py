@@ -2,8 +2,6 @@
 
 import json
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.engine.events.types import (
     ClientToolCallPayload,
     NativeArtifact,
@@ -11,6 +9,7 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
 )
@@ -61,7 +60,7 @@ def _call(call_id: str, name: str, arguments: dict[str, str]) -> ClientToolCallP
     )
 
 
-async def _bindings(manager: SessionManager[AsyncSession]) -> ConsolidationToolBindings:
+async def _bindings(manager: SessionManager[WriteSession]) -> ConsolidationToolBindings:
     corpus = await seed_consolidation_corpus(manager)
     ownership = ConsolidationOwnershipRepository(manager)
     claim = await ownership.claim(corpus.team)
@@ -77,7 +76,7 @@ async def _bindings(manager: SessionManager[AsyncSession]) -> ConsolidationToolB
 
 
 async def test_later_sibling_uses_admission_snapshot_not_first_sibling_updated_reads(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     bindings = await _bindings(rdb_session_manager)
     selection = make_test_model_selection()
@@ -119,7 +118,7 @@ async def test_later_sibling_uses_admission_snapshot_not_first_sibling_updated_r
 
 
 async def test_catalog_binds_only_scoped_ordinary_tools_and_rejects_runtime_and_saved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     bindings = await _bindings(rdb_session_manager)
     selection = make_test_model_selection()

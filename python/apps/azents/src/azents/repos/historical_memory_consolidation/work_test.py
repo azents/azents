@@ -1,7 +1,6 @@
 """Small finite-pass regressions across publications and late committed work."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory_consolidation import (
@@ -18,6 +17,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
     DraftFileChange,
@@ -42,7 +42,7 @@ from azents.testing.consolidation import (
 
 
 async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     manager = rdb_session_manager
     corpus = await seed_consolidation_corpus(manager)
@@ -80,7 +80,7 @@ async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
                     summary="Late work remains pending for a separate pass",
                     title="Late source",
                 )
-                late_id = await session.scalar(
+                late_id = await session.write_session.scalar(
                     sa.select(RDBConsolidationWork.id).where(
                         RDBConsolidationWork.source_session_id == late_source
                     )
@@ -139,10 +139,10 @@ async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
         )
         covered.update(ids)
         async with manager() as session:
-            late = await session.get(RDBConsolidationWork, late_id)
+            late = await session.write_session.get(RDBConsolidationWork, late_id)
             assert late is not None and late.state is ConsolidationWorkState.PENDING
             published = set(
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBConsolidationWork.id).where(
                         work_predicate(corpus.team),
                         RDBConsolidationWork.state == ConsolidationWorkState.PUBLISHED,
@@ -150,7 +150,7 @@ async def test_finite_pass_spans_four_slices_and_does_not_cover_late_work(
                 )
             )
             assert published == covered
-            unit = await session.scalar(
+            unit = await session.write_session.scalar(
                 sa.select(RDBConsolidationUnit).where(
                     RDBConsolidationUnit.agent_id == corpus.team.agent_id
                 )

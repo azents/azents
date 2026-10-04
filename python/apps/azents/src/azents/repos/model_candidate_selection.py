@@ -4,8 +4,6 @@ import dataclasses
 import datetime
 from typing import assert_never
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import ModelCandidateClaimKind
 from azents.core.model_availability import PrimaryModelReservation
 from azents.core.model_operation import (
@@ -19,6 +17,7 @@ from azents.core.model_operation import (
     mark_current_candidate_skipped_and_advance,
     set_transferred_probe_claim,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import (
     ForegroundProbeOutcome,
@@ -37,7 +36,7 @@ class ModelCandidateSelection:
 
 
 async def select_model_operation_candidate(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     operation: ModelOperationSnapshot,
     workspace_id: str,
@@ -179,7 +178,7 @@ async def select_model_operation_candidate(
 
 
 async def _transfer_primary_reservation(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     operation: ModelOperationSnapshot,
     identity: ModelCandidateIdentity,

@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -23,6 +22,7 @@ from azents.core.runtime_profile import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
@@ -67,7 +67,7 @@ class RuntimeRecreationService:
     """Create and inspect recreation operations within authority boundaries."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     profile_repository: Annotated[
         RuntimeProfileRepository, Depends(RuntimeProfileRepository)
@@ -281,7 +281,7 @@ class RuntimeRecreationService:
 
     async def _create_operation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
@@ -332,7 +332,7 @@ class RuntimeRecreationService:
 
     async def _project_operation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         operation: RuntimeRecreationOperation,
         offset: int,
@@ -376,7 +376,7 @@ class RuntimeRecreationItemProcessResult:
 class RuntimeRecreationReconciler:
     """Dispatch and observe durable generation-fenced recreation items."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     profile_repository: RuntimeProfileRepository
     runtime_repository: AgentRuntimeRepository
     agent_repository: AgentRepository

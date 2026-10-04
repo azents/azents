@@ -5,11 +5,10 @@ import datetime
 from collections.abc import Sequence
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunPhase, AgentRunStatus
 from azents.engine.events.types import ActiveToolCall
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 class ExecutionRunState(Protocol):
@@ -31,7 +30,7 @@ class ExecutionRunRepository(Protocol):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> ExecutionRunState | None:
         """Return one AgentRun state."""
@@ -39,7 +38,7 @@ class ExecutionRunRepository(Protocol):
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -54,7 +53,7 @@ class ExecutionModelFilePinRepository(Protocol):
 
     async def pin_many(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,
@@ -76,7 +75,7 @@ class ConditionalPhaseUpdate:
 class EngineExecutionOperationRepository:
     """Own completed phase and ModelFile pin transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: ExecutionRunRepository
     model_file_pin_repository: ExecutionModelFilePinRepository | None
 

@@ -4,7 +4,6 @@ import re
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.enums import WorkspaceUserRole
@@ -16,6 +15,7 @@ from azents.core.vfs import parse_vfs_glob_pattern, parse_vfs_search_uri
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationEvidence
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.ownership import (
     ConsolidationOwnershipRepository,
 )
@@ -38,7 +38,7 @@ from azents.testing.consolidation_vfs import bind_consolidation_test_vfs
 
 
 async def test_search_finds_tail_beyond_one_result_chunk_and_honors_scan_bound(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await bind_consolidation_test_vfs(rdb_session_manager)
     async with rdb_session_manager() as session:
@@ -49,7 +49,7 @@ async def test_search_finds_tail_beyond_one_result_chunk_and_honors_scan_bound(
             summary="z" * 13000 + "\nneedle\n",
             title="Long source",
         )
-        await session.commit()
+        await session.write_session.commit()
     location = parse_vfs_search_uri(binding.source.source_uri(source_id))
     full = await binding.source.grep(
         binding.principal,
@@ -80,14 +80,14 @@ async def test_search_finds_tail_beyond_one_result_chunk_and_honors_scan_bound(
 
 
 async def test_personal_inventory_excludes_team_and_another_personal_user(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     async with rdb_session_manager() as session:
         user = await UserRepository().create(
             session, UserCreate(email=f"{uuid7().hex}@example.test")
         )
-        session.add(
+        session.write_session.add(
             RDBWorkspaceUser(
                 workspace_id=corpus.personal.workspace_id,
                 user_id=user.id,
@@ -95,7 +95,7 @@ async def test_personal_inventory_excludes_team_and_another_personal_user(
                 role=WorkspaceUserRole.MEMBER,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         other_key = ConsolidationUnitKey(
             workspace_id=corpus.personal.workspace_id,
             agent_id=corpus.personal.agent_id,
@@ -109,7 +109,7 @@ async def test_personal_inventory_excludes_team_and_another_personal_user(
             summary="OTHER_USER_SENTINEL",
             title="Other private source",
         )
-        await session.commit()
+        await session.write_session.commit()
     claim = await ConsolidationOwnershipRepository(rdb_session_manager).claim(
         corpus.personal
     )
@@ -140,7 +140,7 @@ async def test_personal_inventory_excludes_team_and_another_personal_user(
 
 
 async def test_exact_source_after_first_page_and_literal_prefix_are_not_starved(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await bind_consolidation_test_vfs(rdb_session_manager)
     ids: list[str] = []
@@ -155,7 +155,7 @@ async def test_exact_source_after_first_page_and_literal_prefix_are_not_starved(
                     title=f"Source {index}",
                 )
             )
-        await session.commit()
+        await session.write_session.commit()
     target = max(ids)
     uri = binding.source.source_uri(target)
     result = await binding.source.grep(
@@ -184,7 +184,7 @@ async def test_exact_source_after_first_page_and_literal_prefix_are_not_starved(
         assert exact.uris == (uri,) and not exact.truncated
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count())
                 .select_from(RDBConsolidationEvidence)
                 .where(
@@ -215,7 +215,7 @@ async def test_exact_source_after_first_page_and_literal_prefix_are_not_starved(
 
 
 async def test_narrowed_source_queries_preserve_scope_and_agent_denial(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await bind_consolidation_test_vfs(rdb_session_manager)
     other = await seed_consolidation_corpus(rdb_session_manager)

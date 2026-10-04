@@ -7,13 +7,13 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.job_runtime.deps import get_job_runtime
 from azents.job_runtime.local import JobRuntimeClosedError
 from azents.job_runtime.types import JobRuntime
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.ingress_queue import (
     ExternalChannelIngressQueueRepository,
 )
@@ -32,7 +32,7 @@ class ExternalChannelIngressRecoveryService:
     """Resubmit due active Session domain state without claiming generic jobs."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     queue_repository: Annotated[
@@ -61,7 +61,7 @@ class ExternalChannelIngressRecoveryService:
                 now=now,
                 limit=_RECOVERY_SCAN_LIMIT,
             )
-            await session.commit()
+            await session.write_session.commit()
         submitted: list[str] = []
         for owner in owners:
             try:

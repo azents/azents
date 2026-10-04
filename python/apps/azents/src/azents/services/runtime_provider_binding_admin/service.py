@@ -7,7 +7,6 @@ from typing import Annotated, Any
 from azcommon.datetime import tznow
 from fastapi import Depends
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -18,6 +17,7 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBinding,
@@ -90,7 +90,7 @@ class RuntimeProviderBindingAdminService:
     """Manage Provider authentication bindings without exposing stored secrets."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     provider_repository: Annotated[
         RuntimeProviderRepository, Depends(RuntimeProviderRepository)
@@ -315,7 +315,7 @@ class RuntimeProviderBindingAdminService:
             )
 
     async def _mutable_binding(
-        self, session: AsyncSession, binding_id: str
+        self, session: WriteSession, binding_id: str
     ) -> RuntimeProviderAuthBinding:
         binding = await self.binding_repository.get_by_id(
             session, binding_id=binding_id, for_update=True
@@ -332,7 +332,7 @@ class RuntimeProviderBindingAdminService:
 
     async def _projection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         binding: RuntimeProviderAuthBinding,
     ) -> RuntimeProviderBindingAdminProjection:
         connected = await self.control_repository.has_connected_connection_for_binding(
@@ -367,7 +367,7 @@ class RuntimeProviderBindingAdminService:
 
     async def _provider_logical_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         provider_id: str,
     ) -> str:
         provider = await self.provider_repository.get_by_id(

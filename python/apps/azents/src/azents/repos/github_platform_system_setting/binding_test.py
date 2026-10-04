@@ -13,6 +13,7 @@ from azents.core.github_credentials import (
 from azents.core.github_system_setting_data import (
     PlatformGitHubAppToolkitCredential,
 )
+from azents.rdb.session_capabilities import ReadWriteSession
 from azents.repos.github_platform_system_setting.repository import (
     PlatformGitHubAppSystemSettingRepository,
 )
@@ -64,7 +65,7 @@ async def test_inspect_toolkits_bound_to_decrypts_current_credentials() -> None:
     session = require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
     impact = await service.inspect_toolkits_bound_to(
-        session,
+        ReadWriteSession(session),
         app_id="123",
     )
 
@@ -97,7 +98,7 @@ async def test_inspect_toolkits_mismatched_with_requires_reconnect() -> None:
     session = require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
     impact = await service.inspect_toolkits_mismatched_with(
-        session,
+        ReadWriteSession(session),
         effective_app_id="123",
     )
 

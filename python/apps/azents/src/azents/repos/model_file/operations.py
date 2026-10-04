@@ -8,10 +8,10 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.file_metadata_authority import (
@@ -43,7 +43,7 @@ class ModelFileOperationRepository:
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     @property
@@ -63,7 +63,7 @@ class ModelFileOperationRepository:
 
     async def validate_authority_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         authority: FileResourceAuthority,
         *,
         lock: bool,
@@ -170,7 +170,7 @@ class ModelFileOperationRepository:
 
     async def _authorize_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         model_file: ModelFile | None,
         user_id: str,

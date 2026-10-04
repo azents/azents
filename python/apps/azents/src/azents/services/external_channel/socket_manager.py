@@ -10,7 +10,6 @@ from uuid import uuid4
 from cryptography.fernet import InvalidToken
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
 from azents.core.deps import get_config
@@ -27,6 +26,7 @@ from azents.core.external_channel_ingestion import (
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelTrigger,
@@ -85,7 +85,7 @@ class SlackSocketManagerService:
     """Own multiple Slack sockets in External Channel Gateway processes."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -502,7 +502,7 @@ class SlackSocketManagerService:
                 now=now,
                 lease_until=now + self._lease_duration(),
             )
-            await session.commit()
+            await session.write_session.commit()
             return configuration
 
     async def _renew(self, connection_id: str) -> bool:
@@ -515,7 +515,7 @@ class SlackSocketManagerService:
                 now=now,
                 lease_until=now + self._lease_duration(),
             )
-            await session.commit()
+            await session.write_session.commit()
             return renewed
 
     def _lease_override(self) -> ExternalChannelGatewayLeaseConfig | None:
@@ -547,7 +547,7 @@ class SlackSocketManagerService:
                 lease_owner=self.manager_id,
                 now=_utc_now(),
             )
-            await session.commit()
+            await session.write_session.commit()
             return active
 
     async def _record_gap(self, connection_id: str, reason: str) -> bool:
@@ -559,7 +559,7 @@ class SlackSocketManagerService:
                 now=_utc_now(),
                 gap_reason=reason,
             )
-            await session.commit()
+            await session.write_session.commit()
             return recorded
 
     async def _release(
@@ -589,7 +589,7 @@ class SlackSocketManagerService:
                     gap_reason=reason,
                     gap_status=status,
                 )
-            await session.commit()
+            await session.write_session.commit()
             return released
 
 

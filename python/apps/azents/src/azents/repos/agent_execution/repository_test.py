@@ -9,7 +9,7 @@ from typing import NamedTuple
 import pytest
 import sqlalchemy as sa
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.agent_session_data import AgentSessionCreate
@@ -63,6 +63,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -80,7 +81,7 @@ from azents.testing.model_selection import (
 )
 
 
-async def _create_workspace(session: AsyncSession, handle: str) -> str:
+async def _create_workspace(session: WriteSession, handle: str) -> str:
     """Create Workspace for tests."""
     await WorkspaceRepository().create(
         session,
@@ -100,7 +101,7 @@ class _AgentRuntimeFixture(NamedTuple):
 
 
 async def _create_agent_runtime(
-    session: AsyncSession,
+    session: WriteSession,
     handle: str = "event-runtime-ws",
 ) -> _AgentRuntimeFixture:
     """Create AgentRuntime for tests."""
@@ -112,8 +113,8 @@ async def _create_agent_runtime(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -147,16 +148,16 @@ async def _create_agent_runtime(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
 
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     return _AgentRuntimeFixture(
         workspace_id=workspace_id,
         agent_id=agent.id,
@@ -226,7 +227,7 @@ def _agent_session_repository() -> AgentSessionRepository:
 
 
 async def _noop_terminal_finalization(
-    _session: AsyncSession,
+    _session: WriteSession,
     _run_ids: list[str],
 ) -> None:
     """Satisfy the atomic replacement finalization boundary in fixture tests."""
@@ -255,7 +256,7 @@ class TestEventExecutionRepositories:
 
     async def test_user_message_default_effort_round_trip(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Preserve explicit null effort in requested and applied profiles."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -307,7 +308,7 @@ class TestEventExecutionRepositories:
         assert isinstance(loaded.payload, UserMessagePayload)
         assert loaded.payload.requested_inference_profile == requested_profile
         assert loaded.payload.applied_inference_profile == applied_profile
-        stored = await rdb_session.get(RDBEvent, appended.id)
+        stored = await rdb_session.read_session.get(RDBEvent, appended.id)
         assert stored is not None
         assert stored.payload["requested_inference_profile"] == {
             "model_target_label": "Quality",
@@ -323,7 +324,7 @@ class TestEventExecutionRepositories:
 
     async def test_external_message_updates_last_user_input_at(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Treat released external invocations as recent Session input."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -379,16 +380,18 @@ class TestEventExecutionRepositories:
                 payload=payload.model_dump(mode="json"),
             ),
         )
-        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        stored_session = await rdb_session.read_session.get(
+            RDBAgentSession, event_session.id
+        )
         assert stored_session is not None
-        await rdb_session.refresh(stored_session)
+        await rdb_session.write_session.refresh(stored_session)
 
         assert stored_session.last_user_input_at == appended.created_at
         assert stored_session.last_activity_at == appended.created_at
 
     async def test_last_user_input_at_never_moves_backward(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An older batch timestamp cannot regress Session recency."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -418,15 +421,17 @@ class TestEventExecutionRepositories:
             session_id=event_session.id,
             created_at=event_session.created_at,
         )
-        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        stored_session = await rdb_session.read_session.get(
+            RDBAgentSession, event_session.id
+        )
         assert stored_session is not None
-        await rdb_session.refresh(stored_session)
+        await rdb_session.write_session.refresh(stored_session)
 
         assert stored_session.last_user_input_at == newer
 
     async def test_mailbox_batch_advances_session_projections_monotonically(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Advance both Session recency projections from one inserted batch."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -480,16 +485,18 @@ class TestEventExecutionRepositories:
             session_id=event_session.id,
             events=[user_event],
         )
-        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        stored_session = await rdb_session.read_session.get(
+            RDBAgentSession, event_session.id
+        )
         assert stored_session is not None
-        await rdb_session.refresh(stored_session)
+        await rdb_session.write_session.refresh(stored_session)
 
         assert stored_session.last_user_input_at == user_event.created_at
         assert stored_session.last_activity_at == action_event.created_at
 
     async def test_action_message_updates_last_activity_at(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Treat durable tool-action activity as recent Session activity."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -519,15 +526,17 @@ class TestEventExecutionRepositories:
                 ).model_dump(mode="json"),
             ),
         )
-        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        stored_session = await rdb_session.read_session.get(
+            RDBAgentSession, event_session.id
+        )
         assert stored_session is not None
-        await rdb_session.refresh(stored_session)
+        await rdb_session.write_session.refresh(stored_session)
 
         assert stored_session.last_activity_at == appended.created_at
 
     async def test_turn_marker_default_effort_round_trip(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Preserve explicit null effort in durable turn provenance."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -578,7 +587,7 @@ class TestEventExecutionRepositories:
         assert loaded is not None
         assert isinstance(loaded.payload, TurnMarkerPayload)
         assert loaded.payload == turn_marker
-        stored = await rdb_session.get(RDBEvent, appended.id)
+        stored = await rdb_session.read_session.get(RDBEvent, appended.id)
         assert stored is not None
         assert stored.payload["applied_inference_profile"] == {
             "model_target_label": "Quality",
@@ -589,7 +598,7 @@ class TestEventExecutionRepositories:
 
     async def test_append_read_and_move_head(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Validate transcript append/read and model input head move."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -658,7 +667,7 @@ class TestEventExecutionRepositories:
 
     async def test_append_with_external_id_returns_existing_event(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Append with same External ID returns existing event."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -697,7 +706,7 @@ class TestEventExecutionRepositories:
         assert second.id == first.id
         assert isinstance(second.payload, UserMessagePayload)
         assert second.payload.content == "first"
-        result = await rdb_session.execute(
+        result = await rdb_session.write_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBEvent)
             .where(
@@ -709,7 +718,7 @@ class TestEventExecutionRepositories:
 
     async def test_append_action_message_event_with_external_id(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Action message events validate and append with input-buffer external IDs."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -752,7 +761,8 @@ class TestEventExecutionRepositories:
     ) -> None:
         """Event append does not block an Agent-first Session key-share lock."""
         session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
-        async with session_factory() as setup_session:
+        async with session_factory() as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
                 setup_session,
                 "event-runtime-lock-ws",
@@ -767,7 +777,7 @@ class TestEventExecutionRepositories:
                     title=None,
                 ),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         projection_started = asyncio.Event()
 
@@ -776,7 +786,7 @@ class TestEventExecutionRepositories:
 
             async def advance_session_projections(
                 self,
-                session: AsyncSession,
+                session: WriteSession,
                 *,
                 session_id: str,
                 events: Sequence[Event],
@@ -790,11 +800,13 @@ class TestEventExecutionRepositories:
 
         transcript_repo = PausingTranscriptRepository()
         async with (
-            session_factory() as agent_first_session,
-            session_factory() as append_session,
+            session_factory() as _raw_agent_first_session,
+            session_factory() as _raw_append_session,
         ):
-            agent_first_tx = await agent_first_session.begin()
-            await agent_first_session.execute(
+            agent_first_session = ReadWriteSession(_raw_agent_first_session)
+            append_session = ReadWriteSession(_raw_append_session)
+            agent_first_tx = await agent_first_session.write_session.begin()
+            await agent_first_session.write_session.execute(
                 sa.select(RDBAgent.id).where(RDBAgent.id == agent_id).with_for_update()
             )
 
@@ -813,7 +825,7 @@ class TestEventExecutionRepositories:
             )
             try:
                 await asyncio.wait_for(projection_started.wait(), timeout=2)
-                locked_session_id = await agent_first_session.scalar(
+                locked_session_id = await agent_first_session.write_session.scalar(
                     sa.select(RDBAgentSession.id)
                     .where(RDBAgentSession.id == event_session.id)
                     .with_for_update(read=True, key_share=True, nowait=True)
@@ -822,7 +834,7 @@ class TestEventExecutionRepositories:
 
                 await agent_first_tx.commit()
                 event = await asyncio.wait_for(append_task, timeout=2)
-                await append_session.commit()
+                await append_session.write_session.commit()
                 assert event.session_id == event_session.id
             finally:
                 if agent_first_tx.is_active:
@@ -841,20 +853,22 @@ class TestEventExecutionRepositories:
         session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
         @asynccontextmanager
-        async def session_manager() -> AsyncIterator[AsyncSession]:
+        async def session_manager() -> AsyncIterator[WriteSession]:
             """Commit each compaction persistence stage on clean scope exit."""
-            async with session_factory() as session:
+            async with session_factory() as _raw_session:
+                session = ReadWriteSession(_raw_session)
                 try:
                     yield session
                 except Exception:
-                    await session.rollback()
+                    await session.write_session.rollback()
                     raise
                 else:
-                    await session.commit()
+                    await session.write_session.commit()
 
         transcript_repo = EventTranscriptRepository()
         session_repo = _agent_session_repository()
-        async with session_factory() as setup_session:
+        async with session_factory() as _raw_setup_session:
+            setup_session = ReadWriteSession(_raw_setup_session)
             workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
                 setup_session,
                 "event-compaction-lock-ws",
@@ -879,7 +893,7 @@ class TestEventExecutionRepositories:
                     ).model_dump(mode="json"),
                 ),
             )
-            await setup_session.commit()
+            await setup_session.write_session.commit()
 
         concurrent_input: Event | None = None
 
@@ -890,7 +904,8 @@ class TestEventExecutionRepositories:
             """Append input through an independent transaction during summary."""
             nonlocal concurrent_input
             del old_events, summary_budget
-            async with session_factory() as input_session:
+            async with session_factory() as _raw_input_session:
+                input_session = ReadWriteSession(_raw_input_session)
                 concurrent_input = await asyncio.wait_for(
                     transcript_repo.append(
                         input_session,
@@ -904,7 +919,7 @@ class TestEventExecutionRepositories:
                     ),
                     timeout=2,
                 )
-                await input_session.commit()
+                await input_session.write_session.commit()
             return "summary"
 
         with pytest.raises(CompactionPlanStaleError):
@@ -938,13 +953,13 @@ class TestEventExecutionRepositories:
         assert concurrent_input is not None
         async with session_factory() as read_session:
             current_session = await session_repo.get_by_id(
-                read_session,
+                ReadWriteSession(read_session),
                 event_session.id,
             )
             assert current_session is not None
             assert current_session.model_input_head_event_id is None
             model_input = await transcript_repo.list_for_model_input(
-                read_session,
+                ReadWriteSession(read_session),
                 event_session.id,
                 head_event_id=current_session.model_input_head_event_id,
             )
@@ -952,7 +967,7 @@ class TestEventExecutionRepositories:
 
     async def test_model_input_uses_event_id_order(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Model input and recent history use ascending event IDs."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -1003,7 +1018,7 @@ class TestEventExecutionRepositories:
 
     async def test_pending_run_activation_and_event_association(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Activate a model-independent pending run and retain event associations."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1063,7 +1078,7 @@ class TestEventExecutionRepositories:
 
     async def test_retry_profile_copy_survives_repository_reload(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Copy one failed run's selected profile into its retry run."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1114,8 +1129,8 @@ class TestEventExecutionRepositories:
             target_run_id=retry.id,
         )
 
-        await rdb_session.commit()
-        rdb_session.expunge_all()
+        await rdb_session.write_session.commit()
+        rdb_session.write_session.expunge_all()
         reloaded = await AgentRunRepository().get_by_id(
             rdb_session,
             copied.id,
@@ -1128,7 +1143,7 @@ class TestEventExecutionRepositories:
 
     async def test_child_run_parentage_is_independent_of_session_inference_state(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Keep child run parentage while storing inference state on its Session."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1205,7 +1220,7 @@ class TestEventExecutionRepositories:
 
     async def test_input_event_association_rejects_another_session(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Reject an input event that does not belong to the run session."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1265,7 +1280,7 @@ class TestEventExecutionRepositories:
 
     async def test_agent_run_vfs_projection_is_set_once(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Persist the first immutable VFS projection and retain it on retry."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1343,7 +1358,7 @@ class TestEventExecutionRepositories:
 
     async def test_agent_run_vfs_projection_rejects_session_mismatch(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Reject projection writes through another Session identity."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1379,7 +1394,7 @@ class TestEventExecutionRepositories:
 
     async def test_agent_run_phase_and_terminal_update(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Validate Agent run phase and terminal state updates."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -1466,7 +1481,7 @@ class TestEventExecutionRepositories:
 
     async def test_create_replacement_requires_terminal_finalization_callback(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Replacing a running Run fails closed without finalization."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1509,7 +1524,7 @@ class TestEventExecutionRepositories:
 
     async def test_create_replacement_invokes_terminal_finalization_callback(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Replacement passes every canceled Run to the same transaction callback."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1538,7 +1553,7 @@ class TestEventExecutionRepositories:
         finalized_ids: list[str] = []
 
         async def finalize(
-            _session: AsyncSession,
+            _session: WriteSession,
             run_ids: list[str],
         ) -> object:
             finalized_ids.extend(run_ids)
@@ -1562,7 +1577,7 @@ class TestEventExecutionRepositories:
 
     async def test_failed_run_lookup_by_terminal_result_event(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Resolve a manual retry source from its failed terminal event."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1625,7 +1640,7 @@ class TestEventExecutionRepositories:
 
     async def test_completed_run_records_pending_idle_continuation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Completed Run atomically records its durable idle boundary."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1659,9 +1674,11 @@ class TestEventExecutionRepositories:
             ended_at=datetime.datetime.now(datetime.UTC),
         )
 
-        rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
+        rdb_agent_session = await rdb_session.read_session.get(
+            RDBAgentSession, agent_session.id
+        )
         assert rdb_agent_session is not None
-        await rdb_session.refresh(rdb_agent_session)
+        await rdb_session.write_session.refresh(rdb_agent_session)
         assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
 
         pending = await repo.create_pending(
@@ -1679,12 +1696,12 @@ class TestEventExecutionRepositories:
             requested_enabled_execution_options=[],
         )
 
-        await rdb_session.refresh(rdb_agent_session)
+        await rdb_session.write_session.refresh(rdb_agent_session)
         assert rdb_agent_session.pending_idle_continuation_run_id is None
 
     async def test_noncompleted_run_does_not_record_pending_idle_continuation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Noncompleted terminal states cannot create idle continuation work."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1718,13 +1735,15 @@ class TestEventExecutionRepositories:
             ended_at=datetime.datetime.now(datetime.UTC),
         )
 
-        rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
+        rdb_agent_session = await rdb_session.read_session.get(
+            RDBAgentSession, agent_session.id
+        )
         assert rdb_agent_session is not None
         assert rdb_agent_session.pending_idle_continuation_run_id is None
 
     async def test_archived_idle_boundary_requires_scheduled_allowance(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Archived consumption requires the caller-validated Scheduled exception."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1772,9 +1791,11 @@ class TestEventExecutionRepositories:
             allow_archived_scheduled_continuation=False,
         )
 
-        rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
+        rdb_agent_session = await rdb_session.read_session.get(
+            RDBAgentSession, agent_session.id
+        )
         assert rdb_agent_session is not None
-        await rdb_session.refresh(rdb_agent_session)
+        await rdb_session.write_session.refresh(rdb_agent_session)
         assert consumed is False
         assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
         assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
@@ -1787,7 +1808,7 @@ class TestEventExecutionRepositories:
             allow_archived_scheduled_continuation=True,
         )
 
-        await rdb_session.refresh(rdb_agent_session)
+        await rdb_session.write_session.refresh(rdb_agent_session)
         assert consumed is True
         assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
         assert rdb_agent_session.run_state is AgentSessionRunState.RUNNING
@@ -1795,7 +1816,7 @@ class TestEventExecutionRepositories:
 
     async def test_agent_run_retry_state_updates_and_clears_on_terminal(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """AgentRun retry_state is persisted while running and cleared at terminal."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1866,7 +1887,7 @@ class TestEventExecutionRepositories:
 
     async def test_agent_run_model_operation_state_create_update_and_clear(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Persist strict operation JSON and clear it explicitly or at terminal."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1896,7 +1917,7 @@ class TestEventExecutionRepositories:
         )
 
         assert run.model_operation_state == operation_state
-        stored = await rdb_session.get(RDBAgentRun, run.id)
+        stored = await rdb_session.read_session.get(RDBAgentRun, run.id)
         assert stored is not None
         assert stored.model_operation_state == operation_state.model_dump(mode="json")
 
@@ -1952,7 +1973,7 @@ class TestEventExecutionRepositories:
 
     async def test_agent_run_rejects_invalid_persisted_model_operation_state(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Repository ingress rejects malformed operation JSON."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -1978,18 +1999,18 @@ class TestEventExecutionRepositories:
                 parent_agent_run_id=None,
             ),
         )
-        stored = await rdb_session.get(RDBAgentRun, run.id)
+        stored = await rdb_session.read_session.get(RDBAgentRun, run.id)
         assert stored is not None
         malformed: dict[str, JSONValue] = {"foreground": {"schema_version": 1}}
         stored.model_operation_state = malformed
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         with pytest.raises(ValidationError):
             await repo.get_by_id(rdb_session, run.id)
 
     async def test_agent_run_create_closes_stale_running_runs(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Creating a new run closes remaining running projection in same session."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -2036,7 +2057,7 @@ class TestEventExecutionRepositories:
 
     async def test_mark_terminal_if_running_does_not_overwrite_terminal_run(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Worker fallback does not overwrite terminal run state."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -2078,7 +2099,7 @@ class TestEventExecutionRepositories:
 
     async def test_mark_stopped_for_user_stop_converges_interrupted_run(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """User Stop wins when engine interruption reaches the Run row first."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -2123,7 +2144,7 @@ class TestEventExecutionRepositories:
 
     async def test_mark_stopped_for_user_stop_preserves_other_terminal_run(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """User Stop convergence does not replace a completed Run outcome."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -2165,7 +2186,7 @@ class TestEventExecutionRepositories:
 
     async def test_terminal_transition_records_and_idempotently_acknowledges_unread_run(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A terminal Run creates one boundary that replay cannot recreate."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -2196,7 +2217,9 @@ class TestEventExecutionRepositories:
             ended_at=datetime.datetime.now(datetime.UTC),
         )
 
-        boundary = await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id)
+        boundary = await rdb_session.read_session.get(
+            RDBAgentSessionUnreadRun, agent_session.id
+        )
         assert boundary is not None
         assert boundary.run_id == run.id
         assert boundary.run_index == run.run_index
@@ -2207,7 +2230,12 @@ class TestEventExecutionRepositories:
             run_id=run.id,
         )
         assert acknowledged is not None
-        assert await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id) is None
+        assert (
+            await rdb_session.read_session.get(
+                RDBAgentSessionUnreadRun, agent_session.id
+            )
+            is None
+        )
 
         await repo.mark_terminal(
             rdb_session,
@@ -2215,11 +2243,16 @@ class TestEventExecutionRepositories:
             AgentRunStatus.COMPLETED,
             ended_at=datetime.datetime.now(datetime.UTC),
         )
-        assert await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id) is None
+        assert (
+            await rdb_session.read_session.get(
+                RDBAgentSessionUnreadRun, agent_session.id
+            )
+            is None
+        )
 
     async def test_acknowledging_older_run_preserves_newer_unread_boundary(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Acknowledgement through Run N cannot clear terminal Run N+1."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
@@ -2269,14 +2302,16 @@ class TestEventExecutionRepositories:
             run_id=first.id,
         )
 
-        boundary = await rdb_session.get(RDBAgentSessionUnreadRun, agent_session.id)
+        boundary = await rdb_session.read_session.get(
+            RDBAgentSessionUnreadRun, agent_session.id
+        )
         assert boundary is not None
         assert boundary.run_id == second.id
         assert boundary.run_index == second.run_index
 
     async def test_agent_run_index_increments_per_session(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Agent run index increments within session scope."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)

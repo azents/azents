@@ -25,6 +25,7 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngressAuthority,
 )
 from azents.core.external_channel_provider import SlackConnectionCredentials
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelTrigger,
@@ -70,7 +71,7 @@ class _RepositoryDouble:
 
     async def mark_connection_reconnect_required(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
         reason: str,
@@ -95,7 +96,7 @@ class _RepositoryDouble:
 
     async def release_socket_connection_lease(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
         lease_owner: str,
@@ -118,7 +119,7 @@ class _RepositoryDouble:
 
     async def socket_connection_owned_active(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         **_kwargs: object,
     ) -> object:
         return object()
@@ -160,8 +161,8 @@ def _service(
     """Build a manager around lifecycle-only doubles."""
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield session
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(session)
 
     return SlackSocketManagerService(
         session_manager=session_manager,

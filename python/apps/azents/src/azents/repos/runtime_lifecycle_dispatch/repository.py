@@ -13,7 +13,6 @@ from azents_runtime_control.runtime_configuration import (
     parse_runtime_configuration_envelope,
 )
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -24,6 +23,7 @@ from azents.core.enums import (
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -55,7 +55,7 @@ class RuntimeLifecycleDispatchRepository:
         RuntimeProfileRepository, Depends(RuntimeProfileRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def preflight(
@@ -243,7 +243,7 @@ class RuntimeLifecycleDispatchRepository:
 
     async def _load_current_snapshot(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         snapshot: RuntimeLifecycleDispatchSnapshot,
     ) -> AgentRuntime | None:
         """Lock and revalidate one Agent and Runtime dispatch snapshot."""

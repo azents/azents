@@ -4,7 +4,6 @@ import datetime
 import hashlib
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -22,6 +21,7 @@ from azents.rdb.models.runtime_provider_bootstrap import (
     RDBRuntimeProviderBootstrapSource,
     RDBRuntimeProviderWorkspaceAvailability,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     RuntimeProviderAuditEventCreate,
@@ -44,12 +44,12 @@ class RuntimeProviderRepository:
 
     async def acquire_bootstrap_source_lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_key: str,
     ) -> None:
         """Serialize reconciliation for one trusted bootstrap source."""
-        await session.execute(
+        await session.write_session.execute(
             sa.select(
                 sa.func.pg_advisory_xact_lock(
                     _advisory_lock_id("runtime-provider-bootstrap-source", source_key)
@@ -59,12 +59,12 @@ class RuntimeProviderRepository:
 
     async def acquire_provider_identity_lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_logical_id: str,
     ) -> None:
         """Serialize aggregate identity claims across Admins and sources."""
-        await session.execute(
+        await session.write_session.execute(
             sa.select(
                 sa.func.pg_advisory_xact_lock(
                     _advisory_lock_id(
@@ -77,7 +77,7 @@ class RuntimeProviderRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: RuntimeProviderCreate,
     ) -> RuntimeProvider:
         """Create a Runtime Provider aggregate."""
@@ -96,13 +96,13 @@ class RuntimeProviderRepository:
         rdb.lifecycle_state = create.lifecycle_state
         rdb.availability_mode = create.availability_mode
         rdb.admin_version = 0
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_provider(rdb)
 
     async def get_by_provider_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_logical_id: str,
         for_update: bool,
@@ -113,13 +113,13 @@ class RuntimeProviderRepository:
         )
         if for_update:
             statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.write_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_provider(rdb) if rdb is not None else None
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         for_update: bool,
@@ -132,20 +132,20 @@ class RuntimeProviderRepository:
             # Provider identities are immutable. Serialize mutable Provider
             # state without blocking configuration revision FK references.
             statement = statement.with_for_update(key_share=True)
-        result = await session.execute(statement)
+        result = await session.write_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_provider(rdb) if rdb is not None else None
 
     async def get_bootstrap_kubernetes_provider_by_service_account(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         namespace: str,
         name: str,
         audience: str,
     ) -> RuntimeProvider | None:
         """Resolve one active bootstrap Provider from its trusted SA metadata."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProvider).where(
                 RDBRuntimeProvider.registration_method
                 == RuntimeProviderRegistrationMethod.BOOTSTRAP,
@@ -178,7 +178,7 @@ class RuntimeProviderRepository:
 
     async def list_available(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str | None,
         include_disabled: bool,
@@ -195,12 +195,12 @@ class RuntimeProviderRepository:
         if not include_disabled:
             statement = statement.where(RDBRuntimeProvider.enabled.is_(True))
         statement = statement.order_by(RDBRuntimeProvider.provider_id)
-        result = await session.execute(statement)
+        result = await session.read_session.execute(statement)
         return [self._build_provider(rdb) for rdb in result.scalars()]
 
     async def update_administrative_policy(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         enabled: bool,
@@ -208,7 +208,7 @@ class RuntimeProviderRepository:
         availability_mode: RuntimeProviderAvailabilityMode,
     ) -> RuntimeProvider | None:
         """Replace mutable Provider policy and advance its Admin version."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == provider_id)
             .with_for_update()
@@ -220,19 +220,19 @@ class RuntimeProviderRepository:
         rdb.lifecycle_state = lifecycle_state
         rdb.availability_mode = availability_mode
         rdb.admin_version += 1
-        await session.flush()
-        await session.refresh(rdb)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb)
         return self._build_provider(rdb)
 
     async def replace_workspace_availability(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         workspace_ids: set[str],
     ) -> RuntimeProvider | None:
         """Replace selected-Workspace membership and advance Admin version."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == provider_id)
             .with_for_update()
@@ -240,12 +240,12 @@ class RuntimeProviderRepository:
         provider = result.scalar_one_or_none()
         if provider is None:
             return None
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBRuntimeProviderWorkspaceAvailability).where(
                 RDBRuntimeProviderWorkspaceAvailability.provider_id == provider_id
             )
         )
-        session.add_all(
+        session.write_session.add_all(
             [
                 RDBRuntimeProviderWorkspaceAvailability(
                     provider_id=provider_id,
@@ -255,19 +255,19 @@ class RuntimeProviderRepository:
             ]
         )
         provider.admin_version += 1
-        await session.flush()
-        await session.refresh(provider)
+        await session.write_session.flush()
+        await session.write_session.refresh(provider)
         return self._build_provider(provider)
 
     async def is_available_to_workspace(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_id: str,
         workspace_id: str,
     ) -> bool:
         """Check explicit Workspace membership for selected-Workspace availability."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBRuntimeProviderWorkspaceAvailability.provider_id).where(
                 RDBRuntimeProviderWorkspaceAvailability.provider_id == provider_id,
                 RDBRuntimeProviderWorkspaceAvailability.workspace_id == workspace_id,
@@ -277,7 +277,7 @@ class RuntimeProviderRepository:
 
     async def get_by_provider_id_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_logical_id: str,
     ) -> RuntimeProvider | None:
@@ -290,12 +290,12 @@ class RuntimeProviderRepository:
 
     async def get_or_create_bootstrap_source(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderBootstrapSourceCreate,
     ) -> RuntimeProviderBootstrapSource:
         """Fetch or establish one source after its source lock is held."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeProviderBootstrapSource)
             .where(RDBRuntimeProviderBootstrapSource.source_key == create.source_key)
             .with_for_update()
@@ -306,15 +306,15 @@ class RuntimeProviderRepository:
                 source_key=create.source_key,
                 adapter_kind=create.adapter_kind,
             )
-            session.add(rdb)
-            await session.flush()
+            session.write_session.add(rdb)
+            await session.write_session.flush()
         elif rdb.adapter_kind != create.adapter_kind:
             raise ValueError("Bootstrap source adapter kind is immutable.")
         return self._build_source(rdb)
 
     async def record_source_reconciled(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_id: str,
         source_revision: str,
@@ -322,7 +322,7 @@ class RuntimeProviderRepository:
         reconciled_at: datetime.datetime,
     ) -> None:
         """Record successful authoritative source reconciliation."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderBootstrapSource)
             .where(RDBRuntimeProviderBootstrapSource.id == source_id)
             .values(
@@ -334,11 +334,11 @@ class RuntimeProviderRepository:
                 updated_at=reconciled_at,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def record_source_error(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_id: str,
         error_code: str,
@@ -346,7 +346,7 @@ class RuntimeProviderRepository:
         occurred_at: datetime.datetime,
     ) -> None:
         """Record an adapter failure without changing declaration presence."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBRuntimeProviderBootstrapSource)
             .where(RDBRuntimeProviderBootstrapSource.id == source_id)
             .values(
@@ -355,11 +355,11 @@ class RuntimeProviderRepository:
                 updated_at=occurred_at,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def get_bootstrap_declaration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_id: str,
         declaration_key: str,
@@ -372,13 +372,13 @@ class RuntimeProviderRepository:
         )
         if for_update:
             statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.write_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_declaration(rdb) if rdb is not None else None
 
     async def get_bootstrap_declaration_by_provider_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider_id: str,
         for_update: bool,
@@ -389,13 +389,13 @@ class RuntimeProviderRepository:
         )
         if for_update:
             statement = statement.with_for_update()
-        result = await session.execute(statement)
+        result = await session.write_session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_declaration(rdb) if rdb is not None else None
 
     async def create_bootstrap_declaration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderBootstrapDeclarationCreate,
     ) -> RuntimeProviderBootstrapDeclaration:
@@ -415,13 +415,13 @@ class RuntimeProviderRepository:
             last_seen_at=create.last_seen_at,
             withdrawn_at=create.withdrawn_at,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_declaration(rdb)
 
     async def update_bootstrap_declaration(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         declaration_id: str,
         provider_id: str | None,
@@ -436,7 +436,7 @@ class RuntimeProviderRepository:
         updated_at: datetime.datetime,
     ) -> RuntimeProviderBootstrapDeclaration:
         """Replace mutable reconciliation projection for one declaration."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBRuntimeProviderBootstrapDeclaration)
             .where(RDBRuntimeProviderBootstrapDeclaration.id == declaration_id)
             .values(
@@ -458,7 +458,7 @@ class RuntimeProviderRepository:
 
     async def mark_missing_declarations_absent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_id: str,
         present_declaration_keys: set[str],
@@ -478,7 +478,7 @@ class RuntimeProviderRepository:
                     present_declaration_keys
                 )
             )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBRuntimeProviderBootstrapDeclaration)
             .where(*filters)
             .with_for_update()
@@ -492,12 +492,12 @@ class RuntimeProviderRepository:
             declaration.conflict_message = None
             declaration.withdrawn_at = occurred_at
             declaration.updated_at = occurred_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build_declaration(declaration) for declaration in declarations]
 
     async def append_audit_event(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: RuntimeProviderAuditEventCreate,
     ) -> None:
@@ -509,8 +509,8 @@ class RuntimeProviderRepository:
             metadata_=create.metadata,
         )
         rdb.created_at = create.created_at
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
 
     @staticmethod
     def _build_provider(rdb: RDBRuntimeProvider) -> RuntimeProvider:

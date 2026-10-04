@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     CompiledActiveChoices,
@@ -18,6 +17,7 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
     validate_requested_profile_against_options,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent.data import Agent
@@ -107,7 +107,7 @@ class ActiveProfileAdmissionRepository:
 
     async def validate_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         profile: RequestedInferenceProfile,

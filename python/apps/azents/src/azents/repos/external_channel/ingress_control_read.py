@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.ingress_queue import (
     ExternalChannelIngressQueueRepository,
 )
@@ -23,7 +23,7 @@ class ExternalChannelIngressControlReadRepository:
     """Finish the original explicit commits before control or metric effects."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     queue_repository: Annotated[
         ExternalChannelIngressQueueRepository,
@@ -38,7 +38,7 @@ class ExternalChannelIngressControlReadRepository:
             owner = await self.queue_repository.get_active_owner(
                 session, owner_id=owner_id
             )
-            await session.commit()
+            await session.write_session.commit()
         return owner
 
     async def inspect_active(
@@ -49,5 +49,5 @@ class ExternalChannelIngressControlReadRepository:
             snapshot = await self.queue_repository.inspect_active(
                 session, now=now, limit=limit
             )
-            await session.commit()
+            await session.write_session.commit()
         return snapshot

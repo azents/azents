@@ -9,7 +9,6 @@ from typing import Annotated
 from azcommon.infra.s3.service import S3Service
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker, SessionStopSignal
@@ -30,6 +29,7 @@ from azents.core.session_lifecycle import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
@@ -109,7 +109,7 @@ class ArchivedSessionPurgeService:
     """Fence and purge a bounded batch of archived SessionAgent trees."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     retention_repository: Annotated[
         ArchivedSessionRetentionRepository,

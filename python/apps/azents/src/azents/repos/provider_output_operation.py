@@ -6,10 +6,10 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
@@ -51,7 +51,7 @@ class ProviderOutputOperationRepository:
     """Own provider-output authority, retry, and cleanup transactions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     exchange_file_repository: Annotated[
@@ -134,7 +134,7 @@ class ProviderOutputOperationRepository:
 
     async def persist_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         authority: FileResourceAuthority,
         generated_images: Sequence[ProviderOutputFileMetadata],
@@ -216,7 +216,7 @@ class ProviderOutputOperationRepository:
 
     async def _validated_persisted_object_keys(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         generated_images: Sequence[ProviderOutputFileMetadata],
     ) -> set[str]:
         """Validate deterministic identities and return persisted object keys."""

@@ -5,7 +5,6 @@ from typing import NamedTuple
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeRemovalStage,
@@ -14,6 +13,7 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import WriteSession
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -30,15 +30,15 @@ class _AgentFixture(NamedTuple):
     agent_id: str
 
 
-async def _create_agent(session: AsyncSession) -> _AgentFixture:
+async def _create_agent(session: WriteSession) -> _AgentFixture:
     """Create one Workspace and Agent for removal repository tests."""
     suffix = uuid4().hex[:8]
     workspace = RDBWorkspace(
         name="Runtime removal test",
         handle=f"runtime-removal-{suffix}",
     )
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace.id,
         name="Runtime removal Agent",
@@ -51,8 +51,8 @@ async def _create_agent(session: AsyncSession) -> _AgentFixture:
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return _AgentFixture(
         workspace_id=workspace.id,
         agent_id=agent.id,
@@ -60,7 +60,7 @@ async def _create_agent(session: AsyncSession) -> _AgentFixture:
 
 
 async def test_create_claim_progress_complete_and_recreate(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Persist one active operation and retain completed history."""
     workspace_id, agent_id = await _create_agent(rdb_session)

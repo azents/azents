@@ -4,8 +4,6 @@ import dataclasses
 from collections.abc import Sequence
 from typing import Literal
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import EventKind
 from azents.core.inference_profile import SessionInferenceState
 from azents.engine.events.tool_calls import tool_call_external_id
@@ -16,6 +14,7 @@ from azents.engine.events.types import (
     TokenUsagePayload,
     TurnMarkerPayload,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.engine_event_contracts import TranscriptRepository
 
@@ -28,7 +27,7 @@ class EngineEventMutationRepository:
 
     async def append_events(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         events: Sequence[Event],
         *,
         tool_call_run_id: str | None,
@@ -65,7 +64,7 @@ class EngineEventMutationRepository:
 
     async def append_run_marker(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,
@@ -92,7 +91,7 @@ class EngineEventMutationRepository:
 
     async def append_turn_marker(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         run_id: str,

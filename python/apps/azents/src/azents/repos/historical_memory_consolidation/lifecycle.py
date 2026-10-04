@@ -1,19 +1,19 @@
 """Source availability transitions composed into existing lifecycle transactions."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionProductMode, AgentSessionStatus
 from azents.core.historical_memory_consolidation import ConsolidationWorkKind
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.enrollment import (
     enroll_source_in_session,
 )
 
 
 async def source_availability_in_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     source_session_id: str,
     denied: bool,
@@ -24,10 +24,10 @@ async def source_availability_in_session(
     the monotonic availability identity unchanged and cannot revive old evidence.
     An unprepared source still records continuity but needs no consolidation work.
     """
-    root = await session.get(RDBAgentSession, source_session_id)
+    root = await session.write_session.get(RDBAgentSession, source_session_id)
     if root is None:
         return
-    source = await session.scalar(
+    source = await session.write_session.scalar(
         sa.select(RDBHistoricalMemorySource)
         .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
         .with_for_update(nowait=True)
@@ -47,11 +47,11 @@ async def source_availability_in_session(
                 else ConsolidationWorkKind.RESTORED
             ),
         )
-    await session.flush()
+    await session.write_session.flush()
 
 
 async def membership_work_in_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     user_id: str,
@@ -84,7 +84,7 @@ async def membership_work_in_session(
             query = query.where(RDBAgentSession.status == AgentSessionStatus.ACTIVE)
         if after is not None:
             query = query.where(RDBHistoricalMemorySource.source_session_id > after)
-        rows = (await session.execute(query)).all()
+        rows = (await session.write_session.execute(query)).all()
         if not rows:
             return
         for source, root in rows:
@@ -102,7 +102,7 @@ async def membership_work_in_session(
 
 
 async def agent_memory_availability_in_session(
-    session: AsyncSession, *, agent_id: str, denied: bool
+    session: WriteSession, *, agent_id: str, denied: bool
 ) -> None:
     """Record Memory disable continuity across all source roots before commit."""
     after: str | None = None
@@ -121,7 +121,7 @@ async def agent_memory_availability_in_session(
             query = query.where(RDBAgentSession.status == AgentSessionStatus.ACTIVE)
         if after is not None:
             query = query.where(RDBHistoricalMemorySource.source_session_id > after)
-        ids = list(await session.scalars(query))
+        ids = list(await session.write_session.scalars(query))
         if not ids:
             return
         for source_id in ids:

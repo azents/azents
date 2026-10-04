@@ -39,6 +39,7 @@ from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_mailbox import AgentMailboxRepository
@@ -61,13 +62,13 @@ from azents.worker.session.lifecycle import SessionLifecycleService
 class ObservedManager:
     """Track actual SQLAlchemy sessions and require completion on every return."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.active = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "Completed operations cannot nest transactions"
         self.active = True
         try:
@@ -79,7 +80,9 @@ class ObservedManager:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -94,7 +97,7 @@ class WorkerFixture:
 
 
 def worker_repository(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     sessions: AgentSessionRepository | None = None,
     runs: AgentRunRepository | None = None,
@@ -117,7 +120,7 @@ def worker_repository(
 
 
 async def worker_fixture(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     name: str,
     *,
     child: bool = False,
@@ -165,7 +168,7 @@ async def worker_fixture(
 
 
 async def create_run(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     session_id: str,
     status: AgentRunStatus = AgentRunStatus.RUNNING,
 ) -> AgentRunState:
@@ -182,7 +185,7 @@ async def create_run(
 
 
 async def current_session(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     session_id: str,
 ) -> AgentSession:
     async with manager() as session:
@@ -192,7 +195,7 @@ async def current_session(
 
 
 async def current_run(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     run_id: str,
 ) -> AgentRunState:
     async with manager() as session:
@@ -202,7 +205,7 @@ async def current_run(
 
 
 async def test_missing_and_stale_worker_authority_are_distinct(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-authority")
     with pytest.raises(ValueError, match="^AgentSession not found$") as missing:
@@ -222,7 +225,7 @@ async def test_missing_and_stale_worker_authority_are_distinct(
 
 @pytest.mark.parametrize("case", ["command", "wake", "queue", "active", "empty"])
 async def test_idle_predicates_preserve_durable_running_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     case: str,
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, f"worker-idle-{case}")
@@ -293,7 +296,7 @@ async def test_idle_predicates_preserve_durable_running_state(
 
 @pytest.mark.parametrize("field", ["id", "name", "payload", "requester", "created_at"])
 async def test_pending_command_validates_every_snapshot_field(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     field: str,
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, f"worker-command-{field}")
@@ -356,7 +359,7 @@ async def test_pending_command_validates_every_snapshot_field(
 class FailingAssociation(AgentRunRepository):
     async def associate_input_events(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         event_ids: Sequence[str],
@@ -368,7 +371,7 @@ class FailingAssociation(AgentRunRepository):
 
 
 async def test_pending_creation_association_rollback_and_drift(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-input-rollback")
     async with rdb_session_manager() as session:
@@ -419,7 +422,7 @@ async def test_pending_creation_association_rollback_and_drift(
 
 
 async def test_activation_foreign_session_rolls_back_profile_status_and_phase(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-activation-current")
     foreign = await worker_fixture(rdb_session_manager, "worker-activation-foreign")
@@ -459,7 +462,7 @@ async def test_activation_foreign_session_rolls_back_profile_status_and_phase(
 class FailingFinalization(TerminalRunFinalizationRepository):
     async def finalize_run_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
@@ -469,7 +472,7 @@ class FailingFinalization(TerminalRunFinalizationRepository):
 
 @pytest.mark.parametrize("operation", ["cancel", "terminal", "stop", "bulk"])
 async def test_terminal_and_parent_finalization_roll_back_together(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
 ) -> None:
     fixture = await worker_fixture(
@@ -541,7 +544,7 @@ async def test_terminal_and_parent_finalization_roll_back_together(
 class FailingSuppression(AgentRunRepository):
     async def mark_parent_result_suppressed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         finalized_at: datetime,
@@ -554,7 +557,7 @@ class FailingSuppression(AgentRunRepository):
 
 @pytest.mark.parametrize("status", [AgentRunStatus.PENDING, AgentRunStatus.RUNNING])
 async def test_bridge_terminal_and_suppression_share_atomic_commit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     status: AgentRunStatus,
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, f"worker-bridge-{status.value}")
@@ -591,7 +594,7 @@ async def test_bridge_terminal_and_suppression_share_atomic_commit(
     "operation", ["heartbeat", "idle", "pending", "terminal", "retry", "lifecycle"]
 )
 async def test_takeover_rejects_old_owner_before_any_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, f"worker-stale-{operation}")
@@ -640,7 +643,7 @@ async def test_takeover_rejects_old_owner_before_any_mutation(
 
 
 async def test_foreign_terminal_run_is_not_mutated(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-terminal-current")
     foreign = await worker_fixture(rdb_session_manager, "worker-terminal-foreign")
@@ -657,7 +660,7 @@ async def test_foreign_terminal_run_is_not_mutated(
 
 
 async def test_worker_tree_lock_order_precedes_run_lock(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Capture actual SQL: root gate, ordered Agent/Session set, then Run."""
     fixture = await worker_fixture(rdb_session_manager, "worker-lock-order", child=True)
@@ -678,9 +681,9 @@ async def test_worker_tree_lock_order_precedes_run_lock(
             statements.append(normalized)
 
     @asynccontextmanager
-    async def traced_manager() -> AsyncIterator[AsyncSession]:
+    async def traced_manager() -> AsyncIterator[WriteSession]:
         async with fixture.manager() as session:
-            connection = await session.connection()
+            connection = await session.write_session.connection()
             event.listen(connection.sync_connection, "before_cursor_execute", observe)
             try:
                 yield session
@@ -708,14 +711,14 @@ async def test_worker_tree_lock_order_precedes_run_lock(
 
 
 async def test_heartbeat_external_lease_runs_after_real_transaction_closure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Verify actual closure and persisted heartbeat inside the broker callback."""
     fixture = await worker_fixture(rdb_session_manager, "worker-heartbeat-closure")
     before = await current_session(rdb_session_manager, fixture.session_id)
     assert before.run_heartbeat_at is not None
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == fixture.session_id)
             .values(run_heartbeat_at=before.run_heartbeat_at - timedelta(days=1))
@@ -738,7 +741,7 @@ async def test_heartbeat_external_lease_runs_after_real_transaction_closure(
 
 
 async def test_recovery_reads_running_before_pending_without_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-recover-running")
     running = await create_run(rdb_session_manager, fixture.session_id)
@@ -765,7 +768,7 @@ async def test_recovery_reads_running_before_pending_without_mutation(
 
 
 async def test_lifecycle_start_is_idempotent_and_guarded(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-lifecycle-start")
     now = datetime.now(UTC)
@@ -783,7 +786,7 @@ async def test_lifecycle_start_is_idempotent_and_guarded(
 
 
 async def test_idle_continuation_read_preserves_missing_error(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await worker_fixture(rdb_session_manager, "worker-idle-continuation")
     assert (
@@ -794,7 +797,7 @@ async def test_idle_continuation_read_preserves_missing_error(
     )
     run = await create_run(rdb_session_manager, fixture.session_id)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == fixture.session_id)
             .values(pending_idle_continuation_run_id=run.id)
@@ -811,47 +814,47 @@ async def test_idle_continuation_read_preserves_missing_error(
 
 
 async def cleanup_committed_fixture(
-    manager: SessionManager[AsyncSession], fixture: WorkerFixture
+    manager: SessionManager[WriteSession], fixture: WorkerFixture
 ) -> None:
     """Remove only the independently committed race fixture, never shared rows."""
     async with manager() as session:
         context_ids = sa.select(RDBSessionAgentContext.id).where(
             RDBSessionAgentContext.agent_id == fixture.agent_id
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSessionAgentContext)
             .where(RDBSessionAgentContext.agent_id == fixture.agent_id)
             .values(root_session_agent_id=None)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgent).where(
                 RDBSessionAgent.context_id.in_(context_ids)
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentSession).where(
                 RDBAgentSession.agent_id == fixture.agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgentContext).where(
                 RDBSessionAgentContext.agent_id == fixture.agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentRuntime).where(
                 RDBAgentRuntime.agent_id == fixture.agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgent).where(RDBAgent.id == fixture.agent_id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBLLMProviderIntegration).where(
                 RDBLLMProviderIntegration.workspace_id == fixture.workspace_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(RDBWorkspace.id == fixture.workspace_id)
         )
 
@@ -866,15 +869,16 @@ async def test_independent_transactions_serialize_owner_fence(
     del latest_db_schema
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
                 yield session
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     fixture = await worker_fixture(
         manager, f"worker-race-{uuid4().hex[:12]}", child=True
@@ -887,7 +891,7 @@ async def test_independent_transactions_serialize_owner_fence(
 
     class BarrierSessions(AgentSessionRepository):
         async def lock_execution_by_id(
-            self, session: AsyncSession, agent_session_id: str
+            self, session: WriteSession, agent_session_id: str
         ) -> AgentSession | None:
             try:
                 return await super().lock_execution_by_id(session, agent_session_id)
@@ -898,7 +902,7 @@ async def test_independent_transactions_serialize_owner_fence(
     async def first_transaction() -> None:
         async with manager() as session:
             connection_ids.append(
-                await session.scalar(sa.text("SELECT pg_backend_pid()"))
+                await session.read_session.scalar(sa.text("SELECT pg_backend_pid()"))
             )
             if first == "takeover":
                 await AgentSessionRepository().claim_owner_generation(
@@ -920,10 +924,12 @@ async def test_independent_transactions_serialize_owner_fence(
         await locked.wait()
 
         @asynccontextmanager
-        async def second_manager() -> AsyncIterator[AsyncSession]:
+        async def second_manager() -> AsyncIterator[WriteSession]:
             async with manager() as session:
                 connection_ids.append(
-                    await session.scalar(sa.text("SELECT pg_backend_pid()"))
+                    await session.read_session.scalar(
+                        sa.text("SELECT pg_backend_pid()")
+                    )
                 )
                 second_started.set()
                 yield session
@@ -957,7 +963,7 @@ async def test_independent_transactions_serialize_owner_fence(
             async with asyncio.timeout(10):
                 async with manager() as observer:
                     while True:
-                        blockers = await observer.scalar(
+                        blockers = await observer.write_session.scalar(
                             sa.text("SELECT pg_blocking_pids(:pid)"),
                             {"pid": connection_ids[1]},
                         )

@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
@@ -16,6 +15,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionPolicy,
 )
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
@@ -54,7 +54,7 @@ class SessionLifecycleOperationsRepository:
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -65,7 +65,7 @@ class SessionLifecycleOperationsRepository:
         )
 
     async def archive(
-        self, session: AsyncSession, command: ChatArchiveMutation
+        self, session: WriteSession, command: ChatArchiveMutation
     ) -> tuple[ProviderEffectPlan, ...]:
         """Commit participant and root mutations in the caller's DB-only composition."""
         context = command.context
@@ -98,7 +98,7 @@ class SessionLifecycleOperationsRepository:
         return plans
 
     async def restore(
-        self, session: AsyncSession, context: SessionLifecycleTransitionContext
+        self, session: WriteSession, context: SessionLifecycleTransitionContext
     ) -> None:
         """Validate participant state in reverse registry order before root restore."""
         self.require_context(context)

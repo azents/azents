@@ -7,7 +7,6 @@ import httpx
 import pytest
 from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.llm_catalog as llm_catalog_service
 from azents.core.credentials import (
@@ -31,6 +30,7 @@ from azents.core.llm_catalog import (
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
@@ -67,7 +67,7 @@ from azents.services.oauth_runtime_clients import create_runtime_oauth_client_fa
 
 
 async def test_deterministic_integration_sync_does_not_require_source_authority(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Sync direct integration projections without remote metadata access."""
     async with rdb_session_manager() as session:
@@ -150,7 +150,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
 @pytest.mark.parametrize("provider", [LLMProvider.XAI_OAUTH, LLMProvider.CHATGPT_OAUTH])
 @pytest.mark.parametrize("user_change_during_listing", [False, True])
 async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     provider: LLMProvider,
     user_change_during_listing: bool,
@@ -386,7 +386,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
 
 
 async def test_xai_failure_preserves_last_successful_current_data(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Keep the published xAI catalog when a later provider refresh fails."""

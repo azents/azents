@@ -25,6 +25,7 @@ from azents.core.credentials import (
 from azents.core.enums import LLMProvider
 from azents.core.kimi_oauth import KimiOAuthConnectionMethod
 from azents.core.xai_oauth import XaiOAuthConnectionMethod, XaiOAuthConnectionStatus
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
@@ -66,11 +67,11 @@ class _SessionManager:
     def __init__(self) -> None:
         self.session = AsyncSession()
 
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
+    def __call__(self) -> AbstractAsyncContextManager[WriteSession]:
         return self
 
-    async def __aenter__(self) -> AsyncSession:
-        return self.session
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(self.session)
 
     async def __aexit__(self, *_args: object) -> None:
         return None

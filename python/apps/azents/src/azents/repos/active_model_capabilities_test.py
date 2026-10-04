@@ -46,6 +46,7 @@ from azents.core.model_pricing import (
     ModelPricingUnavailableReason,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent.data import Agent
@@ -68,11 +69,12 @@ _NOW = datetime.datetime(2026, 10, 4, tzinfo=datetime.UTC)
 
 class _Manager:
     def __init__(self) -> None:
-        self.session = AsyncMock(spec=AsyncSession)
+        self.raw_session = AsyncMock(spec=AsyncSession)
+        self.session = ReadWriteSession(self.raw_session)
         self.active = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         self.active = True
         try:
             yield self.session
@@ -205,7 +207,7 @@ async def test_capture_recompiles_old_current_row_without_remote_or_writes() -> 
     assert source.get_models.await_args.kwargs["keys"] == (
         ("openrouter", "openrouter/openai/model"),
     )
-    manager.session.execute.assert_not_awaited()
+    manager.raw_session.execute.assert_not_awaited()
 
 
 async def test_exact_capture_deduplicates_but_keeps_user_order_and_lock_hierarchy() -> (
@@ -225,7 +227,7 @@ async def test_exact_capture_deduplicates_but_keeps_user_order_and_lock_hierarch
         )
 
     async def entries(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: Sequence[ConfiguredModelIdentity],

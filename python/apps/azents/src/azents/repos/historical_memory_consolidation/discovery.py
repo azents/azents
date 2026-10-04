@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus
 from azents.core.historical_memory_consolidation import (
@@ -17,6 +16,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 )
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     consolidation_session,
     database_now,
@@ -27,7 +27,7 @@ from azents.repos.historical_memory_consolidation.authority import (
 class ConsolidationDiscoveryRepository:
     """Eligibility before dispatch; claim and every later operation reauthorize."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def list_due(
         self, *, agent_id: str | None, limit: int
@@ -102,7 +102,7 @@ class ConsolidationDiscoveryRepository:
             )
             if agent_id is not None:
                 query = query.where(RDBConsolidationWork.agent_id == agent_id)
-            rows = (await session.execute(query)).all()
+            rows = (await session.write_session.execute(query)).all()
             result = tuple(
                 ConsolidationUnitKey(
                     workspace_id=workspace,

@@ -3,9 +3,8 @@
 import dataclasses
 import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     DiscordGatewayTypingTarget,
     ExternalChannelConnection,
@@ -19,7 +18,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 class DiscordConnectionOperationRepository:
     """Own completed Discord connection activation and Gateway operations."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     external_channel_repository: ExternalChannelRepository
 
     async def get_configuration(
@@ -55,7 +54,7 @@ class DiscordConnectionOperationRepository:
                 callback_selector_hash=callback_selector_hash,
             )
             if prepared:
-                await session.commit()
+                await session.write_session.commit()
             return prepared
 
     async def activate(
@@ -91,7 +90,7 @@ class DiscordConnectionOperationRepository:
                 checked_at=checked_at,
             )
             if activated is not None:
-                await session.commit()
+                await session.write_session.commit()
             return activated
 
     async def record_activation_failure(
@@ -118,7 +117,7 @@ class DiscordConnectionOperationRepository:
                 )
             )
             if failed is not None:
-                await session.commit()
+                await session.write_session.commit()
             return failed
 
     async def clear_prepared_callback(
@@ -144,7 +143,7 @@ class DiscordConnectionOperationRepository:
                     checked_at=checked_at,
                 )
             )
-            await session.commit()
+            await session.write_session.commit()
             return cleared
 
     async def list_gateway_connection_ids(self) -> list[str]:
@@ -173,7 +172,7 @@ class DiscordConnectionOperationRepository:
                 now=now,
                 lease_until=lease_until,
             )
-            await session.commit()
+            await session.write_session.commit()
             return claim
 
     async def get_owned_gateway_configuration(
@@ -215,7 +214,7 @@ class DiscordConnectionOperationRepository:
                 now=now,
                 lease_until=lease_until,
             )
-            await session.commit()
+            await session.write_session.commit()
             return renewed
 
     async def list_owned_typing_targets(
@@ -258,7 +257,7 @@ class DiscordConnectionOperationRepository:
                 now=now,
                 reason=reason,
             )
-            await session.commit()
+            await session.write_session.commit()
             return recorded
 
     async def mark_gateway_active(
@@ -278,7 +277,7 @@ class DiscordConnectionOperationRepository:
                 lease_generation=lease_generation,
                 now=now,
             )
-            await session.commit()
+            await session.write_session.commit()
             return active
 
     async def release_gateway_lease(
@@ -299,7 +298,7 @@ class DiscordConnectionOperationRepository:
                 lease_generation=lease_generation,
                 now=now,
             )
-            await session.commit()
+            await session.write_session.commit()
             return released
 
     async def mark_gateway_reconnect_required(
@@ -322,5 +321,5 @@ class DiscordConnectionOperationRepository:
                 now=now,
                 reason=reason,
             )
-            await session.commit()
+            await session.write_session.commit()
             return terminalized

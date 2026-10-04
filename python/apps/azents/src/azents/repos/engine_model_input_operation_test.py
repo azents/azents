@@ -33,6 +33,7 @@ from azents.engine.events.types import (
     build_native_compat_key,
     validate_event_payload,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.engine_input_projection import EngineInputProjectionRepository
@@ -63,23 +64,23 @@ class _SessionManager:
         self.database = database
         self.commit_failure = commit_failure
         self.active = False
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
         self.commit_count = 0
         self.rollback_count = 0
         self.operations: list[str] = []
 
-    def assert_session(self, session: AsyncSession) -> None:
+    def assert_session(self, session: ReadSession) -> None:
         """Require every composed operation to use the one active session."""
         assert self.active
         assert session is self.sessions[-1]
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Return input only after commit, restoring all state on any failure."""
         assert not self.active
         saved_run = self.database.run
         saved_events = list(self.database.events)
-        session = AsyncSession()
+        session = ReadWriteSession(AsyncSession())
         self.sessions.append(session)
         self.active = True
         try:
@@ -94,7 +95,7 @@ class _SessionManager:
             raise
         finally:
             self.active = False
-            await session.close()
+            await session.write_session.close()
 
 
 class _RunRepository(AgentRunRepository):
@@ -105,7 +106,7 @@ class _RunRepository(AgentRunRepository):
         self.phase_failure = phase_failure
 
     async def get_by_id(
-        self, session: AsyncSession, run_id: str
+        self, session: ReadSession, run_id: str
     ) -> AgentRunState | None:
         """Read the authoritative detached Run state."""
         self.manager.assert_session(session)
@@ -113,7 +114,7 @@ class _RunRepository(AgentRunRepository):
         return self.manager.database.run
 
     async def lock_by_id(
-        self, session: AsyncSession, run_id: str
+        self, session: ReadSession, run_id: str
     ) -> AgentRunState | None:
         """Record that result append precedes the Run row lock."""
         self.manager.assert_session(session)
@@ -122,7 +123,7 @@ class _RunRepository(AgentRunRepository):
 
     async def update_phase(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         phase: AgentRunPhase,
         *,
@@ -159,7 +160,7 @@ class _TranscriptRepository(EventTranscriptRepository):
 
     async def list_for_model_input(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         head_event_id: str | None = None,
@@ -174,7 +175,7 @@ class _TranscriptRepository(EventTranscriptRepository):
             if head_event_id is None or event.id >= head_event_id
         ]
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: ReadSession, create: EventCreate) -> Event:
         """Idempotently append a recovered Tool result without executing it."""
         self.manager.assert_session(session)
         self.manager.operations.append("append_result")
@@ -194,7 +195,7 @@ class _TranscriptRepository(EventTranscriptRepository):
         return event
 
     async def update_payload(
-        self, session: AsyncSession, event_id: str, payload: EventPayload
+        self, session: ReadSession, event_id: str, payload: EventPayload
     ) -> Event:
         """Change a durable payload inside the input preparation transaction."""
         self.manager.assert_session(session)
@@ -215,7 +216,7 @@ class _SessionHeadRepository:
         self.model_input_head_event_id = head
 
     async def get_by_id(
-        self, session: AsyncSession, session_id: str
+        self, session: ReadSession, session_id: str
     ) -> "_SessionHeadRepository":
         """Read the captured model-input head."""
         self.manager.assert_session(session)
@@ -231,7 +232,7 @@ class _ExchangeFileRepository:
         self.manager = manager
 
     async def list_statuses_by_object_key(
-        self, session: AsyncSession, *, object_keys: Sequence[str]
+        self, session: ReadSession, *, object_keys: Sequence[str]
     ) -> dict[str, ExchangeFileStatus]:
         """Treat the selected Exchange attachment as missing metadata."""
         self.manager.assert_session(session)
@@ -251,7 +252,7 @@ class _ModelFileRepository:
 
     async def list_statuses_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_file_ids: Sequence[str],

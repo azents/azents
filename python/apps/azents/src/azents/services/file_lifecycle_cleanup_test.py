@@ -25,6 +25,7 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_avatar_cleanup import AgentAvatarCleanupRepository
 from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
 from azents.repos.agent_execution import EventTranscriptRepository
@@ -63,7 +64,7 @@ class _ArtifactRepo:
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -88,7 +89,7 @@ class _ArtifactRepo:
 
     async def list_expired_pending_blob_deletion(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[Artifact]:
@@ -103,7 +104,7 @@ class _ArtifactRepo:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         artifact_id: str,
         blob_deleted_at: datetime.datetime,
@@ -128,7 +129,7 @@ class _ExchangeRepo:
 
     async def expire_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         limit: int,
@@ -149,7 +150,7 @@ class _ExchangeRepo:
 
     async def list_expired_pending_blob_deletion(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[ExchangeFile]:
@@ -164,7 +165,7 @@ class _ExchangeRepo:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         blob_deleted_at: datetime.datetime,
@@ -190,7 +191,7 @@ class _ModelFileRepo:
 
     async def mark_deleted_if_unpinned(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         model_file_ids: list[str],
         deleted_at: datetime.datetime,
@@ -217,7 +218,7 @@ class _ModelFileRepo:
 
     async def list_statuses_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_file_ids: list[str],
@@ -232,7 +233,7 @@ class _ModelFileRepo:
 
     async def list_deleted_pending_blob_deletion(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[ModelFile]:
@@ -247,7 +248,7 @@ class _ModelFileRepo:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         model_file_id: str,
         blob_deleted_at: datetime.datetime,
@@ -268,7 +269,7 @@ class _PinnedModelFileRepo(_ModelFileRepo):
 
     async def mark_deleted_if_unpinned(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         model_file_ids: list[str],
         deleted_at: datetime.datetime,
@@ -287,7 +288,7 @@ class _PinRepo:
 
     async def release_terminal_run_pins(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> int:
@@ -307,7 +308,7 @@ class _AvatarCleanupRepo:
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         lease_token: str,
@@ -321,7 +322,7 @@ class _AvatarCleanupRepo:
 
     async def delete_completed(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_token: str,
@@ -333,7 +334,7 @@ class _AvatarCleanupRepo:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_token: str,
@@ -356,7 +357,7 @@ class _AgentSessionRepo:
 
     async def list_model_file_gc_lagging(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[ModelFileGCLaggingSession]:
@@ -366,7 +367,7 @@ class _AgentSessionRepo:
 
     async def advance_model_file_gc_cursor(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         cursor_event_id: str,
@@ -385,7 +386,7 @@ class _TranscriptRepo:
 
     async def list_model_file_gc_range(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         *,
         after_event_id: str | None,
@@ -470,9 +471,9 @@ def _config() -> Config:
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Return fake session context."""
-    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+    yield ReadWriteSession(require_instance(MagicMock(spec=AsyncSession), AsyncSession))
 
 
 def _artifact() -> Artifact:

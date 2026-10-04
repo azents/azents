@@ -10,7 +10,6 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExchangeFileOrigin,
@@ -21,6 +20,7 @@ from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.exchange_upload_operation import RDBExchangeUploadOperation
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -95,7 +95,7 @@ class ExchangeFileOperationRepository:
         WorkspaceUserRepository, Depends(WorkspaceUserRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     @property
@@ -158,7 +158,7 @@ class ExchangeFileOperationRepository:
                 )
             except ValueError:
                 return Failure(ExchangeUploadError.INVALID_REQUEST)
-            session.add(
+            session.write_session.add(
                 RDBExchangeUploadOperation(
                     id=operation.upload_id,
                     publication_id=operation.publication_id,
@@ -182,7 +182,7 @@ class ExchangeFileOperationRepository:
                     cleanup_completed_at=None,
                 )
             )
-            await session.flush()
+            await session.write_session.flush()
             return Success(operation)
 
     async def claim_agent_upload_operation(
@@ -224,7 +224,7 @@ class ExchangeFileOperationRepository:
                 return Failure(ExchangeUploadError.BUSY)
             row.finalize_claim_id = claim_id
             row.finalize_lease_until = min(lease_until, row.expires_at)
-            await session.flush()
+            await session.write_session.flush()
             return Success(_upload_operation(row))
 
     async def load_agent_upload_publication(
@@ -272,7 +272,7 @@ class ExchangeFileOperationRepository:
                 return False
             row.finalize_claim_id = None
             row.finalize_lease_until = None
-            await session.flush()
+            await session.write_session.flush()
             return True
 
     async def finalize_agent_upload_operation(
@@ -315,7 +315,7 @@ class ExchangeFileOperationRepository:
             row.finalized_at = now
             row.finalize_claim_id = None
             row.finalize_lease_until = None
-            await session.flush()
+            await session.write_session.flush()
             return Success(published)
 
     async def claim_due_agent_upload_cleanup(
@@ -333,7 +333,7 @@ class ExchangeFileOperationRepository:
         ):
             raise ValueError("Upload cleanup lease or page bound is invalid")
         async with self.session_manager() as session:
-            rows = await session.scalars(
+            rows = await session.write_session.scalars(
                 sa.select(RDBExchangeUploadOperation)
                 .where(
                     RDBExchangeUploadOperation.cleanup_after <= now,
@@ -354,7 +354,7 @@ class ExchangeFileOperationRepository:
                 row.cleanup_claim_id = claim_id
                 row.cleanup_lease_until = lease_until
                 operations.append(_upload_operation(row))
-            await session.flush()
+            await session.write_session.flush()
             return tuple(operations)
 
     async def finish_agent_upload_cleanup(
@@ -370,14 +370,14 @@ class ExchangeFileOperationRepository:
             row.cleanup_after = completed_at + datetime.timedelta(hours=1)
             row.cleanup_claim_id = None
             row.cleanup_lease_until = None
-            await session.flush()
+            await session.write_session.flush()
             return True
 
     async def _lock_upload(
-        self, session: AsyncSession, upload_id: str
+        self, session: WriteSession, upload_id: str
     ) -> RDBExchangeUploadOperation | None:
         """Lock one exact operation without following a caller object key."""
-        return await session.scalar(
+        return await session.write_session.scalar(
             sa.select(RDBExchangeUploadOperation)
             .where(RDBExchangeUploadOperation.id == upload_id)
             .with_for_update()
@@ -386,7 +386,7 @@ class ExchangeFileOperationRepository:
 
     async def _authorize_agent_upload(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         user_id: str,
@@ -407,7 +407,7 @@ class ExchangeFileOperationRepository:
 
     async def _authorize_upload_row(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         row: RDBExchangeUploadOperation | None,
         agent_id: str,
@@ -427,7 +427,7 @@ class ExchangeFileOperationRepository:
 
     async def _load_upload_publication(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         row: RDBExchangeUploadOperation,
         now: datetime.datetime,
     ) -> Result[ExchangeFile, ExchangeUploadError]:
@@ -786,7 +786,7 @@ class ExchangeFileOperationRepository:
 
     async def _persist_batch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         batch: ExchangeFileCreateBatch,
     ) -> ExchangeFile:
         """Persist uploaded source and optional preview metadata atomically."""
@@ -808,7 +808,7 @@ class ExchangeFileOperationRepository:
 
     async def _authorize_and_expire(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         file: ExchangeFile | None,
         user_id: str,
@@ -824,7 +824,7 @@ class ExchangeFileOperationRepository:
 
     async def _expire_if_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         file: ExchangeFile,
     ) -> ExchangeFile:
         """Transition a due file family and return current source metadata."""
@@ -847,7 +847,7 @@ class ExchangeFileOperationRepository:
 
     async def _has_workspace_access(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         user_id: str,

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
 from azents.core.toolkit_errors import NotFound
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
@@ -23,12 +24,13 @@ from azents.repos.toolkit_operations.owned import AgentToolkitOperationsReposito
 
 async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> None:
     """Lock Toolkit then Agent before updating and reallocating the namespace."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     active = False
     events: list[str] = []
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         nonlocal active
         active = True
         try:
@@ -40,7 +42,7 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
     agent_repo = AsyncMock(spec=AgentRepository)
     namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
 
-    async def load_toolkit(db: AsyncSession, toolkit_id: str) -> SimpleNamespace:
+    async def load_toolkit(db: WriteSession, toolkit_id: str) -> SimpleNamespace:
         assert active and db is session and toolkit_id == "toolkit-1"
         events.append("toolkit")
         return SimpleNamespace(
@@ -50,7 +52,7 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
             enabled=True,
         )
 
-    async def load_agent(db: AsyncSession, agent_id: str) -> SimpleNamespace:
+    async def load_agent(db: WriteSession, agent_id: str) -> SimpleNamespace:
         assert active and db is session and agent_id == "agent-1"
         events.append("agent")
         return SimpleNamespace(
@@ -119,10 +121,11 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
 
 async def test_owned_blank_slug_reset_uses_locked_current_name() -> None:
     """Derive an Agent-owned reset Slug from the locked Toolkit Name."""
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         yield session
 
     toolkit = SimpleNamespace(

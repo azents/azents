@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -23,6 +22,7 @@ from azents.core.external_channel_selector_state import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -76,7 +76,7 @@ class ExternalChannelSelectorService:
     """Project and select routes from interaction-owned selector state."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -187,7 +187,7 @@ class ExternalChannelSelectorService:
                     raise RuntimeError(
                         "Selector interaction disappeared during expiry."
                     )
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelSelectorSelection(
                     status="expired",
                     selector_interaction=expired,
@@ -228,7 +228,7 @@ class ExternalChannelSelectorService:
                 resource_id=resource.id,
             )
             if binding is not None:
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelSelectorSelection(
                     status="already_bound",
                     selector_interaction=interaction,
@@ -246,7 +246,7 @@ class ExternalChannelSelectorService:
             if state.selected_route_id is not None:
                 if state.selected_route_id != route.id:
                     raise ExternalChannelSelectorError("Selector route is immutable.")
-                await session.commit()
+                await session.write_session.commit()
                 return ExternalChannelSelectorSelection(
                     status="already_selected",
                     selector_interaction=interaction,
@@ -262,7 +262,7 @@ class ExternalChannelSelectorService:
             )
             if updated is None:
                 raise RuntimeError("Selector interaction disappeared during selection.")
-            await session.commit()
+            await session.write_session.commit()
             return ExternalChannelSelectorSelection(
                 status="selected",
                 selector_interaction=updated,
@@ -271,7 +271,7 @@ class ExternalChannelSelectorService:
 
     async def _select_setup_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         interaction: ExternalChannelInteraction,
         state: ExternalChannelSelectorState,
@@ -366,7 +366,7 @@ class ExternalChannelSelectorService:
         )
         if updated is None:
             raise RuntimeError("Selector interaction disappeared during selection.")
-        await session.commit()
+        await session.write_session.commit()
         return ExternalChannelSelectorSelection(
             status="setup_pending_location",
             selector_interaction=updated,
@@ -440,7 +440,7 @@ class ExternalChannelSelectorService:
 
     async def _visible_candidates(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         rows: list[ExternalChannelCatalogRoute],
         principal_id: str,

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -40,6 +39,7 @@ from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -81,7 +81,7 @@ class ExternalChannelManagementOperationRepository:
     agent_admin_repository: Annotated[AgentAdminRepository, Depends()]
     workspace_user_repository: Annotated[WorkspaceUserRepository, Depends()]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def add_multi_route(
@@ -140,7 +140,7 @@ class ExternalChannelManagementOperationRepository:
                 ),
             )
             connection.updated_at = now
-            await session.commit()
+            await session.write_session.commit()
             managed = await self.repository.get_multi_route(
                 session,
                 workspace_id=workspace_id,
@@ -170,7 +170,7 @@ class ExternalChannelManagementOperationRepository:
                     catalog_removed_by_user_id=None,
                 ),
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def require_owned_grant(self, *, agent_id: str, grant_id: str) -> None:
         """Finish the grant ownership read before access-service effects."""
@@ -212,7 +212,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if cleanup_plans is None:
                 raise ExternalChannelManagementNotFound(binding_id)
-            await session.commit()
+            await session.write_session.commit()
         return cleanup_plans
 
     async def list_connections(
@@ -572,7 +572,7 @@ class ExternalChannelManagementOperationRepository:
 
     async def _lock_multi_connection_generation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         connection_id: str,
@@ -624,7 +624,7 @@ class ExternalChannelManagementOperationRepository:
             ):
                 raise ExternalChannelManagementNotFound(route_id)
             connection.updated_at = now
-            await session.commit()
+            await session.write_session.commit()
         async with self.session_manager() as session:
             route = await self.repository.get_multi_route(
                 session,
@@ -668,7 +668,7 @@ class ExternalChannelManagementOperationRepository:
             if removal is None:
                 raise ExternalChannelManagementNotFound(route_id)
             connection.updated_at = now
-            await session.commit()
+            await session.write_session.commit()
         return removal
 
     async def disconnect_multi_connection(
@@ -706,7 +706,7 @@ class ExternalChannelManagementOperationRepository:
                 )
             )
             connection.updated_at = now
-            await session.commit()
+            await session.write_session.commit()
         return disconnected
 
     async def disconnect_connection(
@@ -734,7 +734,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if cleanup_plans is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         async with self.session_manager() as session:
             disconnected = await self.lifecycle_repository.disconnect_single_connection(
                 session,
@@ -753,7 +753,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         return ManagedConnectionDisconnectResult(connection, cleanup_plans)
 
     async def replace_multi_channel_default(
@@ -791,7 +791,7 @@ class ExternalChannelManagementOperationRepository:
                 raise ExternalChannelManagementNotFound(route_id)
             if transition.changed:
                 connection.updated_at = now
-            await session.commit()
+            await session.write_session.commit()
         return transition
 
     async def clear_multi_channel_default(
@@ -824,7 +824,7 @@ class ExternalChannelManagementOperationRepository:
             if transition is None:
                 raise ExternalChannelManagementNotFound(provider_channel_id)
             connection.updated_at = now
-            await session.commit()
+            await session.write_session.commit()
         return transition
 
     async def update_multi_discord_thread_auto_archive_duration(
@@ -853,7 +853,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if managed is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         return managed
 
     async def update_multi_discord_url_preview_suppression(
@@ -882,7 +882,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if managed is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         return managed
 
     async def get_binding_mutation_scope(
@@ -927,7 +927,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if not updated:
                 raise ExternalChannelManagementNotFound(binding_id)
-            await session.commit()
+            await session.write_session.commit()
 
     async def replace_multi_slack_configuration(
         self,
@@ -950,7 +950,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
 
     async def replace_multi_discord_configuration(
         self,
@@ -973,7 +973,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
 
     async def replace_slack_configuration(
         self,
@@ -998,7 +998,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
 
     async def replace_discord_configuration(
         self,
@@ -1023,7 +1023,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
 
     async def update_default_response_mode(
         self,
@@ -1051,7 +1051,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if agent is None or agent.workspace_id != workspace_id:
                 raise ExternalChannelManagementNotFound(agent_id)
-            await session.commit()
+            await session.write_session.commit()
         return agent.external_channel_default_response_mode
 
     async def update_discord_thread_auto_archive_duration(
@@ -1082,7 +1082,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         return connection
 
     async def update_discord_url_preview_suppression(
@@ -1111,7 +1111,7 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         return connection
 
     async def update_connection_access_policy(
@@ -1140,5 +1140,5 @@ class ExternalChannelManagementOperationRepository:
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            await session.commit()
+            await session.write_session.commit()
         return connection

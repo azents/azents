@@ -25,6 +25,7 @@ from azents.core.vfs import (
     make_vfs_source_revision,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -116,13 +117,13 @@ class _RunRepository:
     def __init__(self, projection: VfsProjection) -> None:
         self.projection = projection
 
-    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun:
+    async def get_by_id(self, session: ReadSession, run_id: str) -> VfsRun:
         del session, run_id
         return _Run(session_id="session-1", vfs_projection=self.projection)
 
     async def set_vfs_projection_if_unset(
         self,
-        session: _Session,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -137,7 +138,7 @@ class _SessionRepository:
     """AgentSessionRepository test double."""
 
     async def get_by_id(
-        self, session: _Session, agent_session_id: str
+        self, session: ReadSession, agent_session_id: str
     ) -> VfsSessionRecord:
         del session, agent_session_id
         return _Session(agent_id="agent-1", workspace_id="workspace-1")
@@ -149,14 +150,14 @@ class _MappedRunRepository:
     def __init__(self, runs: dict[str, VfsRun]) -> None:
         self.runs = runs
 
-    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun | None:
+    async def get_by_id(self, session: ReadSession, run_id: str) -> VfsRun | None:
         """Return the configured run without falling back to another run."""
         del session
         return self.runs.get(run_id)
 
     async def set_vfs_projection_if_unset(
         self,
-        session: _Session,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -174,7 +175,7 @@ class _MappedSessionRepository:
         self.sessions = sessions
 
     async def get_by_id(
-        self, session: _Session, agent_session_id: str
+        self, session: ReadSession, agent_session_id: str
     ) -> VfsSessionRecord | None:
         """Return the configured Session ownership record."""
         del session
@@ -184,13 +185,13 @@ class _MappedSessionRepository:
 class _UnusedRunRepository:
     """Fail if preview-only tests unexpectedly load a run."""
 
-    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun | None:
+    async def get_by_id(self, session: ReadSession, run_id: str) -> VfsRun | None:
         del session, run_id
         raise AssertionError("Run repository is not used by preview")
 
     async def set_vfs_projection_if_unset(
         self,
-        session: _Session,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -204,7 +205,7 @@ class _UnusedSessionRepository:
     """Fail if preview-only tests unexpectedly load a session."""
 
     async def get_by_id(
-        self, session: _Session, agent_session_id: str
+        self, session: ReadSession, agent_session_id: str
     ) -> VfsSessionRecord | None:
         del session, agent_session_id
         raise AssertionError("Session repository is not used by preview")
@@ -215,7 +216,7 @@ class _EmptyToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: _Session,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
@@ -246,7 +247,7 @@ class _OneToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: _Session,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
@@ -269,7 +270,7 @@ class _ConflictingToolkitRepository:
 
     async def list_effective_for_agent(
         self,
-        session: _Session,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
@@ -317,15 +318,16 @@ class _BlockingReleaseVfsCatalog(ReleaseVfsCatalog):
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[_Session]:
-    yield _Session(agent_id="", workspace_id="")
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    async with AsyncSession() as session:
+        yield ReadWriteSession(session)
 
 
 @dataclass(frozen=True)
 class _VfsTestOperations:
     """Expose the completed boundary over explicit disconnected DB primitives."""
 
-    primitives: VfsProjectionOperations[_Session]
+    primitives: VfsProjectionOperations
 
     def with_owner(self, owner: SessionExecutionOwner) -> "_VfsTestOperations":
         """Require the real fenced repository for owner-generation tests."""
@@ -534,7 +536,7 @@ async def test_run_projection_scopes_required_source_to_root_execution(
 
 
 async def test_run_projection_commit_rejects_owner_takeover_after_build_starts(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A stale builder cannot fix its projection on a Run recovered by a new owner."""
     session_repository = AgentSessionRepository()

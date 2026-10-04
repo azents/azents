@@ -21,6 +21,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
 from azents.services.owner_lifecycle import OwnerLifecycleService
 
@@ -34,9 +35,9 @@ class _SessionDouble:
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder session for repository doubles."""
-    yield cast(AsyncSession, _SessionDouble())
+    yield ReadWriteSession(cast(AsyncSession, _SessionDouble()))
 
 
 def _job(
@@ -89,7 +90,7 @@ class _OwnerLifecycleRepositoryDouble:
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -101,7 +102,7 @@ class _OwnerLifecycleRepositoryDouble:
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -115,7 +116,7 @@ class _OwnerLifecycleRepositoryDouble:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -131,7 +132,7 @@ class _OwnerLifecycleRepositoryDouble:
 
     async def mark_completed(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -163,7 +164,7 @@ class _SessionRepositoryDouble:
 
     async def list_active_user_roots_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         associated_user_id: str,
@@ -174,7 +175,7 @@ class _SessionRepositoryDouble:
 
     async def list_user_roots_by_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         associated_user_id: str,
     ) -> Sequence[_Root]:
@@ -184,7 +185,7 @@ class _SessionRepositoryDouble:
 
     async def has_any_for_associated_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         associated_user_id: str,
     ) -> bool:
@@ -194,7 +195,7 @@ class _SessionRepositoryDouble:
 
     async def lock_root_tree_sessions(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_id: str,
     ) -> Sequence[_Root]:
@@ -215,7 +216,7 @@ class _SessionRepositoryDouble:
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         stop_request_id: str,
@@ -228,7 +229,7 @@ class _SessionRepositoryDouble:
 
     async def archive_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_id: str,
         session_ids: Sequence[str],
@@ -257,7 +258,7 @@ class _RunRepositoryDouble:
 
     async def has_active_for_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> bool:
@@ -279,14 +280,14 @@ class _RetentionRepositoryDouble:
     def __init__(self) -> None:
         self.scheduled: list[tuple[str, datetime.datetime]] = []
 
-    async def lock_settings(self, session: AsyncSession) -> _RetentionSettings:
+    async def lock_settings(self, session: ReadSession) -> _RetentionSettings:
         """Return fixed settings."""
         del session
         return _RetentionSettings()
 
     async def schedule_purge_job(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_id: str,
         eligible_at: datetime.datetime,
@@ -306,7 +307,7 @@ class _MemoryRepositoryDouble:
 
     async def delete_all_for_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         user_id: str,
     ) -> int:
@@ -322,7 +323,7 @@ class _UserRepositoryDouble:
     def __init__(self) -> None:
         self.deleted: list[str] = []
 
-    async def delete(self, session: AsyncSession, user_id: str) -> None:
+    async def delete(self, session: ReadSession, user_id: str) -> None:
         """Record final user deletion."""
         del session
         self.deleted.append(user_id)
@@ -339,7 +340,7 @@ class _RetainedReferenceRepositoryDouble:
 
     async def delete_by_requester_user_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         requester_user_id: str,
     ) -> int:
@@ -350,7 +351,7 @@ class _RetainedReferenceRepositoryDouble:
 
     async def detach_sender_user_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         sender_user_id: str,
     ) -> int:
@@ -361,7 +362,7 @@ class _RetainedReferenceRepositoryDouble:
 
     async def detach_source_user_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         source_user_id: str,
     ) -> int:
@@ -372,7 +373,7 @@ class _RetainedReferenceRepositoryDouble:
 
     async def detach_user_references(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         user_id: str,
     ) -> None:
@@ -406,7 +407,7 @@ class _ExternalChannelDouble:
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -417,7 +418,7 @@ class _ExternalChannelDouble:
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> None:

@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
@@ -30,6 +29,7 @@ from azents.core.external_channel_ingestion import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelTrigger,
@@ -70,7 +70,7 @@ class ExternalChannelTransportIngestionService:
     """Project authenticated callbacks into the shared ingestion boundary."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[

@@ -10,7 +10,6 @@ import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.consts import PROJECT_ROOT
 from azents.core.agent import AgentModelSelectionInput
@@ -35,6 +34,7 @@ from azents.core.model_pricing import normalize_model_pricing
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_catalog import RDBLLMCatalogEntry
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
@@ -61,7 +61,7 @@ class _CountingExactSourceRepository(ModelMetadataSourceRepository):
 
     async def get_models(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         source_key: str,
         keys: Sequence[tuple[str, str]],
@@ -101,7 +101,7 @@ def test_public_catalog_dto_source_does_not_expose_execution_descriptors() -> No
 
 @pytest.mark.asyncio
 async def test_new_selection_diagnostics_preserve_raw_identifier_without_descriptors(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Stored selection remains semantic, with exact publisher-qualified model ID."""
     catalog_repository = LLMCatalogRepository()
@@ -205,7 +205,7 @@ async def test_new_selection_diagnostics_preserve_raw_identifier_without_descrip
 
 
 async def test_active_picker_recompiles_historical_rows_without_writing_them(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     catalogs = LLMCatalogRepository()
     integrations = LLMProviderIntegrationRepository(
@@ -296,7 +296,7 @@ async def test_active_picker_recompiles_historical_rows_without_writing_them(
         )
         # This is historical persisted data, not a new publication through the
         # current writer (which must reject an obsolete capability generation).
-        await session.execute(
+        await session.write_session.execute(
             sa.insert(RDBLLMCatalogEntry).values(
                 id="b" * 32,
                 catalog_id=catalog.id,
@@ -316,10 +316,10 @@ async def test_active_picker_recompiles_historical_rows_without_writing_them(
                 pricing=price.model_dump(mode="json"),
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         before = (
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBLLMCatalogEntry.__table__).where(
                         RDBLLMCatalogEntry.id == "b" * 32
                     )
@@ -374,7 +374,7 @@ async def test_active_picker_recompiles_historical_rows_without_writing_them(
     async with rdb_session_manager() as session:
         after = (
             (
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(RDBLLMCatalogEntry.__table__).where(
                         RDBLLMCatalogEntry.id == "b" * 32
                     )

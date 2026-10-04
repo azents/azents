@@ -19,6 +19,7 @@ from azents.core.external_channel_provider_effect import (
     ProviderTarget,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -75,7 +76,7 @@ class _Repository:
 
     async def terminate_connection_for_provider_event(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> tuple[ProviderEffectPlan, ...]:
         self.terminated.append(kwargs)
@@ -83,7 +84,7 @@ class _Repository:
 
     async def purge_disconnected_connection_provider_state(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         connection_id: str,
     ) -> bool:
@@ -93,7 +94,7 @@ class _Repository:
 
     async def mark_connection_reconnect_required(
         self,
-        _session: AsyncSession,
+        _session: WriteSession,
         **kwargs: object,
     ) -> bool:
         self.reconnect_required.append(kwargs)
@@ -124,14 +125,14 @@ def _service() -> tuple[
     session = _Session()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, session)
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(cast(AsyncSession, session))
 
     repository = _Repository()
     action_service = _ActionService(session)
     return (
         ExternalChannelConnectionRevocationService(
-            session_manager=cast(SessionManager[AsyncSession], session_manager),
+            session_manager=cast(SessionManager[WriteSession], session_manager),
             repository=cast(ExternalChannelRepository, repository),
             action_service=cast(ExternalChannelActionService, action_service),
         ),

@@ -6,7 +6,6 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
@@ -32,6 +31,7 @@ from azents.job_runtime.local import JobRuntimeClosedError
 from azents.job_runtime.types import JobRuntime
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -75,7 +75,7 @@ class ExternalChannelIngressAdmissionService:
     """Persist eligible effective-conversation triggers before provider I/O."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -125,14 +125,14 @@ class ExternalChannelIngressAdmissionService:
                 binding=target.binding,
                 response_mode=target.response_mode,
             ):
-                await session.commit()
+                await session.write_session.commit()
                 return _outcome(
                     ExternalChannelIngestionOutcomeKind.IGNORED,
                     ExternalChannelIngestionReason.RESPONSE_MODE_NOT_TRIGGERED,
                 )
             provider_user_id = request.locator.provider_user_id
             if provider_user_id is None:
-                await session.commit()
+                await session.write_session.commit()
                 return _outcome(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
@@ -158,7 +158,7 @@ class ExternalChannelIngressAdmissionService:
                 )
                 is not None
             ):
-                await session.commit()
+                await session.write_session.commit()
                 return _outcome(
                     ExternalChannelIngestionOutcomeKind.IGNORED,
                     ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
@@ -184,7 +184,7 @@ class ExternalChannelIngressAdmissionService:
                     or target_session.status is not AgentSessionStatus.ACTIVE
                     or target_session.stop_requested_at is not None
                 ):
-                    await session.commit()
+                    await session.write_session.commit()
                     return _outcome(
                         ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                         ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE,
@@ -264,7 +264,7 @@ class ExternalChannelIngressAdmissionService:
                     initial_title_eligible=request.initial_title_eligible,
                 ),
             )
-            await session.commit()
+            await session.write_session.commit()
         if admission.replaced_stale_owner:
             logger.warning(
                 "External Channel ingress stale provisioning owner was replaced",
@@ -293,7 +293,7 @@ class ExternalChannelIngressAdmissionService:
 
     async def _resolve_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -385,7 +385,7 @@ class ExternalChannelIngressAdmissionService:
 
     async def _resolve_route(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
@@ -403,7 +403,7 @@ class ExternalChannelIngressAdmissionService:
 
     async def _ensure_source_resource(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         now: datetime.datetime,
@@ -469,7 +469,7 @@ class ExternalChannelIngressAdmissionService:
 
     async def _lock_authority(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         request: ExternalChannelIngestionRequest,
         now: datetime.datetime,

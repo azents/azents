@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState, EventKind, LLMProvider
 from azents.engine.events.types import UserMessagePayload
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
@@ -35,13 +35,13 @@ from azents.testing.types import require_instance
 class _Boundary:
     """Track each real Session until its completed operation has exited."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.opened: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.opened: list[WriteSession] = []
+        self.active: list[WriteSession] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
         async with self.manager() as session:
             self.opened.append(session)
             self.active.append(session)
@@ -52,7 +52,9 @@ class _Boundary:
 
     def closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.opened)
+        assert all(
+            not session.write_session.in_transaction() for session in self.opened
+        )
 
 
 def _reads(
@@ -68,7 +70,7 @@ def _reads(
 
 
 async def test_missing_read_results_remain_detached_without_stronger_policy(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     reads = _reads(boundary, agents=AgentRepository())
@@ -94,7 +96,7 @@ async def test_missing_read_results_remain_detached_without_stronger_policy(
 
 
 async def test_agent_session_tree_and_drift_snapshots_preserve_order_and_identity(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     session_id = await _create_session(rdb_session_manager, handle="executor-read-tree")
     sessions = AgentSessionRepository()
@@ -142,7 +144,7 @@ async def test_agent_session_tree_and_drift_snapshots_preserve_order_and_identit
 
 
 async def test_head_and_non_reverted_transcript_are_read_in_one_completed_session(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     session_id = await _create_session(rdb_session_manager, handle="executor-read-head")
     transcript = EventTranscriptRepository()
@@ -161,12 +163,12 @@ async def test_head_and_non_reverted_transcript_are_read_in_one_completed_sessio
                     ),
                 )
             )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(model_input_head_event_id=events[1].id)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBEvent).where(RDBEvent.id == events[2].id).values(reverted=True)
         )
     boundary = _Boundary(rdb_session_manager)
@@ -181,7 +183,7 @@ async def test_head_and_non_reverted_transcript_are_read_in_one_completed_sessio
 
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 async def test_read_failure_or_cancellation_closes_sql_and_never_calls_effect(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     failure: str,
 ) -> None:
     session_id = await _create_session(
@@ -192,7 +194,7 @@ async def test_read_failure_or_cancellation_closes_sql_and_never_calls_effect(
         assert current is not None
 
     class FailingAgents(AgentRepository):
-        async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
+        async def get_by_id(self, session: ReadSession, agent_id: str) -> Agent | None:
             await super().get_by_id(session, agent_id)
             if failure == "cancel":
                 raise asyncio.CancelledError()
@@ -209,7 +211,7 @@ async def test_read_failure_or_cancellation_closes_sql_and_never_calls_effect(
 
 
 async def test_wait_mailbox_checks_precede_and_follow_completed_descendant_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     session_id = await _create_session(
         rdb_session_manager, handle="executor-wait-order"
@@ -234,7 +236,7 @@ async def test_wait_mailbox_checks_precede_and_follow_completed_descendant_read(
             title=None,
             last_task_message=None,
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == first.agent_session_id)
             .values(run_state=AgentSessionRunState.RUNNING)
@@ -273,7 +275,7 @@ async def test_wait_mailbox_checks_precede_and_follow_completed_descendant_read(
 
 
 async def test_wait_missing_session_retains_initial_mailbox_result_and_empty_count(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     mailbox = MagicMock(spec=MailboxService)
@@ -298,7 +300,7 @@ async def test_wait_missing_session_retains_initial_mailbox_result_and_empty_cou
 
 
 async def test_metadata_skip_and_missing_source_capture_have_no_provider_fetch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     service = ModelMetadataService(

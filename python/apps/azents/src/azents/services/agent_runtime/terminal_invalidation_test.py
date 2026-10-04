@@ -19,6 +19,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
@@ -63,9 +64,11 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     committed_transactions = 0
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         nonlocal committed_transactions
-        yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+        yield ReadWriteSession(
+            require_instance(MagicMock(spec=AsyncSession), AsyncSession)
+        )
         committed_transactions += 1
 
     command = AgentRuntimeLifecycleCommand(
@@ -76,7 +79,7 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     set_desired_state = AsyncMock(return_value=command)
     runtime_repository = MagicMock(spec=AgentRuntimeRepository)
     runtime_repository.set_desired_state_if_configuration_current = set_desired_state
-    typed_session_manager: SessionManager[AsyncSession] = session_manager
+    typed_session_manager: SessionManager[WriteSession] = session_manager
     service.session_manager = typed_session_manager
     service.runtime_repository = require_instance(
         runtime_repository,

@@ -11,7 +11,6 @@ from typing import Annotated, AsyncContextManager, NamedTuple, Protocol
 
 from azcommon.uuid import uuid7
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionStopSignal
@@ -28,6 +27,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
 )
 from azents.rdb.deps import get_session_manager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
@@ -65,7 +65,7 @@ class OwnerLifecycleAdvanceResult(NamedTuple):
 class OwnerLifecycleSessionManager(Protocol):
     """Open a caller-owned database transaction for owner lifecycle work."""
 
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
+    def __call__(self) -> AsyncContextManager[WriteSession]:
         """Return one asynchronous database-session context."""
         ...
 
@@ -104,7 +104,7 @@ class OwnerLifecycleRepositoryProtocol(Protocol):
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -115,7 +115,7 @@ class OwnerLifecycleRepositoryProtocol(Protocol):
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -127,7 +127,7 @@ class OwnerLifecycleRepositoryProtocol(Protocol):
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -141,7 +141,7 @@ class OwnerLifecycleRepositoryProtocol(Protocol):
 
     async def mark_completed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -156,7 +156,7 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
 
     async def list_active_user_roots_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         associated_user_id: str,
@@ -166,7 +166,7 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
 
     async def list_user_roots_by_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         associated_user_id: str,
     ) -> Sequence[OwnerLifecycleRootSession]:
@@ -175,7 +175,7 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
 
     async def has_any_for_associated_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         associated_user_id: str,
     ) -> bool:
@@ -184,7 +184,7 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
 
     async def lock_root_tree_sessions(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
     ) -> Sequence[OwnerLifecycleRootSession]:
@@ -193,7 +193,7 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         stop_request_id: str,
@@ -204,7 +204,7 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
 
     async def archive_tree(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         session_ids: Sequence[str],
@@ -222,7 +222,7 @@ class OwnerLifecycleRunRepositoryProtocol(Protocol):
 
     async def has_active_for_session_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> bool:
@@ -249,14 +249,14 @@ class OwnerLifecycleRetentionRepositoryProtocol(Protocol):
 
     async def lock_settings(
         self,
-        session: AsyncSession,
+        session: WriteSession,
     ) -> OwnerLifecycleRetentionSettings:
         """Lock system retention settings."""
         ...
 
     async def schedule_purge_job(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         root_session_id: str,
         eligible_at: datetime.datetime,
@@ -286,7 +286,7 @@ class OwnerLifecycleExternalChannelLifecycleProtocol(Protocol):
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ExternalChannelArchiveTermination | None:
@@ -306,7 +306,7 @@ class OwnerLifecycleScheduledTaskLifecycleProtocol(Protocol):
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -316,7 +316,7 @@ class OwnerLifecycleScheduledTaskLifecycleProtocol(Protocol):
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ScheduledTaskLifecycleCleanup | None:
@@ -337,7 +337,7 @@ class OwnerLifecycleMemoryRepositoryProtocol(Protocol):
 
     async def delete_all_for_user(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         user_id: str,
     ) -> int:
@@ -348,7 +348,7 @@ class OwnerLifecycleMemoryRepositoryProtocol(Protocol):
 class OwnerLifecycleUserRepositoryProtocol(Protocol):
     """User deletion consumed during account finalization."""
 
-    async def delete(self, session: AsyncSession, user_id: str) -> None:
+    async def delete(self, session: WriteSession, user_id: str) -> None:
         """Delete one User row."""
         ...
 
@@ -358,7 +358,7 @@ class OwnerLifecycleChatWriteRequestRepositoryProtocol(Protocol):
 
     async def delete_by_requester_user_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         requester_user_id: str,
     ) -> int:
@@ -371,7 +371,7 @@ class OwnerLifecycleMailboxRepositoryProtocol(Protocol):
 
     async def detach_sender_user_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         sender_user_id: str,
     ) -> int:
@@ -384,7 +384,7 @@ class OwnerLifecycleExchangeFileRepositoryProtocol(Protocol):
 
     async def detach_source_user_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source_user_id: str,
     ) -> int:
@@ -397,7 +397,7 @@ class OwnerLifecycleExternalChannelRepositoryProtocol(Protocol):
 
     async def detach_user_references(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         user_id: str,
     ) -> None:
@@ -750,7 +750,7 @@ class OwnerLifecycleService:
                     )
                     if not owned:
                         raise RuntimeError("Owner lifecycle lease was lost")
-                    await session.commit()
+                    await session.write_session.commit()
                     return True
                 # Transitional states; let the next pass observe progress.
                 return True
@@ -862,7 +862,7 @@ class OwnerLifecycleService:
                 )
                 if not owned:
                     raise RuntimeError("Owner lifecycle lease was lost")
-                await session.commit()
+                await session.write_session.commit()
                 archived = True
 
         if archived:
@@ -875,7 +875,7 @@ class OwnerLifecycleService:
 
     async def _detach_retained_user_references(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         user_id: str,
     ) -> None:

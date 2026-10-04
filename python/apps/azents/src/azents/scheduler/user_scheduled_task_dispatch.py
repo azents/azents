@@ -5,12 +5,12 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
@@ -29,7 +29,7 @@ def _utc_now() -> datetime.datetime:
 
 def get_user_scheduled_task_dispatcher(
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ],
     cycle_repository: Annotated[

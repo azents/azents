@@ -2,32 +2,20 @@
 
 import dataclasses
 from collections.abc import Callable, Sequence
-from typing import Annotated, AsyncContextManager, Generic, Protocol, TypeVar
+from typing import Annotated, AsyncContextManager, Protocol
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.vfs import VfsProjection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit.deps import get_toolkit_repository
-
-VfsSessionT_contra = TypeVar(
-    "VfsSessionT_contra", bound="VfsSession", contravariant=True
-)
-
-
-class VfsSession(Protocol):
-    """Database session operation used by VFS projection persistence."""
-
-    async def commit(self) -> None:
-        """Commit a persisted projection."""
-        ...
 
 
 class VfsRun(Protocol):
@@ -86,12 +74,12 @@ class VfsEffectiveToolkitConfig(Protocol):
         ...
 
 
-class VfsRunRepository(Protocol[VfsSessionT_contra]):
+class VfsRunRepository(Protocol):
     """Run repository operations used by VFS projection service."""
 
     async def get_by_id(
         self,
-        session: VfsSessionT_contra,
+        session: ReadSession,
         run_id: str,
     ) -> VfsRun | None:
         """Load one Agent run."""
@@ -99,7 +87,7 @@ class VfsRunRepository(Protocol[VfsSessionT_contra]):
 
     async def set_vfs_projection_if_unset(
         self,
-        session: VfsSessionT_contra,
+        session: WriteSession,
         *,
         run_id: str,
         session_id: str,
@@ -109,24 +97,24 @@ class VfsRunRepository(Protocol[VfsSessionT_contra]):
         ...
 
 
-class VfsSessionRepository(Protocol[VfsSessionT_contra]):
+class VfsSessionRepository(Protocol):
     """Session repository operation used by VFS projection service."""
 
     async def get_by_id(
         self,
-        session: VfsSessionT_contra,
+        session: ReadSession,
         agent_session_id: str,
     ) -> VfsSessionRecord | None:
         """Load one Agent session."""
         ...
 
 
-class VfsToolkitRepository(Protocol[VfsSessionT_contra]):
+class VfsToolkitRepository(Protocol):
     """Effective Toolkit operation used by VFS projection service."""
 
     async def list_effective_for_agent(
         self,
-        session: VfsSessionT_contra,
+        session: ReadSession,
         agent_id: str,
         *,
         workspace_id: str,
@@ -175,17 +163,15 @@ class VfsProjectionOperationProtocol(Protocol):
 
 
 @dataclasses.dataclass(frozen=True)
-class VfsProjectionOperations(Generic[VfsSessionT_contra]):
+class VfsProjectionOperations:
     """Own VFS read/CAS transactions and durable execution ownership fencing."""
 
-    session_manager: Callable[[], AsyncContextManager[VfsSessionT_contra]]
-    agent_run_repository: VfsRunRepository[VfsSessionT_contra]
-    agent_session_repository: VfsSessionRepository[VfsSessionT_contra]
-    toolkit_repository: VfsToolkitRepository[VfsSessionT_contra]
+    session_manager: Callable[[], AsyncContextManager[WriteSession]]
+    agent_run_repository: VfsRunRepository
+    agent_session_repository: VfsSessionRepository
+    toolkit_repository: VfsToolkitRepository
 
-    def with_owner(
-        self: "VfsProjectionOperations[AsyncSession]", owner: SessionExecutionOwner
-    ) -> "VfsProjectionOperations[AsyncSession]":
+    def with_owner(self, owner: SessionExecutionOwner) -> "VfsProjectionOperations":
         return dataclasses.replace(
             self,
             session_manager=OwnerBoundSessionManager(
@@ -217,7 +203,7 @@ class VfsProjectionOperations(Generic[VfsSessionT_contra]):
             published = await self.agent_run_repository.set_vfs_projection_if_unset(
                 session, run_id=run_id, session_id=session_id, projection=projection
             )
-            await session.commit()
+            await session.write_session.commit()
         return published
 
     async def list_effective_toolkits(
@@ -239,14 +225,14 @@ class VfsProjectionOperations(Generic[VfsSessionT_contra]):
 
 def get_vfs_projection_operations(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
     ],
     toolkit_repository: Annotated[ToolkitRepository, Depends(get_toolkit_repository)],
-) -> VfsProjectionOperations[AsyncSession]:
+) -> VfsProjectionOperations:
     """Wire real persistence collaborators behind the completed VFS boundary."""
     return VfsProjectionOperations(
         session_manager=session_manager,

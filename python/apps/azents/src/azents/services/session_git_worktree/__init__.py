@@ -16,7 +16,6 @@ from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.action_execution_data import (
     ActionExecution,
@@ -69,6 +68,7 @@ from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_ME
 from azents.engine.tools.skill import SkillProjectionService
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import EventTranscriptRepository
@@ -508,7 +508,7 @@ class SessionGitWorktreeService:
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
@@ -1015,7 +1015,7 @@ class SessionGitWorktreeService:
 
     async def _create_and_link_workspace_project(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         allocation: SessionGitWorktree,
         worktree_path: str,
@@ -2065,7 +2065,7 @@ class SessionGitWorktreeService:
                 worktree_path=worktree_path,
                 discovery_fingerprint=discovery_fingerprint,
             )
-            await session.commit()
+            await session.write_session.commit()
         return result
 
     async def _mark_cleanup_claim_removing(
@@ -2086,7 +2086,7 @@ class SessionGitWorktreeService:
                 action_execution_id=execution.id,
                 worktree_path=worktree_path,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _release_cleanup_claim(
         self,
@@ -2108,7 +2108,7 @@ class SessionGitWorktreeService:
                 worktree_path=worktree_path,
                 state=state,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _release_cleanup_claims(
         self,
@@ -2126,7 +2126,7 @@ class SessionGitWorktreeService:
                 session,
                 action_execution_id=execution.id,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _release_nonremoving_cleanup_claims(
         self,
@@ -2144,7 +2144,7 @@ class SessionGitWorktreeService:
                 session,
                 action_execution_id=execution.id,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _release_agent_removal_claim(
         self,
@@ -2166,7 +2166,7 @@ class SessionGitWorktreeService:
                 worktree_path=worktree_path,
                 state=state,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _release_nonremoving_agent_removal_claims(
         self,
@@ -2184,7 +2184,7 @@ class SessionGitWorktreeService:
                 session,
                 action_execution_id=execution.id,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _claim_archive_cleanup_path(
         self,
@@ -2202,7 +2202,7 @@ class SessionGitWorktreeService:
                 root_session_id=root_session_id,
                 worktree_path=worktree_path,
             )
-            await session.commit()
+            await session.write_session.commit()
         return claimed
 
     async def _release_archive_cleanup_path(
@@ -2221,7 +2221,7 @@ class SessionGitWorktreeService:
                 root_session_id=root_session_id,
                 worktree_path=worktree_path,
             )
-            await session.commit()
+            await session.write_session.commit()
 
     async def _update_cleanup_result(
         self,
@@ -3609,7 +3609,7 @@ class SessionGitWorktreeService:
 
     async def _ensure_agent_worktree_allocation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         execution: ActionExecution,
         session_id: str,
@@ -3928,7 +3928,7 @@ class SessionGitWorktreeService:
 
     async def _ensure_action_worktree_allocation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         execution: ActionExecution,
         session_id: str,
@@ -5107,7 +5107,7 @@ class SessionGitWorktreeService:
 
     async def mark_cleanup_pending_for_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
     ) -> GitWorktreeCleanupRequest:

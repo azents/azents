@@ -4,10 +4,10 @@ import datetime
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_publication import ConsolidationOutputError
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.publication import (
     ConsolidationPublicationOutcome,
 )
@@ -27,7 +27,7 @@ from azents.testing.consolidation import seed_consolidation_corpus
 
 
 async def test_stage1_sampler_shares_aware_time_but_preserves_real_attempt_deadline(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     discovery = AsyncMock(spec=HistoricalMemoryDiscoveryService)
     discovery.admit_and_list_due_agents.return_value = HistoricalMemoryAdmissionSample(
@@ -57,7 +57,7 @@ async def test_stage1_sampler_shares_aware_time_but_preserves_real_attempt_deadl
 
 
 async def test_not_due_stage1_does_not_skip_pending_consolidation_or_invent_success(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     discovery = AsyncMock(spec=HistoricalMemoryDiscoveryService)
@@ -89,7 +89,7 @@ async def test_not_due_stage1_does_not_skip_pending_consolidation_or_invent_succ
 
 
 async def test_known_validation_failure_is_counted_but_unexpected_errors_propagate(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     corpus = await seed_consolidation_corpus(rdb_session_manager)
     discovery = AsyncMock(spec=HistoricalMemoryDiscoveryService)

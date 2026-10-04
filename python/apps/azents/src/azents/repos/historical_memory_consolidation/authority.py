@@ -10,7 +10,6 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from psycopg.errors import LockNotAvailable, QueryCanceled
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus
 from azents.core.historical_memory_consolidation import (
@@ -25,6 +24,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 )
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 class ConsolidationAuthorityError(PermissionError):
@@ -41,8 +41,8 @@ class ConsolidationDeadlineError(ConsolidationAuthorityError):
 
 @asynccontextmanager
 async def consolidation_session(
-    manager: SessionManager[AsyncSession],
-) -> AsyncIterator[AsyncSession]:
+    manager: SessionManager[WriteSession],
+) -> AsyncIterator[WriteSession]:
     """Complete rollback before normalizing only expected NOWAIT contention."""
     try:
         async with manager() as session:
@@ -72,20 +72,20 @@ class LockedConsolidationOwner:
 class ConsolidationJobSession:
     """A fenced database transaction with an enforceable operation deadline."""
 
-    session: AsyncSession
+    session: WriteSession
     owner: LockedConsolidationOwner
 
 
 @asynccontextmanager
 async def consolidation_job_session(
-    manager: SessionManager[AsyncSession], principal: ConsolidationJobPrincipal
+    manager: SessionManager[WriteSession], principal: ConsolidationJobPrincipal
 ) -> AsyncIterator[ConsolidationJobSession]:
     """Bound admission and all DB work by the approved lease and attempt deadline."""
     timeout = asyncio.timeout(120)
     try:
         async with timeout:
             async with consolidation_session(manager) as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(sa.func.set_config("statement_timeout", "120000", True))
                 )
                 owner = await lock_job_owner(session, principal)
@@ -102,7 +102,7 @@ async def consolidation_job_session(
                         "Consolidation database deadline was exceeded."
                     )
                 timeout.reschedule(asyncio.get_running_loop().time() + remaining)
-                await session.execute(
+                await session.write_session.execute(
                     sa.select(
                         sa.func.set_config(
                             "statement_timeout",
@@ -135,7 +135,7 @@ def unit_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
 
 
 async def lock_unit_authority(
-    session: AsyncSession, key: ConsolidationUnitKey
+    session: WriteSession, key: ConsolidationUnitKey
 ) -> str | None:
     """Protect current Agent eligibility and personal grant from concurrent loss.
 
@@ -143,7 +143,7 @@ async def lock_unit_authority(
     writers. Lock contention is an ordinary retryable database failure, never a
     reason to assume authority. No foreground identity is created or consulted.
     """
-    agent = await session.scalar(
+    agent = await session.write_session.scalar(
         sa.select(RDBAgent)
         .where(
             RDBAgent.id == key.agent_id,
@@ -157,7 +157,7 @@ async def lock_unit_authority(
         raise ConsolidationAuthorityError("Consolidation scope is unavailable.")
     if key.associated_user_id is None:
         return None
-    grant = await session.scalar(
+    grant = await session.write_session.scalar(
         sa.select(RDBWorkspaceUser.memory_grant_identity)
         .where(
             RDBWorkspaceUser.workspace_id == key.workspace_id,
@@ -170,16 +170,16 @@ async def lock_unit_authority(
     return grant
 
 
-async def database_now(session: AsyncSession) -> datetime.datetime:
+async def database_now(session: ReadSession) -> datetime.datetime:
     """Sample database wall time after lock acquisition, not transaction start."""
-    value = await session.scalar(sa.select(sa.func.clock_timestamp()))
+    value = await session.read_session.scalar(sa.select(sa.func.clock_timestamp()))
     if not isinstance(value, datetime.datetime):
         raise TypeError("Database clock did not return an aware timestamp.")
     return value
 
 
 async def require_commit_owner(
-    session: AsyncSession, owner: LockedConsolidationOwner
+    session: ReadSession, owner: LockedConsolidationOwner
 ) -> None:
     """Reject transactions crossing the deadline or lease while doing DB work."""
     now = await database_now(session)
@@ -192,11 +192,11 @@ async def require_commit_owner(
 
 
 async def lock_job_owner(
-    session: AsyncSession, principal: ConsolidationJobPrincipal
+    session: WriteSession, principal: ConsolidationJobPrincipal
 ) -> LockedConsolidationOwner:
     """Reauthorize and fence every operation, including replay and late results."""
     grant = await lock_unit_authority(session, principal.unit)
-    unit = await session.scalar(
+    unit = await session.write_session.scalar(
         sa.select(RDBConsolidationUnit)
         .where(unit_predicate(principal.unit))
         .with_for_update()
@@ -211,7 +211,9 @@ async def lock_job_owner(
         or unit.lease_until <= now
     ):
         raise ConsolidationAuthorityError("Consolidation owner is no longer current.")
-    attempt = await session.get(RDBConsolidationAttempt, principal.attempt_id)
+    attempt = await session.write_session.get(
+        RDBConsolidationAttempt, principal.attempt_id
+    )
     if (
         attempt is None
         or attempt.unit_id != unit.id

@@ -3,7 +3,6 @@
 import datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -13,6 +12,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -69,7 +69,7 @@ def _contract_payload() -> dict[str, object]:
 
 
 async def _create_provider(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> str:
     """Create the durable Provider used by advertisement tests."""
     async with session_manager() as session:
@@ -94,7 +94,7 @@ async def _create_provider(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> RuntimeProviderContractService:
     """Build the production contract service."""
     return RuntimeProviderContractService(
@@ -106,7 +106,7 @@ def _service(
 
 
 async def test_advertisement_is_immediately_authoritative_and_idempotent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A valid advertisement immediately becomes current without Admin action."""
     provider_resource_id = await _create_provider(rdb_session_manager)
@@ -140,7 +140,7 @@ async def test_advertisement_is_immediately_authoritative_and_idempotent(
 
 
 async def test_new_advertisement_moves_current_and_preserves_history(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Capability changes retain immutable history while replacing authority."""
     provider_resource_id = await _create_provider(rdb_session_manager)
@@ -177,7 +177,7 @@ async def test_new_advertisement_moves_current_and_preserves_history(
 
 
 async def test_restored_advertisement_appends_new_revision(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Re-advertised historical content appends evidence instead of reactivating it."""
     provider_resource_id = await _create_provider(rdb_session_manager)
@@ -237,7 +237,7 @@ async def test_restored_advertisement_appends_new_revision(
 
 
 async def test_advertisement_rejects_registration_contract_identity_mismatch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Authenticated registration claims cannot substitute another implementation."""
     provider_resource_id = await _create_provider(rdb_session_manager)
@@ -258,7 +258,7 @@ async def test_advertisement_rejects_registration_contract_identity_mismatch(
 
 
 async def test_advertisement_rejects_invalid_profile_contract_declarations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Duplicate Profile contract families fail before current authority moves."""
     provider_resource_id = await _create_provider(rdb_session_manager)

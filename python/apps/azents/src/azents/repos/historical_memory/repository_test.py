@@ -7,7 +7,6 @@ import hashlib
 import pytest
 import sqlalchemy as sa
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import SelectableModelCandidate, SelectableModelOption
 from azents.core.agent_session_data import AgentSessionCreate
@@ -38,6 +37,7 @@ from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.session_lifecycle_finalizer import (
@@ -68,7 +68,7 @@ class _SourceFixture:
 
 
 async def _create_source(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     slug: str,
     activity_at: datetime.datetime,
@@ -79,8 +79,8 @@ async def _create_source(
 ) -> _SourceFixture:
     """Persist one root Session and a visible source event."""
     workspace = RDBWorkspace(name=slug, handle=slug)
-    session.add(workspace)
-    await session.flush()
+    session.write_session.add(workspace)
+    await session.write_session.flush()
 
     model_selection = make_test_model_selection_dict()
     agent = RDBAgent(
@@ -96,12 +96,12 @@ async def _create_source(
         lightweight_model_label="lightweight",
         memory_enabled=memory_enabled,
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(workspace_id=workspace.id, agent_id=agent.id)
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
 
     associated_user_id: str | None = None
     if product_mode is AgentSessionProductMode.USER:
@@ -111,7 +111,7 @@ async def _create_source(
         )
         associated_user_id = user.id
         if membership:
-            session.add(
+            session.write_session.add(
                 RDBWorkspaceUser(
                     workspace_id=workspace.id,
                     user_id=user.id,
@@ -119,7 +119,7 @@ async def _create_source(
                     role=WorkspaceUserRole.MEMBER,
                 )
             )
-            await session.flush()
+            await session.write_session.flush()
 
     source = await AgentSessionRepository().create(
         session,
@@ -131,7 +131,7 @@ async def _create_source(
             title=f"{slug} title",
         ),
     )
-    source_row = await session.get(RDBAgentSession, source.id)
+    source_row = await session.read_session.get(RDBAgentSession, source.id)
     assert source_row is not None
     source_row.last_activity_at = activity_at
     source_row.run_state = run_state
@@ -147,8 +147,8 @@ async def _create_source(
         ),
     )
     event.id = hashlib.sha256(slug.encode()).hexdigest()[:32]
-    session.add(event)
-    await session.flush()
+    session.write_session.add(event)
+    await session.write_session.flush()
     return _SourceFixture(
         workspace_id=workspace.id,
         agent_id=agent.id,
@@ -199,7 +199,7 @@ def test_failure_progress_rejects_non_historical_model_operation() -> None:
 
 
 async def test_explicit_agent_admission_leaves_other_agents_unmodified(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A scoped sampler executes production admission without cross-test writes."""
     async with rdb_session_manager() as session:
@@ -213,7 +213,7 @@ async def test_explicit_agent_admission_leaves_other_agents_unmodified(
             slug="historical-sample-unrelated",
             activity_at=_NOW - datetime.timedelta(hours=8),
         )
-        await session.commit()
+        await session.write_session.commit()
     repository = HistoricalMemoryRepository(session_manager=rdb_session_manager)
     admitted = await repository.admit_eligible_sources(
         agent_id=selected.agent_id,
@@ -227,7 +227,7 @@ async def test_explicit_agent_admission_leaves_other_agents_unmodified(
 
 
 async def test_admission_applies_window_execution_and_user_membership_authority(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """First admission accepts only inactive authorized idle roots in the window."""
     async with rdb_session_manager() as session:
@@ -306,7 +306,7 @@ async def test_admission_applies_window_execution_and_user_membership_authority(
 
 
 async def test_admitted_source_remains_due_beyond_first_admission_age_window(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An admitted retry or first result is not dropped after ten days."""
     async with rdb_session_manager() as session:
@@ -315,7 +315,7 @@ async def test_admitted_source_remains_due_beyond_first_admission_age_window(
             slug="hm-age-free",
             activity_at=_NOW - datetime.timedelta(days=20),
         )
-        session.add(
+        session.write_session.add(
             RDBHistoricalMemorySource(
                 source_session_id=source.session_id,
                 admitted_at=_NOW - datetime.timedelta(days=12),
@@ -336,7 +336,7 @@ async def test_admitted_source_remains_due_beyond_first_admission_age_window(
 
 
 async def test_failure_retains_prior_result_and_publish_resets_progress(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Refresh failure is bounded progress while empty success is still complete."""
     async with rdb_session_manager() as session:
@@ -345,7 +345,7 @@ async def test_failure_retains_prior_result_and_publish_resets_progress(
             slug="hm-progress",
             activity_at=_NOW - datetime.timedelta(hours=7),
         )
-        session.add(
+        session.write_session.add(
             RDBHistoricalMemorySource(
                 source_session_id=source.session_id,
                 admitted_at=_NOW - datetime.timedelta(hours=1),
@@ -374,7 +374,7 @@ async def test_failure_retains_prior_result_and_publish_resets_progress(
             attempted_at=_NOW,
             operation=operation,
         )
-        await session.commit()
+        await session.write_session.commit()
     assert started is not None
     assert started.model_operation_state == operation
     assert started.source_activity_at == _NOW - datetime.timedelta(hours=7)
@@ -441,7 +441,7 @@ async def test_failure_retains_prior_result_and_publish_resets_progress(
 
 
 async def test_preparation_admission_rechecks_current_source_state_and_membership(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Preparation lock stages reject stale Session state and User membership."""
     async with rdb_session_manager() as session:
@@ -474,11 +474,13 @@ async def test_preparation_admission_rechecks_current_source_state_and_membershi
             product_mode=AgentSessionProductMode.USER,
             membership=False,
         )
-        archived_row = await session.get(RDBAgentSession, archived.session_id)
+        archived_row = await session.read_session.get(
+            RDBAgentSession, archived.session_id
+        )
         assert archived_row is not None
         archived_row.status = AgentSessionStatus.ARCHIVED
         for source in (running, recent, disabled, archived, private):
-            session.add(
+            session.write_session.add(
                 RDBHistoricalMemorySource(
                     source_session_id=source.session_id,
                     admitted_at=_NOW,
@@ -526,7 +528,7 @@ async def test_preparation_admission_rechecks_current_source_state_and_membershi
 
 
 async def test_publication_reauthorizes_source_and_session_delete_cascades(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Archived roots cannot publish and purging a root removes source state."""
     async with rdb_session_manager() as session:
@@ -535,13 +537,13 @@ async def test_publication_reauthorizes_source_and_session_delete_cascades(
             slug="hm-publish-authority",
             activity_at=_NOW - datetime.timedelta(hours=7),
         )
-        session.add(
+        session.write_session.add(
             RDBHistoricalMemorySource(
                 source_session_id=source.session_id,
                 admitted_at=_NOW,
             )
         )
-        source_row = await session.get(RDBAgentSession, source.session_id)
+        source_row = await session.read_session.get(RDBAgentSession, source.session_id)
         assert source_row is not None
         source_row.status = AgentSessionStatus.ARCHIVED
 
@@ -575,7 +577,7 @@ async def test_publication_reauthorizes_source_and_session_delete_cascades(
 
 
 async def test_user_membership_loss_prevents_publication(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A private source is unavailable immediately after membership removal."""
     async with rdb_session_manager() as session:
@@ -585,14 +587,14 @@ async def test_user_membership_loss_prevents_publication(
             activity_at=_NOW - datetime.timedelta(hours=7),
             product_mode=AgentSessionProductMode.USER,
         )
-        session.add(
+        session.write_session.add(
             RDBHistoricalMemorySource(
                 source_session_id=source.session_id,
                 admitted_at=_NOW,
             )
         )
         assert source.associated_user_id is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceUser).where(
                 RDBWorkspaceUser.workspace_id == source.workspace_id,
                 RDBWorkspaceUser.user_id == source.associated_user_id,

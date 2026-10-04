@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_cutover import (
     MemoryHandoverAction,
@@ -13,6 +12,7 @@ from azents.core.historical_memory_cutover import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.cutover import (
     MemoryHandoverRepository,
 )
@@ -21,7 +21,7 @@ from azents.repos.historical_memory_consolidation.cutover import (
 @dataclasses.dataclass
 class MemoryHandoverService:
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def handover(self, request: MemoryHandoverRequest) -> MemoryHandoverResult:

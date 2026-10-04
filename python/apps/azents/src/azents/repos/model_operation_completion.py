@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeStatus,
@@ -13,6 +12,7 @@ from azents.core.model_operation import (
     ModelOperationState,
     mark_model_operation_succeeded,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunPatch
 from azents.repos.agent_session import AgentSessionRepository
@@ -53,7 +53,7 @@ class ModelOperationCompletionRepository:
 
     async def complete_success_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         completion: ModelOperationCompletion,
     ) -> None:
         """Settle operation success in the caller's database-only transaction."""

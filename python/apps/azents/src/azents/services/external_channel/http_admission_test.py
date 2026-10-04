@@ -29,6 +29,7 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionReason,
 )
 from azents.core.external_channel_provider import SlackConnectionCredentials
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -78,7 +79,7 @@ class _RepositoryDouble:
 
     async def get_slack_http_configuration_by_provider_identity(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         provider_app_id: str,
         provider_tenant_id: str,
@@ -290,7 +291,7 @@ def _service(
     config: Config | None = None,
 ) -> _AdmissionServiceFixture:
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         yield MagicMock(spec=AsyncSession)
 
     repository = _RepositoryDouble(configuration)

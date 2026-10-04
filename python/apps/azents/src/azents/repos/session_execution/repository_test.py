@@ -6,7 +6,6 @@ from typing import Literal, NamedTuple
 import pytest
 from azcommon.result import Success
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -27,6 +26,7 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
@@ -49,7 +49,7 @@ class _ExecutionSubject(NamedTuple):
 
 
 async def _create_execution_subject(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
 ) -> _ExecutionSubject:
@@ -70,8 +70,8 @@ async def _create_execution_subject(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -105,15 +105,15 @@ async def _create_execution_subject(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
 
     created = await AgentSessionRepository().create(
         session,
@@ -125,10 +125,10 @@ async def _create_execution_subject(
             title=None,
         ),
     )
-    agent_session = await session.get(RDBAgentSession, created.id)
+    agent_session = await session.read_session.get(RDBAgentSession, created.id)
     assert agent_session is not None
     await AgentSessionRepository().mark_running(session, created.id)
-    await session.refresh(agent_session)
+    await session.write_session.refresh(agent_session)
     return _ExecutionSubject(
         agent_session=agent_session,
         agent_id=agent.id,
@@ -136,7 +136,7 @@ async def _create_execution_subject(
 
 
 async def _archive_with_scheduled_continuation(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     agent_session: RDBAgentSession,
     phase: Literal["admitted", "started"],
@@ -153,8 +153,8 @@ async def _archive_with_scheduled_continuation(
         requested_enabled_execution_options=[],
         status=AgentRunStatus.COMPLETED,
     )
-    session.add(run)
-    await session.flush()
+    session.write_session.add(run)
+    await session.write_session.flush()
     state = ScheduledTaskCycleState(
         cycle_id=cycle_id,
         task_id=uuid7().hex,
@@ -215,7 +215,7 @@ async def _archive_with_scheduled_continuation(
         ),
     )
     agent_session.status = AgentSessionStatus.ARCHIVED
-    await session.flush()
+    await session.write_session.flush()
     return mailbox_item.id
 
 
@@ -224,7 +224,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_rejects_idle_session(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Mailbox work cannot execute without durable running admission."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -232,7 +232,7 @@ class TestSessionExecutionRepository:
             handle="execution-idle-session",
         )
         agent_session.run_state = AgentSessionRunState.IDLE
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         with pytest.raises(
             CanonicalExecutionSnapshotError,
@@ -246,7 +246,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_rejects_stale_owner_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A wake-up cannot execute after durable ownership changes."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -266,7 +266,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_rejects_incomplete_pending_command(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A partial durable command is never projected for execution."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -277,7 +277,7 @@ class TestSessionExecutionRepository:
         agent_session.pending_command_name = "compact"
         agent_session.pending_command_payload = {}
         agent_session.pending_command_created_at = None
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         with pytest.raises(
             CanonicalExecutionSnapshotError,
@@ -291,7 +291,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_projects_only_matching_recoverable_run(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """The durable snapshot carries the unique Session-local recoverable Run."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -308,8 +308,8 @@ class TestSessionExecutionRepository:
             requested_enabled_execution_options=[],
             status=AgentRunStatus.RUNNING,
         )
-        rdb_session.add(run)
-        await rdb_session.flush()
+        rdb_session.write_session.add(run)
+        await rdb_session.write_session.flush()
 
         snapshot = await SessionExecutionRepository().load_canonical_snapshot(
             rdb_session,
@@ -324,7 +324,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_accepts_archived_started_continuation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A typed continuation may resume its pre-archive started cycle."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -348,7 +348,7 @@ class TestSessionExecutionRepository:
 
     async def test_archived_started_continuation_survives_agent_decommission_fence(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A preserved cycle may finish while its Agent decommission waits."""
         agent_session, agent_id = await _create_execution_subject(
@@ -360,10 +360,10 @@ class TestSessionExecutionRepository:
             agent_session=agent_session,
             phase="started",
         )
-        agent = await rdb_session.get(RDBAgent, agent_id)
+        agent = await rdb_session.read_session.get(RDBAgent, agent_id)
         assert agent is not None
         agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         snapshot = await SessionExecutionRepository().load_canonical_snapshot(
             rdb_session,
@@ -376,7 +376,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_rejects_archived_admitted_continuation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """An admitted cycle never grants archived execution authority."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -401,7 +401,7 @@ class TestSessionExecutionRepository:
 
     async def test_load_canonical_snapshot_rejects_archived_ordinary_input(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Archived Sessions remain closed to ordinary mailbox input."""
         agent_session, _agent_id = await _create_execution_subject(
@@ -430,7 +430,7 @@ class TestSessionExecutionRepository:
             ),
         )
         agent_session.status = AgentSessionStatus.ARCHIVED
-        await rdb_session.flush()
+        await rdb_session.write_session.flush()
 
         with pytest.raises(
             CanonicalExecutionSnapshotError,

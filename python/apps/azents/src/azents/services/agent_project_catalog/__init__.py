@@ -6,7 +6,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentProjectCatalogStatus
 from azents.core.session_workspace_paths import (
@@ -17,6 +16,7 @@ from azents.core.session_workspace_paths import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import (
     AgentProjectCatalogEntry,
@@ -55,7 +55,7 @@ class AgentProjectCatalogService:
         Depends(AgentProjectCatalogRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
@@ -92,7 +92,7 @@ class AgentProjectCatalogService:
                 agent_id=agent_id,
                 path=normalized,
             )
-            await session.commit()
+            await session.write_session.commit()
             return Success(entry)
 
     async def upsert_project_candidates(
@@ -125,7 +125,7 @@ class AgentProjectCatalogService:
                         path=path,
                     )
                 )
-            await session.commit()
+            await session.write_session.commit()
             return Success(entries)
 
     async def list_catalog_entries(
@@ -206,7 +206,7 @@ class AgentProjectCatalogService:
                 path=normalized,
                 patch=patch,
             )
-            await session.commit()
+            await session.write_session.commit()
             return Success(entry)
 
     async def refresh_project_status_for_execution(
@@ -247,7 +247,7 @@ class AgentProjectCatalogService:
                 path=normalized,
                 patch=patch,
             )
-            await session.commit()
+            await session.write_session.commit()
             return Success(entry)
 
     async def refresh_project_statuses(
@@ -292,7 +292,7 @@ class AgentProjectCatalogService:
                         patch=patch,
                     )
                 )
-            await session.commit()
+            await session.write_session.commit()
             return Success(entries)
 
     async def _status_patch(

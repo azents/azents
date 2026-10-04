@@ -9,12 +9,12 @@ from typing import NamedTuple, Never
 import httpx
 import pytest
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import KimiOAuthConfig, KimiOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.kimi_oauth import KimiOAuthConnectionMethod, KimiOAuthConnectionStatus
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime_data import KimiOAuthRefreshTokens
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
@@ -36,7 +36,7 @@ class _Fixture(NamedTuple):
     repository: KimiOAuthRuntimeRepository
 
 
-async def _fixture(manager: SessionManager[AsyncSession]) -> _Fixture:
+async def _fixture(manager: SessionManager[WriteSession]) -> _Fixture:
     async with manager() as session:
         query, integration_id = await _create_integration(
             session,
@@ -66,7 +66,7 @@ def _tokens() -> KimiOAuthRefreshTokens:
 
 
 async def test_integration_capture_finishes_its_database_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The added complete read exposes detached data, not a live transaction."""
     fixture = await _fixture(rdb_session_manager)
@@ -81,7 +81,7 @@ async def test_integration_capture_finishes_its_database_transaction(
 
 
 async def test_http_precedes_persistence_and_returns_detached_credentials(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager)
     calls = 0
@@ -138,7 +138,7 @@ async def test_http_precedes_persistence_and_returns_detached_credentials(
 
 
 async def test_original_secrets_only_fence_preserves_config_only_change_behavior(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager)
     assert isinstance(fixture.original.config, KimiOAuthConfig)
@@ -164,7 +164,7 @@ async def test_original_secrets_only_fence_preserves_config_only_change_behavior
 
 
 async def test_changed_secrets_win_over_success_and_failure_without_new_status_fence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager)
     assert isinstance(fixture.original.secrets, KimiOAuthSecrets)
@@ -192,7 +192,7 @@ async def test_changed_secrets_win_over_success_and_failure_without_new_status_f
 @pytest.mark.parametrize("operation", ["success", "failure"])
 @pytest.mark.parametrize("failure", ["error", "cancel"])
 async def test_actual_partial_refresh_write_rolls_back_on_error_or_cancel(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
     failure: str,
 ) -> None:
@@ -201,7 +201,7 @@ async def test_actual_partial_refresh_write_rolls_back_on_error_or_cancel(
     class FailingQuery(LLMProviderIntegrationRepository):
         async def update_runtime_state_by_id(
             self,
-            session: AsyncSession,
+            session: WriteSession,
             integration_id: str,
             update: LLMProviderIntegrationUpdate,
         ) -> Never:

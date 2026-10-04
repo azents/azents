@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import AgentRunStatus, AgentSessionKind, AgentSessionRunState
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
     SessionExecutionRepository,
@@ -37,7 +38,7 @@ class _ReplayRepository(SessionCutoverReplayRepository):
 
     async def read_candidate_batch(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         batch_size: int,
         after_session_id: str | None,
@@ -49,7 +50,7 @@ class _ReplayRepository(SessionCutoverReplayRepository):
 
     async def fence_owner_generation(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         expected_owner_generation: int,
@@ -60,7 +61,7 @@ class _ReplayRepository(SessionCutoverReplayRepository):
 
     async def read_candidate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> CutoverReplayCandidate | None:
@@ -91,7 +92,7 @@ class _CanonicalRepository(SessionExecutionRepository):
 
     async def load_canonical_snapshot(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         owner_generation: int,
@@ -165,9 +166,9 @@ class _Session:
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a fake database session for deterministic service tests."""
-    yield cast(AsyncSession, _Session())
+    yield ReadWriteSession(cast(AsyncSession, _Session()))
 
 
 def _candidate(
@@ -463,7 +464,7 @@ async def test_candidate_repository_rejects_unbounded_batch_size(
 
     with pytest.raises(ValueError, match="batch_size"):
         await repository.read_candidate_batch(
-            cast(AsyncSession, object()),
+            ReadWriteSession(cast(AsyncSession, object())),
             batch_size=batch_size,
             after_session_id=None,
         )

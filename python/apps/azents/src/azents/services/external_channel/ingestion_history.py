@@ -8,7 +8,6 @@ from typing import Annotated
 
 import httpx
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
 from azents.core.external_channel_conversation_data import (
@@ -29,6 +28,7 @@ from azents.core.external_channel_provider import (
 from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -93,7 +93,7 @@ class ExternalChannelProviderHistoryReader:
     """Read provider history and return one provider-neutral canonical range."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[

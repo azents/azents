@@ -4,9 +4,9 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_admin import RDBAgentAdmin
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import AgentAdmin, AgentAdminCreate, AgentAdminList, DuplicateAdmin
 
@@ -16,7 +16,7 @@ class AgentAdminRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: AgentAdminCreate,
     ) -> Result[AgentAdmin, DuplicateAdmin]:
         """Create AgentAdmin.
@@ -30,11 +30,11 @@ class AgentAdminRepository:
                 agent_id=create.agent_id,
                 workspace_user_id=create.workspace_user_id,
             )
-            session.add(rdb)
-            await session.flush()
+            session.write_session.add(rdb)
+            await session.write_session.flush()
             return Success(self._build(rdb))
         except IntegrityError as e:
-            await session.rollback()
+            await session.write_session.rollback()
             if is_constrained_by(e, RDBAgentAdmin.UQ_AGENT_WORKSPACE_USER):
                 return Failure(
                     DuplicateAdmin(
@@ -45,7 +45,7 @@ class AgentAdminRepository:
             raise
 
     async def list_by_agent(
-        self, session: AsyncSession, agent_id: str
+        self, session: ReadSession, agent_id: str
     ) -> AgentAdminList:
         """Fetch admin list for Agent.
 
@@ -53,7 +53,7 @@ class AgentAdminRepository:
         :param agent_id: Agent ID
         :return: AgentAdmin list
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentAdmin)
             .where(RDBAgentAdmin.agent_id == agent_id)
             .order_by(RDBAgentAdmin.created_at.asc())
@@ -62,7 +62,7 @@ class AgentAdminRepository:
         return AgentAdminList(items=[self._build(r) for r in rdbs])
 
     async def is_admin(
-        self, session: AsyncSession, agent_id: str, workspace_user_id: str
+        self, session: ReadSession, agent_id: str, workspace_user_id: str
     ) -> bool:
         """Check whether specific WorkspaceUser is admin of Agent.
 
@@ -71,7 +71,7 @@ class AgentAdminRepository:
         :param workspace_user_id: WorkspaceUser ID
         :return: True when admin
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBAgentAdmin)
             .where(
@@ -83,12 +83,12 @@ class AgentAdminRepository:
 
     async def is_admin_for_update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         workspace_user_id: str,
     ) -> bool:
         """Lock and check one Agent administrator membership."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBAgentAdmin.id)
             .where(
                 RDBAgentAdmin.agent_id == agent_id,
@@ -100,7 +100,7 @@ class AgentAdminRepository:
 
     async def list_admin_agent_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_user_id: str,
         agent_ids: list[str],
@@ -108,7 +108,7 @@ class AgentAdminRepository:
         """Return Agent IDs administered by one WorkspaceUser."""
         if not agent_ids:
             return set()
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBAgentAdmin.agent_id).where(
                 RDBAgentAdmin.workspace_user_id == workspace_user_id,
                 RDBAgentAdmin.agent_id.in_(agent_ids),
@@ -116,14 +116,14 @@ class AgentAdminRepository:
         )
         return set(result.scalars().all())
 
-    async def count_by_agent(self, session: AsyncSession, agent_id: str) -> int:
+    async def count_by_agent(self, session: ReadSession, agent_id: str) -> int:
         """Count Agent admins.
 
         :param session: Database session
         :param agent_id: Agent ID
         :return: Admin count
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBAgentAdmin)
             .where(RDBAgentAdmin.agent_id == agent_id)
@@ -132,7 +132,7 @@ class AgentAdminRepository:
 
     async def delete(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         workspace_user_id: str,
     ) -> bool:
@@ -143,7 +143,7 @@ class AgentAdminRepository:
         :param workspace_user_id: WorkspaceUser ID
         :return: True when a row was deleted
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBAgentAdmin)
             .where(
                 RDBAgentAdmin.agent_id == agent_id,

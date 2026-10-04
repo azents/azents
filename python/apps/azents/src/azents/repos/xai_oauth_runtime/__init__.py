@@ -5,11 +5,11 @@ from typing import Annotated
 
 from azcommon.result import Failure
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.llm_provider_integration.deps import (
@@ -26,7 +26,7 @@ class XaiOAuthRuntimeRepository:
         Depends(get_llm_provider_integration_repository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def load_integration(

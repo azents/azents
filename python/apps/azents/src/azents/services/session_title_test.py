@@ -72,6 +72,7 @@ from azents.engine.run.provider_failure import (
 from azents.engine.run.resolve import ResolvedModelCandidateRuntime
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -1001,7 +1002,7 @@ class TestSessionTitleHelpers:
 
             async def get_by_id(
                 self,
-                session: AsyncSession,
+                session: ReadSession,
                 agent_session_id: str,
             ) -> AgentSession:
                 current = await super().get_by_id(session, agent_session_id)
@@ -1105,7 +1106,7 @@ class TestSessionTitleHelpers:
         class WinningRepository(_AgentSessionRepository):
             async def replace_initial_auto_title(
                 self,
-                session: AsyncSession,
+                session: WriteSession,
                 *,
                 session_id: str,
                 title: str,
@@ -1126,10 +1127,10 @@ class TestSessionTitleHelpers:
                 calls.append("commit")
 
         @asynccontextmanager
-        async def session_manager() -> AsyncIterator[RecordingSession]:
+        async def session_manager() -> AsyncIterator[WriteSession]:
             session = RecordingSession()
             try:
-                yield session
+                yield ReadWriteSession(session)
             except Exception:
                 raise
             else:
@@ -1229,18 +1230,18 @@ class TestSessionTitleHelpers:
         calls: list[str] = []
 
         @asynccontextmanager
-        async def session_manager() -> AsyncIterator[AsyncSession]:
+        async def session_manager() -> AsyncIterator[WriteSession]:
             nonlocal active_contexts
             active_contexts += 1
             try:
-                yield AsyncMock(spec=AsyncSession)
+                yield ReadWriteSession(AsyncMock(spec=AsyncSession))
             finally:
                 active_contexts -= 1
 
         class WinningRepository(_AgentSessionRepository):
             async def replace_initial_auto_title(
                 self,
-                session: AsyncSession,
+                session: WriteSession,
                 *,
                 session_id: str,
                 title: str,
@@ -1248,7 +1249,9 @@ class TestSessionTitleHelpers:
             ) -> AgentSession:
                 del session, session_id, event_id
                 return (
-                    await self.get_by_id(AsyncMock(spec=AsyncSession), "session-001")
+                    await self.get_by_id(
+                        ReadWriteSession(AsyncMock(spec=AsyncSession)), "session-001"
+                    )
                 ).model_copy(
                     update={
                         "title": title,
@@ -1482,7 +1485,7 @@ class _AgentRepository(AgentRepository):
     def __init__(self, structured_response: bool = False) -> None:
         self.structured_response = structured_response
 
-    async def get_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
+    async def get_by_id(self, session: ReadSession, agent_id: str) -> Agent:
         del session, agent_id
         now = datetime.datetime.now(datetime.UTC)
         selection = _model_selection(self.structured_response)
@@ -1522,7 +1525,7 @@ class _AgentRepository(AgentRepository):
             updated_at=now,
         )
 
-    async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent:
+    async def lock_by_id(self, session: WriteSession, agent_id: str) -> Agent:
         """Return the same test Agent under the repository lock seam."""
         return await self.get_by_id(session, agent_id)
 
@@ -1533,7 +1536,7 @@ class _IntegrationRepository(LLMProviderIntegrationRepository):
 
     async def get_by_id_with_secrets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         integration_id: str,
     ) -> LLMProviderIntegrationWithSecrets:
         del session, integration_id
@@ -1624,7 +1627,7 @@ def _title_service(
 def _session_title_repository(
     *,
     structured_response: bool,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> SessionTitleRepository:
     """Create the title database operation repository for tests."""
     return SessionTitleRepository(
@@ -1652,7 +1655,7 @@ def _healthy_health_repository() -> AsyncMock:
 
 
 def _chatgpt_oauth_runtime_repository(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> ChatGPTOAuthRuntimeRepository:
     """Create the OAuth runtime persistence repository for tests."""
     return ChatGPTOAuthRuntimeRepository(
@@ -1701,15 +1704,16 @@ def _generation_snapshot(
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
-    session: AsyncSession = AsyncMock(spec=AsyncSession)
+async def _session_manager() -> AsyncIterator[WriteSession]:
+    _raw_session: AsyncSession = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     yield session
 
 
 class _AgentSessionRepository(AgentSessionRepository):
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> AgentSession:
         del session, agent_session_id
@@ -1742,7 +1746,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession:
         """Return the same Session under the title operation lock seam."""
@@ -1750,7 +1754,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def set_title_model_operation_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         generation_event_id: str,
@@ -1762,7 +1766,7 @@ class _AgentSessionRepository(AgentSessionRepository):
 
     async def replace_initial_auto_title(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         title: str,
@@ -1777,7 +1781,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
     repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
 
     async def capture(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: tuple[ConfiguredModelIdentity, ...],

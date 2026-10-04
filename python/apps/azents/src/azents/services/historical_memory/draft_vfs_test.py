@@ -7,7 +7,6 @@ import re
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
 from azents.core.vfs import (
@@ -25,6 +24,7 @@ from azents.engine.tooling.execution_context import (
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.readable_storage import RoutedReadableStorage
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
     DraftFileChange,
@@ -55,7 +55,7 @@ _URI = "azents://memory-draft/summary.md"
 
 
 async def test_generic_create_read_edit_delete_and_replay_without_runtime(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -94,7 +94,7 @@ async def test_generic_create_read_edit_delete_and_replay_without_runtime(
 
 
 async def test_readonly_and_unknown_vfs_never_fall_back_to_runtime(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     runtime = AsyncMock(return_value="native runtime result")
@@ -120,7 +120,7 @@ async def test_readonly_and_unknown_vfs_never_fall_back_to_runtime(
 
 
 async def test_queued_write_keeps_old_evidence_after_another_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -146,7 +146,7 @@ async def test_queued_write_keeps_old_evidence_after_another_read(
 
 
 async def test_two_admitted_writes_do_not_silently_rebase_on_each_other(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -162,7 +162,7 @@ async def test_two_admitted_writes_do_not_silently_rebase_on_each_other(
 
 
 async def test_private_alias_is_not_authority_and_optional_patch_has_no_stub(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     wrong = binding.principal.model_copy(update={"owner_token": "x" * 32})
@@ -186,7 +186,7 @@ async def test_private_alias_is_not_authority_and_optional_patch_has_no_stub(
 
 
 async def test_unicode_bounds_inventory_and_native_search(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -243,7 +243,7 @@ async def test_unicode_bounds_inventory_and_native_search(
 
 
 async def test_mixed_revision_continuation_invalidates_all_mutation_admission(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -314,7 +314,7 @@ class _DelayedDraftRepository(ConsolidationDraftRepository):
 
 @pytest.mark.parametrize("restart", [False, True])
 async def test_delayed_chunk_cannot_rehabilitate_conflict_or_replace_restart(
-    rdb_session_manager: SessionManager[AsyncSession], restart: bool
+    rdb_session_manager: SessionManager[WriteSession], restart: bool
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})
@@ -365,7 +365,7 @@ async def test_delayed_chunk_cannot_rehabilitate_conflict_or_replace_restart(
 
 
 async def test_initial_read_completing_after_newer_chunk_invalidates_mixed_evidence(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await _binding(rdb_session_manager)
     tools = binding.tools({})

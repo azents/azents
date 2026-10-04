@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -39,6 +38,7 @@ from azents.rdb.models.agent_runtime_removal import (
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import RDBWorkspaceRuntimeProfile
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -103,7 +103,7 @@ class _SourceRacingResolutionService(RuntimeProfileResolutionService):
 
     async def attach_prepared_selection(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent: Agent,
         runtime: AgentRuntime,
@@ -188,7 +188,7 @@ def _profile_spec() -> dict[str, object]:
 
 
 async def _create_profile(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     workspace_id: str,
     key: str,
@@ -274,7 +274,7 @@ async def _create_profile(
 
 
 async def _seed_runtime_free_agent(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     handle: str,
 ) -> _RuntimeFreeAgentFixture:
@@ -302,8 +302,8 @@ async def _seed_runtime_free_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -322,8 +322,8 @@ async def _seed_runtime_free_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return _RuntimeFreeAgentFixture(
         workspace_id=workspace_id,
         agent_id=agent.id,
@@ -335,7 +335,7 @@ async def _seed_runtime_free_agent(
 
 
 def _resolution_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> RuntimeProfileResolutionService:
     return RuntimeProfileResolutionService(
         session_manager=session_manager,
@@ -348,7 +348,7 @@ def _resolution_service(
 
 
 def _transition_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     resolution_service: RuntimeProfileResolutionService | None = None,
 ) -> AgentRuntimeTransitionService:
@@ -385,7 +385,7 @@ def _request(
 
 
 async def test_add_runtime_commits_stopped_revision_and_exact_replay(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """First add is lazy, durable, and replayed only from exact evidence."""
     async with rdb_session_manager() as session:
@@ -442,7 +442,7 @@ async def test_add_runtime_commits_stopped_revision_and_exact_replay(
 
 
 async def test_add_runtime_source_race_rolls_back_all_transition_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A changed Profile source cannot leave capability, Runtime, or receipt state."""
     async with rdb_session_manager() as session:
@@ -450,7 +450,7 @@ async def test_add_runtime_source_race_rolls_back_all_transition_state(
             session,
             handle="runtime-transition-source-race",
         )
-        profile = await session.get(
+        profile = await session.read_session.get(
             RDBWorkspaceRuntimeProfile,
             fixture.workspace_runtime_profile_id,
         )
@@ -481,12 +481,12 @@ async def test_add_runtime_source_race_rolls_back_all_transition_state(
             session,
             fixture.agent_id,
         )
-        receipt_count = await session.scalar(
+        receipt_count = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBAgentRuntimeAddReceipt)
             .where(RDBAgentRuntimeAddReceipt.agent_id == fixture.agent_id)
         )
-        profile = await session.get(
+        profile = await session.read_session.get(
             RDBWorkspaceRuntimeProfile,
             fixture.workspace_runtime_profile_id,
         )
@@ -503,7 +503,7 @@ async def test_add_runtime_source_race_rolls_back_all_transition_state(
 
 
 async def _complete_removal(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     fixture: _RuntimeFreeAgentFixture,
     runtime: AgentRuntime,
@@ -538,7 +538,7 @@ async def _complete_removal(
         active_run_count=0,
         queued_runtime_action_count=0,
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentRuntimeRemovalOperation)
         .where(RDBAgentRuntimeRemovalOperation.id == created.operation.id)
         .values(
@@ -555,7 +555,7 @@ async def _complete_removal(
             completed_at=now,
         )
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgent)
         .where(RDBAgent.id == fixture.agent_id)
         .values(
@@ -569,7 +569,7 @@ async def _complete_removal(
 
 
 async def test_add_runtime_rearms_exact_completed_runtime_without_starting(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Re-add reuses the logical Runtime and clears deleted-incarnation state."""
     async with rdb_session_manager() as session:
@@ -619,7 +619,7 @@ async def test_add_runtime_rearms_exact_completed_runtime_without_starting(
 
 
 async def test_add_runtime_rearm_rejects_provider_reassignment(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A retained logical Runtime cannot be rearmed onto another Provider."""
     async with rdb_session_manager() as session:

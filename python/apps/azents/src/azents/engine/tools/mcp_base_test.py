@@ -18,6 +18,7 @@ from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.mcp import McpToolkit
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -108,8 +109,8 @@ def _tool(name: str) -> McpBaseTool:
 class _FakeSessionContext:
     """Minimal async session context manager for tests."""
 
-    async def __aenter__(self) -> AsyncSession:
-        return AsyncSession()
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(AsyncSession())
 
     async def __aexit__(self, *exc: object) -> None:
         pass
@@ -118,7 +119,7 @@ class _FakeSessionContext:
 class _FakeSessionManager:
     """Minimal async context manager factory for tests."""
 
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
+    def __call__(self) -> AsyncContextManager[WriteSession]:
         return _FakeSessionContext()
 
 

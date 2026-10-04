@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -28,6 +27,7 @@ from azents.core.session_resource_authority import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ChannelActionResult
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -72,7 +72,7 @@ class ScheduledTaskChannelService:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         progress_repository: ScheduledTaskProgressRepository,
         provider_repository: ExternalChannelWorkRepository,
         action_service: ExternalChannelActionService,
@@ -484,7 +484,7 @@ class ScheduledTaskChannelService:
 
 def get_scheduled_task_channel_service(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     progress_repository: Annotated[
         ScheduledTaskProgressRepository, Depends(ScheduledTaskProgressRepository)

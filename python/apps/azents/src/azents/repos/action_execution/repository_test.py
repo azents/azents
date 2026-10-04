@@ -2,8 +2,6 @@
 
 import datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.action_execution_data import (
     ActionExecutionCreate,
     ActionExecutionEventCreate,
@@ -25,6 +23,7 @@ from azents.engine.events.types import validate_event_payload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -35,7 +34,7 @@ from azents.testing.model_selection import (
 
 
 async def _create_agent_session(
-    session: AsyncSession,
+    session: WriteSession,
     handle: str,
 ) -> str:
     """Create an AgentSession for action execution tests."""
@@ -52,8 +51,8 @@ async def _create_agent_session(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Action execution test agent",
@@ -86,15 +85,15 @@ async def _create_agent_session(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     agent_session = await AgentSessionRepository().create(
         session,
         AgentSessionCreate(
@@ -135,7 +134,7 @@ class TestActionExecutionRepository:
 
     async def test_create_project_and_append_events(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Execution state and progress events are keyed by action_message event."""
         session_id = await _create_agent_session(rdb_session, "action-exec-create")

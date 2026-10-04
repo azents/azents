@@ -5,7 +5,6 @@ import dataclasses
 from datetime import datetime
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker
 from azents.core.enums import AgentRunPhase, AgentRunStatus, EventKind
@@ -13,6 +12,7 @@ from azents.engine.events.engine_events import RunStopped
 from azents.engine.events.types import ActiveToolCall, AgentRunState, Event
 from azents.engine.run.emit import PublishedEvent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.user_stop import UserStopOperationRepository
@@ -225,7 +225,7 @@ class _FinalizerFixture:
 
 
 async def _finalizer(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     name: str,
     *,
     child: bool,
@@ -264,7 +264,7 @@ async def _finalize(fixture: _FinalizerFixture) -> None:
 
 @pytest.mark.parametrize("child", [False, True])
 async def test_finalize_persists_live_events_and_preserves_completed_stage_order(
-    rdb_session_manager: SessionManager[AsyncSession], child: bool
+    rdb_session_manager: SessionManager[WriteSession], child: bool
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,
@@ -310,7 +310,7 @@ async def test_finalize_persists_live_events_and_preserves_completed_stage_order
 
 
 async def test_record_interrupted_run_publishes_history_after_terminal_before_clear(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager, "stop-record-order", child=True, fail_dispatch_at=None
@@ -338,7 +338,7 @@ async def test_record_interrupted_run_publishes_history_after_terminal_before_cl
 
 
 async def test_finalize_ignores_redis_and_passed_calls_without_durable_ownership(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,
@@ -368,7 +368,7 @@ async def test_finalize_ignores_redis_and_passed_calls_without_durable_ownership
 
 @pytest.mark.parametrize("record_only", [False, True])
 async def test_stale_owner_rejected_before_live_durable_or_external_effects(
-    rdb_session_manager: SessionManager[AsyncSession], record_only: bool
+    rdb_session_manager: SessionManager[WriteSession], record_only: bool
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,
@@ -403,14 +403,14 @@ class _FaultRunRepository(AgentRunRepository):
     """Fail after the actual terminal write to test stage-local rollback."""
 
     async def mark_stopped_for_user_stop(
-        self, session: AsyncSession, run_id: str, *, ended_at: datetime
+        self, session: WriteSession, run_id: str, *, ended_at: datetime
     ) -> AgentRunState | None:
         await super().mark_stopped_for_user_stop(session, run_id, ended_at=ended_at)
         raise RuntimeError("terminal persistence unavailable")
 
 
 async def test_terminal_failure_keeps_prior_commits_and_stop_intent_for_retry(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,
@@ -451,7 +451,7 @@ async def test_terminal_failure_keeps_prior_commits_and_stop_intent_for_retry(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_marker_failure_or_cancellation_preserves_completed_earlier_stages(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,
@@ -492,7 +492,7 @@ async def test_marker_failure_or_cancellation_preserves_completed_earlier_stages
 
 @pytest.mark.parametrize("fail_at", [0, 1, 2])
 async def test_dispatch_failure_keeps_committed_history_and_stop_intent_until_retry(
-    rdb_session_manager: SessionManager[AsyncSession], fail_at: int
+    rdb_session_manager: SessionManager[WriteSession], fail_at: int
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,
@@ -529,7 +529,7 @@ async def test_dispatch_failure_keeps_committed_history_and_stop_intent_until_re
 
 
 async def test_no_effective_run_clears_stop_without_fabricated_markers(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _finalizer(
         rdb_session_manager,

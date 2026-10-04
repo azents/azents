@@ -4,10 +4,10 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 
 
@@ -16,7 +16,7 @@ class VfsReadAuthorityRepository:
     """Finish the durable owner check before filesystem or backend I/O."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def assert_current(self, *, session_id: str, owner_generation: int) -> None:
@@ -30,7 +30,7 @@ class VfsReadAuthorityRepository:
 
 def get_vfs_read_authority_repository(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> VfsReadAuthorityRepository:
     """Wire complete owner checks without exporting a live SessionManager."""

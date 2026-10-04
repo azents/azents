@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from uuid6 import uuid7
 
 from azents.core.historical_memory_consolidation import (
@@ -24,6 +24,7 @@ from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
     DraftFileChange,
@@ -50,9 +51,9 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
     @asynccontextmanager
-    async def manager() -> AsyncGenerator[AsyncSession, None]:
+    async def manager() -> AsyncGenerator[WriteSession, None]:
         async with factory.begin() as session:
-            yield session
+            yield ReadWriteSession(session)
 
     corpus = await seed_consolidation_corpus(manager)
     late_transaction = factory()
@@ -67,7 +68,7 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
                     summary="Synthetic late-commit source",
                     title=f"Synthetic commit-order source {index}",
                 )
-                original = await session.scalar(
+                original = await session.write_session.scalar(
                     sa.select(RDBConsolidationWork).where(
                         RDBConsolidationWork.source_session_id == source_id
                     )
@@ -88,15 +89,15 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
                         kind=original.kind,
                     )
                 )
-                await session.delete(original)
+                await session.write_session.delete(original)
         # Real transactions insert in sequence order and commit in reverse order.
         # Holding only work metadata leaves source/owner locks available.
         await late_transaction.begin()
         late_transaction.add(templates[0])
         await late_transaction.flush()
         async with manager() as session:
-            session.add(templates[1])
-            await session.flush()
+            session.write_session.add(templates[1])
+            await session.write_session.flush()
         assert templates[0].sequence < templates[1].sequence
         owners = ConsolidationOwnershipRepository(manager)
         claim = await owners.claim(corpus.team)
@@ -152,7 +153,9 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
         )
         await late_transaction.commit()
         async with manager() as session:
-            late = await session.get(RDBConsolidationWork, templates[0].id)
+            late = await session.write_session.get(
+                RDBConsolidationWork, templates[0].id
+            )
             assert late is not None
             assert late.sequence < page.pass_upper_sequence
             assert late.state is ConsolidationWorkState.PENDING
@@ -164,12 +167,12 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
     finally:
         await late_transaction.close()
         async with manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSessionAgentContext)
                 .where(RDBSessionAgentContext.agent_id == corpus.team.agent_id)
                 .values(root_session_agent_id=None)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSessionAgent).where(
                     RDBSessionAgent.agent_session_id.in_(
                         sa.select(RDBAgentSession.id).where(
@@ -178,30 +181,30 @@ async def test_lower_sequence_committing_after_publication_remains_pending(
                     )
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBSessionAgentContext).where(
                     RDBSessionAgentContext.agent_id == corpus.team.agent_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgentSession).where(
                     RDBAgentSession.agent_id == corpus.team.agent_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgentRuntime).where(
                     RDBAgentRuntime.agent_id == corpus.team.agent_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBAgent).where(RDBAgent.id == corpus.team.agent_id)
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBWorkspace).where(
                     RDBWorkspace.id == corpus.team.workspace_id
                 )
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBUser).where(
                     RDBUser.id == corpus.personal.associated_user_id
                 )

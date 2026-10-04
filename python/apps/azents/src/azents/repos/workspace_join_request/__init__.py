@@ -4,10 +4,10 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import JoinRequestStatus
 from azents.rdb.models.workspace_join_request import RDBWorkspaceJoinRequest
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     NotFound,
@@ -22,7 +22,7 @@ class WorkspaceJoinRequestRepository:
     """WorkspaceJoinRequest CRUD repository."""
 
     async def create_or_rerequest(
-        self, session: AsyncSession, create: WorkspaceJoinRequestCreate
+        self, session: WriteSession, create: WorkspaceJoinRequestCreate
     ) -> WorkspaceJoinRequest:
         """Create or re-request join request (PostgreSQL ON CONFLICT).
 
@@ -51,12 +51,12 @@ class WorkspaceJoinRequestRepository:
                 "updated_at": sa.func.now(),
             },
         ).returning(RDBWorkspaceJoinRequest)
-        result = await session.execute(stmt)
+        result = await session.write_session.execute(stmt)
         rdb = result.scalar_one()
         return self._build(rdb)
 
     async def get(
-        self, session: AsyncSession, join_request_id: str
+        self, session: ReadSession, join_request_id: str
     ) -> WorkspaceJoinRequest | None:
         """Fetch join request by ID.
 
@@ -64,13 +64,13 @@ class WorkspaceJoinRequestRepository:
         :param join_request_id: Join request ID
         :return: Join request or None
         """
-        rdb = await session.get(RDBWorkspaceJoinRequest, join_request_id)
+        rdb = await session.read_session.get(RDBWorkspaceJoinRequest, join_request_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_workspace_and_user(
-        self, session: AsyncSession, workspace_id: str, user_id: str
+        self, session: ReadSession, workspace_id: str, user_id: str
     ) -> WorkspaceJoinRequest | None:
         """Workspace ID + User Fetch join request by ID.
 
@@ -79,7 +79,7 @@ class WorkspaceJoinRequestRepository:
         :param user_id: User ID
         :return: Join request or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBWorkspaceJoinRequest).where(
                 RDBWorkspaceJoinRequest.workspace_id == workspace_id,
                 RDBWorkspaceJoinRequest.user_id == user_id,
@@ -92,7 +92,7 @@ class WorkspaceJoinRequestRepository:
 
     async def list_by_workspace(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         *,
         status: JoinRequestStatus | None = None,
@@ -111,7 +111,7 @@ class WorkspaceJoinRequestRepository:
             stmt = stmt.where(RDBWorkspaceJoinRequest.status == status)
         stmt = stmt.order_by(RDBWorkspaceJoinRequest.created_at.desc())
 
-        result = await session.execute(stmt)
+        result = await session.read_session.execute(stmt)
         items = result.scalars().all()
         return WorkspaceJoinRequestList(
             items=[self._build(r) for r in items],
@@ -120,7 +120,7 @@ class WorkspaceJoinRequestRepository:
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         join_request_id: str,
         update: WorkspaceJoinRequestUpdate,
     ) -> Result[WorkspaceJoinRequest, NotFound]:
@@ -137,7 +137,7 @@ class WorkspaceJoinRequestRepository:
                 return Failure(NotFound(join_request_id=join_request_id))
             return Success(existing)
 
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBWorkspaceJoinRequest)
             .where(RDBWorkspaceJoinRequest.id == join_request_id)
             .values(**update)
@@ -148,13 +148,13 @@ class WorkspaceJoinRequestRepository:
             return Failure(NotFound(join_request_id=join_request_id))
         return Success(self._build(rdb))
 
-    async def delete(self, session: AsyncSession, join_request_id: str) -> None:
+    async def delete(self, session: WriteSession, join_request_id: str) -> None:
         """Delete join request.
 
         :param session: Database session
         :param join_request_id: Join request ID
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspaceJoinRequest).where(
                 RDBWorkspaceJoinRequest.id == join_request_id
             )

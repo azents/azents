@@ -5,10 +5,10 @@ import hashlib
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_web import RDBRuntimeWebSessionRoute
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.runtime_web.data import RuntimeWebSessionRoute
 
 
@@ -21,7 +21,7 @@ class RuntimeWebSessionRouteRepository:
 
     async def acquire(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         desired_generation: int,
@@ -48,7 +48,7 @@ class RuntimeWebSessionRouteRepository:
             desired_generation=desired_generation,
             runner_generation=runner_generation,
         )
-        existing = await session.scalar(
+        existing = await session.write_session.scalar(
             sa.select(RDBRuntimeWebSessionRoute)
             .where(RDBRuntimeWebSessionRoute.runtime_id == runtime_id)
             .with_for_update()
@@ -60,8 +60,8 @@ class RuntimeWebSessionRouteRepository:
                     "Runtime Web session route is already owned"
                 )
             lease_generation = existing.lease_generation + 1
-            await session.delete(existing)
-            await session.flush()
+            await session.write_session.delete(existing)
+            await session.write_session.flush()
         route = RDBRuntimeWebSessionRoute(
             runtime_id=runtime_id,
             desired_generation=desired_generation,
@@ -76,13 +76,13 @@ class RuntimeWebSessionRouteRepository:
             lease_expires_at=now + datetime.timedelta(seconds=lease_seconds),
             draining_at=None,
         )
-        session.add(route)
-        await session.flush()
+        session.write_session.add(route)
+        await session.write_session.flush()
         return self._route(route)
 
     async def renew(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -113,13 +113,13 @@ class RuntimeWebSessionRouteRepository:
             runner_generation=route.runner_generation,
         )
         route.lease_expires_at = now + datetime.timedelta(seconds=lease_seconds)
-        await session.flush()
-        await session.refresh(route, attribute_names=["updated_at"])
+        await session.write_session.flush()
+        await session.write_session.refresh(route, attribute_names=["updated_at"])
         return self._route(route)
 
     async def resolve(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         desired_generation: int,
@@ -151,7 +151,7 @@ class RuntimeWebSessionRouteRepository:
 
     async def consume_join(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -190,12 +190,12 @@ class RuntimeWebSessionRouteRepository:
         route.join_nonce_hash = hashlib.sha256(
             f"consumed:{route.session_lease_id}:{route.lease_generation}".encode()
         ).hexdigest()
-        await session.flush()
+        await session.write_session.flush()
         return self._route(route)
 
     async def mark_draining(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -215,12 +215,12 @@ class RuntimeWebSessionRouteRepository:
             raise RuntimeWebSessionRouteConflict("Runtime Web session route is stale")
         if route.draining_at is None:
             route.draining_at = now
-            await session.flush()
+            await session.write_session.flush()
         return self._route(route)
 
     async def release(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         owner_boot_id: str,
@@ -236,19 +236,19 @@ class RuntimeWebSessionRouteRepository:
             or route.lease_generation != lease_generation
         ):
             return False
-        await session.delete(route)
-        await session.flush()
+        await session.write_session.delete(route)
+        await session.write_session.flush()
         return True
 
     async def _validate_runtime(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         desired_generation: int,
         runner_generation: int,
     ) -> None:
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
             .with_for_update()
@@ -263,8 +263,8 @@ class RuntimeWebSessionRouteRepository:
             )
 
     @staticmethod
-    async def _database_now(session: AsyncSession) -> datetime.datetime:
-        now = await session.scalar(sa.select(sa.func.now()))
+    async def _database_now(session: ReadSession) -> datetime.datetime:
+        now = await session.read_session.scalar(sa.select(sa.func.now()))
         if not isinstance(now, datetime.datetime):
             raise RuntimeError("Database did not return a current timestamp")
         if now.tzinfo is None or now.utcoffset() is None:
@@ -273,10 +273,10 @@ class RuntimeWebSessionRouteRepository:
 
     @staticmethod
     async def _lock(
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
     ) -> RDBRuntimeWebSessionRoute | None:
-        return await session.scalar(
+        return await session.write_session.scalar(
             sa.select(RDBRuntimeWebSessionRoute)
             .where(RDBRuntimeWebSessionRoute.runtime_id == runtime_id)
             .with_for_update()

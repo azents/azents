@@ -5,12 +5,12 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MailboxSchedulingMode
 from azents.core.mailbox_data import MailboxItemCreate
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission_data import MailboxAdmissionResult, MailboxEnqueue
@@ -21,7 +21,7 @@ class MailboxAdmissionRepository:
     """Compose Mailbox admission with its matching Session wake transition."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     agent_session_repository: Annotated[
@@ -30,7 +30,7 @@ class MailboxAdmissionRepository:
 
     async def enqueue_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         input: MailboxEnqueue,
     ) -> MailboxAdmissionResult:
         """Create one pending input and persist its wake transition."""
@@ -44,7 +44,7 @@ class MailboxAdmissionRepository:
 
     async def _enqueue_without_running_transition(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         input: MailboxEnqueue,
     ) -> MailboxAdmissionResult:
         """Create one pending input before applying its Session transition."""
@@ -111,7 +111,7 @@ class MailboxAdmissionRepository:
 
     async def enqueue_many_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         inputs: Sequence[MailboxEnqueue],
     ) -> list[MailboxAdmissionResult]:
         """Create pending inputs and persist each distinct wake transition."""
@@ -133,7 +133,7 @@ class MailboxAdmissionRepository:
 
     async def enqueue_idle_continuations_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         inputs: Sequence[MailboxEnqueue],
     ) -> list[MailboxAdmissionResult]:
         """Create idle-hook inputs whose composing operation owns Session state."""

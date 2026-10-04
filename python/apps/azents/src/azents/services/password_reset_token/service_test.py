@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock
 
 from azcommon.logging import RuntimeEnvironment
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_reset_token import PasswordResetTokenRepository
 from azents.repos.session import SessionRepository
@@ -34,7 +34,7 @@ from azents.services.runtime_terminal.invalidation import (
 
 
 def _make_service(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> PasswordResetTokenService:
     """Create PasswordResetTokenService for tests."""
     return PasswordResetTokenService(
@@ -57,7 +57,7 @@ class TestPasswordResetTokenService:
 
     async def test_create_returns_plaintext_once_without_hash(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Create response returns plaintext token and list does not expose hash."""
         service = _make_service(rdb_session_manager)
@@ -87,7 +87,7 @@ class TestPasswordResetTokenService:
 
     async def test_preview_masks_current_user_email(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Preview masks current user email hint."""
         service = _make_service(rdb_session_manager)
@@ -116,7 +116,7 @@ class TestPasswordResetTokenService:
 
     async def test_redeem_sets_password_revokes_sessions_and_audits(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """On redeem success, set password and revoke existing sessions."""
         service = _make_service(rdb_session_manager)
@@ -188,7 +188,7 @@ class TestPasswordResetTokenService:
 
     async def test_weak_password_does_not_consume_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Weak password failure does not consume reset token."""
         service = _make_service(rdb_session_manager)
@@ -229,7 +229,7 @@ class TestPasswordResetTokenService:
 
     async def test_redeem_rejects_reused_token(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject reuse of single-use reset token."""
         service = _make_service(rdb_session_manager)

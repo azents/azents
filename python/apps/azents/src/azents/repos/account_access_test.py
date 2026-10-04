@@ -9,12 +9,12 @@ from dataclasses import dataclass
 import pytest
 from azcommon.result import Success
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.account_access import ActiveAccountSubjectStatus
 from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.account_access import AccountAccessOperationRepository
 from azents.repos.session import SessionRepository
 from azents.repos.session.data import Session, SessionCreate
@@ -29,15 +29,15 @@ from azents.services.account_access import AccountAccessService
 class RecordedReadScope:
     """Track the actual PostgreSQL session until its infrastructure scope closes."""
 
-    def __init__(self, session_manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, session_manager: SessionManager[WriteSession]) -> None:
         self.session_manager = session_manager
         self.active_scopes = 0
         self.completed_reads = 0
         self.aborted_reads = 0
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[ReadSession] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Delegate the actual commit/rollback/close boundary without callbacks."""
         self.active_scopes += 1
         try:
@@ -58,16 +58,18 @@ class RecordedReadScope:
     def assert_closed(self) -> None:
         """Require no active admission transaction after detached return."""
         assert self.active_scopes == 0
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.read_session.in_transaction() for session in self.sessions
+        )
 
 
 class RecordedUserRepository(UserRepository):
     """Record real User query sessions, including disabled/missing subjects."""
 
     def __init__(self) -> None:
-        self.read_sessions: list[AsyncSession] = []
+        self.read_sessions: list[ReadSession] = []
 
-    async def get(self, session: AsyncSession, user_id: str) -> User | None:
+    async def get(self, session: ReadSession, user_id: str) -> User | None:
         """Perform the retained narrow User read using the composing session."""
         self.read_sessions.append(session)
         return await super().get(session, user_id)
@@ -77,10 +79,10 @@ class RecordedSessionRepository(SessionRepository):
     """Record exact Session reads and injected DB failures after real queries."""
 
     def __init__(self) -> None:
-        self.read_sessions: list[AsyncSession] = []
+        self.read_sessions: list[ReadSession] = []
         self.failure: BaseException | None = None
 
-    async def get(self, session: AsyncSession, session_id: str) -> Session | None:
+    async def get(self, session: ReadSession, session_id: str) -> Session | None:
         """Keep the actual Session query rather than an application callback."""
         self.read_sessions.append(session)
         result = await super().get(session, session_id)
@@ -93,9 +95,9 @@ class RecordedWorkspaceRepository(WorkspaceRepository):
     """Record real handle resolution sessions."""
 
     def __init__(self) -> None:
-        self.read_sessions: list[AsyncSession] = []
+        self.read_sessions: list[ReadSession] = []
 
-    async def resolve_id(self, session: AsyncSession, handle: str) -> str | None:
+    async def resolve_id(self, session: ReadSession, handle: str) -> str | None:
         """Resolve the handle in the same completed membership read."""
         self.read_sessions.append(session)
         return await super().resolve_id(session, handle)
@@ -105,12 +107,12 @@ class RecordedMembershipRepository(WorkspaceUserRepository):
     """Record real membership reads and their narrow database failure boundary."""
 
     def __init__(self) -> None:
-        self.read_sessions: list[AsyncSession] = []
+        self.read_sessions: list[ReadSession] = []
         self.failure: BaseException | None = None
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -135,7 +137,7 @@ class AccessFixture:
     members: RecordedMembershipRepository
 
 
-def access_fixture(session_manager: SessionManager[AsyncSession]) -> AccessFixture:
+def access_fixture(session_manager: SessionManager[WriteSession]) -> AccessFixture:
     """Build completed access operations with real PostgreSQL query primitives."""
     scope = RecordedReadScope(session_manager)
     users = RecordedUserRepository()
@@ -169,7 +171,7 @@ class SubjectIdentity:
 
 
 async def seed_subject(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     status: ActiveAccountSubjectStatus,
 ) -> SubjectIdentity:
     """Create isolated authoritative state for every existing rejection condition."""
@@ -218,7 +220,7 @@ class WorkspaceIdentity:
 
 
 async def seed_workspace(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     user_id: str,
     role: WorkspaceUserRole | None,
@@ -255,7 +257,7 @@ async def seed_workspace(
 
 @pytest.mark.parametrize("status", list(ActiveAccountSubjectStatus))
 async def test_exact_subject_status_is_detached_after_one_real_database_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     status: ActiveAccountSubjectStatus,
 ) -> None:
     """Retain all current rejection predicates with User-first short circuiting."""
@@ -283,7 +285,7 @@ async def test_exact_subject_status_is_detached_after_one_real_database_read(
 
 @pytest.mark.parametrize("role", list(WorkspaceUserRole))
 async def test_membership_snapshot_returns_the_current_role_after_database_close(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     role: WorkspaceUserRole,
 ) -> None:
     """Handle and membership queries share one read and return only pure authority."""
@@ -309,7 +311,7 @@ async def test_membership_snapshot_returns_the_current_role_after_database_close
 
 @pytest.mark.parametrize("workspace_exists", [False, True])
 async def test_workspace_and_membership_missing_are_distinct_detached_outcomes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     workspace_exists: bool,
 ) -> None:
     """Preserve the distinction used by core HTTP 404 and 403 errors."""
@@ -336,7 +338,7 @@ async def test_workspace_and_membership_missing_are_distinct_detached_outcomes(
 
 
 async def test_session_revocation_is_revalidated_on_each_completed_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A previously admitted JWT subject gains no cached Session authority."""
     subject = await seed_subject(rdb_session_manager, ActiveAccountSubjectStatus.ACTIVE)
@@ -363,7 +365,7 @@ async def test_session_revocation_is_revalidated_on_each_completed_read(
 
 @pytest.mark.parametrize("cancelled", [False, True])
 async def test_subject_read_failure_or_cancellation_closes_real_database_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancelled: bool,
 ) -> None:
     """Propagate a later database-read failure without returning admission success."""
@@ -386,7 +388,7 @@ async def test_subject_read_failure_or_cancellation_closes_real_database_transac
 
 
 async def test_membership_read_failure_closes_the_handle_resolution_transaction(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Abandon the whole read if its later membership query fails."""
     subject = await seed_subject(rdb_session_manager, ActiveAccountSubjectStatus.ACTIVE)

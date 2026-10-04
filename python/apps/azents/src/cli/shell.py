@@ -21,12 +21,12 @@ from azcommon.di import Container
 from azcommon.logging import configure_logging_for_runtime
 from dotenv import load_dotenv
 from ptpython.repl import embed
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config, Settings
 from azents.process_lifecycle import run_with_container
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.base import RDBModel
+from azents.rdb.session_capabilities import WriteSession
 
 load_dotenv()
 
@@ -73,7 +73,7 @@ def collect_db_models(module_name: str, source: str, base_class: Type[T]) -> Mod
 async def _build_variables(
     config: Config,
     container: Container,
-    session: AsyncSession,
+    session: WriteSession,
 ) -> list[Variable]:
     """Configure the variable list used by the shell."""
     return [

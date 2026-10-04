@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated, assert_never
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.credential_read import (
     CredentialReadFact,
@@ -13,6 +12,7 @@ from azents.core.credential_read import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.user import UserRepository
 from azents.repos.user_email import UserEmailRepository
@@ -23,7 +23,7 @@ class CredentialReadOperationRepository:
     """Complete the original database-only groups before application projection."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     user_repository: Annotated[UserRepository, Depends(UserRepository)]
     user_email_repository: Annotated[UserEmailRepository, Depends(UserEmailRepository)]

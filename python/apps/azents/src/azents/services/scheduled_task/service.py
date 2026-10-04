@@ -10,7 +10,6 @@ from typing import NamedTuple, Protocol
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
@@ -37,6 +36,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import (
@@ -78,13 +78,13 @@ class ScheduledTaskAuthorityValidator(Protocol):
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         task: ScheduledTask,
     ) -> None: ...
 
     async def validate_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -98,7 +98,7 @@ class RDBScheduledTaskAuthorityValidator:
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         task: ScheduledTask,
     ) -> None:
         await self.validate_target(
@@ -111,14 +111,14 @@ class RDBScheduledTaskAuthorityValidator:
 
     async def validate_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
         session_id: str,
         binding_id: str | None,
     ) -> None:
-        target = await session.scalar(
+        target = await session.write_session.scalar(
             sa.select(RDBAgentSession).where(
                 RDBAgentSession.id == session_id,
                 RDBAgentSession.workspace_id == workspace_id,
@@ -132,7 +132,7 @@ class RDBScheduledTaskAuthorityValidator:
             )
         if binding_id is None:
             return
-        binding = await session.scalar(
+        binding = await session.write_session.scalar(
             sa.select(RDBExternalChannelBinding)
             .join(
                 RDBExternalChannelResource,
@@ -236,7 +236,7 @@ class ScheduledTaskService:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -286,7 +286,7 @@ class ScheduledTaskService:
 
     async def list_tasks(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
     ) -> list[ScheduledTask]:
@@ -295,7 +295,7 @@ class ScheduledTaskService:
 
     async def replace(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -330,7 +330,7 @@ class ScheduledTaskService:
 
     async def lock_provider_mutation_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         expected_binding_id: str,
@@ -350,7 +350,7 @@ class ScheduledTaskService:
 
     async def lock_management_mutation_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         expected_binding_id: str | None,
@@ -370,7 +370,7 @@ class ScheduledTaskService:
 
     async def replace_locked_provider_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         target: ScheduledTaskMutationTarget,
         expected_binding_id: str | None,
@@ -440,7 +440,7 @@ class ScheduledTaskService:
 
     async def delete(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -457,7 +457,7 @@ class ScheduledTaskService:
 
     async def delete_with_snapshot(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -479,7 +479,7 @@ class ScheduledTaskService:
 
     async def delete_locked_provider_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         target: ScheduledTaskMutationTarget,
         expected_binding_id: str | None,
@@ -505,7 +505,7 @@ class ScheduledTaskService:
 
     async def _lock_mutation_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -565,7 +565,7 @@ class ScheduledTaskService:
 
     async def _cycle(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task: ScheduledTask,
     ) -> ScheduledTaskCycleRecord | None:
         if task.active_cycle_id is None:
@@ -579,7 +579,7 @@ class ScheduledTaskService:
 
     async def _delete_admitted_cycle(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         task: ScheduledTask,
         cycle: ScheduledTaskCycleRecord,
         trigger_id: str | None,
@@ -605,7 +605,7 @@ class ScheduledTaskDispatcher:
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         *,
         agent_session_repository: AgentSessionRepository,
         cycle_repository: ScheduledTaskCycleRepository,
@@ -846,7 +846,7 @@ class ScheduledTaskDispatcher:
 
     async def _complete_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         task: ScheduledTask,
         *,
         lease_owner: str,

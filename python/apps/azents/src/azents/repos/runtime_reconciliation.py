@@ -5,12 +5,12 @@ from datetime import timedelta
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeDesiredState, RuntimeProviderObservedState
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import RuntimeConfigurationState
@@ -27,7 +27,7 @@ class RuntimeReconciliationOperationRepository:
     """Own the five original reconciliation scopes without dispatch machinery."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)

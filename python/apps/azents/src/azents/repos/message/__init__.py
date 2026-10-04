@@ -6,7 +6,6 @@ import time
 from typing import NamedTuple
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, MessageRole
 from azents.core.type_guards import is_object_list
@@ -57,6 +56,7 @@ from azents.engine.events.types import (
 from azents.engine.run.types import FunctionToolCall
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.transport.chat import ChatAttachmentSnapshot, chat_attachment_from_event
 
 from .data import ChatMessage
@@ -642,31 +642,29 @@ def _system_error_metadata(payload: SystemErrorPayload) -> dict[str, str] | None
 class MessageRepository:
     """Message fetch repository. Operates on events."""
 
-    async def get_by_id(
-        self, session: AsyncSession, message_id: str
-    ) -> RDBEvent | None:
+    async def get_by_id(self, session: ReadSession, message_id: str) -> RDBEvent | None:
         """Fetch message by ID."""
-        return await session.get(RDBEvent, message_id)
+        return await session.read_session.get(RDBEvent, message_id)
 
     async def get_event_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         event_id: str,
     ) -> Event | None:
         """Fetch and decode one transcript Event by ID."""
-        row = await session.get(RDBEvent, event_id)
+        row = await session.read_session.get(RDBEvent, event_id)
         return None if row is None else _to_event(row)
 
     async def has_non_reverted_kind(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         kind: EventKind,
     ) -> bool:
         """Return whether one Session contains a non-reverted event kind."""
         return bool(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(
                     sa.exists().where(
                         RDBEvent.session_id == session_id,
@@ -679,7 +677,7 @@ class MessageRepository:
 
     async def list_historical_memory_events_by_tier(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         tail_event_id: str,
@@ -758,7 +756,7 @@ class MessageRepository:
 
     async def _list_historical_memory_eligible_lane(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         tail_event_id: str,
@@ -782,7 +780,7 @@ class MessageRepository:
             page_limit = budget.next_page_limit
             rows = list(
                 (
-                    await session.execute(
+                    await session.read_session.execute(
                         statement.order_by(RDBEvent.id.desc()).limit(page_limit)
                     )
                 ).scalars()
@@ -804,7 +802,7 @@ class MessageRepository:
 
     async def _list_historical_memory_registered_tools(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         tail_event_id: str,
@@ -836,7 +834,7 @@ class MessageRepository:
             page_limit = budget.next_page_limit
             call_rows = list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         statement.order_by(RDBEvent.id.desc()).limit(page_limit)
                     )
                 ).scalars()
@@ -898,7 +896,7 @@ class MessageRepository:
 
     async def _historical_memory_tool_results(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         tail_event_id: str,
@@ -908,7 +906,7 @@ class MessageRepository:
         """Load correlated registered-tool results for one call page."""
         if not call_ids or budget.exhausted:
             return []
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent)
             .where(
                 RDBEvent.session_id == session_id,
@@ -954,7 +952,7 @@ class MessageRepository:
 
     async def list_by_session_id_paginated(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         limit: int = 50,
         before: str | None = None,
@@ -970,7 +968,7 @@ class MessageRepository:
 
         query = query.order_by(RDBEvent.id.desc()).limit(limit + 1)
 
-        result = await session.execute(query)
+        result = await session.read_session.execute(query)
         rows = list(result.scalars())
 
         has_more = len(rows) > limit
@@ -987,7 +985,7 @@ class MessageRepository:
 
     async def list_events_by_session_id_paginated(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         limit: int = 50,
         before: str | None = None,
@@ -1016,7 +1014,7 @@ class MessageRepository:
                 query = query.where(RDBEvent.id <= around)
             query = query.order_by(RDBEvent.id.desc()).limit(limit + 1)
 
-        result = await session.execute(query)
+        result = await session.read_session.execute(query)
         rows = list(result.scalars())
 
         if len(rows) > limit:
@@ -1030,7 +1028,7 @@ class MessageRepository:
         has_more = False
         if oldest_boundary is not None:
             has_more = bool(
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(
                         sa.exists().where(
                             RDBEvent.session_id == session_id,
@@ -1044,7 +1042,7 @@ class MessageRepository:
         has_newer = False
         if newest_boundary is not None:
             has_newer = bool(
-                await session.scalar(
+                await session.read_session.scalar(
                     sa.select(
                         sa.exists().where(
                             RDBEvent.session_id == session_id,
@@ -1063,11 +1061,11 @@ class MessageRepository:
 
     async def get_latest_retry_visible_event(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> RDBEvent | None:
         """Fetch the newest durable event that is visible in retry eligibility."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent)
             .where(
                 RDBEvent.session_id == session_id,
@@ -1086,12 +1084,12 @@ class MessageRepository:
 
     async def mark_reverted_from_event_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         event_id: str,
     ) -> int:
         """Hide the selected event and later events from UI and model input."""
-        count_result = await session.execute(
+        count_result = await session.write_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBEvent)
             .where(
@@ -1101,7 +1099,7 @@ class MessageRepository:
             )
         )
         delete_count = count_result.scalar_one()
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBEvent)
             .where(
                 RDBEvent.session_id == session_id,
@@ -1116,7 +1114,7 @@ class MessageRepository:
 
     async def _refresh_session_last_user_input_at(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> None:
         """Refresh AgentSession latest user input timestamp after event revert."""
@@ -1129,7 +1127,7 @@ class MessageRepository:
             )
             .scalar_subquery()
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(
@@ -1139,16 +1137,16 @@ class MessageRepository:
                 )
             )
         )
-        await session.flush()
+        await session.write_session.flush()
 
     async def is_at_or_before_model_input_head(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         event_id: str,
     ) -> bool:
         """Check whether the target event is at or before the model-input head."""
-        head_event_id = await session.scalar(
+        head_event_id = await session.read_session.scalar(
             sa.select(RDBAgentSession.model_input_head_event_id).where(
                 RDBAgentSession.id == session_id
             )

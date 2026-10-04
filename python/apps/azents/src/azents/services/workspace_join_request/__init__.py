@@ -8,12 +8,12 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.email.service import EmailService
 from azents.core.enums import JoinRequestStatus, WorkspaceUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_join_request import WorkspaceJoinRequestRepository
 from azents.repos.workspace_join_request.data import WorkspaceJoinRequestCreate
@@ -45,7 +45,7 @@ class WorkspaceJoinRequestService:
     workspace_user_repo: Annotated[WorkspaceUserRepository, Depends()]
     email_service: Annotated[EmailService, Depends()]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def request_join(
@@ -276,7 +276,7 @@ class WorkspaceJoinRequestService:
 
     async def auto_approve_if_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         workspace_id: str,
         user_id: str,
     ) -> bool:

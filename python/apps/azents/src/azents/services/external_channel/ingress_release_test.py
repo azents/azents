@@ -6,7 +6,6 @@ import datetime
 import pytest
 from azcommon import di
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.api.testenv.external_channel_ingress.v1 import (
     IngressOwnerRequest,
@@ -24,6 +23,7 @@ from azents.job_runtime.types import (
     JobRuntime,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.ingress_control_read_test import (
     _MISSING,
     _Boundary,
@@ -75,7 +75,7 @@ class _Runtime(JobRuntime):
 
 
 async def test_missing_read_commits_before_unchanged_api_404_without_submit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     runtime = _Runtime(boundary, "success")
@@ -94,7 +94,7 @@ async def test_missing_read_commits_before_unchanged_api_404_without_submit(
 
 @pytest.mark.parametrize("outcome", ["success", "error", "cancel"])
 async def test_api_submit_acceptance_error_cancel_follow_actual_read_completion(
-    rdb_session_manager: SessionManager[AsyncSession], outcome: str
+    rdb_session_manager: SessionManager[WriteSession], outcome: str
 ) -> None:
     seed = await _seed(rdb_session_manager)
     boundary = _Boundary(rdb_session_manager)
@@ -131,7 +131,7 @@ async def test_api_submit_acceptance_error_cancel_follow_actual_read_completion(
 
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_owner_query_failure_never_returns_missing_or_submits(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     seed = await _seed(rdb_session_manager)
     boundary = _Boundary(rdb_session_manager)
@@ -168,7 +168,7 @@ class _LocalRuntime(LocalJobRuntime):
 
 
 async def test_real_local_runtime_accepts_without_waiting_for_handler(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     seed = await _seed(rdb_session_manager)
     boundary = _Boundary(rdb_session_manager)
@@ -209,7 +209,7 @@ async def test_real_local_runtime_accepts_without_waiting_for_handler(
 
 
 async def test_closed_actual_runtime_propagates_after_completed_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     seed = await _seed(rdb_session_manager)
     boundary = _Boundary(rdb_session_manager)

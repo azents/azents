@@ -2,9 +2,8 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 
@@ -13,7 +12,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 class DiscordSettingsReadRepository:
     """Own completed Discord settings control-origin reads."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     external_channel_repository: ExternalChannelRepository
 
     async def get_interaction(

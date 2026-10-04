@@ -5,10 +5,10 @@ from typing import Annotated
 
 from azcommon.result import Result
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_model_settings.data import (
     DefaultModelCannotBeCleared,
@@ -22,7 +22,7 @@ class WorkspaceModelSettingsOperationRepository:
     """Own current snapshots, empty-row creation and atomic default updates."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     settings_repository: Annotated[
         WorkspaceModelSettingsRepository, Depends(WorkspaceModelSettingsRepository)

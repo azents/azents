@@ -29,6 +29,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -179,8 +180,8 @@ def _service(
     session = require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield session
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(session)
 
     ensure_for_agent = AsyncMock()
     get_impact = AsyncMock(return_value=impact)
@@ -204,7 +205,7 @@ def _service(
     runtime_profile_repository.get_configuration_state = AsyncMock(
         return_value=_unconfigured_state() if runtime is not None else None
     )
-    typed_session_manager: SessionManager[AsyncSession] = session_manager
+    typed_session_manager: SessionManager[WriteSession] = session_manager
     service = object.__new__(AgentRuntimeService)
     service.session_manager = typed_session_manager
     service.agent_repository = require_instance(agent_repository, AgentRepository)

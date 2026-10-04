@@ -6,7 +6,6 @@ import hashlib
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.system_setting import (
     SystemDataMigrationOutcome,
@@ -32,6 +31,7 @@ from azents.rdb.models.system_setting import (
     RDBSystemSettingCandidate,
     RDBSystemSettingHealth,
 )
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 def _advisory_lock_id(namespace: str, name: str) -> int:
@@ -45,12 +45,12 @@ class SystemSettingRepository:
 
     async def acquire_section_lock(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         section: SystemSettingSection,
     ) -> None:
         """Serialize mutations for one Section."""
-        await session.execute(
+        await session.write_session.execute(
             sa.select(
                 sa.func.pg_advisory_xact_lock(
                     _advisory_lock_id("system-setting-section", section.value)
@@ -60,17 +60,17 @@ class SystemSettingRepository:
 
     async def get_current(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         section: SystemSettingSection,
     ) -> StoredSystemSetting | None:
         """Fetch current Admin-managed Section state."""
-        rdb = await session.get(RDBSystemSetting, section)
+        rdb = await session.read_session.get(RDBSystemSetting, section)
         return self._build_current(rdb) if rdb is not None else None
 
     async def write_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         write: SystemSettingCurrentWrite,
     ) -> StoredSystemSetting:
@@ -108,17 +108,17 @@ class SystemSettingRepository:
             )
             .returning(RDBSystemSetting)
         )
-        result = await session.execute(statement)
+        result = await session.write_session.execute(statement)
         return self._build_current(result.scalar_one())
 
     async def get_candidate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         section: SystemSettingSection,
     ) -> StoredSystemSettingCandidate | None:
         """Fetch the single candidate for a Section."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSystemSettingCandidate).where(
                 RDBSystemSettingCandidate.section == section
             )
@@ -128,12 +128,12 @@ class SystemSettingRepository:
 
     async def replace_candidate(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: SystemSettingCandidateCreate,
     ) -> StoredSystemSettingCandidate:
         """Delete any previous candidate and store the replacement."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSystemSettingCandidate).where(
                 RDBSystemSettingCandidate.section == create.section
             )
@@ -158,13 +158,13 @@ class SystemSettingRepository:
             impact=None,
             created_by_user_id=create.created_by_user_id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_candidate(rdb)
 
     async def update_candidate_validation(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         candidate_id: str,
         status: SystemSettingValidationStatus,
@@ -177,7 +177,7 @@ class SystemSettingRepository:
         updated_at: datetime.datetime,
     ) -> StoredSystemSettingCandidate | None:
         """Update validation fields only when the candidate still exists."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBSystemSettingCandidate)
             .where(RDBSystemSettingCandidate.id == candidate_id)
             .values(
@@ -197,7 +197,7 @@ class SystemSettingRepository:
 
     async def delete_candidate(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         section: SystemSettingSection,
         candidate_id: str | None = None,
@@ -206,7 +206,7 @@ class SystemSettingRepository:
         filters = [RDBSystemSettingCandidate.section == section]
         if candidate_id is not None:
             filters.append(RDBSystemSettingCandidate.id == candidate_id)
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBSystemSettingCandidate)
             .where(*filters)
             .returning(RDBSystemSettingCandidate.id)
@@ -215,17 +215,17 @@ class SystemSettingRepository:
 
     async def get_health(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         section: SystemSettingSection,
     ) -> StoredSystemSettingHealth | None:
         """Fetch the latest explicit health result."""
-        rdb = await session.get(RDBSystemSettingHealth, section)
+        rdb = await session.read_session.get(RDBSystemSettingHealth, section)
         return self._build_health(rdb) if rdb is not None else None
 
     async def write_health(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         write: SystemSettingHealthWrite,
     ) -> StoredSystemSettingHealth:
@@ -258,12 +258,12 @@ class SystemSettingRepository:
             )
             .returning(RDBSystemSettingHealth)
         )
-        result = await session.execute(statement)
+        result = await session.write_session.execute(statement)
         return self._build_health(result.scalar_one())
 
     async def append_audit_event(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         create: SystemSettingAuditEventCreate,
     ) -> StoredSystemSettingAuditEvent:
@@ -285,13 +285,13 @@ class SystemSettingRepository:
             confirmation_action=create.confirmation_action,
             event_metadata=create.metadata,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build_audit(rdb)
 
     async def list_audit_events(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         section: SystemSettingSection | None,
         offset: int,
@@ -301,12 +301,12 @@ class SystemSettingRepository:
         filters = []
         if section is not None:
             filters.append(RDBSystemSettingAuditEvent.section == section)
-        total_result = await session.execute(
+        total_result = await session.read_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBSystemSettingAuditEvent)
             .where(*filters)
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSystemSettingAuditEvent)
             .where(*filters)
             .order_by(RDBSystemSettingAuditEvent.created_at.desc())
@@ -399,9 +399,9 @@ class SystemSettingRepository:
 class SystemDataMigrationRepository:
     """Persist application data-migration completion markers."""
 
-    async def acquire_lock(self, session: AsyncSession, *, name: str) -> None:
+    async def acquire_lock(self, session: WriteSession, *, name: str) -> None:
         """Serialize one application migration across processes."""
-        await session.execute(
+        await session.write_session.execute(
             sa.select(
                 sa.func.pg_advisory_xact_lock(
                     _advisory_lock_id("system-data-migration", name)
@@ -411,12 +411,12 @@ class SystemDataMigrationRepository:
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         name: str,
     ) -> StoredSystemDataMigration | None:
         """Fetch a migration marker."""
-        rdb = await session.get(RDBSystemDataMigration, name)
+        rdb = await session.read_session.get(RDBSystemDataMigration, name)
         if rdb is None:
             return None
         return StoredSystemDataMigration(
@@ -428,7 +428,7 @@ class SystemDataMigrationRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         name: str,
         outcome: SystemDataMigrationOutcome,
@@ -442,8 +442,8 @@ class SystemDataMigrationRepository:
             migration_metadata=metadata,
             completed_at=completed_at,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return StoredSystemDataMigration(
             name=rdb.name,
             outcome=rdb.outcome,

@@ -31,6 +31,7 @@ from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningCapabilities, ModelReasoningEffort
 from azents.core.model_catalog_source import decode_catalog_source
 from azents.engine.run.input import InputMessage
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.active_profile_admission import (
@@ -116,7 +117,8 @@ async def test_exact_active_profile_capture_and_fences(case: str) -> None:
         reasoning_effort="high" if case == "supported" else "max",
         enabled_execution_options=[],
     )
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     active = AsyncMock(spec=ActiveModelCapabilitiesRepository)
     active.capture_exact_choices.return_value = _capture(
         agent, missing=case == "missing"
@@ -182,12 +184,13 @@ async def test_public_new_admission_compiles_after_scope_and_rechecks_authority(
     """Every real wrapper exits before writes and rejects before mailbox admission."""
     agent = _agent()
     agent.lifecycle_status = AgentLifecycleStatus.ACTIVE
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
     scopes = 0
     events: list[str] = []
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
+    async def manager() -> AsyncIterator[WriteSession]:
         nonlocal scopes
         scopes += 1
         events.append("enter")
@@ -203,7 +206,7 @@ async def test_public_new_admission_compiles_after_scope_and_rechecks_authority(
         del workspace_id, identities
         assert scopes == 0
         events.append("capture")
-        assert not session.commit.await_count
+        assert not _raw_session.commit.await_count
         return _capture(agent, missing=False)
 
     active.capture_exact_choices.side_effect = capture

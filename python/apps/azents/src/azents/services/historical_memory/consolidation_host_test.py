@@ -9,7 +9,6 @@ from collections.abc import Sequence
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import EventKind
@@ -46,6 +45,7 @@ from azents.engine.model_stream import (
 )
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationRevision
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
     ConsolidationBudgetRepository,
 )
@@ -289,7 +289,7 @@ class _ScriptedModel:
 
 
 async def _host(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     personal: bool,
     empty: bool,
@@ -332,7 +332,7 @@ async def _host(
 @pytest.mark.parametrize("personal", [False, True])
 @pytest.mark.parametrize("empty", [False, True])
 async def test_multi_turn_shared_host_edits_handles_errors_and_publishes_files(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     personal: bool,
     empty: bool,
 ) -> None:
@@ -366,7 +366,9 @@ async def test_multi_turn_shared_host_edits_handles_errors_and_publishes_files(
     )
     assert all("combined budget" not in request.lower() for request in model.requests)
     async with rdb_session_manager() as session:
-        revision = await session.get(RDBConsolidationRevision, outcome.revision_id)
+        revision = await session.read_session.get(
+            RDBConsolidationRevision, outcome.revision_id
+        )
         assert revision is not None
         assert "Untrusted final prose" not in revision.markdown
         assert (revision.rendered_block == "") == empty
@@ -376,7 +378,7 @@ async def test_multi_turn_shared_host_edits_handles_errors_and_publishes_files(
 
 
 async def test_normal_final_response_without_valid_files_is_not_success(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(
         rdb_session_manager,
@@ -394,7 +396,7 @@ async def test_normal_final_response_without_valid_files_is_not_success(
 
 
 async def test_input_checkpoint_stops_before_any_physical_request_or_publication(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(
         rdb_session_manager,
@@ -436,7 +438,7 @@ class _UncertainPublication(ConsolidationPublicationRepository):
 
 
 async def test_uncertain_commit_inspects_original_outcome_without_repeat_publication(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     host = await _host(
         rdb_session_manager,
@@ -453,7 +455,7 @@ async def test_uncertain_commit_inspects_original_outcome_without_repeat_publica
         == outcome
     )
     async with rdb_session_manager() as session:
-        count = await session.scalar(
+        count = await session.read_session.scalar(
             sa.select(sa.func.count())
             .select_from(RDBConsolidationRevision)
             .where(RDBConsolidationRevision.unit_id == host.claim.unit_id)

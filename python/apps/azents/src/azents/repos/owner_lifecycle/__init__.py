@@ -5,10 +5,10 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import OwnerLifecycleKind, OwnerLifecycleStatus
 from azents.rdb.models.owner_lifecycle import RDBOwnerLifecycleJob
+from azents.rdb.session_capabilities import WriteSession
 
 from .data import OwnerLifecycleJob
 
@@ -18,13 +18,13 @@ class OwnerLifecycleRepository:
 
     async def create_or_get_membership_archive(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         user_id: str,
     ) -> OwnerLifecycleJob:
         """Create or return the durable membership-archive job."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBOwnerLifecycleJob)
             .values(
                 id=uuid7().hex,
@@ -40,7 +40,7 @@ class OwnerLifecycleRepository:
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            rdb = await session.scalar(
+            rdb = await session.write_session.scalar(
                 sa.select(RDBOwnerLifecycleJob).where(
                     RDBOwnerLifecycleJob.kind == OwnerLifecycleKind.MEMBERSHIP_ARCHIVE,
                     RDBOwnerLifecycleJob.workspace_id == workspace_id,
@@ -61,17 +61,17 @@ class OwnerLifecycleRepository:
             rdb.started_at = None
             rdb.completed_at = None
             rdb.updated_at = now
-            await session.flush()
+            await session.write_session.flush()
         return self._build(rdb)
 
     async def create_or_get_account_purge(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         user_id: str,
     ) -> OwnerLifecycleJob:
         """Create or return the durable account-purge job."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             insert(RDBOwnerLifecycleJob)
             .values(
                 id=uuid7().hex,
@@ -87,7 +87,7 @@ class OwnerLifecycleRepository:
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
-            rdb = await session.scalar(
+            rdb = await session.write_session.scalar(
                 sa.select(RDBOwnerLifecycleJob).where(
                     RDBOwnerLifecycleJob.kind == OwnerLifecycleKind.ACCOUNT_PURGE,
                     RDBOwnerLifecycleJob.user_id == user_id,
@@ -95,12 +95,12 @@ class OwnerLifecycleRepository:
             )
         if rdb is None:
             raise RuntimeError("Owner lifecycle account purge job creation failed")
-        await session.flush()
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -146,7 +146,7 @@ class OwnerLifecycleRepository:
             .limit(1)
             .scalar_subquery()
         )
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBOwnerLifecycleJob)
             .where(RDBOwnerLifecycleJob.id == candidate)
             .values(
@@ -181,7 +181,7 @@ class OwnerLifecycleRepository:
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -189,7 +189,7 @@ class OwnerLifecycleRepository:
         now: datetime.datetime,
     ) -> bool:
         """Advance an owned job to its current coordinator phase."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBOwnerLifecycleJob)
             .where(
                 RDBOwnerLifecycleJob.id == job_id,
@@ -205,7 +205,7 @@ class OwnerLifecycleRepository:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -215,7 +215,7 @@ class OwnerLifecycleRepository:
         now: datetime.datetime,
     ) -> bool:
         """Release an owned job into bounded retry wait."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBOwnerLifecycleJob)
             .where(
                 RDBOwnerLifecycleJob.id == job_id,
@@ -236,14 +236,14 @@ class OwnerLifecycleRepository:
 
     async def mark_completed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         lease_owner: str,
         now: datetime.datetime,
     ) -> bool:
         """Mark an owned job completed and release its lease."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBOwnerLifecycleJob)
             .where(
                 RDBOwnerLifecycleJob.id == job_id,

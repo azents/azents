@@ -6,12 +6,12 @@ from typing import Annotated
 
 from azcommon.datetime import tznow
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeProviderBootstrapDeclarationState
 from azents.core.runtime_provider_bootstrap import RuntimeProviderBootstrapSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialUnavailable,
@@ -39,7 +39,7 @@ class RuntimeProviderBootstrapEnrollmentService:
     """Reconcile a declaration and ensure its Provider credential."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     provider_repository: Annotated[
         RuntimeProviderRepository, Depends(RuntimeProviderRepository)

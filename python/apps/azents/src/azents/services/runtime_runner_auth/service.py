@@ -2,14 +2,13 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredential,
     RuntimeRunnerCredentialInvalid,
     RuntimeRunnerCredentialVerifier,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 
 
@@ -17,7 +16,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 class RuntimeRunnerAuthenticationService:
     """Authenticate a signed Runner credential against current Runtime state."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     runtime_repository: AgentRuntimeRepository
     verifier: RuntimeRunnerCredentialVerifier
 
@@ -40,7 +39,7 @@ class RuntimeRunnerAuthenticationService:
 
     async def authorize_runner_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         credential: RuntimeRunnerCredential,
     ) -> bool:
         """Validate Runner authority inside a caller-owned transaction."""

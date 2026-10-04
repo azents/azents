@@ -55,6 +55,7 @@ from azents.engine.tools.skill import (
     skill_items_from_vfs_projection,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
@@ -152,11 +153,11 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
+async def _session_manager() -> AsyncIterator[WriteSession]:
     """Yield one unused but correctly typed test session."""
     session = AsyncSession()
     try:
-        yield session
+        yield ReadWriteSession(session)
     finally:
         await session.close()
 
@@ -238,7 +239,7 @@ class _OwnershipTakingSkillScanRunner(_SkillScanRunner):
         *,
         entries_by_root: dict[str, tuple[str, ...]],
         files: dict[str, bytes],
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         session_id: str,
     ) -> None:
         super().__init__(entries_by_root=entries_by_root, files=files)
@@ -973,7 +974,7 @@ class TestSkillProjectionService:
 
     async def test_takeover_after_runtime_scan_rejects_skill_state_commit(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Runtime discovery cannot commit after its Session owner is superseded."""
         sessions = AgentSessionRepository()

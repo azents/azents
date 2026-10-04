@@ -23,6 +23,7 @@ from azents.core.enums import LLMProvider
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
@@ -70,10 +71,12 @@ class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
         self.backend_pid: int | None = None
 
     async def get_by_id_with_secrets_for_update(
-        self, session: AsyncSession, integration_id: str
+        self, session: WriteSession, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
         """Exercise identity-map refresh and actual PostgreSQL row serialization."""
-        self.backend_pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+        self.backend_pid = await session.read_session.scalar(
+            sa.text("SELECT pg_backend_pid()")
+        )
         if self.lock_before_pause:
             latest = await super().get_by_id_with_secrets_for_update(
                 session, integration_id
@@ -82,14 +85,16 @@ class _PausedIntegrationRepository(LLMProviderIntegrationRepository):
             await self.resume.wait()
             return latest
         # Populate the identity map with stale data before the final locked reread.
-        stale_row = await session.get(RDBLLMProviderIntegration, integration_id)
+        stale_row = await session.read_session.get(
+            RDBLLMProviderIntegration, integration_id
+        )
         assert stale_row is not None
         self.read_complete.set()
         await self.resume.wait()
         return await super().get_by_id_with_secrets_for_update(session, integration_id)
 
     async def get_by_id_with_secrets(
-        self, session: AsyncSession, integration_id: str
+        self, session: ReadSession, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
         """Expose the old non-atomic read boundary for regression verification."""
         latest = await super().get_by_id_with_secrets(session, integration_id)
@@ -119,9 +124,10 @@ async def test_superseded_refresh_preserves_complete_current_integration(
     """Committed reconnect or runtime updates fence both stale persistence paths."""
 
     @asynccontextmanager
-    async def sessions() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            async with session.begin():
+    async def sessions() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
+            async with session.write_session.begin():
                 yield session
 
     repository = LLMProviderIntegrationRepository(
@@ -236,12 +242,12 @@ async def test_superseded_refresh_preserves_complete_current_integration(
     finally:
         if workspace_id is not None:
             async with sessions() as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBLLMProviderIntegration).where(
                         RDBLLMProviderIntegration.workspace_id == workspace_id
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
                 )
 
@@ -266,9 +272,10 @@ async def test_refresh_completions_are_atomically_ordered(
     """The first successful identity wins; state-only failure can be repaired."""
 
     @asynccontextmanager
-    async def sessions() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
-            async with session.begin():
+    async def sessions() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
+            async with session.write_session.begin():
                 yield session
 
     cipher = CredentialCipher(Fernet.generate_key().decode())
@@ -371,8 +378,9 @@ async def test_refresh_completions_are_atomically_ordered(
         if lock_before_pause:
             # Observe actual PostgreSQL blocking, not a sleep or scheduler yield.
             async with asyncio.timeout(5):
-                async with AsyncSession(rdb_engine) as observer:
-                    while not await observer.scalar(
+                async with AsyncSession(rdb_engine) as _raw_observer:
+                    observer = ReadWriteSession(_raw_observer)
+                    while not await observer.read_session.scalar(
                         sa.text(
                             "SELECT EXISTS (SELECT 1 FROM pg_locks "
                             "WHERE NOT granted AND :pid = ANY(pg_blocking_pids(pid)))"
@@ -439,11 +447,11 @@ async def test_refresh_completions_are_atomically_ordered(
                 await asyncio.gather(task, return_exceptions=True)
         if workspace_id is not None:
             async with sessions() as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBLLMProviderIntegration).where(
                         RDBLLMProviderIntegration.workspace_id == workspace_id
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
                 )

@@ -5,12 +5,11 @@ import datetime
 from collections.abc import Sequence
 from typing import Protocol
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import AgentRunStatus
 from azents.engine.events.terminal_projection import terminal_result_from_events
 from azents.engine.events.types import Event
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.engine_event_contracts import RunStateRepository
 from azents.repos.engine_event_mutation import EngineEventMutationRepository
 from azents.repos.model_operation_completion import ModelOperationCompletion
@@ -21,7 +20,7 @@ class TerminalModelOperationRepository(Protocol):
     """Database-only success settlement composed with terminal Run mutation."""
 
     async def complete_success_in_session(
-        self, session: AsyncSession, completion: ModelOperationCompletion
+        self, session: WriteSession, completion: ModelOperationCompletion
     ) -> None:
         """Settle the exact frozen model operation in the terminal transaction."""
         ...
@@ -30,7 +29,7 @@ class TerminalModelOperationRepository(Protocol):
 class TerminalModelFilePinRepository(Protocol):
     """Database-only pin release performed with terminal Run mutation."""
 
-    async def release_run(self, session: AsyncSession, *, run_id: str) -> None:
+    async def release_run(self, session: WriteSession, *, run_id: str) -> None:
         """Release ModelFile pins in the terminal transaction."""
         ...
 
@@ -47,7 +46,7 @@ class InterruptedModelOutput:
 class EngineRunFinalizationOperationRepository:
     """Own terminal operations without changing branch-specific atomic groups."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     run_repository: RunStateRepository
     event_mutation_repository: EngineEventMutationRepository
     model_operation_repository: TerminalModelOperationRepository
@@ -207,7 +206,7 @@ class EngineRunFinalizationOperationRepository:
 
     async def _mark_terminal(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         status: AgentRunStatus,

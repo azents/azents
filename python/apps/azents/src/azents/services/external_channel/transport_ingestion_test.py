@@ -3,21 +3,18 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import NamedTuple
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    ExternalChannelAppMode,
-    ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
-    ExternalChannelResourceStatus,
     ExternalChannelResourceType,
-    ExternalChannelTransport,
 )
 from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcome,
@@ -26,8 +23,9 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
 )
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
-    ExternalChannelConnectionConfiguration,
     ExternalChannelResource,
     ExternalChannelTrigger,
 )
@@ -46,7 +44,7 @@ from azents.services.external_channel.transport_ingestion import (
 _NOW = datetime.datetime(2026, 7, 29, 1, tzinfo=datetime.UTC)
 
 
-class _Repository(ExternalChannelRepository):
+class _Repository:
     """Return one configuration and optional Discord resource identities."""
 
     def __init__(
@@ -57,7 +55,6 @@ class _Repository(ExternalChannelRepository):
         configuration_generation: int = 2,
         expected_delivery_channel_id: str = "201",
     ) -> None:
-        super().__init__()
         self.provider_resource = provider_resource
         self.delivery_resource = delivery_resource
         self.configuration_generation = configuration_generation
@@ -65,48 +62,28 @@ class _Repository(ExternalChannelRepository):
 
     async def get_owned_discord_gateway_configuration(
         self,
-        session: AsyncSession,
+        _session: WriteSession,
         *,
         connection_id: str,
         lease_owner: str,
         lease_generation: int,
         now: datetime.datetime,
-    ) -> ExternalChannelConnectionConfiguration:
-        del session
+    ) -> object:
         assert connection_id == "connection-1"
         assert (lease_owner, lease_generation) == ("o", 3)
         assert now.tzinfo is not None
-        return ExternalChannelConnectionConfiguration(
-            id=connection_id,
-            workspace_id="workspace-1",
+        return SimpleNamespace(
             provider=ExternalChannelProvider.DISCORD,
-            transport=ExternalChannelTransport.HTTP,
-            status=ExternalChannelConnectionStatus.ACTIVE,
-            app_mode=ExternalChannelAppMode.SINGLE,
             provider_tenant_id="300",
             provider_bot_user_id="900",
-            provider_app_id=None,
-            http_callback_selector_hash=None,
             encrypted_credentials="ciphertext",
             configuration_generation=self.configuration_generation,
             ingress_profile=(ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
-            capabilities=None,
-            provider_config=None,
-            last_verified_at=None,
-            last_health_at=None,
-            disconnected_at=None,
-            socket_lease_owner=None,
-            socket_lease_until=None,
-            socket_heartbeat_at=None,
-            socket_gap_detected_at=None,
-            socket_gap_reason=None,
-            created_at=_NOW,
-            updated_at=_NOW,
         )
 
     async def get_resource_by_provider_key(
         self,
-        session: AsyncSession,
+        _session: WriteSession,
         *,
         connection_id: str,
         resource_type: ExternalChannelResourceType,
@@ -114,12 +91,12 @@ class _Repository(ExternalChannelRepository):
     ) -> ExternalChannelResource | None:
         assert connection_id == "connection-1"
         assert resource_type is ExternalChannelResourceType.THREAD
-        del session, provider_resource_key
+        del provider_resource_key
         return self.provider_resource
 
     async def get_discord_resource_by_delivery_channel(
         self,
-        session: AsyncSession,
+        _session: WriteSession,
         *,
         connection_id: str,
         guild_id: str,
@@ -127,11 +104,10 @@ class _Repository(ExternalChannelRepository):
     ) -> ExternalChannelResource | None:
         assert (connection_id, guild_id) == ("connection-1", "300")
         assert delivery_channel_id == self.expected_delivery_channel_id
-        del session
         return self.delivery_resource
 
 
-class _Ingestion(ExternalChannelConversationIngestionService):
+class _Ingestion:
     """Capture the credential-free request passed to shared ingestion."""
 
     def __init__(self) -> None:
@@ -151,7 +127,7 @@ class _Ingestion(ExternalChannelConversationIngestionService):
         )
 
 
-class _QueueAdmission(ExternalChannelIngressAdmissionService):
+class _QueueAdmission:
     """Defer projection-only tests to the legacy ingestion capture."""
 
     def __init__(
@@ -170,30 +146,33 @@ class _QueueAdmission(ExternalChannelIngressAdmissionService):
         return self.outcome
 
 
-class _ServiceFixture(NamedTuple):
-    service: ExternalChannelTransportIngestionService
-    ingestion: _Ingestion
-
-
 def _service(
     *,
     repository: _Repository | None = None,
     queue_outcome: ExternalChannelIngestionOutcome | None = None,
-) -> _ServiceFixture:
+) -> tuple[ExternalChannelTransportIngestionService, _Ingestion]:
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession() as session:
-            yield session
+    async def session_manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(cast(AsyncSession, object()))
 
     ingestion = _Ingestion()
-    return _ServiceFixture(
-        service=ExternalChannelTransportIngestionService(
-            session_manager=session_manager,
-            repository=repository or _Repository(),
-            ingestion_service=ingestion,
-            queue_admission_service=_QueueAdmission(queue_outcome),
+    return (
+        ExternalChannelTransportIngestionService(
+            session_manager=cast(SessionManager[WriteSession], session_manager),
+            repository=cast(
+                ExternalChannelRepository,
+                repository or _Repository(),
+            ),
+            ingestion_service=cast(
+                ExternalChannelConversationIngestionService,
+                ingestion,
+            ),
+            queue_admission_service=cast(
+                ExternalChannelIngressAdmissionService,
+                _QueueAdmission(queue_outcome),
+            ),
         ),
-        ingestion=ingestion,
+        ingestion,
     )
 
 
@@ -306,9 +285,7 @@ def _queued_outcome() -> ExternalChannelIngestionOutcome:
 
 @pytest.mark.asyncio
 async def test_slack_parent_invocation_projects_content_free_parent_request() -> None:
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     outcome = await service.ingest_slack_event(
         event=_slack_event(),
@@ -329,9 +306,7 @@ async def test_slack_parent_invocation_projects_content_free_parent_request() ->
 @pytest.mark.asyncio
 async def test_slack_callback_projects_expected_file_count() -> None:
     """The durable locator retains the bounded callback-observed file count."""
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     await service.ingest_slack_event(
         event=_slack_event(
@@ -357,9 +332,7 @@ async def test_slack_callback_projects_expected_file_count() -> None:
 async def test_slack_durable_admission_short_circuits_provider_history() -> None:
     """An established Session callback returns after its DB-only queue admission."""
     queued = _queued_outcome()
-    fixture = _service(queue_outcome=queued)
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service(queue_outcome=queued)
 
     outcome = await service.ingest_slack_event(
         event=_slack_event(thread_ts="90.000001"),
@@ -374,9 +347,7 @@ async def test_slack_durable_admission_short_circuits_provider_history() -> None
 
 @pytest.mark.asyncio
 async def test_slack_manual_thread_invocation_reuses_root_scope() -> None:
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     await service.ingest_slack_event(
         event=_slack_event(thread_ts="90.000001"),
@@ -393,9 +364,7 @@ async def test_slack_manual_thread_invocation_reuses_root_scope() -> None:
 
 @pytest.mark.asyncio
 async def test_slack_message_targeting_authorized_bot_projects_invocation() -> None:
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     await service.ingest_slack_event(
         event=_slack_event(
@@ -423,9 +392,7 @@ async def test_slack_message_targeting_authorized_bot_projects_invocation() -> N
 async def test_discord_parent_invocation_defers_thread_provisioning_to_ingestion() -> (
     None
 ):
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -448,9 +415,7 @@ async def test_discord_parent_invocation_defers_thread_provisioning_to_ingestion
 @pytest.mark.asyncio
 async def test_discord_callback_projects_expected_file_count() -> None:
     """The durable locator retains the bounded callback-observed file count."""
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -471,9 +436,7 @@ async def test_discord_callback_projects_expected_file_count() -> None:
 async def test_discord_durable_admission_short_circuits_provider_history() -> None:
     """A gateway callback returns after DB-only queue admission."""
     queued = _queued_outcome()
-    fixture = _service(queue_outcome=queued)
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service(queue_outcome=queued)
 
     outcome = await service.ingest_discord_event(
         event=_discord_event(
@@ -492,9 +455,7 @@ async def test_discord_durable_admission_short_circuits_provider_history() -> No
 
 @pytest.mark.asyncio
 async def test_discord_manual_thread_reuses_thread_without_provisioning() -> None:
-    fixture = _service()
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service()
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -516,23 +477,14 @@ async def test_discord_manual_thread_reuses_thread_without_provisioning() -> Non
 
 @pytest.mark.asyncio
 async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
-    resource = ExternalChannelResource(
-        id="resource-1",
-        connection_id="connection-1",
-        resource_type=ExternalChannelResourceType.THREAD,
-        provider_resource_key="discord:300:100",
-        labels={"delivery_channel_id": "201"},
-        status=ExternalChannelResourceStatus.ACTIVE,
-        discovered_at=_NOW,
-        latest_activity_at=_NOW,
-        unavailable_at=None,
-        deleted_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
+    resource = cast(
+        ExternalChannelResource,
+        SimpleNamespace(
+            provider_resource_key="discord:300:100",
+            labels={"delivery_channel_id": "201"},
+        ),
     )
-    fixture = _service(repository=_Repository(delivery_resource=resource))
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service(repository=_Repository(delivery_resource=resource))
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -553,29 +505,20 @@ async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
 @pytest.mark.asyncio
 async def test_discord_provisioned_thread_starter_reuses_root_scope() -> None:
     """A starter replay from an Azents-created Thread remains the root trigger."""
-    resource = ExternalChannelResource(
-        id="resource-1",
-        connection_id="connection-1",
-        resource_type=ExternalChannelResourceType.THREAD,
-        provider_resource_key="discord:300:100",
-        labels={
-            "source_channel_id": "200",
-            "parent_channel_id": "200",
-            "root_message_id": "100",
-            "thread_id": "100",
-            "delivery_channel_id": "100",
-        },
-        status=ExternalChannelResourceStatus.ACTIVE,
-        discovered_at=_NOW,
-        latest_activity_at=_NOW,
-        unavailable_at=None,
-        deleted_at=None,
-        created_at=_NOW,
-        updated_at=_NOW,
+    resource = cast(
+        ExternalChannelResource,
+        SimpleNamespace(
+            provider_resource_key="discord:300:100",
+            labels={
+                "source_channel_id": "200",
+                "parent_channel_id": "200",
+                "root_message_id": "100",
+                "thread_id": "100",
+                "delivery_channel_id": "100",
+            },
+        ),
     )
-    fixture = _service(repository=_Repository(provider_resource=resource))
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service(repository=_Repository(provider_resource=resource))
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -604,9 +547,9 @@ async def test_discord_provisioned_thread_starter_reuses_root_scope() -> None:
 @pytest.mark.asyncio
 async def test_discord_provider_native_thread_starter_keeps_thread_scope() -> None:
     """A provider-native Thread starter is not mistaken for a provisioned replay."""
-    fixture = _service(repository=_Repository(expected_delivery_channel_id="100"))
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service(
+        repository=_Repository(expected_delivery_channel_id="100")
+    )
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -629,9 +572,7 @@ async def test_discord_provider_native_thread_starter_keeps_thread_scope() -> No
 
 @pytest.mark.asyncio
 async def test_stale_discord_configuration_stops_before_provider_io() -> None:
-    fixture = _service(repository=_Repository(configuration_generation=3))
-    service = fixture.service
-    ingestion = fixture.ingestion
+    service, ingestion = _service(repository=_Repository(configuration_generation=3))
 
     outcome = await service.ingest_discord_event(
         event=_discord_event(

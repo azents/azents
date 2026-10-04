@@ -5,7 +5,6 @@ import datetime
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory import HistoricalMemoryCompletion
@@ -28,6 +27,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.authority import (
@@ -59,7 +59,7 @@ class _Ready:
     work_id: str
 
 
-async def _ready(manager: SessionManager[AsyncSession], *, empty: bool) -> _Ready:
+async def _ready(manager: SessionManager[WriteSession], *, empty: bool) -> _Ready:
     corpus = await seed_consolidation_corpus(manager)
     owners = ConsolidationOwnershipRepository(manager)
     claim = await owners.claim(corpus.team)
@@ -116,7 +116,7 @@ async def _ready(manager: SessionManager[AsyncSession], *, empty: bool) -> _Read
     return _Ready(corpus, claim.principal, frozen, work_id)
 
 
-async def _publish(manager: SessionManager[AsyncSession], ready: _Ready) -> str:
+async def _publish(manager: SessionManager[WriteSession], ready: _Ready) -> str:
     overview = validate_consolidation_overview(
         key=ready.principal.unit, markdown=ready.frozen.markdown
     )
@@ -131,11 +131,11 @@ async def _publish(manager: SessionManager[AsyncSession], ready: _Ready) -> str:
 
 @pytest.mark.parametrize("empty", [False, True])
 async def test_atomic_publication_records_exact_coverage_and_durable_uncertain_outcome(
-    rdb_session_manager: SessionManager[AsyncSession], empty: bool
+    rdb_session_manager: SessionManager[WriteSession], empty: bool
 ) -> None:
     ready = await _ready(rdb_session_manager, empty=empty)
     async with rdb_session_manager() as session:
-        work = await session.get(RDBConsolidationWork, ready.work_id)
+        work = await session.read_session.get(RDBConsolidationWork, ready.work_id)
         assert work is not None and work.state is ConsolidationWorkState.CONSIDERED
     revision_id = await _publish(rdb_session_manager, ready)
     result = await ConsolidationPublicationRepository(
@@ -143,20 +143,22 @@ async def test_atomic_publication_records_exact_coverage_and_durable_uncertain_o
     ).inspect_outcome(ready.principal)
     assert result is not None and result.revision_id == revision_id
     async with rdb_session_manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, ready.principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, ready.principal.attempt_id
+        )
         assert (
             attempt is not None and attempt.state is ConsolidationAttemptState.COMPLETED
         )
-        unit = await session.get(RDBConsolidationUnit, attempt.unit_id)
+        unit = await session.read_session.get(RDBConsolidationUnit, attempt.unit_id)
         assert unit is not None and unit.published_revision_id == revision_id
         assert unit.owner_token is unit.active_attempt_id is unit.lease_until is None
         assert unit.pass_upper_sequence is None and unit.no_progress_count == 0
-        revision = await session.get(RDBConsolidationRevision, revision_id)
+        revision = await session.read_session.get(RDBConsolidationRevision, revision_id)
         assert revision is not None
         assert (revision.rendered_block == "") == empty
         assert len(revision.rendered_block.encode()) <= 10000
         rows = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBConsolidationWork).where(
                     RDBConsolidationWork.agent_id == ready.corpus.team.agent_id
                 )
@@ -168,7 +170,7 @@ async def test_atomic_publication_records_exact_coverage_and_durable_uncertain_o
         assert own.published_revision_id == revision_id
         assert peer.state is ConsolidationWorkState.PENDING
         dependencies = list(
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBConsolidationRevisionDependency).where(
                     RDBConsolidationRevisionDependency.revision_id == revision_id
                 )
@@ -188,7 +190,7 @@ async def test_atomic_publication_records_exact_coverage_and_durable_uncertain_o
 
 
 async def test_content_change_after_legitimate_read_publishes_old_work_only(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, empty=False)
     now = datetime.datetime.now(datetime.UTC)
@@ -212,14 +214,16 @@ async def test_content_change_after_legitimate_read_publishes_old_work_only(
     assert len(page.entries) == 1 and page.entries[0].version.summary_generation == 2
     assert page.entries[0].work_id != ready.work_id
     async with rdb_session_manager() as session:
-        next_work = await session.get(RDBConsolidationWork, page.entries[0].work_id)
+        next_work = await session.read_session.get(
+            RDBConsolidationWork, page.entries[0].work_id
+        )
         assert (
             next_work is not None and next_work.state is ConsolidationWorkState.PENDING
         )
 
 
 async def test_archive_restore_between_freeze_and_publication_cannot_rehabilitate_bytes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, empty=False)
     async with rdb_session_manager() as session:
@@ -238,21 +242,21 @@ async def test_archive_restore_between_freeze_and_publication_cannot_rehabilitat
         await _publish(rdb_session_manager, ready)
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBConsolidationRevision)
             )
             == 0
         )
-        row = await session.get(RDBConsolidationWork, ready.work_id)
+        row = await session.read_session.get(RDBConsolidationWork, ready.work_id)
         assert row is not None and row.state is ConsolidationWorkState.CONSIDERED
 
 
 async def test_journal_never_accepts_peer_or_unpresented_work_and_cas_is_frozen(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, empty=False)
     async with rdb_session_manager() as session:
-        peer_id = await session.scalar(
+        peer_id = await session.read_session.scalar(
             sa.select(RDBConsolidationWork.id).where(
                 RDBConsolidationWork.associated_user_id
                 == ready.corpus.personal.associated_user_id
@@ -292,7 +296,7 @@ async def test_journal_never_accepts_peer_or_unpresented_work_and_cas_is_frozen(
         await _publish(rdb_session_manager, ready)
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBConsolidationRevision)
             )
             == 0
@@ -300,11 +304,11 @@ async def test_journal_never_accepts_peer_or_unpresented_work_and_cas_is_frozen(
 
 
 async def test_ordinary_source_read_is_not_implicit_work_presentation_or_disposition(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     ready = await _ready(rdb_session_manager, empty=False)
     async with rdb_session_manager() as session:
-        row = await session.get(RDBConsolidationWork, ready.work_id)
+        row = await session.read_session.get(RDBConsolidationWork, ready.work_id)
         assert row is not None
         row.state = ConsolidationWorkState.PENDING
         row.presented_attempt_id = None

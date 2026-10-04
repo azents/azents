@@ -7,7 +7,6 @@ from typing import Annotated, Literal
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, aliased
 
 from azents.core.enums import (
@@ -42,6 +41,7 @@ from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.historical_memory_consolidation.authority import consolidation_session
 from azents.repos.historical_memory_consolidation.foreground import (
@@ -100,7 +100,7 @@ class MemoryVfsRepository:
     """Own bounded SQL and current authorization for the Memory VFS."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
 
@@ -116,7 +116,7 @@ class MemoryVfsRepository:
         if not authority.memory_enabled:
             return None
         async with consolidation_session(self.session_manager) as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
             consumer = await HistoricalMemoryRepository(
@@ -179,7 +179,7 @@ class MemoryVfsRepository:
             return False
         async with self.session_manager() as session:
             return (
-                await session.scalar(
+                await session.write_session.scalar(
                     sa.select(sa.literal(True)).where(self._agent_gate(authority))
                 )
                 is True
@@ -228,7 +228,7 @@ class MemoryVfsRepository:
                 )
             else:
                 return None
-            row = (await session.execute(statement)).one_or_none()
+            row = (await session.write_session.execute(statement)).one_or_none()
         if row is None:
             return None
         return SavedMemoryVfsRecord(
@@ -279,7 +279,7 @@ class MemoryVfsRepository:
         async with self.session_manager() as session:
             rows = list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(
                             RDBAgentMemory.id,
                             RDBAgentMemory.user_id,
@@ -390,7 +390,7 @@ class MemoryVfsRepository:
             )
         )
         async with self.session_manager() as session:
-            row = (await session.execute(statement)).one_or_none()
+            row = (await session.write_session.execute(statement)).one_or_none()
         if row is None:
             return None
         return HistoricalMemoryVfsRecord(
@@ -477,7 +477,7 @@ class MemoryVfsRepository:
             ):
                 return None
             row = (
-                await session.execute(
+                await session.write_session.execute(
                     self._event_select().where(
                         RDBEvent.id == event_id,
                         RDBEvent.session_id == session_id,
@@ -489,7 +489,7 @@ class MemoryVfsRepository:
             ).one_or_none()
             if row is None:
                 return None
-            previous_id = await session.scalar(
+            previous_id = await session.write_session.scalar(
                 sa.select(RDBEvent.id)
                 .where(
                     RDBEvent.session_id == session_id,
@@ -500,7 +500,7 @@ class MemoryVfsRepository:
                 .order_by(RDBEvent.id.desc())
                 .limit(1)
             )
-            next_id = await session.scalar(
+            next_id = await session.write_session.scalar(
                 sa.select(RDBEvent.id)
                 .where(
                     RDBEvent.session_id == session_id,
@@ -530,7 +530,7 @@ class MemoryVfsRepository:
                 if remaining_bytes < 1:
                     remaining_bytes = 1
                 result_row = (
-                    await session.execute(
+                    await session.write_session.execute(
                         self._event_select()
                         .where(
                             RDBEvent.session_id == session_id,
@@ -588,7 +588,7 @@ class MemoryVfsRepository:
                 return MemoryVfsRecordPage((), False)
             rows = list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(RDBEvent)
                         .where(
                             RDBEvent.session_id == session_id,
@@ -610,7 +610,7 @@ class MemoryVfsRepository:
             if call_ids:
                 result_rows = list(
                     (
-                        await session.execute(
+                        await session.write_session.execute(
                             sa.select(RDBEvent).where(
                                 RDBEvent.session_id == session_id,
                                 RDBEvent.kind == EventKind.CLIENT_TOOL_RESULT,
@@ -718,7 +718,7 @@ class MemoryVfsRepository:
         if session_id is not None:
             statement = statement.where(RDBEvent.session_id == session_id)
         async with self.session_manager() as session:
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
             candidate_events: list[_EventCandidate] = []
             oversized = False
             for row in rows[:limit]:
@@ -820,7 +820,9 @@ class MemoryVfsRepository:
                     .order_by(RDBEvent.session_id, RDBEvent.id)
                     .limit(result_budget.row_limit)
                 )
-                result_rows = list((await session.execute(result_statement)).all())
+                result_rows = list(
+                    (await session.write_session.execute(result_statement)).all()
+                )
         results_by_call: dict[tuple[str, str], Event] = {}
         for row in result_rows[: len(call_pairs)]:
             if not row.fits or row.payload is None:
@@ -900,7 +902,7 @@ class MemoryVfsRepository:
             ):
                 return None
             row = (
-                await session.execute(
+                await session.write_session.execute(
                     self._event_select().where(
                         RDBEvent.id == event_id,
                         RDBEvent.session_id == session_id,
@@ -949,7 +951,7 @@ class MemoryVfsRepository:
                 return MemoryVfsRecordPage((), False)
             rows = list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(RDBEvent)
                         .where(
                             RDBEvent.session_id == session_id,
@@ -1088,7 +1090,7 @@ class MemoryVfsRepository:
         async with self.session_manager() as session:
             rows = list(
                 (
-                    await session.execute(
+                    await session.write_session.execute(
                         sa.select(
                             RDBAgentMemory.id,
                             RDBAgentMemory.user_id,
@@ -1160,7 +1162,7 @@ class MemoryVfsRepository:
                 RDBHistoricalMemorySource.source_session_id == source_session_id
             )
         async with self.session_manager() as session:
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
         return MemoryVfsUriPage(
             tuple(
                 "azents://memory/historical/"
@@ -1205,7 +1207,7 @@ class MemoryVfsRepository:
         if session_id is not None:
             statement = statement.where(RDBAgentSession.id == session_id)
         async with self.session_manager() as session:
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
         return MemoryVfsUriPage(
             tuple(
                 "azents://memory/sources/"
@@ -1260,7 +1262,7 @@ class MemoryVfsRepository:
             )
             if session_id is not None:
                 statement = statement.where(RDBEvent.session_id == session_id)
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
         return MemoryVfsUriPage(
             tuple(
                 f"azents://memory/sources/{self._scope(product_mode)}/"
@@ -1335,7 +1337,7 @@ class MemoryVfsRepository:
                 RDBHistoricalMemorySource.source_session_id == source_session_id
             )
         async with self.session_manager() as session:
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
         records = tuple(
             HistoricalMemoryVfsRecord(
                 source_session_id=row.source_session_id,
@@ -1429,7 +1431,7 @@ class MemoryVfsRepository:
         if session_id is not None:
             statement = statement.where(RDBAgentSession.id == session_id)
         async with self.session_manager() as session:
-            rows = list((await session.execute(statement)).all())
+            rows = list((await session.write_session.execute(statement)).all())
         records = tuple(
             SourceSessionVfsRecord(
                 session_id=row.id,
@@ -1452,7 +1454,7 @@ class MemoryVfsRepository:
 
     async def _source_visible(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: MemoryVfsAuthority,
         *,
         scope: Literal["team", "user"],
@@ -1462,7 +1464,7 @@ class MemoryVfsRepository:
         if scope_filter is None:
             return False
         return (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.literal(True))
                 .select_from(RDBAgentSession)
                 .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)

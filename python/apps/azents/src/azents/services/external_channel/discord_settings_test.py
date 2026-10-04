@@ -31,6 +31,7 @@ from azents.core.external_model_settings import (
     ExternalModelRejected,
     ExternalModelSettingsRejectionCode,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelInteraction,
@@ -108,7 +109,7 @@ _CONTEXT = DiscordSettingsContext(
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     yield MagicMock(spec=AsyncSession)
 
 

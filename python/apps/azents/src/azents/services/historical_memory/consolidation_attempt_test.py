@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.active_model_capabilities import (
     CapturedStoredChoice,
@@ -36,6 +35,7 @@ from azents.rdb.models.historical_memory_consolidation import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -154,7 +154,7 @@ class _Harness:
 
 
 async def _harness(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     *,
     block_at: int,
@@ -169,8 +169,8 @@ async def _harness(
             encrypted_credentials="unused",
             config=None,
         )
-        session.add(integration)
-        await session.flush()
+        session.write_session.add(integration)
+        await session.write_session.flush()
         main = make_test_model_selection_dict(
             integration_id=integration.id, model_identifier="main-not-permitted"
         )
@@ -190,7 +190,7 @@ async def _harness(
         second = second_options[1]["candidates"]
         assert isinstance(first, list) and isinstance(second, list)
         options[1]["candidates"] = [*first, *second]
-        agent = await session.get(RDBAgent, corpus.team.agent_id)
+        agent = await session.read_session.get(RDBAgent, corpus.team.agent_id)
         assert agent is not None
         agent.model_selection = main
         agent.selectable_model_options = options
@@ -272,12 +272,14 @@ async def _harness(
 
 
 async def _assert_no_dispatch_or_publication(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     harness: _Harness,
 ) -> None:
     claim = harness.claims[0]
     async with manager() as session:
-        attempt = await session.get(RDBConsolidationAttempt, claim.principal.attempt_id)
+        attempt = await session.read_session.get(
+            RDBConsolidationAttempt, claim.principal.attempt_id
+        )
         assert attempt is not None and attempt.model_requests == 0
         assert attempt.completed_revision_id is None
     assert all(client.closed for client in harness.clients)
@@ -293,7 +295,7 @@ async def _assert_no_dispatch_or_publication(
 
 @pytest.mark.parametrize("block_at", [1, 2])
 async def test_claim_heartbeat_remains_active_during_setup_and_quota_handoff(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     block_at: int,
 ) -> None:
@@ -310,13 +312,17 @@ async def test_claim_heartbeat_remains_active_during_setup_and_quota_handoff(
                 seconds=60
             )
             async with rdb_session_manager() as session:
-                unit = await session.get(RDBConsolidationUnit, claim.unit_id)
+                unit = await session.read_session.get(
+                    RDBConsolidationUnit, claim.unit_id
+                )
                 assert unit is not None
                 unit.lease_until = before
             await harness.clock.ticks.put(None)
             assert await harness.clock.requests.get() == 30
             async with rdb_session_manager() as session:
-                unit = await session.get(RDBConsolidationUnit, claim.unit_id)
+                unit = await session.read_session.get(
+                    RDBConsolidationUnit, claim.unit_id
+                )
                 assert (
                     unit is not None
                     and unit.lease_until is not None
@@ -333,7 +339,7 @@ async def test_claim_heartbeat_remains_active_during_setup_and_quota_handoff(
 
 @pytest.mark.parametrize("block_at", [1, 2])
 async def test_renewal_authority_loss_quiesces_setup_or_handoff_without_late_work(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     block_at: int,
 ) -> None:
@@ -345,7 +351,9 @@ async def test_renewal_authority_loss_quiesces_setup_or_handoff_without_late_wor
         await harness.block.started.wait()
         assert await harness.clock.requests.get() == 30
         async with rdb_session_manager() as session:
-            unit = await session.get(RDBConsolidationUnit, harness.claims[0].unit_id)
+            unit = await session.read_session.get(
+                RDBConsolidationUnit, harness.claims[0].unit_id
+            )
             assert unit is not None
             unit.owner_token = "b" * 32
         await harness.clock.ticks.put(None)
@@ -357,7 +365,7 @@ async def test_renewal_authority_loss_quiesces_setup_or_handoff_without_late_wor
 
 @pytest.mark.parametrize("block_at", [1, 2])
 async def test_absolute_claim_deadline_cancels_blocked_setup_or_handoff(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     block_at: int,
 ) -> None:
@@ -380,7 +388,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
     repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
 
     async def capture(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: tuple[ConfiguredModelIdentity, ...],

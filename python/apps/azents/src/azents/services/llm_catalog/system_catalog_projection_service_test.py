@@ -2,10 +2,9 @@
 
 from unittest.mock import AsyncMock
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import LLMProvider
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
@@ -16,7 +15,7 @@ from azents.services.model_metadata_source import ModelMetadataSourceSyncService
 
 
 async def test_system_catalogs_exclude_integration_scoped_providers(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Listing local current state never starts remote source collection."""
     source = AsyncMock(spec=ModelMetadataSourceSyncService)

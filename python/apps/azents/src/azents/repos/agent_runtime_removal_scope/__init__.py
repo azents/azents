@@ -4,7 +4,6 @@ import datetime
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ActionExecutionStatus,
@@ -35,6 +34,7 @@ from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContextProject,
 )
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     AgentRuntimeRemovalCleanupBatch,
@@ -62,7 +62,7 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def get_impact(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> AgentRuntimeRemovalImpact:
@@ -78,7 +78,7 @@ class AgentRuntimeRemovalScopeRepository:
             session_kind=AgentSessionKind.SUBAGENT,
         )
         active_run_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count(RDBAgentRun.id))
                 .join(
                     RDBAgentSession,
@@ -92,7 +92,7 @@ class AgentRuntimeRemovalScopeRepository:
             or 0
         )
         queued_runtime_action_count = int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count(RDBActionExecution.id))
                 .join(
                     RDBAgentSession,
@@ -115,7 +115,7 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def interrupt_work(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         operation_id: str,
@@ -125,7 +125,7 @@ class AgentRuntimeRemovalScopeRepository:
         active_run_session_ids = sa.select(RDBAgentRun.session_id).where(
             RDBAgentRun.status.in_(_ACTIVE_RUN_STATUSES)
         )
-        stop_rows = await session.execute(
+        stop_rows = await session.write_session.execute(
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.agent_id == agent_id,
@@ -144,7 +144,7 @@ class AgentRuntimeRemovalScopeRepository:
         )
         stop_session_ids = tuple(stop_rows.scalars().all())
 
-        cancelled_rows = await session.execute(
+        cancelled_rows = await session.write_session.execute(
             sa.update(RDBActionExecution)
             .where(
                 RDBActionExecution.session_id.in_(
@@ -164,7 +164,7 @@ class AgentRuntimeRemovalScopeRepository:
             .returning(RDBActionExecution.id)
         )
         cancelled_runtime_action_count = len(cancelled_rows.scalars().all())
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntimeRemovalInterruption(
             stop_session_ids=stop_session_ids,
             cancelled_runtime_action_count=cancelled_runtime_action_count,
@@ -176,12 +176,12 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def has_active_work(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> bool:
         """Return whether Agent work still blocks destructive cleanup."""
-        running_session_exists = await session.scalar(
+        running_session_exists = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBAgentSession.agent_id == agent_id,
@@ -191,7 +191,7 @@ class AgentRuntimeRemovalScopeRepository:
         )
         if running_session_exists:
             return True
-        active_run_exists = await session.scalar(
+        active_run_exists = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBAgentRun.session_id.in_(
@@ -206,7 +206,7 @@ class AgentRuntimeRemovalScopeRepository:
         if active_run_exists:
             return True
         return bool(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(
                     sa.exists().where(
                         RDBActionExecution.session_id.in_(
@@ -223,7 +223,7 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def cleanup_batch(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         agent_runtime_id: str | None,
@@ -242,14 +242,14 @@ class AgentRuntimeRemovalScopeRepository:
         )
         if after_context_id is not None:
             statement = statement.where(RDBSessionAgentContext.id > after_context_id)
-        contexts = list((await session.scalars(statement)).all())
+        contexts = list((await session.write_session.scalars(statement)).all())
         if not contexts:
             await self._cleanup_agent_runtime_projections(
                 session,
                 agent_id=agent_id,
                 agent_runtime_id=agent_runtime_id,
             )
-            await session.flush()
+            await session.write_session.flush()
             return AgentRuntimeRemovalCleanupBatch(
                 cursor_context_id=after_context_id,
                 scanned_count=0,
@@ -284,7 +284,7 @@ class AgentRuntimeRemovalScopeRepository:
                 context.working_folder_cleanup_summary = _REMOVAL_CLEANUP_SUMMARY
                 context.working_folder_cleanup_completed_at = now
             invalidated_count += 1
-        await session.flush()
+        await session.write_session.flush()
         return AgentRuntimeRemovalCleanupBatch(
             cursor_context_id=contexts[-1].id,
             scanned_count=len(contexts),
@@ -294,13 +294,13 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def require_cleanup_complete(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         agent_runtime_id: str | None,
     ) -> None:
         """Reject finalization while Runtime-owned product state remains."""
-        pending_binding = await session.scalar(
+        pending_binding = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBSessionAgentContext.agent_id == agent_id,
@@ -316,7 +316,7 @@ class AgentRuntimeRemovalScopeRepository:
         if pending_binding:
             raise RuntimeError("Agent Runtime Session binding cleanup is incomplete")
 
-        automatic_project_policy_exists = await session.scalar(
+        automatic_project_policy_exists = await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBAgentAutomaticProjectSetting.agent_id == agent_id,
@@ -369,9 +369,11 @@ class AgentRuntimeRemovalScopeRepository:
             ),
         )
         for _, predicate, label in remaining:
-            if await session.scalar(sa.select(sa.exists().where(predicate))):
+            if await session.read_session.scalar(
+                sa.select(sa.exists().where(predicate))
+            ):
                 raise RuntimeError(f"{label} remains after Runtime removal")
-        if agent_runtime_id is not None and await session.scalar(
+        if agent_runtime_id is not None and await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBGitWorktreePathClaim.agent_runtime_id == agent_runtime_id
@@ -379,7 +381,7 @@ class AgentRuntimeRemovalScopeRepository:
             )
         ):
             raise RuntimeError("Git worktree path claims remain after Runtime removal")
-        if await session.scalar(
+        if await session.read_session.scalar(
             sa.select(
                 sa.exists().where(
                     RDBToolkitState.agent_id == agent_id,
@@ -397,14 +399,14 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def _count_sessions(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_kind: AgentSessionKind,
     ) -> int:
         """Count active Sessions of one kind without reading private metadata."""
         return int(
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count(RDBAgentSession.id)).where(
                     RDBAgentSession.agent_id == agent_id,
                     RDBAgentSession.session_kind == session_kind,
@@ -416,19 +418,19 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def _delete_context_runtime_metadata(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         context_ids: Sequence[str],
     ) -> None:
         """Remove Runtime-owned Project and worktree metadata for one page."""
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgentContextGitWorktree).where(
                 RDBSessionAgentContextGitWorktree.session_agent_context_id.in_(
                     context_ids
                 )
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSessionAgentContextProject).where(
                 RDBSessionAgentContextProject.session_agent_context_id.in_(context_ids)
             )
@@ -436,14 +438,14 @@ class AgentRuntimeRemovalScopeRepository:
 
     async def _cleanup_agent_runtime_projections(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         agent_runtime_id: str | None,
     ) -> None:
         """Remove Agent-level path projections after all contexts are covered."""
         if agent_runtime_id is not None:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBGitWorktreePathClaim).where(
                     RDBGitWorktreePathClaim.agent_runtime_id == agent_runtime_id
                 )
@@ -451,7 +453,7 @@ class AgentRuntimeRemovalScopeRepository:
         automatic_project_items_exist = sa.exists().where(
             RDBAgentAutomaticProjectItem.agent_id == agent_id
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentAutomaticProjectSetting)
             .where(
                 RDBAgentAutomaticProjectSetting.agent_id == agent_id,
@@ -463,7 +465,7 @@ class AgentRuntimeRemovalScopeRepository:
                 updated_at=sa.func.now(),
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgentAutomaticProjectItem).where(
                 RDBAgentAutomaticProjectItem.agent_id == agent_id
             )
@@ -473,13 +475,15 @@ class AgentRuntimeRemovalScopeRepository:
             RDBAgentProjectDefault,
             RDBAgentProjectPreset,
         ):
-            await session.execute(sa.delete(model).where(model.agent_id == agent_id))
-        await session.execute(
+            await session.write_session.execute(
+                sa.delete(model).where(model.agent_id == agent_id)
+            )
+        await session.write_session.execute(
             sa.delete(RDBRuntimeWebService).where(
                 RDBRuntimeWebService.agent_id == agent_id
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBToolkitState).where(
                 RDBToolkitState.agent_id == agent_id,
                 RDBToolkitState.toolkit_namespace.in_(

@@ -7,7 +7,6 @@ from typing import NamedTuple
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.chatgpt_oauth import (
     ChatGPTOAuthConnectionMethod,
@@ -16,6 +15,7 @@ from azents.core.chatgpt_oauth import (
 from azents.core.crypto import CredentialCipher
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.chatgpt_oauth_session import RDBChatGPTOAuthSession
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -36,7 +36,7 @@ def _next_suffix() -> str:
     return uuid.uuid4().hex[:12]
 
 
-async def _create_workspace(session: AsyncSession) -> str:
+async def _create_workspace(session: WriteSession) -> str:
     """Create Workspace for tests and return ID."""
     suffix = _next_suffix()
     repo = WorkspaceRepository()
@@ -53,7 +53,7 @@ async def _create_workspace(session: AsyncSession) -> str:
     return workspace_id
 
 
-async def _create_user(session: AsyncSession) -> str:
+async def _create_user(session: WriteSession) -> str:
     """Create User for tests and return ID."""
     repo = UserRepository()
     user = await repo.create(
@@ -71,7 +71,7 @@ class _OAuthSessionFixture(NamedTuple):
 
 
 async def _create_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     method: ChatGPTOAuthConnectionMethod = ChatGPTOAuthConnectionMethod.CALLBACK,
     state: str | None = None,
@@ -117,7 +117,7 @@ class TestChatGPTOAuthSessionRepository:
     """ChatGPTOAuthSessionRepository tests."""
 
     async def test_create_encrypts_session_secrets(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Store PKCE verifier and device auth ID encrypted."""
         repo, session_id = await _create_session(
@@ -126,7 +126,7 @@ class TestChatGPTOAuthSessionRepository:
 
         created = await repo.get_by_id_with_secrets(rdb_session, session_id)
         assert created is not None
-        rdb_result = await rdb_session.execute(
+        rdb_result = await rdb_session.write_session.execute(
             sa.select(RDBChatGPTOAuthSession).where(
                 RDBChatGPTOAuthSession.id == session_id
             )
@@ -139,7 +139,7 @@ class TestChatGPTOAuthSessionRepository:
         assert rdb.encrypted_code_verifier != created.code_verifier
         assert rdb.encrypted_device_auth_id != created.device_auth_id
 
-    async def test_get_by_id_hides_secrets(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_id_hides_secrets(self, rdb_session: WriteSession) -> None:
         """Default fetch result does not include secret value."""
         repo, session_id = await _create_session(rdb_session)
 
@@ -150,7 +150,7 @@ class TestChatGPTOAuthSessionRepository:
         assert not hasattr(session, "device_auth_id")
         assert session.status == ChatGPTOAuthSessionStatus.PENDING
 
-    async def test_get_pending_by_state(self, rdb_session: AsyncSession) -> None:
+    async def test_get_pending_by_state(self, rdb_session: WriteSession) -> None:
         """Fetch pending session by state."""
         state = f"state-{_next_suffix()}"
         repo, session_id = await _create_session(rdb_session, state=state)
@@ -162,7 +162,7 @@ class TestChatGPTOAuthSessionRepository:
         assert session.code_verifier.startswith("verifier-")
 
     async def test_consumed_session_is_not_pending(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Session consumed as connected status is excluded from pending state fetch."""
         state = f"state-{_next_suffix()}"
@@ -176,7 +176,7 @@ class TestChatGPTOAuthSessionRepository:
         assert pending is None
 
     async def test_expired_session_is_not_pending(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Expired pending session is not fetched by state."""
         state = f"state-{_next_suffix()}"
@@ -192,7 +192,7 @@ class TestChatGPTOAuthSessionRepository:
         assert pending is None
 
     async def test_cancelled_session_cannot_be_consumed(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Session already cancelled cannot be returned to connected."""
         repo, session_id = await _create_session(rdb_session)
@@ -206,7 +206,7 @@ class TestChatGPTOAuthSessionRepository:
         assert current is not None
         assert current.status == ChatGPTOAuthSessionStatus.CANCELLED
 
-    async def test_cancel_session(self, rdb_session: AsyncSession) -> None:
+    async def test_cancel_session(self, rdb_session: WriteSession) -> None:
         """Transition Session to cancelled status."""
         repo, session_id = await _create_session(rdb_session)
 
@@ -215,7 +215,7 @@ class TestChatGPTOAuthSessionRepository:
         assert isinstance(result, Success)
         assert result.value.status == ChatGPTOAuthSessionStatus.CANCELLED
 
-    async def test_update_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_update_not_found(self, rdb_session: WriteSession) -> None:
         """Return NotFound when updating nonexistent session."""
         repo = _make_repo()
 

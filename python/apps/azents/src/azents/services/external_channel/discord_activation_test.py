@@ -4,12 +4,14 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config, Settings
+from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -22,6 +24,7 @@ from azents.core.external_channel_provider import (
     DiscordConnectionCredentials,
     ExternalChannelCapabilitySnapshot,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.discord_connection_operations import (
     DiscordConnectionOperationRepository,
 )
@@ -35,7 +38,6 @@ from azents.services.external_channel.discord_activation import (
     DiscordConnectionActivationService,
 )
 from azents.services.external_channel.discord_api import (
-    DiscordAPIAuthenticatedSession,
     DiscordAPIClient,
     DiscordAPIConfigurationInvalid,
     DiscordAPIError,
@@ -48,18 +50,17 @@ from azents.services.external_channel.discord_api import (
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
 
 
-class _SessionDouble(AsyncSession):
+class _SessionDouble:
     """Record durable activation transactions."""
 
     def __init__(self, events: list[str]) -> None:
-        super().__init__()
         self.events = events
 
     async def commit(self) -> None:
         self.events.append("commit")
 
 
-class _RepositoryDouble(ExternalChannelRepository):
+class _RepositoryDouble:
     """Capture authority mutation inputs without persisting secrets."""
 
     def __init__(
@@ -79,7 +80,7 @@ class _RepositoryDouble(ExternalChannelRepository):
 
     async def get_connection_configuration(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         connection_id: str,
     ) -> ExternalChannelConnectionConfiguration:
@@ -90,7 +91,7 @@ class _RepositoryDouble(ExternalChannelRepository):
 
     async def activate_discord_connection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> ExternalChannelConnection | None:
         del session
@@ -100,7 +101,7 @@ class _RepositoryDouble(ExternalChannelRepository):
 
     async def prepare_discord_callback(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> bool:
         """Record durable PING verification preparation."""
@@ -111,7 +112,7 @@ class _RepositoryDouble(ExternalChannelRepository):
 
     async def clear_prepared_discord_callback(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> bool:
         """Record provisional callback cleanup without retaining its selector."""
@@ -122,7 +123,7 @@ class _RepositoryDouble(ExternalChannelRepository):
 
     async def record_discord_activation_failure(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> ExternalChannelConnection:
         """Record the safe durable reason without exposing credentials."""
@@ -139,7 +140,7 @@ class _RepositoryDouble(ExternalChannelRepository):
         )
 
 
-class _DiscordClientDouble(DiscordAPIClient):
+class _DiscordClientDouble:
     """Capture provider calls in their required order."""
 
     def __init__(
@@ -161,10 +162,20 @@ class _DiscordClientDouble(DiscordAPIClient):
         self,
         *,
         bot_token: str,
-    ) -> AsyncGenerator["_DiscordSessionDouble", None]:
+    ) -> AsyncGenerator["_DiscordClientDouble", None]:
         """Yield one authenticated activation workflow session."""
         assert bot_token == "discord-bot-token"
-        yield _DiscordSessionDouble(self)
+        yield self
+
+    async def get_current_application(
+        self,
+    ) -> DiscordApplicationMetadata:
+        self.events.append("metadata")
+        return DiscordApplicationMetadata(application_id="app-1", verify_key="ab" * 32)
+
+    def get_current_bot_user_id(self) -> str:
+        self.events.append("bot")
+        return "bot-1"
 
     async def configure_interactions_endpoint(
         self,
@@ -181,21 +192,6 @@ class _DiscordClientDouble(DiscordAPIClient):
             return "https://callbacks.example/unexpected"
         return endpoint_url
 
-
-class _DiscordSessionDouble(DiscordAPIAuthenticatedSession):
-    """Typed authenticated SDK workflow returned by the client factory."""
-
-    def __init__(self, client: _DiscordClientDouble) -> None:
-        self.client = client
-
-    async def get_current_application(self) -> DiscordApplicationMetadata:
-        self.client.events.append("metadata")
-        return DiscordApplicationMetadata(application_id="app-1", verify_key="ab" * 32)
-
-    def get_current_bot_user_id(self) -> str:
-        self.client.events.append("bot")
-        return "bot-1"
-
     async def reconcile_required_guild_commands(
         self,
         *,
@@ -204,9 +200,9 @@ class _DiscordSessionDouble(DiscordAPIAuthenticatedSession):
     ) -> DiscordGuildCommandSetCapability:
         assert application_id == "app-1"
         assert guild_id == "guild-1"
-        self.client.events.append("command")
-        if self.client.command_error is not None:
-            raise self.client.command_error
+        self.events.append("command")
+        if self.command_error is not None:
+            raise self.command_error
         return DiscordGuildCommandSetCapability(
             schema_version=1,
             command_ids={
@@ -301,27 +297,20 @@ def _service(
     session = _SessionDouble(events)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield session
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        yield ReadWriteSession(cast(AsyncSession, session))
 
     return DiscordConnectionActivationService(
-        config=Config.from_settings(
-            Settings(
-                _env_file=None,
-                rdb_host="unused",
-                rdb_user="unused",
-                rdb_db_name="unused",
-                auth_jwt_secret_key="test-secret-key-for-activation",
-                credential_encryption_key="unused",
-                external_channel_discord_callback_url=callback_url,
-            )
+        config=cast(
+            Config,
+            SimpleNamespace(external_channel_discord_callback_url=callback_url),
         ),
         operations=DiscordConnectionOperationRepository(
             session_manager=session_manager,
-            external_channel_repository=repository,
+            external_channel_repository=cast(ExternalChannelRepository, repository),
         ),
         credentials_codec=codec,
-        discord_client=client,
+        discord_client=cast(DiscordAPIClient, client),
     )
 
 

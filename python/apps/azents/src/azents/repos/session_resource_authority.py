@@ -2,14 +2,13 @@
 
 import dataclasses
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStatus,
 )
+from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
@@ -40,7 +39,7 @@ type PublicSessionResourceResult = (
 
 
 async def authorize_public_session_resource(
-    session: AsyncSession,
+    session: ReadSession,
     *,
     agent_session: AgentSession,
     user_id: str,
@@ -117,7 +116,7 @@ async def authorize_public_session_resource(
 
 
 async def resolve_agent_session_resource(
-    session: AsyncSession,
+    session: ReadSession,
     *,
     agent_session: AgentSession,
     expected_workspace_id: str,

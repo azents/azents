@@ -1,10 +1,10 @@
 """System User role repository."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import SystemUserRole
 from azents.rdb.models.system_user_role import RDBSystemUserRole
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     SystemUserRoleAssignment,
@@ -18,18 +18,18 @@ _SYSTEM_ROLE_MUTATION_LOCK_ID = 0x617A656E7473
 class SystemUserRoleRepository:
     """Instance-wide User role assignment repository."""
 
-    async def acquire_mutation_lock(self, session: AsyncSession) -> None:
+    async def acquire_mutation_lock(self, session: WriteSession) -> None:
         """Serialize system role mutations for final-admin enforcement.
 
         :param session: Database session
         """
-        await session.execute(
+        await session.write_session.execute(
             sa.select(sa.func.pg_advisory_xact_lock(_SYSTEM_ROLE_MUTATION_LOCK_ID))
         )
 
     async def get(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         role: SystemUserRole,
     ) -> SystemUserRoleAssignment | None:
@@ -40,14 +40,16 @@ class SystemUserRoleRepository:
         :param role: System role
         :return: Assignment or None
         """
-        rdb_assignment = await session.get(RDBSystemUserRole, (user_id, role))
+        rdb_assignment = await session.read_session.get(
+            RDBSystemUserRole, (user_id, role)
+        )
         if rdb_assignment is None:
             return None
         return self._build(rdb_assignment)
 
     async def has_role(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         role: SystemUserRole,
     ) -> bool:
@@ -58,7 +60,7 @@ class SystemUserRoleRepository:
         :param role: System role
         :return: Whether assignment exists
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(sa.literal(True)).where(
                 sa.exists().where(
                     RDBSystemUserRole.user_id == user_id,
@@ -70,7 +72,7 @@ class SystemUserRoleRepository:
 
     async def list_by_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
     ) -> list[SystemUserRoleAssignment]:
         """List assignments for a User.
@@ -79,7 +81,7 @@ class SystemUserRoleRepository:
         :param user_id: User ID
         :return: Role assignments
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSystemUserRole)
             .where(RDBSystemUserRole.user_id == user_id)
             .order_by(RDBSystemUserRole.role)
@@ -88,7 +90,7 @@ class SystemUserRoleRepository:
 
     async def list_all(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         offset: int = 0,
         limit: int = 50,
@@ -100,10 +102,10 @@ class SystemUserRoleRepository:
         :param limit: Maximum record count
         :return: Assignment list
         """
-        total_result = await session.execute(
+        total_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(RDBSystemUserRole)
         )
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBSystemUserRole)
             .order_by(RDBSystemUserRole.granted_at.desc())
             .offset(offset)
@@ -116,7 +118,7 @@ class SystemUserRoleRepository:
 
     async def count_by_role(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         role: SystemUserRole,
     ) -> int:
         """Count assignments for a role.
@@ -125,7 +127,7 @@ class SystemUserRoleRepository:
         :param role: System role
         :return: Assignment count
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(sa.func.count())
             .select_from(RDBSystemUserRole)
             .where(RDBSystemUserRole.role == role)
@@ -134,7 +136,7 @@ class SystemUserRoleRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: SystemUserRoleAssignmentCreate,
     ) -> SystemUserRoleAssignment:
         """Create a role assignment.
@@ -148,14 +150,14 @@ class SystemUserRoleRepository:
             role=create.role,
             granted_by_user_id=create.granted_by_user_id,
         )
-        session.add(rdb_assignment)
-        await session.flush()
-        await session.refresh(rdb_assignment)
+        session.write_session.add(rdb_assignment)
+        await session.write_session.flush()
+        await session.write_session.refresh(rdb_assignment)
         return self._build(rdb_assignment)
 
     async def delete(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         user_id: str,
         role: SystemUserRole,
     ) -> bool:
@@ -166,7 +168,7 @@ class SystemUserRoleRepository:
         :param role: System role
         :return: Whether an assignment was deleted
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.delete(RDBSystemUserRole)
             .where(
                 RDBSystemUserRole.user_id == user_id,

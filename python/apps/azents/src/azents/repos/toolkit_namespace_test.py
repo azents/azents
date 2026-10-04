@@ -1,13 +1,13 @@
 """Toolkit namespace allocation repository tests."""
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
 
 
-async def _seed_namespace_fixture(session: AsyncSession) -> None:
-    await session.execute(
+async def _seed_namespace_fixture(session: WriteSession) -> None:
+    await session.write_session.execute(
         sa.text(
             """
             INSERT INTO workspaces (id, name, handle)
@@ -15,7 +15,7 @@ async def _seed_namespace_fixture(session: AsyncSession) -> None:
             """
         )
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.text(
             """
             INSERT INTO agents (
@@ -52,7 +52,7 @@ async def _seed_namespace_fixture(session: AsyncSession) -> None:
             """
         )
     )
-    await session.execute(
+    await session.write_session.execute(
         sa.text(
             """
             INSERT INTO toolkit_configs (
@@ -93,11 +93,11 @@ async def _seed_namespace_fixture(session: AsyncSession) -> None:
             """
         )
     )
-    await session.flush()
+    await session.write_session.flush()
 
 
 async def test_allocation_skips_cross_base_namespace_collision(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Consume another base's exact namespace instead of overwriting it."""
     await _seed_namespace_fixture(rdb_session)
@@ -127,7 +127,7 @@ async def test_allocation_skips_cross_base_namespace_collision(
     assert (second.namespace, second.ordinal) == ("mcp_3", 3)
 
 
-async def test_retired_namespace_is_not_reused(rdb_session: AsyncSession) -> None:
+async def test_retired_namespace_is_not_reused(rdb_session: WriteSession) -> None:
     """Keep the old final name reserved after a Toolkit changes base Slug."""
     await _seed_namespace_fixture(rdb_session)
     repository = ToolkitNamespaceRepository()
@@ -154,7 +154,7 @@ async def test_retired_namespace_is_not_reused(rdb_session: AsyncSession) -> Non
     assert original.namespace == "mcp"
     assert replacement.namespace == "other"
     assert next_toolkit.namespace == "mcp_2"
-    retired_toolkit_id = await rdb_session.scalar(
+    retired_toolkit_id = await rdb_session.read_session.scalar(
         sa.text(
             """
             SELECT toolkit_id
@@ -167,7 +167,7 @@ async def test_retired_namespace_is_not_reused(rdb_session: AsyncSession) -> Non
 
 
 async def test_matching_active_reservation_is_reused(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Return the same reservation for detach/reattach-style reconciliation."""
     await _seed_namespace_fixture(rdb_session)
@@ -187,7 +187,7 @@ async def test_matching_active_reservation_is_reused(
     )
 
     assert reused == first
-    count = await rdb_session.scalar(
+    count = await rdb_session.read_session.scalar(
         sa.text(
             """
             SELECT COUNT(*)
@@ -200,7 +200,7 @@ async def test_matching_active_reservation_is_reused(
 
 
 async def test_toolkit_delete_retires_reservation_via_foreign_key(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Clear the active mapping while retaining the reserved namespace."""
     await _seed_namespace_fixture(rdb_session)
@@ -212,13 +212,13 @@ async def test_toolkit_delete_retires_reservation_via_foreign_key(
         base_slug="mcp",
     )
 
-    await rdb_session.execute(
+    await rdb_session.write_session.execute(
         sa.text("DELETE FROM toolkit_configs WHERE id = 'toolkit-namespace-a'")
     )
-    await rdb_session.flush()
+    await rdb_session.write_session.flush()
 
     row = (
-        await rdb_session.execute(
+        await rdb_session.write_session.execute(
             sa.text(
                 """
                 SELECT toolkit_id, namespace

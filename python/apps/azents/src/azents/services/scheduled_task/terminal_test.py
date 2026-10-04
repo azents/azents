@@ -17,6 +17,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.engine.events.types import Event, ScheduledTaskResultPayload
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -41,9 +42,9 @@ _CYCLE_ID = "c" * 32
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[AsyncSession]:
+async def _session_manager() -> AsyncIterator[WriteSession]:
     """Yield one transaction-shaped session double."""
-    yield require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+    yield ReadWriteSession(require_instance(AsyncMock(spec=AsyncSession), AsyncSession))
 
 
 def _cycle(*, binding_id: str | None = None) -> ScheduledTaskCycleRecord:
@@ -129,7 +130,7 @@ class _RunRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> SimpleNamespace:
         del session
@@ -139,7 +140,7 @@ class _RunRepository:
 
     async def update(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
         patch: AgentRunPatch,
     ) -> SimpleNamespace:
@@ -162,7 +163,7 @@ class _EventRepository:
 
     async def get_by_external_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
         external_id: str,
     ) -> Event | None:
@@ -174,7 +175,7 @@ class _EventRepository:
 
     async def append(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         create: EventCreate,
     ) -> Event:
         del session
@@ -200,7 +201,7 @@ class _CycleRepository:
 
     async def lock(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         session_id: str,
@@ -217,7 +218,7 @@ class _CycleRepository:
 
     async def delete_started(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         record: ScheduledTaskCycleRecord,
     ) -> bool:
@@ -238,7 +239,7 @@ class _TaskRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         del session
@@ -248,7 +249,7 @@ class _TaskRepository:
 
     async def delete_completed_once(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         task_id: str,
         cycle_id: str,
@@ -261,7 +262,7 @@ class _TaskRepository:
 
     async def release_completed_recurring(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         task_id: str,
         cycle_id: str,
@@ -500,9 +501,11 @@ async def test_transaction_completion_precedes_caller_dispatch() -> None:
     fixture = _service(order=order, task=_task())
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
+    async def manager() -> AsyncIterator[WriteSession]:
         order.append("begin")
-        yield require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+        yield ReadWriteSession(
+            require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+        )
         order.append("commit")
 
     fixture.service.operations.session_manager = manager

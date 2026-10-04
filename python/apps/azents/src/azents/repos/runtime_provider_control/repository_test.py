@@ -9,7 +9,6 @@ from azents_runtime_control.provider import (
     RuntimeProviderOperationalWarning,
     RuntimeProviderOperationalWarningSeverity,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -22,6 +21,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.rdb.models.runtime_provider_control import RDBRuntimeProviderConnection
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import (
     RuntimeProviderBootstrapSourceCreate,
     RuntimeProviderCreate,
@@ -44,7 +44,7 @@ from .repository import RuntimeProviderControlRepository
 
 
 async def _provider_source_and_binding(
-    session: AsyncSession,
+    session: WriteSession,
 ) -> tuple[str, str, str]:
     """Create a durable Provider, bootstrap source, and issued-token binding."""
     provider_repository = RuntimeProviderRepository()
@@ -91,7 +91,7 @@ class TestRuntimeProviderControlRepository:
 
     async def test_grant_consumes_once_and_persists_credential(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A grant creates exactly one credential even after replay."""
         repository = RuntimeProviderControlRepository()
@@ -148,7 +148,7 @@ class TestRuntimeProviderControlRepository:
 
     async def test_connection_diagnostics_replace_only_on_active_generation(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """A reconnect never inherits or permits updates to an older snapshot."""
         repository = RuntimeProviderControlRepository()
@@ -219,13 +219,13 @@ class TestRuntimeProviderControlRepository:
             operational_diagnostics=replacement,
         )
         first_row = (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(RDBRuntimeProviderConnection).where(
                     RDBRuntimeProviderConnection.id == first.id
                 )
             )
         ).scalar_one()
-        await rdb_session.refresh(first_row)
+        await rdb_session.write_session.refresh(first_row)
         assert first_row.diagnostics_checked_at == replacement.checked_at
         assert first_row.operational_diagnostics is not None
         warnings = first_row.operational_diagnostics["warnings"]
@@ -271,7 +271,7 @@ class TestRuntimeProviderControlRepository:
             operational_diagnostics=initial,
         )
         second_row = (
-            await rdb_session.execute(
+            await rdb_session.write_session.execute(
                 sa.select(RDBRuntimeProviderConnection).where(
                     RDBRuntimeProviderConnection.id == second.id
                 )
@@ -308,7 +308,7 @@ class TestRuntimeProviderControlRepository:
 
     async def test_revoked_credential_cannot_heartbeat_connection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Credential revocation immediately prevents connection heartbeat."""
         repository = RuntimeProviderControlRepository()
@@ -420,7 +420,7 @@ class TestRuntimeProviderControlRepository:
 
     async def test_revoked_binding_disconnects_kubernetes_connection(
         self,
-        rdb_session: AsyncSession,
+        rdb_session: WriteSession,
     ) -> None:
         """Binding revocation immediately removes workload connection authority."""
         repository = RuntimeProviderControlRepository()

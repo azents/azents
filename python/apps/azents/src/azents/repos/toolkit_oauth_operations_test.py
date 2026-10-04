@@ -51,6 +51,7 @@ from azents.rdb.models.user_email import RDBUserEmail
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.account_access import AccountAccessOperationRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -88,22 +89,22 @@ from azents.services.toolkit_oauth.service import ToolkitOAuthService
 class OAuthScope:
     """Observe the real infrastructure lifetime; no fake commit/SQL adapter."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.sessions: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
+        self.active: list[WriteSession] = []
         self.commits = 0
         self.failures = 0
         self.fault: OAuthFault | None = None
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "Completed OAuth operations must not nest"
         try:
             async with self.manager() as session:
                 self.sessions.append(session)
                 self.active.append(session)
-                connection = await session.connection()
+                connection = await session.write_session.connection()
                 fault = self.fault
                 if fault is not None:
                     event.listen(
@@ -132,7 +133,9 @@ class OAuthScope:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 class OAuthFault:
@@ -145,15 +148,15 @@ class OAuthFault:
         self.pause = False
         self.reached = asyncio.Event()
         self.release = asyncio.Event()
-        self.trace: list[tuple[str, AsyncSession]] = []
+        self.trace: list[tuple[str, ReadSession]] = []
         self.installation_inputs: list[tuple[GitHubInstallationSnapshot, ...]] = []
         self.sql_trace: list[str] = []
         self.sql_stage: str | None = None
         self.sql_cancel = False
 
-    async def point(self, stage: str, session: AsyncSession) -> None:
+    async def point(self, stage: str, session: ReadSession) -> None:
         assert self.scope.active == [session]
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         self.trace.append((stage, session))
         if stage == self.stage:
             self.reached.set()
@@ -199,7 +202,7 @@ class OAuthToolkits(ToolkitRepository):
         self.fault = fault
 
     async def get_shared_by_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> ToolkitConfig | None:
         result = await super().get_shared_by_id(session, toolkit_id)
         await self.fault.point("toolkit", session)
@@ -212,7 +215,7 @@ class OAuthConnections(MCPOAuthConnectionRepository):
         self.fault = fault
 
     async def get_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnection | None:
         result = await super().get_by_toolkit_id(session, toolkit_id)
         await self.fault.point("connection", session)
@@ -220,7 +223,7 @@ class OAuthConnections(MCPOAuthConnectionRepository):
 
     async def upsert_connected(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         toolkit_id: str,
         issuer: str | None,
@@ -258,7 +261,7 @@ class OAuthConnections(MCPOAuthConnectionRepository):
         return result
 
     async def delete_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: WriteSession, toolkit_id: str
     ) -> None:
         await super().delete_by_toolkit_id(session, toolkit_id)
         await self.fault.point("delete", session)
@@ -270,7 +273,7 @@ class OAuthInstallations(GithubUserInstallationRepository):
 
     async def sync(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         user_id: str,
         platform_app_id: str,
         installations: Sequence[GitHubInstallationSnapshot],
@@ -284,7 +287,7 @@ class OAuthUsers(UserRepository):
     def __init__(self, fault: OAuthFault) -> None:
         self.fault = fault
 
-    async def get(self, session: AsyncSession, user_id: str) -> User | None:
+    async def get(self, session: ReadSession, user_id: str) -> User | None:
         result = await super().get(session, user_id)
         await self.fault.point("user", session)
         return result
@@ -294,7 +297,7 @@ class OAuthSessions(SessionRepository):
     def __init__(self, fault: OAuthFault) -> None:
         self.fault = fault
 
-    async def get(self, session: AsyncSession, session_id: str) -> Session | None:
+    async def get(self, session: ReadSession, session_id: str) -> Session | None:
         result = await super().get(session, session_id)
         await self.fault.point("session", session)
         return result
@@ -305,7 +308,7 @@ class OAuthWorkspaces(WorkspaceRepository):
         self.fault = fault
 
     async def get_by_id(
-        self, session: AsyncSession, workspace_id: str
+        self, session: ReadSession, workspace_id: str
     ) -> Workspace | None:
         result = await super().get_by_id(session, workspace_id)
         await self.fault.point("workspace", session)
@@ -318,7 +321,7 @@ class OAuthMembers(WorkspaceUserRepository):
 
     async def get_by_workspace_and_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> WorkspaceUser | None:
@@ -341,7 +344,7 @@ class OAuthSubject:
 
 @dataclasses.dataclass(frozen=True)
 class OAuthFixture:
-    manager: SessionManager[AsyncSession]
+    manager: SessionManager[WriteSession]
     scope: OAuthScope
     fault: OAuthFault
     repository: ToolkitOAuthOperationRepository
@@ -349,7 +352,7 @@ class OAuthFixture:
     subject: OAuthSubject
 
 
-async def oauth_fixture(manager: SessionManager[AsyncSession]) -> OAuthFixture:
+async def oauth_fixture(manager: SessionManager[WriteSession]) -> OAuthFixture:
     cipher = CredentialCipher(Fernet.generate_key().decode())
     async with manager() as session:
         users = UserRepository()
@@ -488,7 +491,7 @@ async def store(
 
 async def connection_row(fixture: OAuthFixture) -> dict[str, object] | None:
     async with fixture.manager() as session:
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(*RDBMCPOAuthConnection.__table__.columns).where(
                 RDBMCPOAuthConnection.toolkit_id == fixture.subject.toolkit_id
             )
@@ -499,7 +502,7 @@ async def connection_row(fixture: OAuthFixture) -> dict[str, object] | None:
 
 async def installation_rows(fixture: OAuthFixture) -> list[dict[str, object]]:
     async with fixture.manager() as session:
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(*RDBGithubUserInstallation.__table__.columns)
             .where(
                 RDBGithubUserInstallation.user_id.in_(
@@ -543,9 +546,9 @@ async def make_owned(fixture: OAuthFixture) -> None:
             main_model_label="default",
             lightweight_model_label="default",
         )
-        session.add(agent)
-        await session.flush()
-        await session.execute(
+        session.write_session.add(agent)
+        await session.write_session.flush()
+        await session.write_session.execute(
             sa.update(RDBToolkitConfig)
             .where(RDBToolkitConfig.id == fixture.subject.toolkit_id)
             .values(owner_agent_id=agent.id)
@@ -559,7 +562,7 @@ async def corrupt_identity(fixture: OAuthFixture, kind: str) -> str:
         await make_owned(fixture)
     elif kind == "foreign":
         async with fixture.manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBToolkitConfig)
                 .where(RDBToolkitConfig.id == fixture.subject.toolkit_id)
                 .values(workspace_id=fixture.subject.foreign_workspace_id)
@@ -664,7 +667,8 @@ class PostSQLOAuthSession(AsyncSession):
             and stage == self.fault.sql_stage
             and stage is not None
         ):
-            assert self.fault.scope.active == [self]
+            assert self.fault.scope.active
+            assert self.fault.scope.active[-1].read_session is self
             assert self.in_transaction()
             self.fault.reached.set()
             await self.fault.release.wait()
@@ -682,7 +686,7 @@ class IndependentOAuthManager:
         self.pids: list[int] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         session = (
             AsyncSession(self.bind, expire_on_commit=False)
             if self.fault is None
@@ -693,7 +697,7 @@ class IndependentOAuthManager:
                 pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
                 assert isinstance(pid, int)
                 self.pids.append(pid)
-                yield session
+                yield ReadWriteSession(session)
             except asyncio.CancelledError:
                 await session.rollback()
                 raise
@@ -708,26 +712,26 @@ async def cleanup_independent(fixture: OAuthFixture) -> None:
     """Delete only UUID-seeded subjects, never broad table cleanup."""
     subject = fixture.subject
     async with fixture.manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBAgent).where(
                 RDBAgent.workspace_id.in_(
                     (subject.requester.workspace_id, subject.foreign_workspace_id)
                 )
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(
                 RDBWorkspace.id.in_(
                     (subject.requester.workspace_id, subject.foreign_workspace_id)
                 )
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBUser).where(
                 RDBUser.id.in_((subject.requester.user_id, subject.other_user_id))
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBUserEmail).where(
                 RDBUserEmail.user_id.in_(
                     (subject.requester.user_id, subject.other_user_id)
@@ -755,45 +759,48 @@ class Invalidation(StrEnum):
 
 
 async def invalidate(
-    fixture: OAuthFixture, session: AsyncSession, mutation: Invalidation
+    fixture: OAuthFixture, session: WriteSession, mutation: Invalidation
 ) -> None:
     """Isolated committed SQL facts; defensive deletes are not public API claims."""
     subject = fixture.subject
     if mutation is Invalidation.TOOLKIT_DELETE:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBToolkitConfig).where(RDBToolkitConfig.id == subject.toolkit_id)
         )
     elif mutation is Invalidation.USER_DISABLE:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBUser)
             .where(RDBUser.id == subject.requester.user_id)
             .values(access_disabled_at=datetime.now(UTC))
         )
-        assert await session.get(RDBWorkspaceUser, subject.member_id) is not None
+        assert (
+            await session.read_session.get(RDBWorkspaceUser, subject.member_id)
+            is not None
+        )
     elif mutation is Invalidation.USER_DELETE:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBUser).where(RDBUser.id == subject.requester.user_id)
         )
     elif mutation is Invalidation.SESSION_DELETE:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSession).where(RDBSession.id == subject.requester.session_id)
         )
     elif mutation is Invalidation.SESSION_REVOKE:
         await SessionRepository().revoke(session, subject.requester.session_id)
     elif mutation is Invalidation.SESSION_EXPIRE:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSession)
             .where(RDBSession.id == subject.requester.session_id)
             .values(expires_at=datetime.now(UTC) - timedelta(hours=1))
         )
     elif mutation is Invalidation.SESSION_FOREIGN:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBSession)
             .where(RDBSession.id == subject.requester.session_id)
             .values(user_id=subject.other_user_id)
         )
     elif mutation is Invalidation.WORKSPACE_DELETE:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBWorkspace).where(
                 RDBWorkspace.id == subject.requester.workspace_id
             )
@@ -801,18 +808,18 @@ async def invalidate(
     elif mutation is Invalidation.MEMBERSHIP_REMOVE:
         await WorkspaceUserRepository().delete(session, subject.member_id)
     elif mutation is Invalidation.MEMBER_DEMOTION:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBWorkspaceUser)
             .where(RDBWorkspaceUser.id == subject.member_id)
             .values(role=WorkspaceUserRole.MEMBER)
         )
     elif mutation is Invalidation.HANDLE_RENAME:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBWorkspace)
             .where(RDBWorkspace.id == subject.requester.workspace_id)
             .values(handle=f"renamed-{uuid4().hex}")
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBWorkspace)
             .where(RDBWorkspace.id == subject.foreign_workspace_id)
             .values(handle=subject.handle)
@@ -893,7 +900,7 @@ def expected_denial(mutation: Invalidation, *, flow: str) -> ToolkitOAuthDenied 
 
 @pytest.mark.parametrize("kind", ["shared", "missing", "owned", "foreign"])
 async def test_pair_preserves_toolkit_then_connection_even_absent_and_detached(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     kind: str,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -925,7 +932,7 @@ async def test_pair_preserves_toolkit_then_connection_even_absent_and_detached(
         assert sa.inspect(pair.connection, raiseerr=False) is None
     fixture.scope.assert_closed()
     async with fixture.manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBMCPOAuthConnection).where(
                 RDBMCPOAuthConnection.toolkit_id == fixture.subject.toolkit_id
             )
@@ -936,7 +943,7 @@ async def test_pair_preserves_toolkit_then_connection_even_absent_and_detached(
 
 @pytest.mark.parametrize("kind", ["shared", "missing", "owned", "foreign"])
 async def test_saved_and_optional_snapshot_exact_shared_workspace_and_none_no_scope(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     kind: str,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -967,7 +974,7 @@ async def test_saved_and_optional_snapshot_exact_shared_workspace_and_none_no_sc
 
 @pytest.mark.parametrize("column", ["toolkit_credentials", "client_id", "access_token"])
 async def test_pair_cipher_failure_propagates_after_real_select_and_closes_scope(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     column: str,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -976,19 +983,19 @@ async def test_pair_cipher_failure_propagates_after_real_select_and_closes_scope
     ) == Success(None)
     async with fixture.manager() as session:
         if column == "toolkit_credentials":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBToolkitConfig)
                 .where(RDBToolkitConfig.id == fixture.subject.toolkit_id)
                 .values(encrypted_credentials="invalid-test-ciphertext")
             )
         elif column == "client_id":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBMCPOAuthConnection)
                 .where(RDBMCPOAuthConnection.toolkit_id == fixture.subject.toolkit_id)
                 .values(encrypted_client_id="invalid-test-ciphertext")
             )
         else:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBMCPOAuthConnection)
                 .where(RDBMCPOAuthConnection.toolkit_id == fixture.subject.toolkit_id)
                 .values(encrypted_access_token="invalid-test-ciphertext")
@@ -1012,7 +1019,7 @@ async def test_pair_cipher_failure_propagates_after_real_select_and_closes_scope
 )
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_real_read_fault_and_actual_task_cancel_close_without_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
     stage: str,
     cancel: bool,
@@ -1029,7 +1036,7 @@ async def test_real_read_fault_and_actual_task_cancel_close_without_mutation(
 
 @pytest.mark.parametrize("tokens", [False, True])
 async def test_full_upsert_encryption_connected_without_tokens_and_conflict_replacement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     tokens: bool,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -1084,7 +1091,7 @@ async def test_full_upsert_encryption_connected_without_tokens_and_conflict_repl
 
 
 async def test_connect_retains_tokens_and_exchange_null_refresh_clears_row(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
     initial = connection_write(tokens=True, label="original")
@@ -1125,7 +1132,7 @@ async def test_connect_retains_tokens_and_exchange_null_refresh_clears_row(
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_actual_full_write_error_or_task_cancel_restores_entire_previous_row(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     existing: bool,
     cancel: bool,
 ) -> None:
@@ -1145,7 +1152,7 @@ async def test_actual_full_write_error_or_task_cancel_restores_entire_previous_r
 )
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_final_authority_actual_read_fault_or_task_cancel_aborts_before_upsert(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     stage: str,
     cancel: bool,
 ) -> None:
@@ -1157,7 +1164,7 @@ async def test_final_authority_actual_read_fault_or_task_cancel_aborts_before_up
 
 @pytest.mark.parametrize("kind", ["shared", "missing", "owned", "foreign"])
 async def test_atomic_disconnect_guard_delete_and_missing_connection_idempotent(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     kind: str,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -1189,7 +1196,7 @@ async def test_atomic_disconnect_guard_delete_and_missing_connection_idempotent(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_disconnect_fault_or_task_cancel_after_real_delete_restores_connection(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -1203,7 +1210,7 @@ async def test_disconnect_fault_or_task_cancel_after_real_delete_restores_connec
 
 
 async def test_installation_order_duplicates_avatar_and_user_app_isolation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
     initial = (
@@ -1288,7 +1295,7 @@ async def test_installation_order_duplicates_avatar_and_user_app_isolation(
 
 @pytest.mark.parametrize("source", ["empty", "all_invalid"])
 async def test_empty_or_decoded_all_invalid_installations_prune_exact_user_app(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     source: str,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -1331,7 +1338,7 @@ async def test_empty_or_decoded_all_invalid_installations_prune_exact_user_app(
 
 
 async def test_original_avatar_persistence_projection_distinction_survives_actual_sync(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
     raw: list[dict[str, object]] = [
@@ -1438,7 +1445,7 @@ async def test_installation_sql_fault_task_cancel_after_write_prune_restores_bat
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_installation_post_complete_sync_fault_cancel_rolls_back_upsert_and_prune(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -1453,7 +1460,7 @@ async def test_installation_post_complete_sync_fault_cancel_rolls_back_upsert_an
 
 
 async def test_empty_app_id_transparently_raises_without_pruning(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
     assert await fixture.repository.sync_installations(
@@ -1604,7 +1611,9 @@ def install_service_external_gap(
         calls.append("github_exchange")
         return "synthetic-temporary-github-token"
 
-    async def github_list(*args: object) -> tuple[GitHubInstallationSnapshot, ...]:
+    async def github_list(
+        *args: object,
+    ) -> tuple[GitHubInstallationSnapshot, ...]:
         del args
         await gap()
         return decode_github_installations(
@@ -1618,7 +1627,11 @@ def install_service_external_gap(
                 },
                 {
                     "id": 3,
-                    "account": {"login": "projected", "type": "User", "avatar_url": ""},
+                    "account": {
+                        "login": "projected",
+                        "type": "User",
+                        "avatar_url": "",
+                    },
                 },
                 {"id": "invalid", "account": None},
             ]
@@ -1725,7 +1738,7 @@ async def test_paused_service_final_write_rechecks_independent_committed_authori
             try:
                 if mutation is Invalidation.OWNER_TRANSFER:
                     async with primary() as session:
-                        await session.execute(
+                        await session.write_session.execute(
                             sa.update(RDBWorkspaceUser)
                             .where(RDBWorkspaceUser.id == fixture.subject.member_id)
                             .values(role=WorkspaceUserRole.OWNER)
@@ -1774,7 +1787,7 @@ async def test_paused_service_final_write_rechecks_independent_committed_authori
                 baseline_installations = await installation_rows(fixture)
                 async with primary() as session:
                     if mutation is Invalidation.OWNER_TRANSFER:
-                        current = await session.get(
+                        current = await session.write_session.get(
                             RDBWorkspaceUser, fixture.subject.member_id
                         )
                         assert (
@@ -1783,7 +1796,7 @@ async def test_paused_service_final_write_rechecks_independent_committed_authori
                         )
                     elif mutation is Invalidation.USER_DISABLE:
                         assert (
-                            await session.get(
+                            await session.write_session.get(
                                 RDBWorkspaceUser, fixture.subject.member_id
                             )
                             is not None
@@ -1885,7 +1898,7 @@ async def test_paused_service_final_write_rechecks_independent_committed_authori
 
 @pytest.mark.parametrize("kind", ["missing", "owned", "foreign"])
 async def test_final_shared_write_rejects_exact_toolkit_eligibility_without_upsert(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     kind: str,
 ) -> None:
     fixture = await oauth_fixture(rdb_session_manager)
@@ -1916,7 +1929,7 @@ async def test_final_shared_write_rejects_exact_toolkit_eligibility_without_upse
     "first_invalid", ["user", "session", "workspace", "membership", "permission"]
 )
 async def test_invalid_facts_keep_auth_workspace_member_permission_toolkit_order(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     flow: str,
     first_invalid: str,
 ) -> None:
@@ -1931,13 +1944,13 @@ async def test_invalid_facts_keep_auth_workspace_member_permission_toolkit_order
     async with fixture.manager() as session:
         await invalidate(fixture, session, mutations[first_invalid])
         if first_invalid in {"user", "session"}:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBWorkspace).where(
                     RDBWorkspace.id == fixture.subject.requester.workspace_id
                 )
             )
         else:
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBToolkitConfig).where(
                     RDBToolkitConfig.id == fixture.subject.toolkit_id
                 )

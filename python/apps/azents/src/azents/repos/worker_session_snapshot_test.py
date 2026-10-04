@@ -21,6 +21,7 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -46,7 +47,7 @@ class _ObservedProjection(SessionExecutionRepository):
     ) -> None:
         self.manager = manager
         self.error = error
-        self.calls: list[tuple[AsyncSession, str, int]] = []
+        self.calls: list[tuple[WriteSession, str, int]] = []
         self.statements: list[str] = []
         self.returned: CanonicalExecutionSnapshot | None = None
 
@@ -56,22 +57,28 @@ class _ObservedProjection(SessionExecutionRepository):
         self.statements.append(statement)
 
     async def load_canonical_snapshot(
-        self, session: AsyncSession, *, session_id: str, owner_generation: int
+        self, session: ReadSession, *, session_id: str, owner_generation: int
     ) -> CanonicalExecutionSnapshot:
         assert self.manager.active and session is self.manager.sessions[-1]
         self.calls.append((session, session_id, owner_generation))
-        event.listen(session.sync_session, "do_orm_execute", self._record_statement)
+        event.listen(
+            session.write_session.sync_session, "do_orm_execute", self._record_statement
+        )
         try:
             result = await super().load_canonical_snapshot(
                 session, session_id=session_id, owner_generation=owner_generation
             )
-            assert session.in_transaction()
+            assert session.read_session.in_transaction()
             self.returned = result
             if self.error is not None:
                 raise self.error
             return result
         finally:
-            event.remove(session.sync_session, "do_orm_execute", self._record_statement)
+            event.remove(
+                session.write_session.sync_session,
+                "do_orm_execute",
+                self._record_statement,
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -88,7 +95,7 @@ class _SnapshotSubject:
 
 
 async def _subject(
-    manager: SessionManager[AsyncSession], handle: str, *, child: bool
+    manager: SessionManager[WriteSession], handle: str, *, child: bool
 ) -> _SnapshotSubject:
     sessions = AgentSessionRepository()
     async with manager() as session:
@@ -123,7 +130,7 @@ async def _subject(
 
 
 async def _assert_equivalent(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     subject: _SnapshotSubject,
     wrapper: WorkerSessionSnapshotOperationRepository,
     projection: _ObservedProjection,
@@ -146,7 +153,7 @@ async def _assert_equivalent(
 
 @pytest.mark.parametrize("child", [False, True])
 async def test_snapshot_after_claim_preserves_root_agent_workspace_and_lineage(
-    rdb_session_manager: SessionManager[AsyncSession], child: bool
+    rdb_session_manager: SessionManager[WriteSession], child: bool
 ) -> None:
     """Claim completes first; the exact canonical DTO returns after unlocked SQL."""
     observed = ObservedReadManager(rdb_session_manager)
@@ -190,12 +197,12 @@ def _run(session_id: str, index: int, status: AgentRunStatus) -> RDBAgentRun:
 
 @pytest.mark.parametrize("status", [AgentRunStatus.PENDING, AgentRunStatus.RUNNING])
 async def test_snapshot_preserves_command_recoverable_run_and_completed_idle_state(
-    rdb_session_manager: SessionManager[AsyncSession], status: AgentRunStatus
+    rdb_session_manager: SessionManager[WriteSession], status: AgentRunStatus
 ) -> None:
     subject = await _subject(rdb_session_manager, "snapshot-work-state", child=True)
     now = datetime.datetime.now(datetime.UTC)
     async with rdb_session_manager() as session:
-        row = await session.get(RDBAgentSession, subject.session_id)
+        row = await session.read_session.get(RDBAgentSession, subject.session_id)
         assert row is not None
         row.pending_command_id = "command-001"
         row.pending_command_name = "compact"
@@ -206,10 +213,10 @@ async def test_snapshot_preserves_command_recoverable_run_and_completed_idle_sta
         recoverable = _run(subject.session_id, 1, status)
         completed = _run(subject.session_id, 2, AgentRunStatus.COMPLETED)
         other_root_run = _run(subject.root_session_id, 1, AgentRunStatus.PENDING)
-        session.add_all([recoverable, completed, other_root_run])
-        await session.flush()
+        session.write_session.add_all([recoverable, completed, other_root_run])
+        await session.write_session.flush()
         row.pending_idle_continuation_run_id = completed.id
-        await session.flush()
+        await session.write_session.flush()
         recoverable_id, completed_id = recoverable.id, completed.id
     observed = ObservedReadManager(rdb_session_manager)
     projection = _ObservedProjection(observed, None)
@@ -230,7 +237,7 @@ async def test_snapshot_preserves_command_recoverable_run_and_completed_idle_sta
 @pytest.mark.parametrize("phase", ["started", "admitted"])
 @pytest.mark.parametrize("decommissioning", [False, True])
 async def test_snapshot_keeps_archived_started_continuation_exception_unchanged(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     phase: Literal["started", "admitted"],
     decommissioning: bool,
 ) -> None:
@@ -238,16 +245,16 @@ async def test_snapshot_keeps_archived_started_continuation_exception_unchanged(
         rdb_session_manager, "snapshot-archived-cycle", child=False
     )
     async with rdb_session_manager() as session:
-        row = await session.get(RDBAgentSession, subject.session_id)
+        row = await session.read_session.get(RDBAgentSession, subject.session_id)
         assert row is not None
         await _archive_with_scheduled_continuation(
             session, agent_session=row, phase=phase
         )
         if decommissioning:
-            agent = await session.get(RDBAgent, subject.agent_id)
+            agent = await session.read_session.get(RDBAgent, subject.agent_id)
             assert agent is not None
             agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
-        await session.flush()
+        await session.write_session.flush()
     observed = ObservedReadManager(rdb_session_manager)
     projection = _ObservedProjection(observed, None)
     wrapper = WorkerSessionSnapshotOperationRepository(observed, projection)
@@ -273,7 +280,7 @@ SnapshotFailure = Literal["missing", "stale", "idle", "command", "idle-run", "li
     "failure", ["missing", "stale", "idle", "command", "idle-run", "lineage"]
 )
 async def test_snapshot_wrapper_preserves_bounded_canonical_errors_and_read_cleanup(
-    rdb_session_manager: SessionManager[AsyncSession], failure: SnapshotFailure
+    rdb_session_manager: SessionManager[WriteSession], failure: SnapshotFailure
 ) -> None:
     """Representative validations remain the core repository's authority."""
     subject = await _subject(
@@ -281,7 +288,7 @@ async def test_snapshot_wrapper_preserves_bounded_canonical_errors_and_read_clea
     )
     session_id, generation = subject.session_id, subject.generation
     async with rdb_session_manager() as session:
-        row = await session.get(RDBAgentSession, session_id)
+        row = await session.read_session.get(RDBAgentSession, session_id)
         assert row is not None
         if failure == "missing":
             session_id = "0" * 32
@@ -293,14 +300,16 @@ async def test_snapshot_wrapper_preserves_bounded_canonical_errors_and_read_clea
             row.pending_command_id = "incomplete-command"
         elif failure == "idle-run":
             run = _run(session_id, 1, AgentRunStatus.RUNNING)
-            session.add(run)
-            await session.flush()
+            session.write_session.add(run)
+            await session.write_session.flush()
             row.pending_idle_continuation_run_id = run.id
         else:
-            node = await session.get(RDBSessionAgent, subject.session_agent_id)
+            node = await session.read_session.get(
+                RDBSessionAgent, subject.session_agent_id
+            )
             assert node is not None
             node.parent_session_agent_id = node.id
-        await session.flush()
+        await session.write_session.flush()
     observed = ObservedReadManager(rdb_session_manager)
     projection = _ObservedProjection(observed, None)
     wrapper = WorkerSessionSnapshotOperationRepository(observed, projection)
@@ -323,7 +332,7 @@ async def test_snapshot_wrapper_preserves_bounded_canonical_errors_and_read_clea
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_snapshot_read_failure_or_cancellation_propagates_after_real_projection(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     subject = await _subject(rdb_session_manager, "snapshot-read-failure", child=False)
     observed = ObservedReadManager(rdb_session_manager)
@@ -345,7 +354,7 @@ class _PausedProjection(_ObservedProjection):
         self.release = asyncio.Event()
 
     async def load_canonical_snapshot(
-        self, session: AsyncSession, *, session_id: str, owner_generation: int
+        self, session: ReadSession, *, session_id: str, owner_generation: int
     ) -> CanonicalExecutionSnapshot:
         result = await super().load_canonical_snapshot(
             session, session_id=session_id, owner_generation=owner_generation
@@ -356,7 +365,7 @@ class _PausedProjection(_ObservedProjection):
 
 
 async def test_task_cancellation_after_canonical_sql_abandons_snapshot_read_scope(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     subject = await _subject(rdb_session_manager, "snapshot-task-cancel", child=False)
     observed = ObservedReadManager(rdb_session_manager)

@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 import pytest
 from azcommon import di
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ScheduledTaskStatus
 from azents.job_runtime.local import LocalJobRuntime
@@ -22,6 +21,7 @@ from azents.job_runtime.types import (
     JobRuntime,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.scheduled_task_state import ScheduledTaskStateRepository
 from azents.repos.scheduled_task_state.data import ScheduledTaskState
 from azents.repos.scheduler_state_operations import SchedulerStateOperationRepository
@@ -464,13 +464,13 @@ async def test_normal_stale_settlement_none_keeps_existing_success_log(
 class RealBoundary:
     """Delegate every SQL scope to genuine PostgreSQL and observe its completion."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.active: list[AsyncSession] = []
-        self.sessions: list[AsyncSession] = []
+        self.active: list[WriteSession] = []
+        self.sessions: list[WriteSession] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         async with self.manager() as session:
             self.active.append(session)
             self.sessions.append(session)
@@ -481,7 +481,9 @@ class RealBoundary:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 class BoundaryHandle(JobHandle):
@@ -533,7 +535,7 @@ class BoundaryLogs(logging.Handler):
 
 @pytest.mark.parametrize("fail", [False, True])
 async def test_real_scheduler_job_runtime_and_logs_follow_completed_pg_operations(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     fail: bool,
 ) -> None:
@@ -591,7 +593,7 @@ async def test_real_scheduler_job_runtime_and_logs_follow_completed_pg_operation
 
 
 async def test_cancelled_real_scheduler_waiter_keeps_committed_lease_and_shielded_job(
-    rdb_session_manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     boundary = RealBoundary(rdb_session_manager)
     repository = SchedulerStateOperationRepository(
@@ -670,7 +672,7 @@ async def test_external_runtime_error_keeps_existing_failure_settlement(
 
 @pytest.mark.parametrize("closed", [False, True])
 async def test_real_runtime_closed_submit_or_nullable_summary_preserves_settlement(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     closed: bool,
 ) -> None:

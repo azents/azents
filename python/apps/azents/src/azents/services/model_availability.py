@@ -5,7 +5,6 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, SelectableModelCandidate
 from azents.core.agent_session_data import AgentSession
@@ -21,6 +20,7 @@ from azents.core.model_availability import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
@@ -70,7 +70,7 @@ class SessionModelAvailabilityService:
     """Project model recovery state from PostgreSQL and mutate reservations."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
@@ -244,7 +244,7 @@ class SessionModelAvailabilityService:
 
     async def _authorize(
         self,
-        db: AsyncSession,
+        db: WriteSession,
         *,
         agent_id: str,
         session_id: str,

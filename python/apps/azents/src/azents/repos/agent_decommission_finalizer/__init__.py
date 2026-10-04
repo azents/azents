@@ -3,7 +3,6 @@
 import datetime
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentDecommissionStatus, AgentLifecycleStatus
 from azents.rdb.models.agent import RDBAgent
@@ -29,6 +28,7 @@ from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.toolkit import RDBAgentToolkit
 from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 
 def _terminal_delete_pending(runtime: RDBAgentRuntime) -> bool:
@@ -45,7 +45,7 @@ class AgentDecommissionFinalizerRepository:
 
     async def finalize(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         job_id: str,
         agent_id: str,
@@ -53,7 +53,7 @@ class AgentDecommissionFinalizerRepository:
         now: datetime.datetime,
     ) -> bool:
         """Delete verified Agent-owned rows and complete its job tombstone."""
-        job = await session.scalar(
+        job = await session.write_session.scalar(
             sa.select(RDBAgentDecommissionJob)
             .where(
                 RDBAgentDecommissionJob.id == job_id,
@@ -66,7 +66,7 @@ class AgentDecommissionFinalizerRepository:
         if job is None:
             return False
 
-        agent = await session.scalar(
+        agent = await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
@@ -79,7 +79,7 @@ class AgentDecommissionFinalizerRepository:
 
         await self._require_absent_lifecycle_roots(session, agent_id=agent_id)
 
-        runtime = await session.scalar(
+        runtime = await session.write_session.scalar(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.agent_id == agent_id)
             .with_for_update()
@@ -87,7 +87,7 @@ class AgentDecommissionFinalizerRepository:
         if runtime is not None:
             if _terminal_delete_pending(runtime):
                 raise RuntimeError("AgentRuntime terminal deletion is not acknowledged")
-            await session.delete(runtime)
+            await session.write_session.delete(runtime)
 
         for model in (
             RDBAgentAdmin,
@@ -97,9 +97,11 @@ class AgentDecommissionFinalizerRepository:
             RDBAgentToolkit,
             RDBAgentMemory,
         ):
-            await session.execute(sa.delete(model).where(model.agent_id == agent_id))
+            await session.write_session.execute(
+                sa.delete(model).where(model.agent_id == agent_id)
+            )
 
-        await session.delete(agent)
+        await session.write_session.delete(agent)
         job.status = AgentDecommissionStatus.COMPLETED
         job.lease_owner = None
         job.lease_until = None
@@ -108,12 +110,12 @@ class AgentDecommissionFinalizerRepository:
         job.last_error_summary = None
         job.completed_at = now
         job.updated_at = now
-        await session.flush()
+        await session.write_session.flush()
         return True
 
     async def _require_absent_lifecycle_roots(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> None:
@@ -131,7 +133,7 @@ class AgentDecommissionFinalizerRepository:
             (RDBExternalChannelBlock, "ExternalChannelBlock"),
         )
         for model, label in remaining:
-            exists = await session.scalar(
+            exists = await session.read_session.scalar(
                 sa.select(sa.exists().where(model.agent_id == agent_id))
             )
             if exists:
@@ -162,6 +164,6 @@ class AgentDecommissionFinalizerRepository:
             ),
         )
         for _, label, exists_query in route_owned_roots:
-            exists = await session.scalar(exists_query)
+            exists = await session.read_session.scalar(exists_query)
             if exists:
                 raise RuntimeError(f"{label} lifecycle root remains")

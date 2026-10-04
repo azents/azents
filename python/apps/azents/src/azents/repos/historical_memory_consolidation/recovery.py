@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import (
     ConsolidationJobPrincipal,
@@ -20,6 +19,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityBusyError,
     ConsolidationAuthorityError,
@@ -50,7 +50,7 @@ class ConsolidationRecoveryCheckpoint:
 class ConsolidationRecoveryRepository:
     """Keep permitted drafts and rebuild denied prose as a whole."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def prepare(
         self, principal: ConsolidationJobPrincipal
@@ -59,7 +59,7 @@ class ConsolidationRecoveryRepository:
             session, owner = job.session, job.owner
             published_available = owner.unit.published_revision_id is not None
             if owner.unit.published_revision_id is not None:
-                revision = await session.get(
+                revision = await session.write_session.get(
                     RDBConsolidationRevision, owner.unit.published_revision_id
                 )
                 if revision is None or revision.unit_id != owner.unit.id:
@@ -90,7 +90,7 @@ class ConsolidationRecoveryRepository:
                         raise
                     except ConsolidationAuthorityError:
                         published_available = False
-            draft = await session.scalar(
+            draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(
                     RDBConsolidationDraft.unit_id == owner.unit.id
                 )
@@ -113,7 +113,7 @@ class ConsolidationRecoveryRepository:
                 owner.unit.published_revision_id = None
             if rebuilt:
                 assert draft is not None
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBConsolidationWork)
                     .where(
                         work_predicate(principal.unit),
@@ -129,17 +129,17 @@ class ConsolidationRecoveryRepository:
                         presented_attempt_id=None,
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBConsolidationDraft).where(
                         RDBConsolidationDraft.id == draft.id
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBConsolidationEvidence).where(
                         RDBConsolidationEvidence.attempt_id == principal.attempt_id
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.delete(RDBConsolidationMutationReceipt).where(
                         RDBConsolidationMutationReceipt.attempt_id
                         == principal.attempt_id
@@ -177,7 +177,7 @@ class ConsolidationRecoveryRepository:
                         ),
                     )
                 )
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBConsolidationWork)
                     .where(RDBConsolidationWork.id.in_(current))
                     .values(

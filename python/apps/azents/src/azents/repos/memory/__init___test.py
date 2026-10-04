@@ -1,13 +1,13 @@
 """MemoryRepository tests."""
 
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import LLMProvider
 from azents.core.memory_scope import MemoryScope
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -18,7 +18,7 @@ from . import MemoryRepository
 from .data import MemoryCreate, MemorySummary
 
 
-async def _create_workspace(session: AsyncSession, handle: str = "mem-test-ws") -> str:
+async def _create_workspace(session: WriteSession, handle: str = "mem-test-ws") -> str:
     """Create Workspace for tests and return internal ID."""
     repo = WorkspaceRepository()
     result = await repo.create(
@@ -31,7 +31,7 @@ async def _create_workspace(session: AsyncSession, handle: str = "mem-test-ws") 
 
 
 async def _create_agent(
-    session: AsyncSession,
+    session: WriteSession,
     workspace_id: str,
     *,
     model_slug: str = "mem-test-model",
@@ -46,8 +46,8 @@ async def _create_agent(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(llm_integration)
-    await session.flush()
+    session.write_session.add(llm_integration)
+    await session.write_session.flush()
 
     agent = RDBAgent(
         workspace_id=workspace_id,
@@ -81,15 +81,15 @@ async def _create_agent(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     return agent.id
 
 
 class TestMemoryRepository:
     """MemoryRepository CRUD tests."""
 
-    async def test_upsert_creates_new_memory(self, rdb_session: AsyncSession) -> None:
+    async def test_upsert_creates_new_memory(self, rdb_session: WriteSession) -> None:
         """Create new memory."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-upsert-ws")
         agent_id = await _create_agent(
@@ -123,7 +123,7 @@ class TestMemoryRepository:
         assert memory.updated_at is not None
 
     async def test_upsert_updates_existing_memory(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Upsert with same memory name updates existing record."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-upd-ws")
@@ -162,7 +162,7 @@ class TestMemoryRepository:
         assert second.content == "Updated content"
         assert second.type == "reference"
 
-    async def test_get_by_name_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_name_found(self, rdb_session: WriteSession) -> None:
         """Fetch existing memory by name."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-get-ws")
         agent_id = await _create_agent(
@@ -189,7 +189,7 @@ class TestMemoryRepository:
         assert found.name == "get-test"
         assert found.description == "Fetch test"
 
-    async def test_get_by_name_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_name_not_found(self, rdb_session: WriteSession) -> None:
         """Fetching nonexistent memory by name returns None."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-nf-ws")
         agent_id = await _create_agent(
@@ -206,7 +206,7 @@ class TestMemoryRepository:
         assert found is None
 
     async def test_get_by_name_agent_scope_isolation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """agent scope memory is not fetched from user scope."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-iso-ws")
@@ -237,7 +237,7 @@ class TestMemoryRepository:
         )
         assert found is None
 
-    async def test_list_summaries_basic(self, rdb_session: AsyncSession) -> None:
+    async def test_list_summaries_basic(self, rdb_session: WriteSession) -> None:
         """Fetch summary list of multiple memories."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-list-ws")
         agent_id = await _create_agent(
@@ -269,7 +269,7 @@ class TestMemoryRepository:
         names = [s.name for s in summaries]
         assert names == ["list-item-0", "list-item-1", "list-item-2"]
 
-    async def test_list_summaries_type_filter(self, rdb_session: AsyncSession) -> None:
+    async def test_list_summaries_type_filter(self, rdb_session: WriteSession) -> None:
         """Fetch summary list filtered by type."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-tf-ws")
         agent_id = await _create_agent(
@@ -306,7 +306,7 @@ class TestMemoryRepository:
         assert all(s.type == "project" for s in summaries)
 
     async def test_list_summaries_scope_isolation(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """agent scope and user scope lists are separated."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-si-ws")
@@ -358,7 +358,7 @@ class TestMemoryRepository:
         assert len(user_summaries) == 1
         assert user_summaries[0].name == "user-mem"
 
-    async def test_search_finds_by_name(self, rdb_session: AsyncSession) -> None:
+    async def test_search_finds_by_name(self, rdb_session: WriteSession) -> None:
         """Search memory by name."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-sn-ws")
         agent_id = await _create_agent(
@@ -392,7 +392,7 @@ class TestMemoryRepository:
         assert len(results) == 1
         assert results[0].name == "search-target-name"
 
-    async def test_search_finds_by_description(self, rdb_session: AsyncSession) -> None:
+    async def test_search_finds_by_description(self, rdb_session: WriteSession) -> None:
         """Search memory by description."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-sd-ws")
         agent_id = await _create_agent(
@@ -426,7 +426,7 @@ class TestMemoryRepository:
         assert len(results) == 1
         assert results[0].name == "desc-test"
 
-    async def test_search_finds_by_content(self, rdb_session: AsyncSession) -> None:
+    async def test_search_finds_by_content(self, rdb_session: WriteSession) -> None:
         """Search memory by content."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-sc-ws")
         agent_id = await _create_agent(
@@ -461,7 +461,7 @@ class TestMemoryRepository:
         assert results[0].name == "content-test"
 
     async def test_search_splits_query_into_case_insensitive_and_terms(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Search splits whitespace terms and requires every term to match."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-sand-ws")
@@ -507,7 +507,7 @@ class TestMemoryRepository:
         assert [result.name for result in full_results] == ["matching-memory"]
 
     async def test_search_partial_ranks_by_distinct_matched_terms(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Partial search ranks matches by distinct matched query term count."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-sp-ws")
@@ -555,7 +555,7 @@ class TestMemoryRepository:
         assert all(result.total_terms == 3 for result in results)
 
     async def test_search_can_limit_results_to_user_scope(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """Runtime search can distinguish user-only from combined scope."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-ss-ws")
@@ -614,7 +614,7 @@ class TestMemoryRepository:
             "user-shared-term",
         ]
 
-    async def test_delete_by_name_exists(self, rdb_session: AsyncSession) -> None:
+    async def test_delete_by_name_exists(self, rdb_session: WriteSession) -> None:
         """Deleting existing memory returns True."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-del-ws")
         agent_id = await _create_agent(
@@ -649,7 +649,7 @@ class TestMemoryRepository:
         )
         assert found is None
 
-    async def test_delete_by_name_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_delete_by_name_not_found(self, rdb_session: WriteSession) -> None:
         """Deleting nonexistent memory returns False."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-dnf-ws")
         agent_id = await _create_agent(
@@ -665,7 +665,7 @@ class TestMemoryRepository:
         )
         assert deleted is False
 
-    async def test_count(self, rdb_session: AsyncSession) -> None:
+    async def test_count(self, rdb_session: WriteSession) -> None:
         """Fetch memory count in scope."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-cnt-ws")
         agent_id = await _create_agent(
@@ -717,7 +717,7 @@ class TestMemoryRepository:
 class TestMemoryRepositoryStrictCrud:
     """Strict CRUD methods used by human Memory UI."""
 
-    async def test_create_and_get_by_id(self, rdb_session: AsyncSession) -> None:
+    async def test_create_and_get_by_id(self, rdb_session: WriteSession) -> None:
         """Create and fetch Memory by immutable ID."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-crud-get-ws")
         agent_id = await _create_agent(
@@ -747,7 +747,7 @@ class TestMemoryRepositoryStrictCrud:
         assert found.name == "strict-create"
 
     async def test_list_returns_full_memory_rows(
-        self, rdb_session: AsyncSession
+        self, rdb_session: WriteSession
     ) -> None:
         """List full Memory rows for one exact scope."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-crud-list-ws")
@@ -789,7 +789,7 @@ class TestMemoryRepositoryStrictCrud:
         assert rows[0].name == "agent-memory"
         assert rows[0].content == "Agent content"
 
-    async def test_update_by_id_renames_memory(self, rdb_session: AsyncSession) -> None:
+    async def test_update_by_id_renames_memory(self, rdb_session: WriteSession) -> None:
         """Update Memory by immutable ID, including changing name."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-crud-upd-ws")
         agent_id = await _create_agent(
@@ -823,7 +823,7 @@ class TestMemoryRepositoryStrictCrud:
         assert updated.name == "after-name"
         assert updated.description == "After"
 
-    async def test_delete_by_id(self, rdb_session: AsyncSession) -> None:
+    async def test_delete_by_id(self, rdb_session: WriteSession) -> None:
         """Delete Memory by immutable ID."""
         workspace_id = await _create_workspace(rdb_session, handle="mem-crud-del-ws")
         agent_id = await _create_agent(

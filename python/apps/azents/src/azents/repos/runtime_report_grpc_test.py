@@ -8,10 +8,10 @@ from typing import NoReturn
 import grpc
 import pytest
 from azents_runtime_control.proto import runtime_runner_control_pb2
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_report_operations_test import (
     _Boundary,
     _Fixture,
@@ -134,7 +134,7 @@ def _servicer(
 
 @pytest.mark.parametrize("outcome", ["success", "noop", "error", "cancel"])
 async def test_actual_grpc_report_and_heartbeat_have_closed_database_boundaries(
-    rdb_session_manager: SessionManager[AsyncSession], outcome: str
+    rdb_session_manager: SessionManager[WriteSession], outcome: str
 ) -> None:
     fixture = await _fixture(
         rdb_session_manager,
@@ -199,7 +199,7 @@ async def test_actual_grpc_report_and_heartbeat_have_closed_database_boundaries(
 
 
 async def test_grpc_registration_abort_follows_completed_evidence_read(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     authenticator = _Authenticator(fixture)

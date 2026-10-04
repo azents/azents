@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Annotated, Literal, NamedTuple
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -39,6 +38,7 @@ from azents.core.external_channel_participation_state import (
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -232,7 +232,7 @@ class ExternalChannelParticipationService:
     """Authorize and commit provider-neutral participation settings."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -567,7 +567,7 @@ class ExternalChannelParticipationService:
                             raise ExternalChannelParticipationError(
                                 "External Channel parent conversation changed."
                             )
-                    await session.commit()
+                    await session.write_session.commit()
         return ExternalChannelParticipationSettingsMutation(
             settings=ExternalChannelParticipationSettings(
                 target="parent",
@@ -676,7 +676,7 @@ class ExternalChannelParticipationService:
                     raise ExternalChannelParticipationError(
                         "External Channel thread settings changed before submission."
                     )
-                await session.commit()
+                await session.write_session.commit()
         return ExternalChannelParticipationSettingsMutation(
             settings=ExternalChannelParticipationSettings(
                 target="thread",
@@ -695,7 +695,7 @@ class ExternalChannelParticipationService:
 
     async def _authorize_settings_actor(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         route_id: str,
@@ -996,7 +996,7 @@ class ExternalChannelParticipationService:
                     raise ExternalChannelParticipationError(
                         "External Channel setup was already selected differently."
                     )
-                await session.commit()
+                await session.write_session.commit()
                 return _CommittedLocation(
                     setting=setting,
                     claim=claim,
@@ -1039,7 +1039,7 @@ class ExternalChannelParticipationService:
                 raise ExternalChannelParticipationError(
                     "External Channel setup selection lost its current revision."
                 )
-            await session.commit()
+            await session.write_session.commit()
             return _CommittedLocation(
                 setting=setting,
                 claim=selected,
@@ -1048,7 +1048,7 @@ class ExternalChannelParticipationService:
 
     async def _resolve_selected_resource(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         claim: ExternalChannelSetupClaim,
         source: ExternalChannelSetupSourceProjection,

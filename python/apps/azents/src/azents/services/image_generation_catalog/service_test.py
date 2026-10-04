@@ -9,7 +9,6 @@ from typing import NamedTuple
 import pytest
 from azcommon.result import Success
 from cryptography.fernet import Fernet
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.image_generation_catalog as image_generation_catalog_module
 from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
@@ -28,6 +27,7 @@ from azents.core.llm_catalog_sync import (
 )
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.image_generation_catalog_operations import (
     ImageGenerationCatalogOperationsRepository,
 )
@@ -99,19 +99,19 @@ def test_only_openai_api_key_supports_explicit_image_selection_initially() -> No
 
 
 def _session_manager_for(
-    session: AsyncSession,
-) -> SessionManager[AsyncSession]:
+    session: WriteSession,
+) -> SessionManager[WriteSession]:
     """Return a test session manager over the active transaction."""
 
     @asynccontextmanager
-    async def manager() -> AsyncGenerator[AsyncSession, None]:
+    async def manager() -> AsyncGenerator[WriteSession, None]:
         yield session
 
     return manager
 
 
 async def _create_service(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
     *,
     handle: str,
 ) -> _ImageCatalogServiceFixture:
@@ -155,7 +155,7 @@ async def _create_service(
 async def _publish_flare(
     service: ImageGenerationCatalogService,
     *,
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
     workspace_id: str,
     integration_id: str,
 ) -> None:
@@ -205,7 +205,7 @@ async def _publish_flare(
 
 @pytest.mark.asyncio
 async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A credential update before claim cannot publish the older credential view."""
@@ -223,7 +223,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
     )
 
     async def begin_attempt_after_credential_update(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         catalog_id: str,
         workspace_id: str,
@@ -284,7 +284,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
 
 @pytest.mark.asyncio
 async def test_disabled_conversation_without_image_tool_has_no_image_gate(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Conversation-only saves retain their existing selection predicates."""
     fixture = await _create_service(
@@ -309,7 +309,7 @@ async def test_disabled_conversation_without_image_tool_has_no_image_gate(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("automatic_retry_blocked", [False, True])
 async def test_sync_provider_failure_is_visible_after_failed_attempt_commit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     automatic_retry_blocked: bool,
 ) -> None:
@@ -390,7 +390,7 @@ async def test_sync_provider_failure_is_visible_after_failed_attempt_commit(
 
 @pytest.mark.asyncio
 async def test_explicit_pin_requires_current_catalog_usability(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Saved and runtime pins stop authorizing after credential generation changes."""
     (
@@ -461,7 +461,7 @@ async def test_explicit_pin_requires_current_catalog_usability(
 
 @pytest.mark.asyncio
 async def test_disabled_integration_rejects_default_with_recovery_guidance(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Disabling an integration blocks maintained-default save and execution."""
     (
@@ -507,7 +507,7 @@ async def test_disabled_integration_rejects_default_with_recovery_guidance(
 
 @pytest.mark.asyncio
 async def test_runtime_rejects_image_tool_missing_from_conversation_capabilities(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """A reconstructed selection cannot bypass current image capability checks."""
     service, _, workspace_id, integration_id = await _create_service(

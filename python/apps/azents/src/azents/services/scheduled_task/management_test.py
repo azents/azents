@@ -19,6 +19,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.management import (
@@ -68,8 +69,8 @@ class _SessionManager:
         self.session = _Session()
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, self.session)
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(cast(AsyncSession, self.session))
 
 
 class _AgentRepository:
@@ -86,7 +87,7 @@ class _AgentRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> object | None:
         del session
@@ -101,7 +102,7 @@ class _AgentRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> object | None:
         if self.events is not None:
@@ -125,7 +126,7 @@ class _AgentSessionRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> object | None:
         del session
@@ -145,7 +146,7 @@ class _AgentSessionRepository:
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> object | None:
         if self.events is not None:
@@ -167,7 +168,7 @@ class _AuthorityValidator:
 
     async def validate(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task: ScheduledTask,
     ) -> None:
         await self.validate_target(
@@ -180,7 +181,7 @@ class _AuthorityValidator:
 
     async def validate_target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -204,7 +205,7 @@ class _ExternalChannelRepository:
 
     async def lock_binding(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         binding_id: str,
     ) -> None:
@@ -232,7 +233,7 @@ class _TaskRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         del session
@@ -246,7 +247,7 @@ class _TaskRepository:
 
     async def get_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
@@ -258,19 +259,19 @@ class _TaskRepository:
             return None
         return self.task
 
-    async def create(self, session: AsyncSession, create: object) -> ScheduledTask:
+    async def create(self, session: ReadSession, create: object) -> ScheduledTask:
         del session, create
         self.created = True
         raise AssertionError("Unexpected Task creation.")
 
-    async def replace(self, session: AsyncSession, **kwargs: object) -> ScheduledTask:
+    async def replace(self, session: ReadSession, **kwargs: object) -> ScheduledTask:
         del session, kwargs
         self.replaced = True
         raise AssertionError("Unexpected Task replacement.")
 
     async def delete_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         task_id: str,
@@ -295,12 +296,12 @@ class _CycleRepository:
         self.events = events
         self.record = record
 
-    async def get(self, session: AsyncSession, **kwargs: object) -> object | None:
+    async def get(self, session: ReadSession, **kwargs: object) -> object | None:
         del session, kwargs
         self.events.append("cycle-read")
         return self.record
 
-    async def lock(self, session: AsyncSession, **kwargs: object) -> object | None:
+    async def lock(self, session: ReadSession, **kwargs: object) -> object | None:
         del session, kwargs
         self.events.append("cycle-lock")
         return self.record
@@ -314,7 +315,7 @@ class _MailboxRepository:
 
     async def get_by_idempotency_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         **kwargs: object,
     ) -> None:
         del session, kwargs
@@ -389,7 +390,7 @@ def _service(
     cycle_repository: _CycleRepository | None = None,
 ) -> ScheduledTaskManagementService:
     return ScheduledTaskManagementService(
-        session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
+        session_manager=cast(SessionManager[WriteSession], _SessionManager()),
         agent_repository=cast(
             AgentRepository,
             agent_repository or _AgentRepository(events),

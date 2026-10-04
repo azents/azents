@@ -8,7 +8,6 @@ from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.system_setting import (
     ResolvedSystemSetting,
@@ -47,6 +46,7 @@ from azents.core.system_setting_data import (
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.github_platform_system_setting.data import (
     PlatformGitHubAppConfirmationImpact,
 )
@@ -61,7 +61,7 @@ class SystemSettingsRepository:
     """Own Section lifetimes and atomic query composition."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     repository: Annotated[SystemSettingRepository, Depends(SystemSettingRepository)]
     payloads: Annotated[
@@ -442,7 +442,7 @@ class SystemSettingsRepository:
 
     async def _prepare_confirmation_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         definition: SystemSettingDefinition,
         candidate: StoredSystemSettingCandidate,
@@ -749,7 +749,7 @@ class SystemSettingsRepository:
     async def _activate_candidate(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         candidate: StoredSystemSettingCandidate,
         resolved: ResolvedSystemSetting,
         actor_user_id: str | None,
@@ -806,7 +806,7 @@ class SystemSettingsRepository:
     async def _delete_expired_candidate(
         self,
         *,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SystemSettingDefinition,
         now: datetime.datetime,
     ) -> None:

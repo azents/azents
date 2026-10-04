@@ -5,10 +5,10 @@ import datetime
 from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.scheduled_task_state import ScheduledTaskStateRepository
 from azents.repos.scheduled_task_state.data import ScheduledTaskState
 
@@ -18,7 +18,7 @@ class SchedulerStateOperationRepository:
     """Own the seven original Scheduler database groups without job callbacks."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     state_repository: Annotated[
         ScheduledTaskStateRepository, Depends(ScheduledTaskStateRepository)

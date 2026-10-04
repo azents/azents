@@ -45,6 +45,7 @@ from azents.rdb.models.external_model_settings import (
     RDBExternalModelDraft,
     RDBExternalModelMutation,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -102,7 +103,8 @@ def _saved_fast(provider: LLMProvider) -> dict[str, object]:
 @dataclass(frozen=True)
 class _ReplayFixture:
     repository: ExternalModelSettingsRepository
-    session: AsyncMock
+    session: ReadWriteSession
+    raw_session: AsyncMock
     authorized: _AuthorizedModelTarget
     draft: RDBExternalModelDraft
     mutation: MagicMock
@@ -114,10 +116,11 @@ class _ReplayFixture:
 def _replay_fixture(
     *, saved_definition: dict[str, object], removed_target: bool
 ) -> _ReplayFixture:
-    session = AsyncMock(spec=AsyncSession)
+    _raw_session = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager
-    async def sessions() -> AsyncIterator[AsyncSession]:
+    async def sessions() -> AsyncIterator[WriteSession]:
         yield session
 
     agent_repository = AsyncMock(spec=AgentRepository)
@@ -213,10 +216,11 @@ def _replay_fixture(
     mutation.expected_generation = 2
     mutation.resulting_generation = 3
     mutation.notice_outcome = ExternalModelNoticeOutcome.DELIVERED
-    session.scalar.return_value = mutation
+    _raw_session.scalar.return_value = mutation
     return _ReplayFixture(
         repository=repository,
         session=session,
+        raw_session=_raw_session,
         authorized=authorized,
         draft=draft,
         mutation=mutation,
@@ -252,7 +256,7 @@ def _active_fixture() -> _ReplayFixture:
     fixture.draft.expected_generation = 3
     fixture.draft.selected_enabled_execution_options = []
     fixture.draft.options_snapshot = [_snapshot([])]
-    fixture.session.scalar.return_value = None
+    fixture.raw_session.scalar.return_value = None
     authorized = replace(
         fixture.authorized,
         agent=agent,
@@ -289,7 +293,7 @@ async def test_live_editor_projects_exact_metadata_without_agent_writes(
     original_agent = fixture.authorized.agent.model_dump(mode="json")
     original_session = fixture.authorized.session.model_dump(mode="json")
     if action == "reopen":
-        fixture.session.scalar.return_value = fixture.draft
+        fixture.raw_session.scalar.return_value = fixture.draft
     with (
         patch.object(repository, "_lock_draft", AsyncMock(return_value=fixture.draft)),
         patch.object(
@@ -459,7 +463,7 @@ async def test_fresh_apply_validates_projected_options_and_freezes_saved_result(
         reasoning_effort=ModelReasoningEffort.HIGH,
         enabled_execution_options=[ModelExecutionOptionId.FAST],
     )
-    mutation = fixture.session.add.call_args.args[0]
+    mutation = fixture.raw_session.add.call_args.args[0]
     assert isinstance(mutation, RDBExternalModelMutation)
     assert mutation.new_reasoning_effort == ModelReasoningEffort.HIGH
     assert mutation.new_enabled_execution_options == ["fast"]
@@ -532,8 +536,8 @@ async def test_unauthorized_model_controls_do_not_capture_metadata(action: str) 
     assert result is rejection
     assert fixture.draft.options_snapshot == original_snapshot
     fixture.active_repository.capture_exact_choices_in_session.assert_not_awaited()
-    fixture.session.add.assert_not_called()
-    fixture.session.flush.assert_not_awaited()
+    fixture.raw_session.add.assert_not_called()
+    fixture.raw_session.flush.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -541,7 +545,7 @@ async def test_applied_draft_without_matching_mutation_stays_frozen() -> None:
     fixture = _replay_fixture(
         saved_definition=_saved_fast(LLMProvider.OPENAI), removed_target=True
     )
-    fixture.session.scalar.return_value = None
+    fixture.raw_session.scalar.return_value = None
     snapshot = deepcopy(fixture.draft.options_snapshot)
     with (
         patch.object(
@@ -571,7 +575,7 @@ async def test_applied_draft_without_matching_mutation_stays_frozen() -> None:
     assert fixture.draft.options_snapshot == snapshot
     fixture.active_repository.capture_exact_choices_in_session.assert_not_awaited()
     fixture.agent_session_repository.set_applied_inference_profile.assert_not_awaited()
-    fixture.session.flush.assert_not_awaited()
+    fixture.raw_session.flush.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -664,10 +668,12 @@ async def test_applied_fast_snapshot_replay_preserves_immutable_result(
     fixture.active_repository.capture_exact_choices_in_session.assert_not_awaited()
     fixture.agent_repository.lock_by_id_nowait.assert_not_awaited()
     fixture.agent_session_repository.set_applied_inference_profile.assert_not_awaited()
-    fixture.session.add.assert_not_called()
-    fixture.session.flush.assert_not_awaited()
-    assert fixture.session.execute.await_count == 1
-    assert "SET LOCAL lock_timeout" in str(fixture.session.execute.await_args.args[0])
+    fixture.raw_session.add.assert_not_called()
+    fixture.raw_session.flush.assert_not_awaited()
+    assert fixture.raw_session.execute.await_count == 1
+    assert "SET LOCAL lock_timeout" in str(
+        fixture.raw_session.execute.await_args.args[0]
+    )
 
 
 @pytest.mark.parametrize(
@@ -905,4 +911,4 @@ async def test_replay_keeps_existing_expiry_actor_and_fingerprint_guards(
     if guard != "fingerprint":
         authorize.assert_not_awaited()
     fixture.agent_session_repository.set_applied_inference_profile.assert_not_awaited()
-    fixture.session.flush.assert_not_awaited()
+    fixture.raw_session.flush.assert_not_awaited()

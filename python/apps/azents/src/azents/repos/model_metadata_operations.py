@@ -8,7 +8,6 @@ from typing import Annotated, Any, assert_never
 
 import sqlalchemy as sa
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
@@ -21,6 +20,7 @@ from azents.core.model_metadata_collection_data import FetchedModelMetadataSourc
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     LLMCatalog,
@@ -84,16 +84,16 @@ class ModelMetadataSourceOperations:
     """Keep source and all affected system entries in one DB-only commit."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     repository: Annotated[
         ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
 
-    async def _system_owners(self, session: AsyncSession) -> list[RDBLLMCatalog]:
+    async def _system_owners(self, session: WriteSession) -> list[RDBLLMCatalog]:
         """Find/create stable identities, then acquire every owner lock in ID order."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBLLMCatalog.id, RDBLLMCatalog.provider).where(
                 RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                 RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
@@ -146,7 +146,7 @@ class ModelMetadataSourceOperations:
                     started_at=started_at,
                     diagnostics={"source_key": CATALOG_SOURCE_KEY},
                 )
-            await session.flush()
+            await session.write_session.flush()
             return token
 
     async def read_current(self) -> ModelMetadataSource | None:
@@ -232,7 +232,7 @@ class ModelMetadataSourceOperations:
                         action_hint="Verify removals before replacing the source.",
                         diagnostics={**diagnostics, "reduction_scope": reduction},
                     )
-                await session.flush()
+                await session.write_session.flush()
                 return SourcePublicationResult(
                     source=None,
                     catalogs=[],
@@ -283,7 +283,7 @@ class ModelMetadataSourceOperations:
                         )
                     case _:
                         assert_never(replacement)
-            await session.flush()
+            await session.write_session.flush()
             source = await self.repository.get_current(
                 session, source_key=CATALOG_SOURCE_KEY
             )
@@ -322,7 +322,7 @@ class ModelMetadataSourceOperations:
                     action_hint="Retry after the configured source becomes available.",
                     diagnostics=diagnostics,
                 )
-            await session.flush()
+            await session.write_session.flush()
 
 
 def _source_diagnostics(

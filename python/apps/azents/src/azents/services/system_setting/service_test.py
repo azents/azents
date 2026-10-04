@@ -7,7 +7,6 @@ import pytest
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, ValidationError
 from pytest import MonkeyPatch
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.repos.system_setting.operations as service_module
 from azents.core.crypto import CredentialCipher
@@ -49,6 +48,7 @@ from azents.core.system_setting_data import (
 from azents.core.system_setting_payload import SystemSettingPayloadResolver
 from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.github_platform_system_setting.binding import (
     PlatformGitHubAppBindingRepository,
 )
@@ -103,7 +103,7 @@ def _definition(
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     *,
     activation_mode: SystemSettingActivationMode = SystemSettingActivationMode.DIRECT,
     environment: dict[str, str] | None = None,
@@ -136,7 +136,7 @@ def _service(
 
 
 def _registered_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> SystemSettingsService:
     encryption_key = Fernet.generate_key().decode()
     service = _service(session_manager, key=encryption_key)
@@ -178,7 +178,7 @@ def test_compiled_registry_includes_external_channel_files() -> None:
 
 
 async def test_external_channel_file_limits_resolve_defaults_without_storage(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The typed defaults are effective before an administrator writes a row."""
     service = _registered_service(rdb_session_manager)
@@ -200,7 +200,7 @@ async def test_external_channel_file_limits_resolve_defaults_without_storage(
 
 
 async def test_external_channel_file_limits_activate_directly_and_validate_aggregate(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A valid local policy activates immediately and an invalid one never writes."""
     service = _registered_service(rdb_session_manager)
@@ -240,7 +240,7 @@ async def test_external_channel_file_limits_activate_directly_and_validate_aggre
 
 
 async def test_direct_mutation_encrypts_secrets_and_writes_metadata_only_audit(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Current state stores ciphertext while audit records actions only."""
     service = _service(rdb_session_manager)
@@ -268,7 +268,7 @@ async def test_direct_mutation_encrypts_secrets_and_writes_metadata_only_audit(
 
 
 async def test_environment_empty_value_overrides_admin_without_fallback(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A present empty environment value stays authoritative and read-only."""
     encryption_key = Fernet.generate_key().decode()
@@ -305,7 +305,7 @@ async def test_environment_empty_value_overrides_admin_without_fallback(
 
 
 async def test_mutation_enforces_optimistic_current_version(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A stale Admin version cannot replace current state or candidates."""
     service = _service(rdb_session_manager)
@@ -316,7 +316,7 @@ async def test_mutation_enforces_optimistic_current_version(
 
 
 async def test_expired_candidate_is_deleted_even_when_cancel_reports_expiry(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: MonkeyPatch,
 ) -> None:
     """Expiry errors occur after candidate ciphertext deletion commits."""
@@ -350,7 +350,7 @@ async def test_expired_candidate_is_deleted_even_when_cancel_reports_expiry(
 
 
 async def test_health_is_visible_only_for_the_current_effective_generation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A changed effective payload makes the previous health result stale."""
     service = _service(rdb_session_manager)
@@ -386,7 +386,7 @@ async def test_health_is_visible_only_for_the_current_effective_generation(
 
 
 async def test_valid_candidate_auto_activates_without_confirmation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A valid candidate with no impact activates in the validation transaction."""
     service = _service(
@@ -422,7 +422,7 @@ async def test_valid_candidate_auto_activates_without_confirmation(
 
 
 async def test_replaced_candidate_fails_in_flight_validation_as_conflict(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An in-flight mutation cannot validate a later replacement candidate."""
     service = _service(

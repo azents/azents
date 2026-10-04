@@ -5,11 +5,11 @@ from typing import Annotated
 
 from azcommon.result import Result
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.user_email import DuplicateEmail, UserEmailCreate
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user_email import UserEmailRepository
 from azents.repos.user_email.data import UserEmail, UserEmailList
 
@@ -19,7 +19,7 @@ class UserEmailOperationRepository:
     """Own complete UserEmail read and mutation transactions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     user_email_repository: Annotated[UserEmailRepository, Depends(UserEmailRepository)]
 

@@ -4,8 +4,6 @@ import dataclasses
 import datetime
 from typing import Literal
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -18,6 +16,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_management import ManagedBinding
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.management import (
@@ -110,7 +109,7 @@ class ScheduledTaskManagementService:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         agent_repository: AgentRepository,
         agent_session_repository: AgentSessionRepository,
         task_repository: ScheduledTaskRepository,
@@ -263,7 +262,7 @@ class ScheduledTaskManagementService:
                 agent_session=agent_session,
                 bindings=bindings,
             )
-            await session.commit()
+            await session.write_session.commit()
         await self.channel_service.execute_registration(task)
         return projection
 
@@ -372,7 +371,7 @@ class ScheduledTaskManagementService:
                 agent_session=agent_session,
                 bindings=bindings,
             )
-            await session.commit()
+            await session.write_session.commit()
             return projection
 
     async def delete(
@@ -422,7 +421,7 @@ class ScheduledTaskManagementService:
             if not deleted:
                 raise ScheduledTaskManagementUnavailable("not_found")
             deleted_task = target.task
-            await session.commit()
+            await session.write_session.commit()
         await self.channel_service.execute_deletion(deleted_task)
 
     async def get_current_cycle(
@@ -449,7 +448,7 @@ class ScheduledTaskManagementService:
 
     async def _require_task(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -474,7 +473,7 @@ class ScheduledTaskManagementService:
 
     async def _require_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -490,7 +489,7 @@ class ScheduledTaskManagementService:
 
     async def _lock_and_require_task(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -516,7 +515,7 @@ class ScheduledTaskManagementService:
 
     async def _lock_and_require_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -548,7 +547,7 @@ class ScheduledTaskManagementService:
 
     async def _require_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -576,7 +575,7 @@ class ScheduledTaskManagementService:
 
     async def _project_task(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         task: ScheduledTask,
         agent_session: AgentSession,
@@ -623,7 +622,7 @@ class ScheduledTaskManagementService:
 
     async def _cycle(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task: ScheduledTask,
     ) -> ScheduledTaskCycleState | None:
         if task.active_cycle_id is None:
@@ -640,7 +639,7 @@ class ScheduledTaskManagementService:
 
     async def _binding_map(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -656,7 +655,7 @@ class ScheduledTaskManagementService:
 
     async def _require_binding_authorities(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -680,7 +679,7 @@ class ScheduledTaskManagementService:
 
     async def _lock_bindings(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         binding_ids: list[str | None],
     ) -> None:

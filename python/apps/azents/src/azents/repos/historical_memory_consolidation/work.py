@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_consolidation import (
     ConsolidationJobPrincipal,
@@ -22,6 +21,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     consolidation_job_session,
@@ -122,7 +122,7 @@ def captured_work_version(
 class ConsolidationWorkRepository:
     """Present exact IDs before delivery and journal choices under the owner fence."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def retire_obsolete_pending(
         self, principal: ConsolidationJobPrincipal
@@ -143,7 +143,7 @@ class ConsolidationWorkRepository:
                 .returning(RDBConsolidationWork.id)
                 .cte("retired_consolidation_metadata")
             )
-            count = await job.session.scalar(
+            count = await job.session.write_session.scalar(
                 sa.select(sa.func.count()).select_from(retired)
             )
             if not isinstance(count, int):
@@ -168,7 +168,7 @@ class ConsolidationWorkRepository:
             if after_sequence is not None:
                 query = query.where(RDBConsolidationWork.sequence > after_sequence)
             rows = list(
-                await session.scalars(
+                await session.write_session.scalars(
                     query.order_by(RDBConsolidationWork.sequence).limit(limit + 1)
                 )
             )
@@ -228,7 +228,7 @@ class ConsolidationWorkRepository:
         """Save explicit choices only; publication alone promotes them to coverage."""
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
-            draft = await session.scalar(
+            draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(
                     RDBConsolidationDraft.unit_id == owner.unit.id
                 )
@@ -243,7 +243,7 @@ class ConsolidationWorkRepository:
             ids = tuple(item.work_id for item in coverage.dispositions)
             rows = {
                 row.id: row
-                for row in await session.scalars(
+                for row in await session.write_session.scalars(
                     sa.select(RDBConsolidationWork)
                     .where(
                         work_predicate(principal.unit), RDBConsolidationWork.id.in_(ids)
@@ -270,7 +270,7 @@ class ConsolidationWorkRepository:
                 .exists()
             )
             captured = set(
-                await session.scalars(
+                await session.write_session.scalars(
                     sa.select(RDBConsolidationWork.id).where(
                         RDBConsolidationWork.id.in_(ids), sa.or_(exposed, inherited)
                     )

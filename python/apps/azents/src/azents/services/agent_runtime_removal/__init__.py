@@ -7,7 +7,6 @@ import logging
 from typing import Annotated, Protocol
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionStopSignal
@@ -19,6 +18,7 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -83,7 +83,7 @@ class AgentRuntimeRemovalService:
     def __init__(
         self,
         session_manager: Annotated[
-            SessionManager[AsyncSession], Depends(get_session_manager)
+            SessionManager[WriteSession], Depends(get_session_manager)
         ],
         agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
         runtime_repository: Annotated[
@@ -513,7 +513,7 @@ class AgentRuntimeRemovalService:
 
     async def _record_delete_target(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation: AgentRuntimeRemovalOperation,
         lease_owner: str,
@@ -580,7 +580,7 @@ class AgentRuntimeRemovalService:
 
     async def _lock_operation_runtime(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         operation: AgentRuntimeRemovalOperation,
     ) -> AgentRuntime | None:
         """Lock and validate the operation's exact logical Runtime."""
@@ -632,7 +632,7 @@ class AgentRuntimeRemovalService:
 
     async def _require_owned(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         operation_id: str,
         lease_owner: str,

@@ -17,6 +17,7 @@ from azents.core.toolkit_errors import NotFound
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
@@ -638,7 +639,7 @@ class _RaceToolkitRepository(ToolkitRepository):
 
     async def list_available_for_workspace_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         workspace_id: str,
         user_id: str,
     ) -> list[ToolkitConfig]:
@@ -652,29 +653,30 @@ class _RaceToolkitRepository(ToolkitRepository):
 
 def _engine_session_manager(
     engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
+) -> SessionManager[WriteSession]:
     """Create independent committing sessions for a concurrency test."""
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with AsyncSession(engine, expire_on_commit=False) as raw_session:
+            session = ReadWriteSession(raw_session)
             try:
                 yield session
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     return session_manager
 
 
 async def _seed_slug_race(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> None:
     """Seed one Agent, one shared Toolkit, and one conflicting owned Toolkit."""
     async with session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO workspaces (id, name, handle)
@@ -682,7 +684,7 @@ async def _seed_slug_race(
                 """
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO agents (
@@ -719,7 +721,7 @@ async def _seed_slug_race(
                 """
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO toolkit_configs (
@@ -750,7 +752,7 @@ async def _seed_slug_race(
                 """
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO agent_toolkit_namespace_reservations (
@@ -767,7 +769,7 @@ async def _seed_slug_race(
                 """
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.text(
                 """
                 INSERT INTO agent_toolkit_namespace_sequences (
@@ -796,10 +798,10 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
     agent_repo = MagicMock(spec=AgentRepository)
 
     async def lock_agent(
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
     ) -> SimpleNamespace | None:
-        workspace_id = await session.scalar(
+        workspace_id = await session.read_session.scalar(
             sa.select(RDBAgent.workspace_id)
             .where(RDBAgent.id == agent_id)
             .with_for_update(key_share=True)
@@ -862,8 +864,10 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
             if not task.done():
                 task.cancel()
         async with session_manager() as session:
-            await session.execute(sa.text("DELETE FROM agents WHERE id = 'agent-race'"))
-            await session.execute(
+            await session.write_session.execute(
+                sa.text("DELETE FROM agents WHERE id = 'agent-race'")
+            )
+            await session.write_session.execute(
                 sa.text("DELETE FROM workspaces WHERE id = 'workspace-race'")
             )
 
@@ -877,7 +881,7 @@ def _build_service(
     agent_repo: AgentRepository,
     agent_admin_repo: AgentAdminRepository,
     github_user_installation_repo: GithubUserInstallationRepository,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     toolkit_registry: dict[str, Any],
     github_runtime: PlatformGitHubAppRuntimeService,
 ) -> ToolkitService:

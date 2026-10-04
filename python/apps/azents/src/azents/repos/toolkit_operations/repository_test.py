@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
 from azents.core.system_setting import SystemSettingFieldSource
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -49,13 +50,13 @@ class _TrackedSessionManager:
     """Deterministic commit/rollback probe for one repository operation."""
 
     def __init__(self) -> None:
-        self.session = AsyncMock(spec=AsyncSession)
+        self.session = ReadWriteSession(AsyncMock(spec=AsyncSession))
         self.active = False
         self.committed = False
         self.rolled_back = False
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         self.active = True
         try:
             yield self.session
@@ -289,7 +290,7 @@ async def test_slug_update_locks_all_attached_agents_before_reallocation() -> No
     repository.namespace_repository = namespace_repo
     events: list[str] = []
 
-    async def lock(session: AsyncSession, agent_id: str) -> None:
+    async def lock(session: WriteSession, agent_id: str) -> None:
         assert session is session_manager.session
         assert session_manager.active
         events.append(f"lock:{agent_id}")

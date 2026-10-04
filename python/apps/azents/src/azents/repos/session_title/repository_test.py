@@ -27,6 +27,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
     ModelProviderFailureRetryability,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.model_candidate_health.data import (
@@ -46,10 +47,11 @@ async def test_load_generation_snapshot_freezes_title_operation_in_one_context(
 ) -> None:
     """The title owner, chain selection, and persistence share one transaction."""
     events: list[str] = []
-    session: AsyncSession = AsyncMock(spec=AsyncSession)
+    _raw_session: WriteSession = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         events.append("enter")
         try:
             yield session
@@ -215,10 +217,11 @@ async def test_load_generation_snapshot_freezes_title_operation_in_one_context(
 async def test_replace_initial_auto_title_commits_as_one_repository_operation() -> None:
     """The conditional title update receives one repository-owned session."""
     events: list[str] = []
-    session: AsyncSession = AsyncMock(spec=AsyncSession)
+    _raw_session: WriteSession = AsyncMock(spec=AsyncSession)
+    session = ReadWriteSession(_raw_session)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         events.append("enter")
         try:
             yield session
@@ -259,7 +262,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
     repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
 
     async def capture(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         identities: tuple[ConfiguredModelIdentity, ...],

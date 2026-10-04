@@ -5,13 +5,13 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.deps import CurrentUser, WorkspaceMember
 from azents.core.email.service import EmailService
 from azents.core.enums import InvitationStatus, SignupTokenDeliveryMethod
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user_email import UserEmailRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import Workspace
@@ -49,7 +49,7 @@ class WorkspaceInvitationService:
     email_service: Annotated[EmailService, Depends()]
     signup_token_service: Annotated[SignupTokenService, Depends()]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def create(

@@ -3,12 +3,12 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.engine_read import (
     EngineInvokeReadRepository,
@@ -24,7 +24,7 @@ from azents.repos.toolkit import ToolkitRepository
 
 def get_engine_model_read_repository(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
@@ -39,7 +39,7 @@ def get_engine_model_read_repository(
 
 def get_engine_invoke_read_repository(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)],
     integration_repository: Annotated[
@@ -57,7 +57,7 @@ def get_engine_invoke_read_repository(
 
 def get_engine_toolkit_read_repository(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     cipher: Annotated[CredentialCipher, Depends(get_credential_cipher)],
 ) -> EngineToolkitReadRepository:

@@ -2,7 +2,6 @@
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.enums import AgentSessionProductMode
@@ -14,10 +13,11 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationWork
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
+from azents.rdb.session_capabilities import WriteSession
 
 
 async def enroll_source_in_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     source: RDBHistoricalMemorySource,
     root: RDBAgentSession,
@@ -39,7 +39,7 @@ async def enroll_source_in_session(
             user_id = root.associated_user_id
             if user_id is None:
                 raise ValueError("Personal source has no associated User.")
-            membership_id = await session.scalar(
+            membership_id = await session.write_session.scalar(
                 sa.select(RDBWorkspaceUser.memory_grant_identity).where(
                     RDBWorkspaceUser.workspace_id == root.workspace_id,
                     RDBWorkspaceUser.user_id == user_id,
@@ -73,4 +73,4 @@ async def enroll_source_in_session(
         .on_conflict_do_nothing(constraint="uq_historical_consolidation_work_version")
         .returning(RDBConsolidationWork.id)
     )
-    return await session.scalar(statement)
+    return await session.write_session.scalar(statement)

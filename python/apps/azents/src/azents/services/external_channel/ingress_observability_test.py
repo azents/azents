@@ -14,6 +14,7 @@ from azents.cli import external_channel_ingress as cli_module
 from azents.core.config import Config
 from azents.job_runtime.types import JobHandle, JobRequest, JobRuntime
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.ingress_control_read_test import (
     _Boundary,
     _ReadFault,
@@ -88,7 +89,7 @@ class _Metrics(ExternalChannelIngressMetrics):
 
 @pytest.mark.parametrize("seeded", [False, True], ids=["empty", "populated"])
 async def test_observation_closes_before_metrics_and_runtime_counts(
-    rdb_session_manager: SessionManager[AsyncSession], seeded: bool
+    rdb_session_manager: SessionManager[WriteSession], seeded: bool
 ) -> None:
     seed = await _seed(rdb_session_manager) if seeded else None
     boundary = _Boundary(rdb_session_manager)
@@ -113,7 +114,7 @@ async def test_observation_closes_before_metrics_and_runtime_counts(
 
 @pytest.mark.parametrize("outcome", ["error", "cancel"])
 async def test_metric_projection_error_cancel_cannot_reopen_or_undo_read(
-    rdb_session_manager: SessionManager[AsyncSession], outcome: str
+    rdb_session_manager: SessionManager[WriteSession], outcome: str
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     metrics = _Metrics(boundary)
@@ -133,7 +134,7 @@ async def test_metric_projection_error_cancel_cannot_reopen_or_undo_read(
 
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_query_error_cancel_does_not_project_process_metrics(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     metrics = _Metrics(boundary)
@@ -150,22 +151,23 @@ async def test_query_error_cancel_does_not_project_process_metrics(
     assert boundary.events == ["open", "closed"]
 
 
-def _standalone_manager(engine: AsyncEngine) -> SessionManager[AsyncSession]:
+def _standalone_manager(engine: AsyncEngine) -> SessionManager[WriteSession]:
     """Use genuine isolated PG Sessions for the CLI's own asyncio.run loop."""
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(engine, expire_on_commit=False) as session:
+    async def manager() -> AsyncIterator[WriteSession]:
+        async with AsyncSession(engine, expire_on_commit=False) as raw_session:
+            session = ReadWriteSession(raw_session)
             try:
                 yield session
             except asyncio.CancelledError:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
     return manager
 

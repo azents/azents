@@ -40,6 +40,7 @@ from azents.core.external_channel_ingestion import (
 )
 from azents.core.mailbox_data import MailboxItem
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
@@ -123,6 +124,12 @@ class _Session(AsyncSession):
         self.commit_mock = AsyncMock()
         self.rollback_mock = AsyncMock()
 
+    __hash__ = None
+
+    def __eq__(self, other: object) -> bool:
+        """Compare equal to its capability wrapper for mock call assertions."""
+        return isinstance(other, ReadWriteSession) and other.write_session is self
+
     async def commit(self) -> None:
         """Record one transaction commit."""
         await self.commit_mock()
@@ -134,13 +141,13 @@ class _Session(AsyncSession):
 
 def _session_manager(
     *sessions: _Session,
-) -> SessionManager[AsyncSession]:
+) -> SessionManager[WriteSession]:
     """Yield a fixed sequence of transaction test values."""
     remaining = iter(sessions)
 
     @asynccontextmanager
-    async def manager() -> AsyncIterator[AsyncSession]:
-        yield next(remaining)
+    async def manager() -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(next(remaining))
 
     return manager
 
@@ -317,7 +324,7 @@ def _binding() -> ExternalChannelBinding:
 
 def _service(
     *,
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
     repository: MagicMock,
     queue_repository: MagicMock,
     mailbox_admission_repository: MagicMock,
@@ -441,7 +448,7 @@ def _collaborators(
     mailbox_admission_repository = MagicMock(spec=MailboxAdmissionRepository)
 
     async def enqueue_many(
-        _session: AsyncSession,
+        _session: WriteSession,
         enqueues: list[object],
     ) -> list[MailboxAdmissionResult]:
         return [
@@ -580,11 +587,10 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
     assert stale is True
     transaction.rollback_mock.assert_awaited_once()
     reset_transaction.commit_mock.assert_awaited_once()
-    queue_repository.reset_batch_for_coordination.assert_awaited_once_with(
-        reset_transaction,
-        owner=drain,
-        items=[row],
-    )
+    reset_call = queue_repository.reset_batch_for_coordination.await_args
+    assert reset_call is not None
+    assert reset_call.args[0].write_session is reset_transaction
+    assert reset_call.kwargs == {"owner": drain, "items": [row]}
     queue_repository.finish_batch.assert_not_awaited()
     agent_session_repository.admit_input_wakeup.assert_not_awaited()
     wake_dispatcher.dispatch.assert_not_awaited()
@@ -642,10 +648,10 @@ async def test_session_admission_cas_failure_rolls_back_and_resets_claim(
     reset_transaction.commit_mock.assert_awaited_once()
     queue_repository.finish_batch.assert_not_awaited()
     agent_session_repository.lock_by_id.assert_not_awaited()
-    agent_session_repository.admit_input_wakeup.assert_awaited_once_with(
-        transaction,
-        "session-1",
-    )
+    admit_call = agent_session_repository.admit_input_wakeup.await_args
+    assert admit_call is not None
+    assert admit_call.args[0].write_session is transaction
+    assert admit_call.args[1] == "session-1"
     wake_dispatcher.dispatch.assert_not_awaited()
 
 
@@ -698,12 +704,14 @@ async def test_coordination_exhaustion_releases_current_lease(
     assert finalize.await_count == 4
     final_claim_args = queue_repository.claim_due_batch.await_args
     assert final_claim_args is not None
-    queue_repository.release_lease.assert_awaited_once_with(
-        transactions[-1],
-        owner_id="owner-1",
-        lease_owner=final_claim_args.kwargs["lease_owner"],
-        lease_generation=7,
-    )
+    release_call = queue_repository.release_lease.await_args
+    assert release_call is not None
+    assert release_call.args[0].write_session is transactions[-1]
+    assert release_call.kwargs == {
+        "owner_id": "owner-1",
+        "lease_owner": final_claim_args.kwargs["lease_owner"],
+        "lease_generation": 7,
+    }
     assert all(transaction.commit_mock.await_count == 1 for transaction in transactions)
 
 
@@ -735,12 +743,12 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
             self.held_locks.clear()
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         task = asyncio.current_task()
         assert task is not None
         session = _LockSession(task.get_name())
         try:
-            yield session
+            yield ReadWriteSession(session)
         finally:
             session.release_all()
 
@@ -754,12 +762,12 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
     repository = MagicMock(spec=ExternalChannelRepository)
 
     async def lock_connection(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
     ) -> ExternalChannelConnection:
         assert connection_id == "connection-1"
-        lock_session = require_instance(session, _LockSession)
+        lock_session = require_instance(session.write_session, _LockSession)
         await lock_session.acquire(connection_lock)
         if lock_session.role == "callback-admission":
             admission_holds_connection.set()
@@ -779,13 +787,13 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
     row = SimpleNamespace(id=item.id)
 
     async def lock_claimed_batch(
-        session: AsyncSession,
+        session: WriteSession,
         *,
         claim: ExternalChannelIngressBatch,
         now: datetime.datetime,
     ) -> _LockedBatch:
         del claim, now
-        lock_session = require_instance(session, _LockSession)
+        lock_session = require_instance(session.write_session, _LockSession)
         await lock_session.acquire(drain_lock)
         finalization_waiting_for_connection.set()
         if not lock_session.holds(connection_lock):
@@ -816,8 +824,10 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
                 session,
                 connection_id="connection-1",
             )
-            await require_instance(session, _LockSession).acquire(drain_lock)
-            await session.commit()
+            await require_instance(session.write_session, _LockSession).acquire(
+                drain_lock
+            )
+            await session.write_session.commit()
 
     finalize_task = asyncio.create_task(
         service._finalize_batch(  # noqa: SLF001
@@ -862,7 +872,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
     repository = MagicMock(spec=ExternalChannelRepository)
 
     async def lock_connection(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         connection_id: str,
     ) -> ExternalChannelConnection:
@@ -874,7 +884,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
     queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
 
     async def lock_owner(
-        _session: AsyncSession,
+        _session: WriteSession,
         **_kwargs: object,
     ) -> ExternalChannelIngressOwner:
         calls.append("owner")
@@ -888,7 +898,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
     )
 
     async def lock_first_item(
-        _session: AsyncSession,
+        _session: WriteSession,
         *,
         owner_id: str,
     ) -> ExternalChannelIngressItem:
@@ -1099,10 +1109,10 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
         read_through_position="00000000000000000002",
     )
     agent_session_repository.lock_by_id.assert_not_awaited()
-    agent_session_repository.admit_input_wakeup.assert_awaited_once_with(
-        transaction,
-        "session-1",
-    )
+    admit_call = agent_session_repository.admit_input_wakeup.await_args
+    assert admit_call is not None
+    assert admit_call.args[0].write_session is transaction
+    assert admit_call.args[1] == "session-1"
     transaction.commit_mock.assert_awaited_once()
     wake_dispatcher.dispatch.assert_awaited_once()
 

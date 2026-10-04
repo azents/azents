@@ -1,7 +1,6 @@
 """PostgreSQL-backed Session history search and visible paging checks."""
 
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     EventKind,
@@ -9,10 +8,10 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
-from azents.core.json_value import JSONValue
 from azents.engine.events.types import ExternalChannelMessagePayload
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.event import JSONValue, RDBEvent
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.message import MessageRepository
 from azents.repos.message.repository_test import _create_agent_session
 from azents.repos.session_history.repository import (
@@ -25,7 +24,7 @@ _PAYLOAD_ADAPTER: TypeAdapter[dict[str, JSONValue]] = TypeAdapter(dict[str, JSON
 
 
 async def _event(
-    session: AsyncSession,
+    session: WriteSession,
     session_id: str,
     order: int,
     kind: EventKind,
@@ -40,17 +39,17 @@ async def _event(
         reverted=reverted,
     )
     row.id = f"{order:032x}"
-    session.add(row)
-    await session.flush()
+    session.write_session.add(row)
+    await session.write_session.flush()
     return row.id
 
 
 async def test_search_visible_scalar_and_part_text_without_file_metadata(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Only exposed user text can match; returned anchors locate actual events."""
     session_id = await _create_agent_session(rdb_session)
-    root = await rdb_session.get(RDBAgentSession, session_id)
+    root = await rdb_session.read_session.get(RDBAgentSession, session_id)
     assert root is not None
     scope = SessionHistoryScope(
         agent_id=root.agent_id,
@@ -173,7 +172,7 @@ async def test_search_visible_scalar_and_part_text_without_file_metadata(
 
 
 async def test_visible_paging_skips_hidden_and_reverted_events_in_flags(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Event filtering happens before limits and both direction existence checks."""
     session_id = await _create_agent_session(rdb_session)

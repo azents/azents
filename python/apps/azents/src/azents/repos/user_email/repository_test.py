@@ -1,9 +1,9 @@
 """UserEmail repository tests."""
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.user_email import DuplicateEmail, UserEmailCreate
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 
@@ -19,7 +19,7 @@ def _next_email() -> str:
     return f"ue-test-{_email_counter}@example.com"
 
 
-async def _create_user(session: AsyncSession) -> str:
+async def _create_user(session: WriteSession) -> str:
     """Create User for tests and return ID."""
     repo = UserRepository()
     user = await repo.create(session, UserCreate(email=_next_email()))
@@ -29,7 +29,7 @@ async def _create_user(session: AsyncSession) -> str:
 class TestUserEmailRepository:
     """UserEmailRepository tests."""
 
-    async def test_create(self, rdb_session: AsyncSession) -> None:
+    async def test_create(self, rdb_session: WriteSession) -> None:
         """Create UserEmail."""
         # Given: prepare User
         user_id = await _create_user(rdb_session)
@@ -51,7 +51,7 @@ class TestUserEmailRepository:
         assert email.created_at
         assert email.updated_at
 
-    async def test_create_duplicate_email(self, rdb_session: AsyncSession) -> None:
+    async def test_create_duplicate_email(self, rdb_session: WriteSession) -> None:
         """Return DuplicateEmail when creating duplicate email."""
         # Given: UserEmail with same email already exists
         user_id = await _create_user(rdb_session)
@@ -73,7 +73,7 @@ class TestUserEmailRepository:
         assert isinstance(result.error, DuplicateEmail)
         assert result.error.email == "ue-dup@example.com"
 
-    async def test_get(self, rdb_session: AsyncSession) -> None:
+    async def test_get(self, rdb_session: WriteSession) -> None:
         """Fetch UserEmail by ID."""
         # Given: create UserEmail
         user_id = await _create_user(rdb_session)
@@ -93,7 +93,7 @@ class TestUserEmailRepository:
         assert email.id == email_id
         assert email.email == "ue-get@example.com"
 
-    async def test_get_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent ID."""
         # Given: nonexistent ID
         repo = UserEmailRepository()
@@ -104,7 +104,7 @@ class TestUserEmailRepository:
         # Then: None
         assert email is None
 
-    async def test_get_by_email(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_email(self, rdb_session: WriteSession) -> None:
         """Fetch UserEmail by email address."""
         # Given: create UserEmail
         user_id = await _create_user(rdb_session)
@@ -122,7 +122,7 @@ class TestUserEmailRepository:
         assert email.email == "ue-by-email@example.com"
         assert email.user_id == user_id
 
-    async def test_get_by_email_not_found(self, rdb_session: AsyncSession) -> None:
+    async def test_get_by_email_not_found(self, rdb_session: WriteSession) -> None:
         """Return None when fetching by nonexistent email."""
         # Given: nonexistent email
         repo = UserEmailRepository()
@@ -133,7 +133,7 @@ class TestUserEmailRepository:
         # Then: None
         assert email is None
 
-    async def test_list_by_user(self, rdb_session: AsyncSession) -> None:
+    async def test_list_by_user(self, rdb_session: WriteSession) -> None:
         """Fetch UserEmail list by User ID."""
         # Given: add multiple emails to one User
         user_id = await _create_user(rdb_session)
@@ -153,7 +153,7 @@ class TestUserEmailRepository:
         # Then: three items (one auto-created on create + two manual additions)
         assert len(emails) >= 2
 
-    async def test_list_all(self, rdb_session: AsyncSession) -> None:
+    async def test_list_all(self, rdb_session: WriteSession) -> None:
         """Fetch all UserEmail list."""
         # Given: create UserEmail
         user_id = await _create_user(rdb_session)
@@ -170,7 +170,7 @@ class TestUserEmailRepository:
         assert email_list.total >= 1
         assert len(email_list.items) >= 1
 
-    async def test_delete(self, rdb_session: AsyncSession) -> None:
+    async def test_delete(self, rdb_session: WriteSession) -> None:
         """Delete UserEmail."""
         # Given: create UserEmail
         user_id = await _create_user(rdb_session)

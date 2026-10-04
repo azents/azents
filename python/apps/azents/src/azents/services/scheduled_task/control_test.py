@@ -12,6 +12,7 @@ from azents.core.config import Config
 from azents.core.enums import ExternalChannelResourceType, ScheduledTaskScheduleType
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
@@ -83,8 +84,8 @@ class _ControlSessionManager:
         self.calls = calls
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, _ControlSession(self.calls))
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        yield ReadWriteSession(cast(AsyncSession, _ControlSession(self.calls)))
 
 
 class _ControlTaskRepository:
@@ -96,7 +97,7 @@ class _ControlTaskRepository:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         del session
@@ -113,7 +114,7 @@ class _ControlTaskService:
 
     async def lock_provider_mutation_target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         task_id: str,
         expected_binding_id: str,
@@ -130,7 +131,7 @@ class _ControlTaskService:
 
     async def delete_locked_provider_target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         target: ScheduledTaskMutationTarget,
         expected_binding_id: str,
@@ -153,7 +154,7 @@ async def test_provider_mutation_authorizes_binding_before_scheduled_locks(
     task_service = _ControlTaskService(task, calls)
     service = ScheduledTaskProviderControlService(
         session_manager=cast(
-            SessionManager[AsyncSession],
+            SessionManager[WriteSession],
             _ControlSessionManager(calls),
         ),
         external_repository=cast(ExternalChannelRepository, object()),
@@ -165,7 +166,7 @@ async def test_provider_mutation_authorizes_binding_before_scheduled_locks(
 
     async def authorize(
         control_service: ScheduledTaskProviderControlService,
-        session: AsyncSession,
+        session: WriteSession,
         **kwargs: object,
     ) -> ExternalChannelInteraction:
         del control_service, session, kwargs

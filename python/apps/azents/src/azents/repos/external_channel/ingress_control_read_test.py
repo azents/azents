@@ -10,7 +10,6 @@ from typing import Literal, NamedTuple
 import pytest
 import sqlalchemy as sa
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -27,6 +26,7 @@ from azents.rdb.models.external_channel_ingress import (
     RDBExternalChannelIngressOwner,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.app_mode_repository_test import (
     _agent,
     _connection_create,
@@ -61,7 +61,7 @@ class _Seed(NamedTuple):
     item_ids: tuple[str, ...]
 
 
-async def _seed(manager: SessionManager[AsyncSession]) -> _Seed:
+async def _seed(manager: SessionManager[WriteSession]) -> _Seed:
     """Create isolated relational queue inputs outside the completed reads."""
     async with manager() as session:
         workspace_id = await _workspace(session, "ingress-control-read")
@@ -149,7 +149,7 @@ async def _seed(manager: SessionManager[AsyncSession]) -> _Seed:
             )
             owner_id = admission.owner.id
             ids.append(admission.item.id)
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBExternalChannelIngressItem)
                 .where(RDBExternalChannelIngressItem.id == admission.item.id)
                 .values(
@@ -158,12 +158,12 @@ async def _seed(manager: SessionManager[AsyncSession]) -> _Seed:
                 )
             )
         assert owner_id is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBExternalChannelIngressOwner)
             .where(RDBExternalChannelIngressOwner.id == owner_id)
             .values(created_at=_NOW)
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBExternalChannelIngressItem)
             .where(RDBExternalChannelIngressItem.id == ids[1])
             .values(
@@ -173,7 +173,7 @@ async def _seed(manager: SessionManager[AsyncSession]) -> _Seed:
                 batch_id="b" * 32,
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBExternalChannelIngressItem)
             .where(RDBExternalChannelIngressItem.id == ids[2])
             .values(
@@ -187,15 +187,15 @@ async def _seed(manager: SessionManager[AsyncSession]) -> _Seed:
 class _Boundary:
     """Track actual Session transactions and real commit events."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.opened: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.opened: list[WriteSession] = []
+        self.active: list[WriteSession] = []
         self.events: list[str] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
-        current: AsyncSession | None = None
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
+        current: WriteSession | None = None
 
         def committed(_: object) -> None:
             self.events.append("commit")
@@ -206,17 +206,23 @@ class _Boundary:
                 self.opened.append(session)
                 self.active.append(session)
                 self.events.append("open")
-                event.listen(session.sync_session, "after_commit", committed)
+                event.listen(
+                    session.write_session.sync_session, "after_commit", committed
+                )
                 yield session
         finally:
             if current is not None:
                 self.active.remove(current)
-                event.remove(current.sync_session, "after_commit", committed)
+                event.remove(
+                    current.write_session.sync_session, "after_commit", committed
+                )
                 self.events.append("closed")
 
     def closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.opened)
+        assert all(
+            not session.write_session.in_transaction() for session in self.opened
+        )
 
 
 def _reads(
@@ -228,7 +234,7 @@ def _reads(
 
 
 async def test_empty_owner_and_diagnostics_explicitly_commit_before_return(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     repository = _reads(boundary, ExternalChannelIngressQueueRepository())
@@ -244,11 +250,11 @@ async def test_empty_owner_and_diagnostics_explicitly_commit_before_return(
 
 
 async def test_owner_read_uses_presence_without_ready_lease_or_due_filters(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     seed = await _seed(rdb_session_manager)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBExternalChannelIngressOwner)
             .where(RDBExternalChannelIngressOwner.id == seed.owner_id)
             .values(
@@ -272,7 +278,7 @@ async def test_owner_read_uses_presence_without_ready_lease_or_due_filters(
 
 @pytest.mark.parametrize("limit", [1, 3, 1000])
 async def test_sanitized_counts_order_age_and_truncation_remain_detached(
-    rdb_session_manager: SessionManager[AsyncSession], limit: int
+    rdb_session_manager: SessionManager[WriteSession], limit: int
 ) -> None:
     seed = await _seed(rdb_session_manager)
     boundary = _Boundary(rdb_session_manager)
@@ -307,7 +313,7 @@ async def test_sanitized_counts_order_age_and_truncation_remain_detached(
 
 @pytest.mark.parametrize("limit", [0, 1001])
 async def test_diagnostic_limit_errors_close_without_metrics_or_commit(
-    rdb_session_manager: SessionManager[AsyncSession], limit: int
+    rdb_session_manager: SessionManager[WriteSession], limit: int
 ) -> None:
     boundary = _Boundary(rdb_session_manager)
     with pytest.raises(ValueError, match="limit must be from 1 to 1000"):
@@ -325,22 +331,22 @@ class _ReadFault(ExternalChannelIngressQueueRepository):
         self.cancel = cancel
         self.reached = False
 
-    def fail(self, session: AsyncSession) -> None:
-        assert session.in_transaction()
+    def fail(self, session: ReadSession) -> None:
+        assert session.read_session.in_transaction()
         self.reached = True
         if self.cancel:
             raise asyncio.CancelledError()
         raise ValueError("after actual ingress read")
 
     async def get_active_owner(
-        self, session: AsyncSession, *, owner_id: str
+        self, session: ReadSession, *, owner_id: str
     ) -> ExternalChannelIngressOwner | None:
         await super().get_active_owner(session, owner_id=owner_id)
         self.fail(session)
         return None
 
     async def inspect_active(
-        self, session: AsyncSession, *, now: datetime.datetime, limit: int
+        self, session: ReadSession, *, now: datetime.datetime, limit: int
     ) -> ExternalChannelIngressDiagnosticSnapshot:
         snapshot = await super().inspect_active(session, now=now, limit=limit)
         self.fail(session)
@@ -350,7 +356,7 @@ class _ReadFault(ExternalChannelIngressQueueRepository):
 @pytest.mark.parametrize("operation", ["owner", "diagnostic"])
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_actual_query_error_and_cancellation_close_before_external_effects(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: Literal["owner", "diagnostic"],
     cancel: bool,
 ) -> None:
@@ -368,7 +374,7 @@ async def test_actual_query_error_and_cancellation_close_before_external_effects
     assert boundary.events == ["open", "closed"]
     async with rdb_session_manager() as session:
         assert (
-            await session.scalar(
+            await session.read_session.scalar(
                 sa.select(sa.func.count()).select_from(RDBExternalChannelIngressItem)
             )
             == 3

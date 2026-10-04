@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
@@ -16,6 +15,7 @@ from azents.core.enums import (
 from azents.core.terminal_result import terminal_result_content
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -30,7 +30,7 @@ class TerminalRunFinalizationRepository:
     """Finalize terminal Runs and direct-parent mailbox delivery atomically."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     agent_session_repository: Annotated[
@@ -50,7 +50,7 @@ class TerminalRunFinalizationRepository:
 
     async def finalize_run_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
@@ -167,7 +167,7 @@ class TerminalRunFinalizationRepository:
 
     async def lock_run_finalization(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
     ) -> None:
@@ -185,7 +185,7 @@ class TerminalRunFinalizationRepository:
 
     async def finalize_runs_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_ids: list[str],
     ) -> list[TerminalFinalizationOutcome]:
         """Finalize multiple terminal Runs in one repository transaction."""
@@ -196,7 +196,7 @@ class TerminalRunFinalizationRepository:
 
     async def _suppress(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:

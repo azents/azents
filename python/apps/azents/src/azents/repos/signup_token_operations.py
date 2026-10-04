@@ -6,7 +6,6 @@ from typing import Annotated, assert_never
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.signup_token_operations import (
     InvalidSignupToken,
@@ -17,6 +16,7 @@ from azents.core.signup_token_operations import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.session import SessionRepository
@@ -39,7 +39,7 @@ class SignupTokenOperationRepository:
     """Own original groups without application preparation or post-commit effects."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     signup_token_repository: Annotated[
         SignupTokenRepository, Depends(SignupTokenRepository)

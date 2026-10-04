@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.oauth2 import OAuthTokenResponse
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnection
 from azents.repos.mcp_oauth_connection.operations import (
@@ -178,20 +179,20 @@ class _ConnectionRepository(MCPOAuthConnectionRepository):
         assert self.active[0] == 1
 
     async def get_by_toolkit_id(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnection:
         del session, toolkit_id
         self._assert_session()
         return self.connection.model_copy(deep=True)
 
     async def get_by_toolkit_id_for_update(
-        self, session: AsyncSession, toolkit_id: str
+        self, session: ReadSession, toolkit_id: str
     ) -> MCPOAuthConnection:
         return await self.get_by_toolkit_id(session, toolkit_id)
 
     async def update_tokens(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         toolkit_id: str,
         access_token: str,
@@ -213,7 +214,7 @@ class _ConnectionRepository(MCPOAuthConnectionRepository):
         return self.connection.model_copy(deep=True)
 
     async def mark_reconnect_required(
-        self, session: AsyncSession, *, toolkit_id: str
+        self, session: ReadSession, *, toolkit_id: str
     ) -> None:
         del session, toolkit_id
         self._assert_session()
@@ -231,10 +232,10 @@ async def test_oauth_fresh_token_returns_without_http_or_write(
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -274,10 +275,10 @@ async def test_oauth_refresh_closes_db_session_during_http(
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -322,10 +323,10 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 
@@ -373,10 +374,10 @@ async def test_oauth_missing_refresh_token_marks_reconnect_required() -> None:
     active = [0]
 
     @asynccontextmanager
-    async def session_manager() -> AsyncIterator[AsyncSession]:
+    async def session_manager() -> AsyncIterator[WriteSession]:
         active[0] += 1
         try:
-            yield AsyncSession()
+            yield ReadWriteSession(AsyncSession())
         finally:
             active[0] -= 1
 

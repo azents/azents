@@ -4,10 +4,9 @@ import dataclasses
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -22,12 +21,12 @@ class OwnerBoundSessionManager:
     broker, and filesystem operations must execute after that scope closes.
     """
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     session_id: str
     owner_generation: int
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         """Lock current ownership until the database operation commits or aborts."""
         async with self.session_manager() as session:
             current = await AgentSessionRepository().wait_for_execution_lock_by_id(
@@ -50,7 +49,7 @@ class OwnerBoundSessionManager:
 class SessionExecutionAuthorityRepository:
     """Expose a completed ownership check without exposing a transaction scope."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     owner: SessionExecutionOwner
 
     async def assert_current(self) -> None:

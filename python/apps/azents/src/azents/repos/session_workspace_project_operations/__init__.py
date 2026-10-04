@@ -6,7 +6,6 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentProjectCatalogStatus, AgentSessionStatus
@@ -16,6 +15,7 @@ from azents.core.session_workspace_project import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -98,7 +98,7 @@ class SessionWorkspaceProjectOperationsRepository:
         Depends(SkillStateRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def load_project_context(
@@ -361,7 +361,7 @@ class SessionWorkspaceProjectOperationsRepository:
 
     async def _lock_context(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         context: ProjectDatabaseContext,
         user_id: str | None,
@@ -397,7 +397,7 @@ class SessionWorkspaceProjectOperationsRepository:
 
     async def _create_project_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         context: ProjectDatabaseContext,
         path: str,

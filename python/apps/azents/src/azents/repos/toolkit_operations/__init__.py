@@ -5,7 +5,6 @@ from typing import Annotated
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
@@ -24,6 +23,7 @@ from azents.core.toolkit_errors import (
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
@@ -130,7 +130,7 @@ class ToolkitOperationsRepository:
         Depends(SystemSettingRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
 
@@ -513,7 +513,7 @@ class ToolkitOperationsRepository:
 
     async def _get_workspace_toolkit(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         toolkit_id: str,
         workspace_id: str,
@@ -527,7 +527,7 @@ class ToolkitOperationsRepository:
 
     async def validate_platform_authority(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         authority: PlatformToolkitAuthority,
     ) -> PlatformAuthorityRejected | None:
         if authority.app_id_source is SystemSettingFieldSource.ADMIN:

@@ -1,13 +1,13 @@
 """Real database checks for execution-bound Toolkit state."""
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.engine_tool_state import TodoItem, TodoState
 from azents.core.enums import AgentSessionProductMode
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.repository_test import _create_agent, _create_workspace
 from azents.repos.session_execution import (
@@ -17,7 +17,7 @@ from azents.repos.toolkit_state.engine import TodoStateStore
 
 
 async def test_toolkit_state_store_rejects_superseded_execution_owner(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A Toolkit state mutation cannot commit after Session takeover."""
     sessions = AgentSessionRepository()

@@ -4,11 +4,11 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.core.kimi_oauth import KimiOAuthSessionStatus
 from azents.rdb.models.kimi_oauth_session import RDBKimiOAuthSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import (
     KimiOAuthSession,
@@ -29,7 +29,7 @@ class KimiOAuthSessionRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: KimiOAuthSessionCreate,
     ) -> KimiOAuthSession:
         """Create Kimi OAuth session.
@@ -49,13 +49,13 @@ class KimiOAuthSessionRepository:
             interval_seconds=create.interval_seconds,
             expires_at=create.expires_at,
         )
-        session.add(rdb_session)
-        await session.flush()
+        session.write_session.add(rdb_session)
+        await session.write_session.flush()
         return self._build(rdb_session)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> KimiOAuthSession | None:
         """Fetch Kimi OAuth session by ID.
@@ -64,14 +64,14 @@ class KimiOAuthSessionRepository:
         :param session_id: Session ID
         :return: Session or None
         """
-        rdb = await session.get(RDBKimiOAuthSession, session_id)
+        rdb = await session.read_session.get(RDBKimiOAuthSession, session_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_id_with_secrets(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> KimiOAuthSessionWithSecrets | None:
         """Fetch Kimi OAuth session by ID including secrets.
@@ -80,20 +80,20 @@ class KimiOAuthSessionRepository:
         :param session_id: Session ID
         :return: Session including secrets or None
         """
-        rdb = await session.get(RDBKimiOAuthSession, session_id)
+        rdb = await session.read_session.get(RDBKimiOAuthSession, session_id)
         if rdb is None:
             return None
         return self._build_with_secrets(rdb)
 
     async def increase_poll_interval(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         *,
         seconds: int,
     ) -> Result[KimiOAuthSession, NotFound]:
         """Increase the polling interval of an unexpired pending session."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBKimiOAuthSession)
             .where(
                 RDBKimiOAuthSession.id == session_id,
@@ -112,7 +112,7 @@ class KimiOAuthSessionRepository:
 
     async def consume(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> Result[KimiOAuthSession, NotFound]:
         """Transition pending session to connected status.
@@ -129,7 +129,7 @@ class KimiOAuthSessionRepository:
 
     async def cancel(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
     ) -> Result[KimiOAuthSession, NotFound]:
         """Transition pending session to cancelled status.
@@ -146,12 +146,12 @@ class KimiOAuthSessionRepository:
 
     async def _transition_pending(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_id: str,
         status: KimiOAuthSessionStatus,
     ) -> Result[KimiOAuthSession, NotFound]:
         """Transition status of unexpired pending session."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBKimiOAuthSession)
             .where(
                 RDBKimiOAuthSession.id == session_id,

@@ -3,13 +3,13 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.skill_projection import SkillProjectionSnapshot, SkillProjectionState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.session_execution.ownership import OwnerBoundSessionManager
 from azents.repos.skill_state import SkillStateRepository
 
@@ -20,7 +20,7 @@ class SkillStateStore:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
     ) -> None:
         """Create Skill state store."""
         self.session_manager = session_manager
@@ -86,7 +86,7 @@ class SkillStateStore:
 
 def get_skill_state_store(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
 ) -> SkillStateStore:
     """Compose the completed Skill store without exposing a session to callers."""

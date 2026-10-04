@@ -8,7 +8,6 @@ from typing import Literal
 import pytest
 import sqlalchemy as sa
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -21,6 +20,7 @@ from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
@@ -60,7 +60,7 @@ from azents.testing.runtime_coordination import FakeRuntimeControlProtocolServic
 @dataclasses.dataclass(frozen=True)
 class QueryCall:
     operation: str
-    session: AsyncSession
+    session: ReadSession
     limit: int | None
 
 
@@ -78,9 +78,9 @@ class ObservedRuntimes(AgentRuntimeRepository):
         self.error = error
         self.calls: list[QueryCall] = []
 
-    def point(self, operation: str, session: AsyncSession, limit: int | None) -> None:
+    def point(self, operation: str, session: ReadSession, limit: int | None) -> None:
         assert self.probe.active_contexts == 1
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         self.calls.append(QueryCall(operation, session, limit))
         if self.stage == operation:
             assert self.error is not None
@@ -88,7 +88,7 @@ class ObservedRuntimes(AgentRuntimeRepository):
 
     async def find_lifecycle_dispatch_candidates(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         limit: int,
         retry_delay: timedelta = timedelta(seconds=60),
@@ -100,7 +100,7 @@ class ObservedRuntimes(AgentRuntimeRepository):
         return rows
 
     async def find_provider_observe_candidates(
-        self, session: AsyncSession, *, limit: int, observe_interval: timedelta
+        self, session: ReadSession, *, limit: int, observe_interval: timedelta
     ) -> list[AgentRuntime]:
         rows = await super().find_provider_observe_candidates(
             session, limit=limit, observe_interval=observe_interval
@@ -109,7 +109,7 @@ class ObservedRuntimes(AgentRuntimeRepository):
         return rows
 
     async def find_configuration_adoption_candidates(
-        self, session: AsyncSession, *, limit: int
+        self, session: ReadSession, *, limit: int
     ) -> list[AgentRuntime]:
         rows = await super().find_configuration_adoption_candidates(
             session, limit=limit
@@ -118,21 +118,21 @@ class ObservedRuntimes(AgentRuntimeRepository):
         return rows
 
     async def get_by_id(
-        self, session: AsyncSession, runtime_id: str
+        self, session: ReadSession, runtime_id: str
     ) -> AgentRuntime | None:
         row = await super().get_by_id(session, runtime_id)
         self.point("runtime_read", session, None)
         return row
 
     async def mark_provider_observe_requested(
-        self, session: AsyncSession, runtime_id: str
+        self, session: WriteSession, runtime_id: str
     ) -> AgentRuntime | None:
         row = await super().mark_provider_observe_requested(session, runtime_id)
         self.point("marker", session, None)
         return row
 
     async def mark_start_timeouts(
-        self, session: AsyncSession, *, stale_threshold: timedelta, limit: int
+        self, session: WriteSession, *, stale_threshold: timedelta, limit: int
     ) -> list[AgentRuntime]:
         rows = await super().mark_start_timeouts(
             session, stale_threshold=stale_threshold, limit=limit
@@ -147,15 +147,15 @@ class ObservedProfiles(RuntimeProfileRepository):
     ) -> None:
         self.probe = probe
         self.error = error
-        self.sessions: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
 
     async def get_configuration_state(
-        self, session: AsyncSession, *, runtime_id: str, for_update: bool = False
+        self, session: WriteSession, *, runtime_id: str, for_update: bool = False
     ) -> RuntimeConfigurationState | None:
         state = await super().get_configuration_state(
             session, runtime_id=runtime_id, for_update=for_update
         )
-        assert self.probe.active_contexts == 1 and session.in_transaction()
+        assert self.probe.active_contexts == 1 and session.read_session.in_transaction()
         self.sessions.append(session)
         if self.error is not None:
             raise self.error
@@ -164,7 +164,7 @@ class ObservedProfiles(RuntimeProfileRepository):
 
 @dataclasses.dataclass(frozen=True)
 class ReconcileFixture:
-    manager: SessionManager[AsyncSession]
+    manager: SessionManager[WriteSession]
     probe: SessionBoundaryProbe
     runtimes: ObservedRuntimes
     profiles: ObservedProfiles
@@ -174,7 +174,7 @@ class ReconcileFixture:
 
 
 async def reconcile_fixture(
-    manager: SessionManager[AsyncSession], name: str
+    manager: SessionManager[WriteSession], name: str
 ) -> ReconcileFixture:
     prepared = await _prepare_start_dispatch(session_manager=manager, slug=name)
     async with manager() as session:
@@ -210,7 +210,7 @@ async def running(fixture: ReconcileFixture, id: str) -> AgentRuntime:
         await AgentRuntimeRepository().record_provider_observed_state(
             session, id, RuntimeProviderObservedState.RUNNING, 1, row.desired_generation
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == id)
             .values(
@@ -273,7 +273,7 @@ async def clone_runtime(fixture: ReconcileFixture, slug: str) -> AgentRuntime:
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None and fixture.state.desired.document is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -316,7 +316,7 @@ async def clone_runtime(fixture: ReconcileFixture, slug: str) -> AgentRuntime:
 
 
 async def test_three_candidate_queries_share_session_and_preserve_sql_order_limits(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-three-lists")
     first = await running(fixture, fixture.runtime.id)
@@ -325,7 +325,7 @@ async def test_three_candidate_queries_share_session_and_preserve_sql_order_limi
     await pending_adoption(fixture, first.id, acknowledged=False)
     await pending_adoption(fixture, second.id, acknowledged=False)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id.in_([first.id, second.id]))
             .values(
@@ -333,7 +333,7 @@ async def test_three_candidate_queries_share_session_and_preserve_sql_order_limi
                 provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
             )
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == second.id)
             .values(
@@ -385,7 +385,7 @@ class ClosedStore(InMemoryRuntimeCoordinationStore):
         self.lookups += 1
         if self.drift:
             async with self.fixture.manager() as session:
-                await session.execute(
+                await session.write_session.execute(
                     sa.update(RDBAgentRuntime)
                     .where(RDBAgentRuntime.id == self.fixture.runtime.id)
                     .values(desired_generation=RDBAgentRuntime.desired_generation + 1)
@@ -442,7 +442,7 @@ def reconciler(
 
 
 async def test_periodic_marker_commits_even_when_no_provider_connection(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-marker-commit")
     runtime = await running(fixture, fixture.runtime.id)
@@ -465,7 +465,7 @@ async def test_periodic_marker_commits_even_when_no_provider_connection(
 
 
 async def test_periodic_acknowledged_pending_adoption_gate_skips_marker(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-profile-gate")
     runtime = await running(fixture, fixture.runtime.id)
@@ -479,7 +479,7 @@ async def test_periodic_acknowledged_pending_adoption_gate_skips_marker(
 
 @pytest.mark.parametrize("kind", ["lifecycle", "adoption"])
 async def test_reconcile_three_lists_suppress_duplicate_dispatch_and_timeout_is_last(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     kind: Literal["lifecycle", "adoption"],
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-suppression")
@@ -487,7 +487,7 @@ async def test_reconcile_three_lists_suppress_duplicate_dispatch_and_timeout_is_
     await pending_adoption(fixture, fixture.runtime.id, acknowledged=False)
     if kind == "lifecycle":
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRuntime)
                 .where(RDBAgentRuntime.id == fixture.runtime.id)
                 .values(
@@ -513,7 +513,7 @@ async def test_reconcile_three_lists_suppress_duplicate_dispatch_and_timeout_is_
 @pytest.mark.parametrize("operation", ["candidates", "periodic", "adoption", "repair"])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_actual_read_error_or_cancel_resolves_each_read_scope(
-    rdb_session_manager: SessionManager[AsyncSession], operation: str, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], operation: str, cancel: bool
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-read-fault")
     runtime = await running(fixture, fixture.runtime.id)
@@ -572,26 +572,26 @@ def repair_input(fixture: ReconcileFixture) -> RuntimeObserveRepairInput:
     ],
 )
 async def test_observe_repair_exact_runtime_and_configuration_tuple_is_detached(
-    rdb_session_manager: SessionManager[AsyncSession], invalid: str
+    rdb_session_manager: SessionManager[WriteSession], invalid: str
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-repair-tuple")
     await running(fixture, fixture.runtime.id)
     input = repair_input(fixture)
     async with rdb_session_manager() as session:
         if invalid == "resource":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRuntime)
                 .where(RDBAgentRuntime.id == fixture.runtime.id)
                 .values(runtime_provider_resource_id=None)
             )
         elif invalid == "desired":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRuntime)
                 .where(RDBAgentRuntime.id == fixture.runtime.id)
                 .values(desired_state=RuntimeDesiredState.STOPPED)
             )
         elif invalid == "ready":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeConfigurationState)
                 .where(RDBRuntimeConfigurationState.runtime_id == fixture.runtime.id)
                 .values(
@@ -632,13 +632,13 @@ async def test_observe_repair_exact_runtime_and_configuration_tuple_is_detached(
 @pytest.mark.parametrize("mutation", ["marker", "timeout"])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_mutation_failure_after_actual_write_rolls_back_only_that_operation(
-    rdb_session_manager: SessionManager[AsyncSession], mutation: str, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], mutation: str, cancel: bool
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-write-fault")
     runtime = await running(fixture, fixture.runtime.id)
     if mutation == "timeout":
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRuntime)
                 .where(RDBAgentRuntime.id == runtime.id)
                 .values(
@@ -664,12 +664,12 @@ async def test_mutation_failure_after_actual_write_rolls_back_only_that_operatio
 
 
 async def test_separate_timeout_commit_preserves_previous_observe_marker(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-timeout-commit")
     runtime = await running(fixture, fixture.runtime.id)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
             .values(
@@ -693,7 +693,7 @@ async def test_separate_timeout_commit_preserves_previous_observe_marker(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_periodic_dispatch_unknown_error_or_cancel_preserves_committed_marker(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     fixture = await reconcile_fixture(rdb_session_manager, "reconcile-dispatch-failure")
     runtime = await running(fixture, fixture.runtime.id)
@@ -714,7 +714,7 @@ async def test_periodic_dispatch_unknown_error_or_cancel_preserves_committed_mar
 
 
 async def test_repair_authority_revalidated_after_coordination_generation_drift(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await reconcile_fixture(
         rdb_session_manager, "reconcile-coordination-drift"

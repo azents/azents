@@ -3,7 +3,6 @@
 import datetime
 from dataclasses import dataclass
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.agent_session_data import AgentSessionCreate
@@ -18,6 +17,7 @@ from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
 from azents.repos.user import UserRepository
@@ -41,9 +41,9 @@ class ConsolidationCorpus:
 
 
 async def create_consolidation_source(
-    session: AsyncSession,
+    session: WriteSession,
     *,
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     key: ConsolidationUnitKey,
     summary: str | None,
     title: str,
@@ -63,12 +63,12 @@ async def create_consolidation_source(
             title=title,
         ),
     )
-    session.add(
+    session.write_session.add(
         RDBHistoricalMemorySource(
             source_session_id=root.id, admitted_at=CONSOLIDATION_FIXTURE_TIME
         )
     )
-    await session.flush()
+    await session.write_session.flush()
     result = await HistoricalMemoryRepository(manager).publish_completed_in_session(
         session,
         source_session_id=root.id,
@@ -85,14 +85,14 @@ async def create_consolidation_source(
 
 
 async def seed_consolidation_corpus(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ConsolidationCorpus:
     """Seed independent Team and personal sentinels without Runtime startup."""
     slug = uuid7().hex
     async with manager() as session:
         workspace = RDBWorkspace(name=slug, handle=slug)
-        session.add(workspace)
-        await session.flush()
+        session.write_session.add(workspace)
+        await session.write_session.flush()
         selection = make_test_model_selection_dict()
         agent = RDBAgent(
             workspace_id=workspace.id,
@@ -106,12 +106,12 @@ async def seed_consolidation_corpus(
             lightweight_model_label="lightweight",
             memory_enabled=True,
         )
-        session.add(agent)
-        await session.flush()
+        session.write_session.add(agent)
+        await session.write_session.flush()
         user = await UserRepository().create(
             session, UserCreate(email=f"{slug}@example.test")
         )
-        session.add(
+        session.write_session.add(
             RDBWorkspaceUser(
                 workspace_id=workspace.id,
                 user_id=user.id,
@@ -119,7 +119,7 @@ async def seed_consolidation_corpus(
                 role=WorkspaceUserRole.MEMBER,
             )
         )
-        await session.flush()
+        await session.write_session.flush()
         team = ConsolidationUnitKey(
             workspace_id=workspace.id,
             agent_id=agent.id,
@@ -142,5 +142,5 @@ async def seed_consolidation_corpus(
             )
             for key in (team, personal)
         ]
-        await session.commit()
+        await session.write_session.commit()
     return ConsolidationCorpus(team, personal, sources[0], sources[1])

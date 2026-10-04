@@ -17,7 +17,6 @@ from pydantic import (
     TypeAdapter,
     ValidationError,
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
@@ -37,6 +36,7 @@ from azents.core.external_channel_selector_state import selector_state_from_inte
 from azents.core.external_model_settings import ExternalModelActorContext
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -289,7 +289,7 @@ class ExternalChannelInteractionProcessor:
     """Open or submit one selector interaction after durable scope checks."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -1202,7 +1202,7 @@ class ExternalChannelInteractionProcessor:
 
     async def _selector_owners(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         selector: ExternalChannelInteraction | None,
         principal_id: str,

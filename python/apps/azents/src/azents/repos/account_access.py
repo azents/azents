@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.account_access import (
     AccountWorkspaceMembership,
@@ -13,6 +12,7 @@ from azents.core.account_access import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.session import SessionRepository
 from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -20,7 +20,7 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 
 
 async def evaluate_active_subject(
-    session: AsyncSession,
+    session: ReadSession,
     *,
     user_id: str,
     session_id: str,
@@ -50,7 +50,7 @@ class AccountAccessOperationRepository:
     """Own exact subject and membership reads without HTTP or credential policy."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     user_repository: Annotated[UserRepository, Depends(UserRepository)]
     session_repository: Annotated[SessionRepository, Depends(SessionRepository)]

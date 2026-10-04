@@ -3,7 +3,6 @@
 import datetime
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.action_execution_data import (
     ActionExecution,
@@ -16,6 +15,7 @@ from azents.core.enums import ActionExecutionEventKind, ActionExecutionStatus
 from azents.core.json_value import JSONValue
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 
 _ACTION_EXECUTION_REPOSITORY_DEP = Depends(ActionExecutionRepository)
@@ -27,7 +27,7 @@ class ActionExecutionService:
 
     def __init__(
         self,
-        session_manager: SessionManager[AsyncSession] = _SESSION_MANAGER_DEP,
+        session_manager: SessionManager[WriteSession] = _SESSION_MANAGER_DEP,
         action_execution_repository: ActionExecutionRepository = (
             _ACTION_EXECUTION_REPOSITORY_DEP
         ),

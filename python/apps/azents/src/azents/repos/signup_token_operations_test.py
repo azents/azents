@@ -29,6 +29,7 @@ from azents.rdb.models.signup_token import RDBSignupToken, RDBSignupTokenRedempt
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.user_email import RDBUserEmail
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import (
     AlreadyExists,
@@ -59,30 +60,48 @@ class SignupScope:
     """Observe actual infrastructure close/rollback, never replace SQL execution."""
 
     def __init__(
-        self, manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+        self, manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self.manager = manager
-        self.active: list[AsyncSession] = []
-        self.sessions: list[AsyncSession] = []
-        self.closed: list[AsyncSession] = []
-        self.rollbacks: list[AsyncSession] = []
+        self.active: list[WriteSession] = []
+        self.sessions: list[WriteSession] = []
+        self.closed: list[WriteSession] = []
+        self.rollbacks: list[WriteSession] = []
         self.commits = 0
         self.failures = 0
         original_close, original_rollback = AsyncSession.close, AsyncSession.rollback
 
         async def close(session: AsyncSession) -> None:
             await original_close(session)
-            self.closed.append(session)
+            wrapper = next(
+                (
+                    candidate
+                    for candidate in self.sessions
+                    if candidate.write_session is session
+                ),
+                None,
+            )
+            if wrapper is not None:
+                self.closed.append(wrapper)
 
         async def rollback(session: AsyncSession) -> None:
             await original_rollback(session)
-            self.rollbacks.append(session)
+            wrapper = next(
+                (
+                    candidate
+                    for candidate in self.sessions
+                    if candidate.write_session is session
+                ),
+                None,
+            )
+            if wrapper is not None:
+                self.rollbacks.append(wrapper)
 
         monkeypatch.setattr(AsyncSession, "close", close)
         monkeypatch.setattr(AsyncSession, "rollback", rollback)
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "Completed Signup groups cannot nest"
         try:
             async with self.manager() as session:
@@ -103,14 +122,16 @@ class SignupScope:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
         assert all(session in self.closed for session in self.sessions)
 
 
 @dataclasses.dataclass(frozen=True)
 class SignupCall:
     stage: str
-    session: AsyncSession
+    session: ReadSession
 
 
 class SignupFault:
@@ -126,9 +147,9 @@ class SignupFault:
         self.trace: list[SignupCall] = []
         self.clocks: list[datetime] = []
 
-    async def point(self, stage: str, session: AsyncSession) -> None:
+    async def point(self, stage: str, session: ReadSession) -> None:
         assert self.scope.active == [session]
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         self.trace.append(SignupCall(stage, session))
         if self.stage == stage:
             self.reached.set()
@@ -146,28 +167,28 @@ class SignupTokens(SignupTokenRepository):
         self.fault = fault
 
     async def create(
-        self, session: AsyncSession, create: SignupTokenCreate
+        self, session: WriteSession, create: SignupTokenCreate
     ) -> SignupToken:
         result = await super().create(session, create)
         await self.fault.point("token_create", session)
         return result
 
     async def list_all(
-        self, session: AsyncSession, *, offset: int = 0, limit: int = 50
+        self, session: ReadSession, *, offset: int = 0, limit: int = 50
     ) -> SignupTokenList:
         result = await super().list_all(session, offset=offset, limit=limit)
         await self.fault.point("token_list", session)
         return result
 
     async def get_by_token_hash(
-        self, session: AsyncSession, token_hash: str
+        self, session: ReadSession, token_hash: str
     ) -> SignupToken | None:
         result = await super().get_by_token_hash(session, token_hash)
         await self.fault.point("token_get", session)
         return result
 
     async def get_available_by_token_hash(
-        self, session: AsyncSession, token_hash: str, *, now: datetime
+        self, session: ReadSession, token_hash: str, *, now: datetime
     ) -> Result[SignupToken, SignupTokenUnavailable]:
         result = await super().get_available_by_token_hash(session, token_hash, now=now)
         self.fault.clocks.append(now)
@@ -175,7 +196,7 @@ class SignupTokens(SignupTokenRepository):
         return result
 
     async def claim_for_redemption(
-        self, session: AsyncSession, token_hash: str, *, now: datetime
+        self, session: WriteSession, token_hash: str, *, now: datetime
     ) -> Result[SignupToken, SignupTokenUnavailable]:
         result = await super().claim_for_redemption(session, token_hash, now=now)
         self.fault.clocks.append(now)
@@ -183,14 +204,14 @@ class SignupTokens(SignupTokenRepository):
         return result
 
     async def create_redemption(
-        self, session: AsyncSession, create: SignupTokenRedemptionCreate
+        self, session: WriteSession, create: SignupTokenRedemptionCreate
     ) -> SignupTokenRedemption:
         result = await super().create_redemption(session, create)
         await self.fault.point("audit", session)
         return result
 
     async def revoke(
-        self, session: AsyncSession, token_id: str, *, revoked_at: datetime
+        self, session: WriteSession, token_id: str, *, revoked_at: datetime
     ) -> bool:
         result = await super().revoke(session, token_id, revoked_at=revoked_at)
         self.fault.clocks.append(revoked_at)
@@ -203,7 +224,7 @@ class SignupUsers(UserRepository):
         self.fault = fault
 
     async def create_with_verified_primary_email(
-        self, session: AsyncSession, create: UserCreate, *, verified_at: datetime
+        self, session: WriteSession, create: UserCreate, *, verified_at: datetime
     ) -> User:
         result = await super().create_with_verified_primary_email(
             session, create, verified_at=verified_at
@@ -216,7 +237,7 @@ class SignupEmails(UserEmailRepository):
     def __init__(self, fault: SignupFault) -> None:
         self.fault = fault
 
-    async def get_by_email(self, session: AsyncSession, email: str) -> UserEmail | None:
+    async def get_by_email(self, session: ReadSession, email: str) -> UserEmail | None:
         result = await super().get_by_email(session, email)
         await self.fault.point("email_lookup", session)
         return result
@@ -227,7 +248,7 @@ class SignupPasswords(PasswordLoginRepository):
         self.fault = fault
 
     async def create(
-        self, session: AsyncSession, create: PasswordLoginCreate
+        self, session: WriteSession, create: PasswordLoginCreate
     ) -> Result[PasswordLogin, AlreadyExists]:
         result = await super().create(session, create)
         await self.fault.point("password_create", session)
@@ -238,7 +259,7 @@ class SignupSessions(SessionRepository):
     def __init__(self, fault: SignupFault) -> None:
         self.fault = fault
 
-    async def create(self, session: AsyncSession, create: SessionCreate) -> Session:
+    async def create(self, session: WriteSession, create: SessionCreate) -> Session:
         result = await super().create(session, create)
         await self.fault.point("session_create", session)
         return result
@@ -251,14 +272,14 @@ class ActualRollbackPasswords(PasswordLoginRepository):
         self.fault = fault
 
     async def create(
-        self, session: AsyncSession, create: PasswordLoginCreate
+        self, session: WriteSession, create: PasswordLoginCreate
     ) -> Result[PasswordLogin, AlreadyExists]:
         first = await super().create(session, create)
         assert isinstance(first, Success)
         second = await super().create(session, create)
         assert isinstance(second, Failure)
         assert session in self.fault.scope.rollbacks
-        assert not session.in_transaction()
+        assert not session.read_session.in_transaction()
         self.fault.trace.append(SignupCall("password_real_rollback", session))
         return second
 
@@ -268,13 +289,13 @@ class SignupFixture:
     repository: SignupTokenOperationRepository
     scope: SignupScope
     fault: SignupFault
-    manager: SessionManager[AsyncSession]
+    manager: SessionManager[WriteSession]
     email: str
     token_hash: str
 
 
 def signup_fixture(
-    manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> SignupFixture:
     scope = SignupScope(manager, monkeypatch)
     fault = SignupFault(scope)
@@ -360,7 +381,7 @@ async def footprint(fixture: SignupFixture) -> dict[str, list[dict[str, object]]
         }
         rows: dict[str, list[dict[str, object]]] = {}
         for name, statement in statements.items():
-            result = await session.execute(statement)
+            result = await session.write_session.execute(statement)
             rows[name] = [dict(row) for row in result.mappings()]
         return rows
 
@@ -370,18 +391,20 @@ async def cleanup_signup(fixture: SignupFixture) -> None:
         user_ids = sa.select(RDBUserEmail.user_id).where(
             RDBUserEmail.email == fixture.email
         )
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBSignupToken).where(RDBSignupToken.email == fixture.email)
         )
-        await session.execute(sa.delete(RDBUser).where(RDBUser.id.in_(user_ids)))
-        await session.execute(
+        await session.write_session.execute(
+            sa.delete(RDBUser).where(RDBUser.id.in_(user_ids))
+        )
+        await session.write_session.execute(
             sa.delete(RDBUserEmail).where(RDBUserEmail.email == fixture.email)
         )
 
 
 @pytest.fixture
 async def signup_pg(
-    rdb_session_manager: SessionManager[AsyncSession], monkeypatch: pytest.MonkeyPatch
+    rdb_session_manager: SessionManager[WriteSession], monkeypatch: pytest.MonkeyPatch
 ) -> SignupFixture:
     return signup_fixture(rdb_session_manager, monkeypatch)
 
@@ -438,7 +461,7 @@ async def test_count_page_order_total_and_detachment_share_one_scope(
                     max_uses=1,
                 ),
             )
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.id == token.id)
                 .values(created_at=NOW + timedelta(minutes=index))
@@ -578,13 +601,13 @@ async def test_redemption_precondition_order_and_no_consumption(
     command = prepared(fixture, label=invalid, max_expiry=False)
     async with fixture.manager() as session:
         if invalid == "revoked":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.id == token.id)
                 .values(revoked_at=NOW)
             )
         elif invalid in {"expiry_equal", "expiry_past"}:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.id == token.id)
                 .values(
@@ -594,7 +617,7 @@ async def test_redemption_precondition_order_and_no_consumption(
                 )
             )
         elif invalid == "exhausted":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.id == token.id)
                 .values(used_count=1)
@@ -766,21 +789,26 @@ class IndependentSignupManager:
         self.pids: list[int] = []
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(self.connection, expire_on_commit=False) as session:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        async with AsyncSession(
+            self.connection, expire_on_commit=False
+        ) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
-                pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+                pid = await session.read_session.scalar(
+                    sa.text("SELECT pg_backend_pid()")
+                )
                 assert isinstance(pid, int)
                 self.pids.append(pid)
                 yield session
             except asyncio.CancelledError:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             except Exception:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
 
 async def test_standalone_password_primitive_rollback_preserves_committed_token(
@@ -832,9 +860,10 @@ async def test_standalone_password_primitive_rollback_preserves_committed_token(
 async def wait_signup_blocked(engine: AsyncEngine, *, holder: int, waiter: int) -> None:
     assert holder != waiter
     async with asyncio.timeout(10):
-        async with AsyncSession(engine) as observer:
+        async with AsyncSession(engine) as _raw_observer:
+            observer = ReadWriteSession(_raw_observer)
             while True:
-                blockers = await observer.scalar(
+                blockers = await observer.read_session.scalar(
                     sa.text("SELECT pg_blocking_pids(:pid)"), {"pid": waiter}
                 )
                 if isinstance(blockers, list) and holder in blockers:

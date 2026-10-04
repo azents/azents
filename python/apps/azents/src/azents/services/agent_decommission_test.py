@@ -22,6 +22,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
@@ -39,9 +40,9 @@ from azents.services.uploads.schema import StoredImage
 
 
 @asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder session for repository doubles."""
-    yield cast(AsyncSession, object())
+    yield ReadWriteSession(cast(AsyncSession, object()))
 
 
 def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
@@ -75,7 +76,7 @@ class _DecommissionRepositoryDouble:
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -87,7 +88,7 @@ class _DecommissionRepositoryDouble:
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -100,7 +101,7 @@ class _DecommissionRepositoryDouble:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -167,9 +168,9 @@ class _TransactionDouble:
 
 
 @asynccontextmanager
-async def _transaction_manager() -> AsyncGenerator[AsyncSession, None]:
+async def _transaction_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield one stable transaction object to all lifecycle collaborators."""
-    yield cast(AsyncSession, _TransactionDouble())
+    yield ReadWriteSession(cast(AsyncSession, _TransactionDouble()))
 
 
 @dataclass(frozen=True)
@@ -195,7 +196,7 @@ class _RootSessionRepositoryDouble:
 
     async def list_root_trees_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[_RootSession]:
@@ -205,7 +206,7 @@ class _RootSessionRepositoryDouble:
 
     async def lock_root_tree_sessions(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_id: str,
     ) -> list[_RootSession]:
@@ -221,7 +222,7 @@ class _RootSessionRepositoryDouble:
 
     async def request_stop(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         stop_request_id: str,
@@ -233,7 +234,7 @@ class _RootSessionRepositoryDouble:
 
     async def archive_tree(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_id: str,
         session_ids: Sequence[str],
@@ -263,7 +264,7 @@ class _AgentRunRepositoryDouble:
 
     async def has_active_for_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> bool:
@@ -283,14 +284,14 @@ class _RetentionSettings:
 class _RetentionRepositoryDouble:
     """Provide a finite retention policy and record purge scheduling."""
 
-    async def lock_settings(self, session: AsyncSession) -> _RetentionSettings:
+    async def lock_settings(self, session: ReadSession) -> _RetentionSettings:
         """Return a deterministic finite retention setting."""
         del session
         return _RetentionSettings(archived_session_retention_days=7, revision=3)
 
     async def schedule_purge_job(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         root_session_id: str,
         eligible_at: datetime.datetime,
@@ -326,7 +327,7 @@ class _ExternalChannelLifecycleDouble:
         self.events = events
         self.calls: list[
             tuple[
-                AsyncSession,
+                ReadSession,
                 SessionLifecycleParticipantDefinition,
                 SessionLifecycleTransitionContext,
             ]
@@ -334,7 +335,7 @@ class _ExternalChannelLifecycleDouble:
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ExternalChannelArchiveTermination:
@@ -350,7 +351,7 @@ class _ExternalChannelLifecycleDouble:
 
     async def cleanup_decommissioned_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         now: datetime.datetime,
@@ -361,7 +362,7 @@ class _ExternalChannelLifecycleDouble:
 
     async def purge_decommissioned_provider_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         connection_ids: Sequence[str],
     ) -> int:
         """Reject provider-state cleanup outside this archive-focused double."""
@@ -385,7 +386,7 @@ class _ScheduledTaskLifecycleDouble:
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -396,7 +397,7 @@ class _ScheduledTaskLifecycleDouble:
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> None:
@@ -410,7 +411,7 @@ class _DecommissionStatusRepositoryDouble:
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -422,7 +423,7 @@ class _DecommissionStatusRepositoryDouble:
 
     async def set_status(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -435,7 +436,7 @@ class _DecommissionStatusRepositoryDouble:
 
     async def mark_retry(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         job_id: str,
         lease_owner: str,
@@ -508,7 +509,8 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
         "archive-tree",
     ]
     session, definition, context = external_channel_lifecycle.calls[0]
-    assert isinstance(session, _TransactionDouble)
+    assert isinstance(session, ReadWriteSession)
+    assert isinstance(session.write_session, _TransactionDouble)
     assert definition is participant
     assert context.root_session_id == "root-session-1"
     assert context.subtree_session_ids == ("root-session-1",)
@@ -571,7 +573,7 @@ class _AgentRepositoryDouble:
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> _AgentProjection:
         """Return the direct owner required by cleanup."""
@@ -587,7 +589,7 @@ class _ExternalChannelDecommissionCleanupDouble:
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ExternalChannelArchiveTermination:
@@ -597,7 +599,7 @@ class _ExternalChannelDecommissionCleanupDouble:
 
     async def cleanup_decommissioned_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         now: datetime.datetime,
@@ -616,7 +618,7 @@ class _ExternalChannelDecommissionCleanupDouble:
 
     async def purge_decommissioned_provider_state(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         connection_ids: Sequence[str],
     ) -> int:
         """Purge credentials only after provider targets were captured."""
@@ -652,7 +654,7 @@ class _ExchangeFileRepositoryDouble:
 
     async def expire_unbound_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
         expired_at: datetime.datetime,
@@ -664,7 +666,7 @@ class _ExchangeFileRepositoryDouble:
 
     async def list_unbound_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> list[_ExchangeFileProjection]:
@@ -674,7 +676,7 @@ class _ExchangeFileRepositoryDouble:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         file_id: str,
         blob_deleted_at: datetime.datetime,
@@ -684,7 +686,7 @@ class _ExchangeFileRepositoryDouble:
 
     async def delete_unbound_expired_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         agent_id: str,
     ) -> int:
@@ -698,7 +700,7 @@ class _RuntimeRepositoryDouble:
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> None:
         """Return no runtime row."""
@@ -707,7 +709,7 @@ class _RuntimeRepositoryDouble:
 
     async def get_terminal_delete_acknowledged(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> None:
         """Report no acknowledgement when no Runtime exists."""
@@ -733,7 +735,7 @@ class _BoundRuntimeRepositoryDouble:
 
     async def get_by_agent_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_id: str,
     ) -> _RuntimeProjection:
         """Return the bound Runtime for both cleanup checks."""
@@ -742,7 +744,7 @@ class _BoundRuntimeRepositoryDouble:
 
     async def get_terminal_delete_acknowledged(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         runtime_id: str,
     ) -> _RuntimeProjection:
         """Return the acknowledged Runtime for the current generation."""

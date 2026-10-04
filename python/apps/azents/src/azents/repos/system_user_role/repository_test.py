@@ -1,8 +1,7 @@
 """SystemUserRoleRepository tests."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.enums import SystemUserRole
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.system_user_role.data import SystemUserRoleAssignmentCreate
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
@@ -12,7 +11,7 @@ from azents.repos.user.data import UserCreate
 class TestSystemUserRoleRepository:
     """SystemUserRoleRepository tests."""
 
-    async def test_assignment_lifecycle(self, rdb_session: AsyncSession) -> None:
+    async def test_assignment_lifecycle(self, rdb_session: WriteSession) -> None:
         """Create, query, list, count, and delete one assignment."""
         user_repo = UserRepository()
         role_repo = SystemUserRoleRepository()

@@ -6,7 +6,6 @@ from collections.abc import Sequence
 
 import pytest
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import AgentRunStatus, AgentSessionProductMode, EventKind
@@ -41,6 +40,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
 from azents.repos.agent_session import AgentSessionRepository
@@ -78,7 +78,7 @@ class _ExecutionState:
 
 
 async def _create_execution(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> _ExecutionState:
     """Create committed durable authority and input before starting external work."""
     sessions = AgentSessionRepository()
@@ -129,7 +129,7 @@ async def _create_execution(
 
 
 async def _take_over(
-    session_manager: SessionManager[AsyncSession], state: _ExecutionState
+    session_manager: SessionManager[WriteSession], state: _ExecutionState
 ) -> None:
     """Claim the next owner with repository code, never a test-only SQL update."""
     async with session_manager() as session:
@@ -218,7 +218,7 @@ def _execution(
 
 
 async def test_old_model_response_cannot_commit_output_or_terminal_state(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Takeover completes during a blocked stream and rejects its later output."""
     state = await _create_execution(rdb_session_manager)
@@ -280,7 +280,7 @@ class _RecordingInvoker:
 
 
 async def test_superseded_tool_admission_never_invokes_external_handler(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The adapter's actual tool wrapper rejects a revoked owner before I/O."""
     state = await _create_execution(rdb_session_manager)
@@ -324,7 +324,7 @@ class _BlockedToolExecutor(_ToolExecutor):
 
 
 async def test_completed_old_tool_cannot_commit_result_after_takeover(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An already admitted call may complete, but its obsolete result is fenced."""
     state = await _create_execution(rdb_session_manager)
@@ -361,7 +361,7 @@ async def test_completed_old_tool_cannot_commit_result_after_takeover(
 
 
 async def test_old_compaction_summary_cannot_move_new_owner_input_head(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Summary generation is outside the transaction and its commit is fenced."""
     state = await _create_execution(rdb_session_manager)

@@ -5,10 +5,10 @@ from typing import Any, cast
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ScheduledTaskScheduleType
 from azents.rdb.models.scheduled_task import RDBScheduledTask
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import ScheduledTask, ScheduledTaskCreate, ScheduledTaskReplace
 
@@ -18,7 +18,7 @@ class ScheduledTaskRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ScheduledTaskCreate,
     ) -> ScheduledTask:
         """Create one Scheduled Task row."""
@@ -35,24 +35,24 @@ class ScheduledTaskRepository:
             cron_expression=create.cron_expression,
             timezone=create.timezone,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         task_id: str,
     ) -> ScheduledTask | None:
         """Fetch one Scheduled Task by exact ID."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBScheduledTask).where(RDBScheduledTask.id == task_id)
         )
         return self._build(rdb) if rdb is not None else None
 
     async def get_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -65,16 +65,16 @@ class ScheduledTaskRepository:
         )
         if lock:
             query = query.with_for_update()
-        rdb = await session.scalar(query)
+        rdb = await session.write_session.scalar(query)
         return self._build(rdb) if rdb is not None else None
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         task_id: str,
     ) -> ScheduledTask | None:
         """Lock and fetch one Scheduled Task by exact ID."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBScheduledTask)
             .where(RDBScheduledTask.id == task_id)
             .with_for_update()
@@ -83,7 +83,7 @@ class ScheduledTaskRepository:
 
     async def lock_claimed_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         lease_owner: str,
@@ -91,7 +91,7 @@ class ScheduledTaskRepository:
         now: datetime.datetime,
     ) -> ScheduledTask | None:
         """Lock one Task only while its unexpired lease belongs to the caller."""
-        rdb = await session.scalar(
+        rdb = await session.write_session.scalar(
             sa.select(RDBScheduledTask)
             .where(
                 RDBScheduledTask.id == task_id,
@@ -105,11 +105,11 @@ class ScheduledTaskRepository:
 
     async def list_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> list[ScheduledTask]:
         """List Tasks owned by one exact Session."""
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBScheduledTask)
             .where(RDBScheduledTask.session_id == session_id)
             .order_by(
@@ -121,7 +121,7 @@ class ScheduledTaskRepository:
 
     async def replace(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -146,7 +146,7 @@ class ScheduledTaskRepository:
         if not preserve_active_cycle:
             values["active_cycle_id"] = None
             values["active_scheduled_for"] = None
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBScheduledTask)
             .where(
                 RDBScheduledTask.session_id == session_id,
@@ -155,13 +155,13 @@ class ScheduledTaskRepository:
             .values(**values)
             .returning(RDBScheduledTask)
         )
-        await session.flush()
+        await session.write_session.flush()
         rdb = result.scalar_one_or_none()
         return self._build(rdb) if rdb is not None else None
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         now: datetime.datetime,
         lease_owner: str,
@@ -169,7 +169,7 @@ class ScheduledTaskRepository:
         limit: int,
     ) -> list[ScheduledTask]:
         """Claim a bounded batch of due Tasks using PostgreSQL SKIP LOCKED."""
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.select(RDBScheduledTask)
             .where(
                 RDBScheduledTask.next_eligible_at <= now,
@@ -193,14 +193,14 @@ class ScheduledTaskRepository:
         for row in rows:
             row.lease_owner = lease_owner
             row.lease_until = lease_until
-        await session.flush()
+        await session.write_session.flush()
         for row in rows:
-            await session.refresh(row, attribute_names=["updated_at"])
+            await session.write_session.refresh(row, attribute_names=["updated_at"])
         return [self._build(row) for row in rows]
 
     async def complete_claim(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         lease_owner: str,
@@ -214,7 +214,7 @@ class ScheduledTaskRepository:
         """Persist one dispatch cursor transition and release its lease."""
         result = cast(
             CursorResult[Any],
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBScheduledTask)
                 .where(
                     RDBScheduledTask.id == task_id,
@@ -233,27 +233,27 @@ class ScheduledTaskRepository:
                 )
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         return bool(result.rowcount)
 
     async def delete_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         task_id: str,
     ) -> bool:
         """Delete one Scheduled Task by exact ID."""
         result = cast(
             CursorResult[Any],
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBScheduledTask).where(RDBScheduledTask.id == task_id)
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         return bool(result.rowcount)
 
     async def delete_by_session_and_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         task_id: str,
@@ -261,19 +261,19 @@ class ScheduledTaskRepository:
         """Delete one Task only when its Session ownership matches exactly."""
         result = cast(
             CursorResult[Any],
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBScheduledTask).where(
                     RDBScheduledTask.session_id == session_id,
                     RDBScheduledTask.id == task_id,
                 )
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         return bool(result.rowcount)
 
     async def delete_completed_once(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         cycle_id: str,
@@ -281,7 +281,7 @@ class ScheduledTaskRepository:
         """Delete a one-time Task only while it owns the completed cycle."""
         result = cast(
             CursorResult[Any],
-            await session.execute(
+            await session.write_session.execute(
                 sa.delete(RDBScheduledTask).where(
                     RDBScheduledTask.id == task_id,
                     RDBScheduledTask.schedule_type == ScheduledTaskScheduleType.ONCE,
@@ -289,12 +289,12 @@ class ScheduledTaskRepository:
                 )
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         return bool(result.rowcount)
 
     async def release_completed_recurring(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_id: str,
         cycle_id: str,
@@ -302,7 +302,7 @@ class ScheduledTaskRepository:
         """Release a recurring Task fence and expose pending or future work."""
         result = cast(
             CursorResult[Any],
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBScheduledTask)
                 .where(
                     RDBScheduledTask.id == task_id,
@@ -323,7 +323,7 @@ class ScheduledTaskRepository:
                 )
             ),
         )
-        await session.flush()
+        await session.write_session.flush()
         return bool(result.rowcount)
 
     def _build(self, rdb: RDBScheduledTask) -> ScheduledTask:

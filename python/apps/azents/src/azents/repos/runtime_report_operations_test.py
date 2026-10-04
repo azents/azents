@@ -16,7 +16,6 @@ from azents_runtime_control.provider import RuntimeProviderReport
 from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -32,6 +31,7 @@ from azents.core.runtime_profile import (
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
 from azents.repos.runtime_profile.data import (
@@ -93,13 +93,13 @@ class _RuntimeQueries(AgentRuntimeRepository):
         self.probe = probe
 
     async def get_by_id(
-        self, session: AsyncSession, runtime_id: str
+        self, session: ReadSession, runtime_id: str
     ) -> AgentRuntime | None:
         self.probe.calls.append("get")
         return await super().get_by_id(session, runtime_id)
 
     async def provider_report_matches_binding(
-        self, session: AsyncSession, *, runtime_id: str, provider_logical_id: str
+        self, session: ReadSession, *, runtime_id: str, provider_logical_id: str
     ) -> bool:
         self.probe.calls.append("binding")
         return await super().provider_report_matches_binding(
@@ -108,7 +108,7 @@ class _RuntimeQueries(AgentRuntimeRepository):
 
     async def record_provider_observed_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         observed_state: RuntimeProviderObservedState,
         provider_generation: int,
@@ -131,7 +131,7 @@ class _RuntimeQueries(AgentRuntimeRepository):
 
     async def record_provider_connection_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         connection_state: RuntimeProviderConnectionState,
     ) -> AgentRuntime | None:
@@ -143,7 +143,7 @@ class _RuntimeQueries(AgentRuntimeRepository):
 
     async def record_runner_state(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         runner_state: RuntimeRunnerState,
         runner_generation: int,
@@ -167,7 +167,7 @@ class _RuntimeQueries(AgentRuntimeRepository):
         return result
 
     async def clear_current_generation_failure(
-        self, session: AsyncSession, runtime_id: str
+        self, session: WriteSession, runtime_id: str
     ) -> AgentRuntime | None:
         result = await super().clear_current_generation_failure(session, runtime_id)
         if result is not None:
@@ -177,7 +177,7 @@ class _RuntimeQueries(AgentRuntimeRepository):
 
     async def record_terminal_delete_acknowledgement(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         *,
         provider_generation: int,
@@ -199,7 +199,7 @@ class _RuntimeQueries(AgentRuntimeRepository):
 
     async def complete_restart_handoff(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         runtime_id: str,
         *,
         provider_generation: int,
@@ -226,7 +226,7 @@ class _ProfileQueries(RuntimeProfileRepository):
 
     async def record_provider_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -248,7 +248,7 @@ class _ProfileQueries(RuntimeProfileRepository):
 
     async def record_runner_configuration_evidence(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -270,7 +270,7 @@ class _ProfileQueries(RuntimeProfileRepository):
 
     async def configuration_evidence_matches_current(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -283,7 +283,7 @@ class _ProfileQueries(RuntimeProfileRepository):
 
     async def configuration_evidence_matches_applied(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         runtime_id: str,
         provider_id: str,
@@ -298,13 +298,13 @@ class _ProfileQueries(RuntimeProfileRepository):
 class _Boundary:
     """Observe real completed managers and the transaction state at external calls."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.opened: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.opened: list[WriteSession] = []
+        self.active: list[WriteSession] = []
 
     @asynccontextmanager
-    async def session_manager(self) -> AsyncIterator[AsyncSession]:
+    async def session_manager(self) -> AsyncIterator[WriteSession]:
         async with self.manager() as session:
             self.opened.append(session)
             self.active.append(session)
@@ -315,7 +315,9 @@ class _Boundary:
 
     def closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.opened)
+        assert all(
+            not session.write_session.in_transaction() for session in self.opened
+        )
 
 
 class _Snapshot(NamedTuple):
@@ -333,13 +335,13 @@ class _Fixture(NamedTuple):
 
 
 async def _fixture(
-    manager: SessionManager[AsyncSession], *, stage: _Stage | None, cancel: bool
+    manager: SessionManager[WriteSession], *, stage: _Stage | None, cancel: bool
 ) -> _Fixture:
     queries = AgentRuntimeRepository()
     profiles = RuntimeProfileRepository()
     async with manager() as session:
         runtime_id = await _create_runtime(session, "report-operations")
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
             .values(desired_state=RuntimeDesiredState.RUNNING)
@@ -394,7 +396,7 @@ async def _fixture(
 
 
 async def _snapshot(
-    manager: SessionManager[AsyncSession], fixture: _Fixture
+    manager: SessionManager[WriteSession], fixture: _Fixture
 ) -> _Snapshot:
     async with manager() as session:
         runtime = await AgentRuntimeRepository().get_by_id(session, fixture.runtime_id)
@@ -433,7 +435,7 @@ def _runner(fixture: _Fixture) -> RunnerReportInput:
 
 
 async def _ack(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     fixture: _Fixture,
     *,
     provider: bool,
@@ -473,7 +475,7 @@ async def _ack(
 @pytest.mark.parametrize("stage", ["provider_evidence", "observed", "connected"])
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_provider_evidence_promotion_observation_connection_roll_back(
-    rdb_session_manager: SessionManager[AsyncSession], stage: _Stage, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], stage: _Stage, cancel: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=stage, cancel=cancel)
     await _ack(
@@ -497,7 +499,7 @@ async def test_provider_evidence_promotion_observation_connection_roll_back(
 @pytest.mark.parametrize("stage", ["runner_evidence", "runner", "clear"])
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_runner_evidence_promotion_path_failure_clear_roll_back(
-    rdb_session_manager: SessionManager[AsyncSession], stage: _Stage, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], stage: _Stage, cancel: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=stage, cancel=cancel)
     await _ack(
@@ -519,7 +521,7 @@ async def test_runner_evidence_promotion_path_failure_clear_roll_back(
 @pytest.mark.parametrize("stage", ["terminal", "connected"])
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_terminal_ack_path_state_failure_and_connection_roll_back(
-    rdb_session_manager: SessionManager[AsyncSession], stage: _Stage, cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], stage: _Stage, cancel: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=stage, cancel=cancel)
     async with rdb_session_manager() as session:
@@ -527,7 +529,7 @@ async def test_terminal_ack_path_state_failure_and_connection_roll_back(
             session, fixture.runtime_id
         )
         assert requested is not None
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == fixture.runtime_id)
             .values(
@@ -558,7 +560,7 @@ async def test_terminal_ack_path_state_failure_and_connection_roll_back(
 
 @pytest.mark.parametrize("cancel", [False, True], ids=["error", "cancel"])
 async def test_restart_rearm_rolls_back_without_undoing_completed_report(
-    rdb_session_manager: SessionManager[AsyncSession], cancel: bool
+    rdb_session_manager: SessionManager[WriteSession], cancel: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage="rearm", cancel=cancel)
     async with rdb_session_manager() as session:
@@ -611,7 +613,7 @@ async def test_restart_rearm_rolls_back_without_undoing_completed_report(
 
 @pytest.mark.parametrize("provider", [True, False], ids=["provider", "runner"])
 async def test_normal_stale_cas_commits_already_reached_configuration_promotion(
-    rdb_session_manager: SessionManager[AsyncSession], provider: bool
+    rdb_session_manager: SessionManager[WriteSession], provider: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await _ack(
@@ -622,7 +624,7 @@ async def test_normal_stale_cas_commits_already_reached_configuration_promotion(
         failure_code="RUNNER_OLD",
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == fixture.runtime_id)
             .values(provider_generation=2 if provider else 0, runner_generation=2)
@@ -650,7 +652,7 @@ async def test_normal_stale_cas_commits_already_reached_configuration_promotion(
 
 
 async def test_provider_then_runner_keeps_query_order_and_detaches_results(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await fixture.operations.record_provider_report(
@@ -683,7 +685,7 @@ async def test_provider_then_runner_keeps_query_order_and_detaches_results(
 
 
 async def test_provider_missing_is_normal_runner_missing_and_binding_mismatch_raise(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await fixture.operations.record_provider_report(
@@ -714,11 +716,11 @@ async def test_provider_missing_is_normal_runner_missing_and_binding_mismatch_ra
 
 @pytest.mark.parametrize("generation", [0, 2])
 async def test_runner_previous_or_future_desired_generation_is_noop_before_evidence(
-    rdb_session_manager: SessionManager[AsyncSession], generation: int
+    rdb_session_manager: SessionManager[WriteSession], generation: int
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == fixture.runtime_id)
             .values(desired_generation=1)
@@ -739,11 +741,11 @@ async def test_runner_previous_or_future_desired_generation_is_noop_before_evide
 
 
 async def test_stopped_streamclose_skips_path_and_configuration_before_generation_check(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == fixture.runtime_id)
             .values(desired_state=RuntimeDesiredState.STOPPED, workspace_path="/old")
@@ -775,7 +777,7 @@ async def test_stopped_streamclose_skips_path_and_configuration_before_generatio
     ],
 )
 async def test_path_and_unsupported_failures_still_commit_exact_configuration(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     path: str,
     unsupported: str | None,
     failure: str,
@@ -802,7 +804,7 @@ async def test_path_and_unsupported_failures_still_commit_exact_configuration(
 
 
 async def test_registration_accepts_current_or_retained_applied_without_fallback(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     assert await fixture.operations.validate_runner_registration(
@@ -848,7 +850,7 @@ async def test_registration_accepts_current_or_retained_applied_without_fallback
 
 
 async def test_heartbeat_returns_provider_first_pending_evidence_until_runner_ack(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     assert (
@@ -896,7 +898,7 @@ async def test_heartbeat_returns_provider_first_pending_evidence_until_runner_ac
     ],
 )
 async def test_heartbeat_rechecks_exact_target_and_ack_predicates(
-    rdb_session_manager: SessionManager[AsyncSession], mutation: str
+    rdb_session_manager: SessionManager[WriteSession], mutation: str
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await _ack(
@@ -908,7 +910,7 @@ async def test_heartbeat_rechecks_exact_target_and_ack_predicates(
     )
     async with rdb_session_manager() as session:
         if mutation == "no_binding":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRuntime)
                 .where(RDBAgentRuntime.id == fixture.runtime_id)
                 .values(runtime_provider_resource_id=None)
@@ -918,20 +920,20 @@ async def test_heartbeat_rechecks_exact_target_and_ack_predicates(
                 session, runtime_id=fixture.runtime_id
             )
         elif mutation == "future_target":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeConfigurationState)
                 .where(RDBRuntimeConfigurationState.runtime_id == fixture.runtime_id)
                 .values(desired_target_generation=1)
             )
         elif mutation == "provider_digest":
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeConfigurationState)
                 .where(RDBRuntimeConfigurationState.runtime_id == fixture.runtime_id)
                 .values(provider_reported_digest="e" * 64)
             )
         else:
             assert mutation == "runner_digest"
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBRuntimeConfigurationState)
                 .where(RDBRuntimeConfigurationState.runtime_id == fixture.runtime_id)
                 .values(runner_reported_digest=fixture.evidence.digest)
@@ -992,7 +994,7 @@ def _shared_provider(fixture: _Fixture) -> RuntimeProviderReport:
 
 @pytest.mark.parametrize("outcome", ["success", "noop", "error", "cancel"])
 async def test_generation_gate_runs_only_after_completed_delegate(
-    rdb_session_manager: SessionManager[AsyncSession], outcome: str
+    rdb_session_manager: SessionManager[WriteSession], outcome: str
 ) -> None:
     fixture = await _fixture(
         rdb_session_manager,
@@ -1030,7 +1032,7 @@ async def test_generation_gate_runs_only_after_completed_delegate(
 
 @pytest.mark.parametrize("outcome", ["success", "orphan", "error", "cancel"])
 async def test_provider_publisher_observes_closed_success_noop_error_cancel(
-    rdb_session_manager: SessionManager[AsyncSession], outcome: str
+    rdb_session_manager: SessionManager[WriteSession], outcome: str
 ) -> None:
     fixture = await _fixture(
         rdb_session_manager,
@@ -1064,14 +1066,14 @@ async def test_provider_publisher_observes_closed_success_noop_error_cancel(
 
 @pytest.mark.parametrize("observed_generation", [0, 2], ids=["lower", "future"])
 async def test_provider_observed_generation_keeps_existing_monotonic_predicate(
-    rdb_session_manager: SessionManager[AsyncSession], observed_generation: int
+    rdb_session_manager: SessionManager[WriteSession], observed_generation: int
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await _ack(
         rdb_session_manager, fixture, provider=False, runner=True, failure_code=None
     )
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == fixture.runtime_id)
             .values(provider_observed_generation=1)
@@ -1109,7 +1111,7 @@ async def test_provider_observed_generation_keeps_existing_monotonic_predicate(
 @pytest.mark.parametrize("provider", [True, False], ids=["provider", "runner"])
 @pytest.mark.parametrize("blocked", [True, False], ids=["blocked", "changed-ready"])
 async def test_reports_accept_retained_applied_without_acknowledging_new_desired(
-    rdb_session_manager: SessionManager[AsyncSession], provider: bool, blocked: bool
+    rdb_session_manager: SessionManager[WriteSession], provider: bool, blocked: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await _ack(
@@ -1156,12 +1158,12 @@ async def test_reports_accept_retained_applied_without_acknowledging_new_desired
     "binding", [True, False], ids=["mismatched-evidence", "missing-binding"]
 )
 async def test_bad_evidence_or_missing_binding_commits_existing_failure_policy(
-    rdb_session_manager: SessionManager[AsyncSession], provider: bool, binding: bool
+    rdb_session_manager: SessionManager[WriteSession], provider: bool, binding: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     if not binding:
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBAgentRuntime)
                 .where(RDBAgentRuntime.id == fixture.runtime_id)
                 .values(runtime_provider_resource_id=None)
@@ -1199,7 +1201,7 @@ async def test_bad_evidence_or_missing_binding_commits_existing_failure_policy(
     ],
 )
 async def test_provider_non_ack_reports_keep_configuration_and_failure_scope(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     state: RuntimeProviderObservedState,
     allowed: bool,
 ) -> None:
@@ -1233,7 +1235,7 @@ async def test_provider_non_ack_reports_keep_configuration_and_failure_scope(
     ],
 )
 async def test_runner_failure_clear_keeps_original_code_eligibility(
-    rdb_session_manager: SessionManager[AsyncSession], code: str, cleared: bool
+    rdb_session_manager: SessionManager[WriteSession], code: str, cleared: bool
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     await _ack(
@@ -1251,7 +1253,7 @@ async def test_runner_failure_clear_keeps_original_code_eligibility(
 
 
 async def test_terminal_ack_second_report_is_normal_noop_without_configuration(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     async with rdb_session_manager() as session:
@@ -1284,7 +1286,7 @@ async def test_terminal_ack_second_report_is_normal_noop_without_configuration(
     "fence", ["provider-generation", "desired-generation", "terminal"]
 )
 async def test_restart_rearm_retains_exact_conditional_and_idempotent_outcomes(
-    rdb_session_manager: SessionManager[AsyncSession], fence: str
+    rdb_session_manager: SessionManager[WriteSession], fence: str
 ) -> None:
     fixture = await _fixture(rdb_session_manager, stage=None, cancel=False)
     async with rdb_session_manager() as session:

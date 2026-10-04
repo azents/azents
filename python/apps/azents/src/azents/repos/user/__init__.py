@@ -4,12 +4,12 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from azents.core.user import UserUpdate
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.user_email import RDBUserEmail
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import User, UserCreate, UserList
 
@@ -17,7 +17,7 @@ from .data import User, UserCreate, UserList
 class UserRepository:
     """User CRUD repository."""
 
-    async def create(self, session: AsyncSession, create: UserCreate) -> User:
+    async def create(self, session: WriteSession, create: UserCreate) -> User:
         """Create User together with primary UserEmail.
 
         :param session: Database session
@@ -32,7 +32,7 @@ class UserRepository:
 
     async def create_with_verified_primary_email(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: UserCreate,
         *,
         verified_at: datetime.datetime,
@@ -50,14 +50,14 @@ class UserRepository:
             primary_email_verified_at=verified_at,
         )
 
-    async def get(self, session: AsyncSession, user_id: str) -> User | None:
+    async def get(self, session: ReadSession, user_id: str) -> User | None:
         """Fetch User by ID.
 
         :param session: Database session
         :param user_id: User ID
         :return: User or None
         """
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBUser, RDBUserEmail.email)
             .join(RDBUserEmail, RDBUserEmail.id == RDBUser.primary_email_id)
             .where(RDBUser.id == user_id)
@@ -67,7 +67,7 @@ class UserRepository:
             return None
         return self._build(row[0], primary_email=row[1])
 
-    async def get_by_email(self, session: AsyncSession, email: str) -> User | None:
+    async def get_by_email(self, session: ReadSession, email: str) -> User | None:
         """Fetch User by email.
 
         :param session: Database session
@@ -75,7 +75,7 @@ class UserRepository:
         :return: User or None
         """
         primary = aliased(RDBUserEmail)
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBUser, primary.email)
             .join(RDBUserEmail, RDBUserEmail.user_id == RDBUser.id)
             .join(primary, primary.id == RDBUser.primary_email_id)
@@ -86,24 +86,26 @@ class UserRepository:
             return None
         return self._build(row[0], primary_email=row[1])
 
-    async def count(self, session: AsyncSession) -> int:
+    async def count(self, session: ReadSession) -> int:
         """Fetch total User count.
 
         :param session: Database session
         :return: Total User count
         """
-        result = await session.execute(sa.select(sa.func.count()).select_from(RDBUser))
+        result = await session.read_session.execute(
+            sa.select(sa.func.count()).select_from(RDBUser)
+        )
         return result.scalar() or 0
 
     async def update(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         user_id: str,
         update: UserUpdate,
     ) -> User | None:
         """Update User."""
         if update:
-            result = await session.execute(
+            result = await session.write_session.execute(
                 sa.update(RDBUser)
                 .where(RDBUser.id == user_id)
                 .values(**update)
@@ -116,7 +118,7 @@ class UserRepository:
 
     async def list_all(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         offset: int = 0,
         limit: int = 50,
@@ -128,12 +130,12 @@ class UserRepository:
         :param limit: Maximum record count to return
         :return: User list
         """
-        count_result = await session.execute(
+        count_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(RDBUser)
         )
         total = count_result.scalar() or 0
 
-        result = await session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBUser, RDBUserEmail.email)
             .join(RDBUserEmail, RDBUserEmail.id == RDBUser.primary_email_id)
             .order_by(RDBUser.created_at.desc())
@@ -148,7 +150,7 @@ class UserRepository:
 
     async def disable_access(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         user_id: str,
         *,
         disabled_at: datetime.datetime,
@@ -160,7 +162,7 @@ class UserRepository:
         :param disabled_at: Access disable timestamp
         :return: Updated User or None when missing
         """
-        result = await session.execute(
+        result = await session.write_session.execute(
             sa.update(RDBUser)
             .where(
                 RDBUser.id == user_id,
@@ -172,20 +174,22 @@ class UserRepository:
         if result.scalar_one_or_none() is None:
             # Already disabled or missing; return current projection when present.
             return await self.get(session, user_id)
-        await session.flush()
+        await session.write_session.flush()
         return await self.get(session, user_id)
 
-    async def delete(self, session: AsyncSession, user_id: str) -> None:
+    async def delete(self, session: WriteSession, user_id: str) -> None:
         """Delete User.
 
         :param session: Database session
         :param user_id: User ID
         """
-        await session.execute(sa.delete(RDBUser).where(RDBUser.id == user_id))
+        await session.write_session.execute(
+            sa.delete(RDBUser).where(RDBUser.id == user_id)
+        )
 
     async def _create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: UserCreate,
         *,
         primary_email_verified_at: datetime.datetime | None,
@@ -194,25 +198,25 @@ class UserRepository:
         # Create User with temporary email ID (resolve circular FK)
         temp_email_id = uuid7().hex
         rdb_user = RDBUser(primary_email_id=temp_email_id, locale="en-US")
-        session.add(rdb_user)
-        await session.flush()
+        session.write_session.add(rdb_user)
+        await session.write_session.flush()
 
         rdb_user_email = RDBUserEmail(
             user_id=rdb_user.id,
             email=create.email,
             verified_at=primary_email_verified_at,
         )
-        session.add(rdb_user_email)
-        await session.flush()
+        session.write_session.add(rdb_user_email)
+        await session.write_session.flush()
 
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBUser)
             .where(RDBUser.id == rdb_user.id)
             .values(primary_email_id=rdb_user_email.id)
         )
-        await session.flush()
+        await session.write_session.flush()
 
-        await session.refresh(rdb_user)
+        await session.write_session.refresh(rdb_user)
         return self._build(rdb_user, primary_email=create.email)
 
     def _build(self, rdb_user: RDBUser, *, primary_email: str) -> User:

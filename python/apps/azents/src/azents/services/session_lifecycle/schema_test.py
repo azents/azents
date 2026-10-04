@@ -1,7 +1,5 @@
 """Installed PostgreSQL lifecycle graph reader and validator tests."""
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.session_lifecycle import (
     SessionLifecycleOwnershipManifest,
     SessionLifecycleResource,
@@ -11,6 +9,7 @@ from azents.core.session_lifecycle import (
 from azents.core.session_lifecycle_registry import (
     get_session_lifecycle_ownership_manifest,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.services.session_lifecycle.schema import (
     PostgreSQLForeignKey,
     PostgreSQLForeignKeyDeleteAction,
@@ -115,7 +114,7 @@ def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
 
 
 async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Installed worktree FKs retain the explicit database finalizer boundary."""
     foreign_keys = await PostgreSQLSessionLifecycleGraphReader().read_foreign_keys(
@@ -157,7 +156,7 @@ async def test_installed_catalog_reader_exposes_worktree_finalizer_boundary(
 
 
 async def test_installed_catalog_restricts_agent_decommission_lifecycle_roots(
-    rdb_session: AsyncSession,
+    rdb_session: WriteSession,
 ) -> None:
     """Fresh migrated PostgreSQL protects Agent and Workspace lifecycle roots."""
     foreign_keys = await PostgreSQLSessionLifecycleGraphReader().read_foreign_keys(

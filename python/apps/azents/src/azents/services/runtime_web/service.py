@@ -7,7 +7,6 @@ from typing import Annotated
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -18,6 +17,7 @@ from azents.core.enums import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.runtime_web import RuntimeWebActorKind
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.runtime_web.data import (
@@ -61,7 +61,7 @@ class RuntimeWebService:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[AsyncSession],
+        session_manager: SessionManager[WriteSession],
         repository: RuntimeWebRepository,
         agent_repository: AgentRepository,
         agent_admin_repository: AgentAdminRepository,
@@ -524,7 +524,7 @@ class RuntimeWebService:
         workspace_user_id: str,
         role: WorkspaceUserRole,
         actor: RuntimeWebActor,
-        mutate: Callable[[AsyncSession], Awaitable[RuntimeWebMutationResult]],
+        mutate: Callable[[WriteSession], Awaitable[RuntimeWebMutationResult]],
     ) -> Result[RuntimeWebServiceProjection, RuntimeWebError]:
         if actor.kind is not RuntimeWebActorKind.USER or actor.actor_id != user_id:
             return Failure(RuntimeWebAccessDenied())
@@ -555,7 +555,7 @@ class RuntimeWebService:
 
     async def _authorize_user(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -590,7 +590,7 @@ class RuntimeWebService:
 
     async def _authorize_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         agent_id: str,
@@ -611,7 +611,7 @@ class RuntimeWebService:
 
     async def _configuration(
         self,
-        session: AsyncSession,
+        session: ReadSession,
     ) -> RuntimeWebConfiguration | RuntimeWebConfigurationUnavailable:
         configuration = await self.repository.get_configuration(session)
         if configuration is None or not configuration.enabled:
@@ -620,10 +620,10 @@ class RuntimeWebService:
 
     async def _projection(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         record: RuntimeWebServiceRecord,
     ) -> RuntimeWebServiceProjection:
-        now = await session.scalar(sa.select(sa.func.now()))
+        now = await session.read_session.scalar(sa.select(sa.func.now()))
         if not isinstance(now, datetime.datetime):
             raise RuntimeError("Database did not return current timestamp")
         return RuntimeWebServiceProjection.from_record(
@@ -635,7 +635,7 @@ class RuntimeWebService:
 
 def get_runtime_web_service(
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ],
     repository: Annotated[

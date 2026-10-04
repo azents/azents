@@ -25,6 +25,7 @@ from azents.engine.tools.gcp import (
     _GcpServerConfig,  # directly configure internal server settings in tests
     _is_read_only_tool,  # directly validate internal utility function in tests
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.engine_tool_repositories import EngineMcpSnapshotFactory
 from azents.testing.types import is_object_factory
 
@@ -96,8 +97,8 @@ class _FakeToolkitStateStore:
 class _FakeSessionContext:
     """Minimal async session context manager for tests."""
 
-    async def __aenter__(self) -> AsyncSession:
-        return AsyncSession()
+    async def __aenter__(self) -> WriteSession:
+        return ReadWriteSession(AsyncSession())
 
     async def __aexit__(self, *exc: object) -> None:
         pass
@@ -106,7 +107,7 @@ class _FakeSessionContext:
 class _FakeSessionManager:
     """Minimal async context manager factory for tests."""
 
-    def __call__(self) -> AsyncContextManager[AsyncSession]:
+    def __call__(self) -> AsyncContextManager[WriteSession]:
         return _FakeSessionContext()
 
 

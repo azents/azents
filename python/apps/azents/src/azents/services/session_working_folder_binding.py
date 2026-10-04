@@ -4,10 +4,10 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRuntimeCapability
 from azents.core.runtime_capabilities import RuntimeCapabilitySnapshot
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )
@@ -124,7 +124,7 @@ class SessionWorkingFolderBindingService:
 
     async def resolve_authority_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,
@@ -141,7 +141,7 @@ class SessionWorkingFolderBindingService:
 
     async def resolve_bound_authority_in_transaction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         agent_id: str,
         session_id: str,

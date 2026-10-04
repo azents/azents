@@ -5,8 +5,6 @@ from collections.abc import Sequence
 from textwrap import dedent
 from typing import NamedTuple
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.agent import SubagentSettings
 from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.enums import (
@@ -22,6 +20,7 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.core.mailbox_data import MailboxItemCreate
 from azents.engine.events.types import AgentRunState, Event
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
@@ -83,7 +82,7 @@ class SubagentResolvedTarget(NamedTuple):
 class SubagentToolOperationRepository:
     """Own complete Subagent collaboration database transactions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
     agent_repository: AgentRepository
     agent_session_repository: AgentSessionRepository
     agent_run_repository: AgentRunRepository
@@ -457,7 +456,7 @@ class SubagentToolOperationRepository:
 
     async def _resolve_target(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         agent_name: str,
@@ -480,7 +479,7 @@ class SubagentToolOperationRepository:
 
     async def _lock_and_list_active_subagent_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         current: SessionAgent,
     ) -> set[str]:
@@ -516,7 +515,7 @@ class SubagentToolOperationRepository:
 
     async def _enqueue_instruction(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         source: SessionAgent,
         target: SessionAgent,
@@ -589,7 +588,7 @@ class SubagentToolOperationRepository:
 
     async def _project_agent_status(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent: SessionAgent,
     ) -> str:
         agent_session = await self.agent_session_repository.get_by_id(

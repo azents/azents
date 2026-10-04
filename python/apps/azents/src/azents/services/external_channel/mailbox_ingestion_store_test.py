@@ -55,6 +55,7 @@ from azents.core.external_channel_participation_state import (
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.external_channel.conversation_provisioning import (
@@ -246,12 +247,12 @@ def _session(
     *,
     commit: AsyncMock | None = None,
     rollback: AsyncMock | None = None,
-) -> AsyncSession:
+) -> WriteSession:
     """Build one runtime-specced AsyncSession fake."""
     session = MagicMock(spec=AsyncSession)
     session.commit = commit or AsyncMock()
     session.rollback = rollback or AsyncMock()
-    return session
+    return ReadWriteSession(session)
 
 
 def _store(
@@ -408,7 +409,7 @@ async def _accepted_control_plan_case(
     session = _session()
 
     @asynccontextmanager
-    async def session_context() -> AsyncIterator[AsyncSession]:
+    async def session_context() -> AsyncIterator[WriteSession]:
         yield session
 
     repository = MagicMock()
@@ -683,8 +684,8 @@ async def test_admission_cas_failure_rolls_back_prepared_input() -> None:
         case.acceptance.reason
         is ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
     )
-    case.session.rollback.assert_awaited_once()
-    case.session.commit.assert_not_awaited()
+    case.session.write_session.rollback.assert_awaited_once()
+    case.session.write_session.commit.assert_not_awaited()
     case.agent_session_repository.lock_by_id.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
 

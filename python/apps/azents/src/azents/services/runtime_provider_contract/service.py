@@ -6,7 +6,6 @@ from typing import Annotated, Any
 from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.core.runtime_provider_contract import (
@@ -15,6 +14,7 @@ from azents.core.runtime_provider_contract import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
@@ -43,7 +43,7 @@ class RuntimeProviderContractService:
     """Persist authenticated Provider advertisements as current authority."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     provider_repository: Annotated[
         RuntimeProviderRepository, Depends(RuntimeProviderRepository)

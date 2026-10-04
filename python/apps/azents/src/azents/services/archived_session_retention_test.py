@@ -5,7 +5,6 @@ import datetime
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
 from azents.core.enums import (
@@ -27,6 +26,7 @@ from azents.rdb.models.archived_session_retention import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import (
     ArchivedSessionPurgeParticipantSnapshotInvalid,
@@ -53,7 +53,7 @@ from azents.testing.model_selection import (
 
 
 def _service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> ArchivedSessionRetentionService:
     return ArchivedSessionRetentionService(
         repository=ArchivedSessionRetentionRepository(),
@@ -61,7 +61,7 @@ def _service(
     )
 
 
-async def _create_user(session: AsyncSession, suffix: str) -> str:
+async def _create_user(session: WriteSession, suffix: str) -> str:
     user = await UserRepository().create(
         session,
         UserCreate(email=f"retention-{suffix}@example.com"),
@@ -70,7 +70,7 @@ async def _create_user(session: AsyncSession, suffix: str) -> str:
 
 
 async def _create_root(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     suffix: str,
 ) -> str:
@@ -94,8 +94,8 @@ async def _create_root(
         encrypted_credentials="encrypted-test-value",
         config=None,
     )
-    session.add(integration)
-    await session.flush()
+    session.write_session.add(integration)
+    await session.write_session.flush()
     model_selection = make_test_model_selection_dict(
         integration_id=integration.id,
         provider=LLMProvider.ANTHROPIC,
@@ -113,15 +113,15 @@ async def _create_root(
         main_model_label="default",
         lightweight_model_label="lightweight",
     )
-    session.add(agent)
-    await session.flush()
+    session.write_session.add(agent)
+    await session.write_session.flush()
     runtime = RDBAgentRuntime(
         workspace_id=workspace_id,
         agent_id=agent.id,
     )
     runtime.workspace_path = "/workspace/agent"
-    session.add(runtime)
-    await session.flush()
+    session.write_session.add(runtime)
+    await session.write_session.flush()
     created = await AgentSessionRepository().create(
         session,
         AgentSessionCreate(
@@ -136,12 +136,12 @@ async def _create_root(
 
 
 async def _archive_root(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     root_session_id: str,
     archived_at: datetime.datetime,
 ) -> None:
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentSession)
         .where(RDBAgentSession.id == root_session_id)
         .values(
@@ -156,7 +156,7 @@ async def _archive_root(
 
 
 async def _create_archived_root(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     suffix: str,
     archived_at: datetime.datetime,
@@ -171,7 +171,7 @@ async def _create_archived_root(
 
 
 async def _create_child_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     root_session_id: str,
     name: str,
@@ -194,12 +194,12 @@ async def _create_child_session(
 
 
 async def _archive_session(
-    session: AsyncSession,
+    session: WriteSession,
     *,
     session_id: str,
     archived_at: datetime.datetime,
 ) -> None:
-    await session.execute(
+    await session.write_session.execute(
         sa.update(RDBAgentSession)
         .where(RDBAgentSession.id == session_id)
         .values(
@@ -211,7 +211,7 @@ async def _archive_session(
 
 
 async def test_default_settings_and_future_only_revision_update(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     service = _service(rdb_session_manager)
     async with rdb_session_manager() as session:
@@ -232,7 +232,7 @@ async def test_default_settings_and_future_only_revision_update(
 
 
 async def test_preview_and_recalculation_skip_started_purge(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     service = _service(rdb_session_manager)
     now = datetime.datetime.now(datetime.UTC)
@@ -255,7 +255,7 @@ async def test_preview_and_recalculation_skip_started_purge(
         )
         started_job.status = ArchivedSessionPurgeStatus.FENCING
         started_job.fencing_started_at = now
-        session.add(started_job)
+        session.write_session.add(started_job)
 
     preview = await service.preview(5)
     initial = await service.get_settings()
@@ -278,14 +278,14 @@ async def test_preview_and_recalculation_skip_started_purge(
     assert summary.skipped_count == 1
     assert summary.completed
     async with rdb_session_manager() as session:
-        overdue = await session.get(RDBAgentSession, overdue_id)
-        started = await session.get(RDBAgentSession, started_id)
-        job = await session.scalar(
+        overdue = await session.read_session.get(RDBAgentSession, overdue_id)
+        started = await session.read_session.get(RDBAgentSession, started_id)
+        job = await session.read_session.scalar(
             sa.select(RDBArchivedSessionPurgeJob).where(
                 RDBArchivedSessionPurgeJob.root_session_id == overdue_id
             )
         )
-        application = await session.get(
+        application = await session.read_session.get(
             RDBArchivedSessionRetentionApplication,
             update.application.id,
         )
@@ -304,7 +304,7 @@ async def test_preview_and_recalculation_skip_started_purge(
 
 
 async def test_recalculation_to_unlimited_cancels_pending_job(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     service = _service(rdb_session_manager)
     now = datetime.datetime.now(datetime.UTC)
@@ -315,7 +315,7 @@ async def test_recalculation_to_unlimited_cancels_pending_job(
             suffix="unlimited",
             archived_at=now - datetime.timedelta(days=2),
         )
-        session.add(
+        session.write_session.add(
             RDBArchivedSessionPurgeJob(
                 root_session_id=session_id,
                 eligible_at=now + datetime.timedelta(days=28),
@@ -335,8 +335,8 @@ async def test_recalculation_to_unlimited_cancels_pending_job(
     assert update.application is not None
     assert summary.cancelled_count == 1
     async with rdb_session_manager() as session:
-        archived = await session.get(RDBAgentSession, session_id)
-        job = await session.scalar(
+        archived = await session.read_session.get(RDBAgentSession, session_id)
+        job = await session.read_session.scalar(
             sa.select(RDBArchivedSessionPurgeJob).where(
                 RDBArchivedSessionPurgeJob.root_session_id == session_id
             )
@@ -350,7 +350,7 @@ async def test_recalculation_to_unlimited_cancels_pending_job(
 
 
 async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Stale schedule identities become observable cancelled tombstones."""
     repository = ArchivedSessionRetentionRepository()
@@ -366,13 +366,13 @@ async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
             suffix="valid-purge-job",
             archived_at=now - datetime.timedelta(days=1),
         )
-        stale_root = await session.get(RDBAgentSession, stale_root_id)
-        valid_root = await session.get(RDBAgentSession, valid_root_id)
+        stale_root = await session.read_session.get(RDBAgentSession, stale_root_id)
+        valid_root = await session.read_session.get(RDBAgentSession, valid_root_id)
         assert stale_root is not None
         assert stale_root.purge_after is not None
         assert valid_root is not None
         assert valid_root.purge_after is not None
-        session.add_all(
+        session.write_session.add_all(
             [
                 RDBArchivedSessionPurgeJob(
                     root_session_id=stale_root_id,
@@ -398,7 +398,7 @@ async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
     async with rdb_session_manager() as session:
         jobs = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBArchivedSessionPurgeJob).where(
                         RDBArchivedSessionPurgeJob.root_session_id.in_(
                             (stale_root_id, valid_root_id)
@@ -414,7 +414,7 @@ async def test_invalid_unstarted_purge_jobs_are_cancelled_in_bounded_batches(
 
 
 async def test_purge_job_with_active_status_child_is_claimable(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """An archived root remains claimable when a child status is stale."""
     repository = ArchivedSessionRetentionRepository()
@@ -434,10 +434,10 @@ async def test_purge_job_with_active_status_child_is_claimable(
             root_session_id=root_session_id,
             archived_at=now - datetime.timedelta(days=31),
         )
-        root = await session.get(RDBAgentSession, root_session_id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
         assert root is not None
         assert root.purge_after is not None
-        session.add(
+        session.write_session.add(
             RDBArchivedSessionPurgeJob(
                 root_session_id=root_session_id,
                 eligible_at=root.purge_after,
@@ -452,7 +452,7 @@ async def test_purge_job_with_active_status_child_is_claimable(
             lease_owner="purge-worker",
             lease_until=now + datetime.timedelta(minutes=1),
         )
-        child = await session.get(RDBAgentSession, active_child_session_id)
+        child = await session.read_session.get(RDBAgentSession, active_child_session_id)
 
     assert claimed is not None
     assert claimed.status is ArchivedSessionPurgeStatus.FENCING
@@ -462,7 +462,7 @@ async def test_purge_job_with_active_status_child_is_claimable(
 
 
 async def test_purge_job_with_fully_archived_child_tree_is_claimable(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A fully archived root tree remains eligible to cross the purge fence."""
     repository = ArchivedSessionRetentionRepository()
@@ -487,10 +487,10 @@ async def test_purge_job_with_fully_archived_child_tree_is_claimable(
             session_id=child_session_id,
             archived_at=now - datetime.timedelta(days=31),
         )
-        root = await session.get(RDBAgentSession, root_session_id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
         assert root is not None
         assert root.purge_after is not None
-        session.add(
+        session.write_session.add(
             RDBArchivedSessionPurgeJob(
                 root_session_id=root_session_id,
                 eligible_at=root.purge_after,
@@ -512,7 +512,7 @@ async def test_purge_job_with_fully_archived_child_tree_is_claimable(
 
 
 async def test_fenced_purge_job_with_active_status_child_is_reclaimed(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A fenced legacy job resumes from the archived root authority."""
     repository = ArchivedSessionRetentionRepository()
@@ -532,7 +532,7 @@ async def test_fenced_purge_job_with_active_status_child_is_reclaimed(
             root_session_id=root_session_id,
             archived_at=now - datetime.timedelta(days=31),
         )
-        root = await session.get(RDBAgentSession, root_session_id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
         assert root is not None
         assert root.purge_after is not None
         job = RDBArchivedSessionPurgeJob(
@@ -543,7 +543,7 @@ async def test_fenced_purge_job_with_active_status_child_is_reclaimed(
         job.status = ArchivedSessionPurgeStatus.RETRY_WAIT
         job.fencing_started_at = now - datetime.timedelta(minutes=10)
         job.next_attempt_at = now - datetime.timedelta(minutes=1)
-        session.add(job)
+        session.write_session.add(job)
 
     async with rdb_session_manager() as session:
         cancelled_count = await repository.cancel_invalid_unstarted_purge_jobs(
@@ -557,7 +557,7 @@ async def test_fenced_purge_job_with_active_status_child_is_reclaimed(
             lease_owner="purge-worker",
             lease_until=now + datetime.timedelta(minutes=1),
         )
-        persisted = await session.scalar(
+        persisted = await session.read_session.scalar(
             sa.select(RDBArchivedSessionPurgeJob).where(
                 RDBArchivedSessionPurgeJob.root_session_id == root_session_id
             )
@@ -574,7 +574,7 @@ async def test_fenced_purge_job_with_active_status_child_is_reclaimed(
 
 
 async def test_purge_job_claim_respects_lease_and_reclaims_after_expiry(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Only one worker owns a valid due purge job until its lease expires."""
     repository = ArchivedSessionRetentionRepository()
@@ -585,10 +585,10 @@ async def test_purge_job_claim_respects_lease_and_reclaims_after_expiry(
             suffix="purge-lease",
             archived_at=now - datetime.timedelta(days=31),
         )
-        root = await session.get(RDBAgentSession, root_session_id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
         assert root is not None
         assert root.purge_after is not None
-        session.add(
+        session.write_session.add(
             RDBArchivedSessionPurgeJob(
                 root_session_id=root_session_id,
                 eligible_at=root.purge_after,
@@ -634,7 +634,7 @@ async def test_purge_job_claim_respects_lease_and_reclaims_after_expiry(
 
 
 async def test_purge_retry_completion_and_tombstone_survive_root_delete(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Retry state is durable and completion survives the final DB cascade."""
     repository = ArchivedSessionRetentionRepository()
@@ -645,10 +645,10 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
             suffix="purge-tombstone",
             archived_at=now - datetime.timedelta(days=31),
         )
-        root = await session.get(RDBAgentSession, root_session_id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
         assert root is not None
         assert root.purge_after is not None
-        session.add(
+        session.write_session.add(
             RDBArchivedSessionPurgeJob(
                 root_session_id=root_session_id,
                 eligible_at=root.purge_after,
@@ -719,8 +719,10 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
         assert completed is True
 
     async with rdb_session_manager() as session:
-        root = await session.get(RDBAgentSession, root_session_id)
-        tombstone = await session.get(RDBArchivedSessionPurgeJob, retried.id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
+        tombstone = await session.read_session.get(
+            RDBArchivedSessionPurgeJob, retried.id
+        )
     assert root is None
     assert tombstone is not None
     assert tombstone.status is ArchivedSessionPurgeStatus.COMPLETED
@@ -736,7 +738,7 @@ async def test_purge_retry_completion_and_tombstone_survive_root_delete(
 
 
 async def test_purge_participant_snapshot_and_progress_are_durable(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Fencing materializes immutable participant versions with durable checkpoints."""
     repository = ArchivedSessionRetentionRepository()
@@ -747,10 +749,10 @@ async def test_purge_participant_snapshot_and_progress_are_durable(
             suffix="purge-participant-progress",
             archived_at=now - datetime.timedelta(days=31),
         )
-        root = await session.get(RDBAgentSession, root_session_id)
+        root = await session.read_session.get(RDBAgentSession, root_session_id)
         assert root is not None
         assert root.purge_after is not None
-        session.add(
+        session.write_session.add(
             RDBArchivedSessionPurgeJob(
                 root_session_id=root_session_id,
                 eligible_at=root.purge_after,
@@ -832,7 +834,7 @@ async def test_purge_participant_snapshot_and_progress_are_durable(
     async with rdb_session_manager() as session:
         execution_rows = list(
             (
-                await session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBArchivedSessionPurgeParticipantExecution).where(
                         RDBArchivedSessionPurgeParticipantExecution.purge_job_id
                         == claimed.id
@@ -840,7 +842,7 @@ async def test_purge_participant_snapshot_and_progress_are_durable(
                 )
             ).all()
         )
-        job = await session.get(RDBArchivedSessionPurgeJob, claimed.id)
+        job = await session.read_session.get(RDBArchivedSessionPurgeJob, claimed.id)
         assert job is not None
         assert job.last_error_participant_key == "session.git-worktrees"
         assert job.last_error_phase is ArchivedSessionPurgeParticipantPhase.PENDING
@@ -941,7 +943,7 @@ async def test_purge_participant_snapshot_and_progress_are_durable(
 
 
 async def test_revision_and_active_application_conflicts(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     service = _service(rdb_session_manager)
     async with rdb_session_manager() as session:

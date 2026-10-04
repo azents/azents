@@ -6,7 +6,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_automatic_project import AgentAutomaticProjectPolicy
 from azents.core.agent_errors import NotFound
@@ -18,6 +17,7 @@ from azents.core.session_workspace_paths import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
@@ -75,7 +75,7 @@ class AgentAutomaticProjectService:
         Depends(AgentProjectCatalogRepository),
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     runtime_target_resolver: Annotated[
@@ -249,7 +249,7 @@ class AgentAutomaticProjectService:
                     path=path,
                     patch=_available_catalog_status_patch(),
                 )
-            await session.commit()
+            await session.write_session.commit()
         return Success(replaced)
 
     async def _authorize(

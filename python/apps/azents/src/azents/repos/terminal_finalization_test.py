@@ -19,6 +19,7 @@ from azents.core.enums import (
 )
 from azents.core.mailbox_data import MailboxItem, MailboxItemCreate
 from azents.engine.events.types import AgentRunState
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -54,10 +55,11 @@ class _Transaction(AsyncSession):
         self.active = True
 
 
-def _transaction(session: AsyncSession) -> _Transaction:
-    assert isinstance(session, _Transaction)
-    assert session.active
-    return session
+def _transaction(session: ReadSession) -> _Transaction:
+    raw = session.read_session
+    assert isinstance(raw, _Transaction)
+    assert raw.active
+    return raw
 
 
 class _SessionManager:
@@ -66,12 +68,12 @@ class _SessionManager:
         self.active: _Transaction | None = None
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         session = _Transaction(self.state)
         assert self.active is None
         self.active = session
         try:
-            yield session
+            yield ReadWriteSession(session)
         except BaseException:
             self.state.rollbacks += 1
             raise
@@ -93,7 +95,7 @@ class _Runs(AgentRunRepository):
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         run_id: str,
     ) -> AgentRunState | None:
         run = _transaction(session).run
@@ -101,7 +103,7 @@ class _Runs(AgentRunRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
     ) -> AgentRunState | None:
         _transaction(session).state.lock_order.append("run")
@@ -109,7 +111,7 @@ class _Runs(AgentRunRepository):
 
     async def mark_stopped_for_user_stop(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         *,
         ended_at: datetime,
@@ -129,7 +131,7 @@ class _Runs(AgentRunRepository):
 
     async def mark_parent_result_enqueued(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         mailbox_item_id: str,
@@ -156,7 +158,7 @@ class _Runs(AgentRunRepository):
 
     async def mark_parent_result_suppressed(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
         finalized_at: datetime,
@@ -190,7 +192,7 @@ class _Sessions(AgentSessionRepository):
 
     async def lock_execution_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         transaction = _transaction(session)
@@ -203,7 +205,7 @@ class _Sessions(AgentSessionRepository):
 
     async def has_stop_request(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_id: str,
     ) -> bool:
         _transaction(session)
@@ -212,7 +214,7 @@ class _Sessions(AgentSessionRepository):
 
     async def get_session_agent_by_session_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         agent_session_id: str,
     ) -> SessionAgent | None:
         _transaction(session)
@@ -220,7 +222,7 @@ class _Sessions(AgentSessionRepository):
 
     async def get_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         _transaction(session)
@@ -228,7 +230,7 @@ class _Sessions(AgentSessionRepository):
 
     async def lock_session_agent_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         session_agent_id: str,
     ) -> SessionAgent | None:
         _transaction(session).state.lock_order.append("session_agent")
@@ -236,7 +238,7 @@ class _Sessions(AgentSessionRepository):
 
     async def lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         transaction = _transaction(session)
@@ -251,7 +253,7 @@ class _Sessions(AgentSessionRepository):
 
     async def mark_session_agent_message_activity(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_agent_id: str,
     ) -> None:
@@ -261,7 +263,7 @@ class _Sessions(AgentSessionRepository):
 class _Mailbox(MailboxRepository):
     async def get_by_idempotency_key(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         kind: object,
@@ -280,7 +282,7 @@ class _Mailbox(MailboxRepository):
 
     async def create_idempotent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: MailboxItemCreate,
         *,
         idempotency_key: str,

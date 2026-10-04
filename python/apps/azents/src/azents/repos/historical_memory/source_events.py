@@ -4,11 +4,11 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.engine.events.types import Event
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.message import MessageRepository
 
 
@@ -18,7 +18,7 @@ class HistoricalMemorySourceEventRepository:
 
     message_repository: Annotated[MessageRepository, Depends(MessageRepository)]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
 
     async def capture(

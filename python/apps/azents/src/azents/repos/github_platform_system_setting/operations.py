@@ -4,7 +4,6 @@ import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.github_system_setting import PlatformGitHubAppConfig
 from azents.core.github_system_setting_data import (
@@ -14,6 +13,7 @@ from azents.core.github_system_setting_data import (
 from azents.core.system_setting import ResolvedSystemSetting
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.github_platform_system_setting.binding import (
     PlatformGitHubAppBindingRepository,
 )
@@ -36,7 +36,7 @@ class PlatformGitHubAppImpactRepository:
     """Complete inspection reads and compose locked confirmation impact."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     impact_repository: Annotated[
         PlatformGitHubAppSystemSettingRepository,
@@ -55,7 +55,7 @@ class PlatformGitHubAppImpactRepository:
 
     async def resolve_impact_in_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         current: ResolvedSystemSetting,
         candidate: ResolvedSystemSetting,
     ) -> PlatformGitHubAppConfirmationImpact:

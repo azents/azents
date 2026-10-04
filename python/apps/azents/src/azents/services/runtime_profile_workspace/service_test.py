@@ -4,7 +4,6 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,10 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import RuntimeProfileLifecycle
-from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileDeleteOutcome,
+    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
 )
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -71,20 +71,14 @@ def _deletion() -> WorkspaceRuntimeProfileDeletion:
     )
 
 
-class _WorkspaceProfileFixture(NamedTuple):
-    service: RuntimeProfileWorkspaceService
-    profiles: AsyncMock
-    transaction: dict[str, bool]
-
-
 def _service(
     outcome: WorkspaceRuntimeProfileDeleteOutcome | None = None,
-) -> _WorkspaceProfileFixture:
+) -> tuple[RuntimeProfileWorkspaceService, AsyncMock, dict[str, bool]]:
     """Build the service with transaction-state tracking dependencies."""
     transaction = {"committed": False, "rolled_back": False}
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
         try:
             yield AsyncMock(spec=AsyncSession)
         except Exception:
@@ -119,9 +113,7 @@ def _service(
             NoopTerminalPolicyInvalidationPublisher()
         ),
     )
-    return _WorkspaceProfileFixture(
-        service=service, profiles=profile_repository, transaction=transaction
-    )
+    return service, profile_repository, transaction
 
 
 def test_terminal_only_workspace_change_skips_physical_reconciliation() -> None:

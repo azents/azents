@@ -8,7 +8,6 @@ from contextlib import asynccontextmanager
 
 import pytest
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import SelectableModelCandidate, SelectableModelOption
 from azents.core.agent_session_data import AgentSession, AgentSessionCreate
@@ -37,6 +36,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import AgentRunCreate, AgentRunPatch, EventCreate
 from azents.repos.agent_mailbox import AgentMailboxRepository
@@ -63,7 +63,7 @@ from azents.testing.model_selection import (
 class _ObservedSessionManager:
     """Observe completion around the actual commit/rollback/close manager."""
 
-    def __init__(self, source: SessionManager[AsyncSession]) -> None:
+    def __init__(self, source: SessionManager[WriteSession]) -> None:
         self.source = source
         self.active_scopes = 0
         self.committed_scopes = 0
@@ -71,7 +71,7 @@ class _ObservedSessionManager:
         self.closed_scopes = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         self.active_scopes += 1
         try:
             async with self.source() as session:
@@ -92,7 +92,7 @@ class _Sessions(AgentSessionRepository):
 
     async def wait_for_execution_lock_by_id(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
         self.trace.append("owner")
@@ -103,7 +103,7 @@ class _Transcript(EventTranscriptRepository):
     def __init__(self, trace: list[str]) -> None:
         self.trace = trace
 
-    async def append(self, session: AsyncSession, create: EventCreate) -> Event:
+    async def append(self, session: WriteSession, create: EventCreate) -> Event:
         self.trace.append(create.kind.value)
         return await super().append(session, create)
 
@@ -114,7 +114,7 @@ class _Runs(AgentRunRepository):
 
     async def mark_terminal_if_running(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         run_id: str,
         status: AgentRunStatus,
         *,
@@ -142,7 +142,7 @@ class _Terminal(TerminalRunFinalizationRepository):
 
     async def lock_run_finalization(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
     ) -> None:
@@ -151,7 +151,7 @@ class _Terminal(TerminalRunFinalizationRepository):
 
     async def finalize_run_in_session(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         run_id: str,
     ) -> TerminalFinalizationOutcome:
@@ -194,7 +194,7 @@ def _retry_state() -> FailedRunRetryState:
 
 
 async def _fixture(
-    source: SessionManager[AsyncSession],
+    source: SessionManager[WriteSession],
     *,
     terminal_failure: BaseException | None,
 ) -> _Fixture:
@@ -314,7 +314,7 @@ def _terminal_operation(kind: ModelOperationKind) -> ModelOperationSnapshot:
 
 
 async def _assert_no_failure_writes(
-    source: SessionManager[AsyncSession],
+    source: SessionManager[WriteSession],
     fixture: _Fixture,
 ) -> None:
     async with source() as session:
@@ -349,7 +349,7 @@ async def _assert_no_failure_writes(
 
 
 async def test_failed_run_finalization_appends_events_delivery_and_closes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Original failure metadata and parent delivery commit in the fenced order."""
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
@@ -416,7 +416,7 @@ async def test_failed_run_finalization_appends_events_delivery_and_closes(
 
 
 async def test_failed_run_finalization_retains_terminal_candidate_outcomes(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """Chain exhaustion evidence survives terminal operation-state clearing."""
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
@@ -456,7 +456,7 @@ async def test_failed_run_finalization_retains_terminal_candidate_outcomes(
 
 
 async def test_failed_run_finalization_yields_to_locked_stop_request(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """The removed lifecycle claim regression now covers the completed operation."""
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
@@ -478,7 +478,7 @@ async def test_failed_run_finalization_yields_to_locked_stop_request(
 
 
 async def test_stale_owner_fails_before_event_or_terminal_mutation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
     async with rdb_session_manager() as session:
@@ -498,7 +498,7 @@ async def test_stale_owner_fails_before_event_or_terminal_mutation(
 
 
 async def test_missing_owned_session_keeps_value_error_semantics(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
     with pytest.raises(ValueError, match="AgentSession not found"):
@@ -513,7 +513,7 @@ async def test_missing_owned_session_keeps_value_error_semantics(
 
 
 async def test_missing_run_retains_existing_conditional_transition_behavior(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     """A missing Run retains the original Event append and ineligible delivery."""
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
@@ -541,7 +541,7 @@ async def test_missing_run_retains_existing_conditional_transition_behavior(
 
 
 async def test_multiple_terminal_operation_slots_abort_before_failure_events(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
     async with rdb_session_manager() as session:
@@ -565,7 +565,7 @@ async def test_multiple_terminal_operation_slots_abort_before_failure_events(
 
 @pytest.mark.parametrize("cancelled", [False, True])
 async def test_terminal_delivery_failure_rolls_back_entire_atomic_group(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancelled: bool,
 ) -> None:
     """Real delivery/activity and all failure Events disappear on abort."""
@@ -581,7 +581,7 @@ async def test_terminal_delivery_failure_rolls_back_entire_atomic_group(
 
 
 async def test_failed_run_replay_keeps_deterministic_events_and_parent_result(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
     first = await fixture.repository.finalize(fixture.input)
@@ -612,7 +612,7 @@ async def test_failed_run_replay_keeps_deterministic_events_and_parent_result(
 
 
 async def test_already_terminal_run_is_not_overwritten_by_failure_transition(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = await _fixture(rdb_session_manager, terminal_failure=None)
     async with rdb_session_manager() as session:

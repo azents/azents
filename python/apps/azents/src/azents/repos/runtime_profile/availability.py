@@ -6,7 +6,6 @@ from typing import Annotated
 from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
@@ -22,6 +21,7 @@ from azents.core.runtime_profile import (
 )
 from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
 from azents.core.runtime_provider_data import RuntimeProvider
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
@@ -55,7 +55,7 @@ class RuntimeProfileAvailabilityRepository:
 
     async def get_agent_profile_unavailability_code(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         workspace_id: str,
         profile_id: str,
@@ -115,7 +115,7 @@ class RuntimeProfileAvailabilityRepository:
 
     async def _provider_ready_for_workspace(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         workspace_id: str,
@@ -146,7 +146,7 @@ class RuntimeProfileAvailabilityRepository:
 
     async def _workspace_compatibility_error(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         provider: RuntimeProvider,
         infrastructure_spec: dict[str, object],

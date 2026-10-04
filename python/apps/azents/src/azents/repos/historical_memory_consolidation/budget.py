@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.historical_memory_budget import (
     CONSOLIDATION_INPUT_TOKEN_LIMIT,
@@ -20,6 +19,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationModelDispatch,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     LockedConsolidationOwner,
@@ -41,11 +41,11 @@ class ConsolidationRemainingBudget:
 
 
 async def check_input_influence(
-    session: AsyncSession,
+    session: WriteSession,
     principal: ConsolidationJobPrincipal,
     owner: LockedConsolidationOwner,
 ) -> None:
-    draft = await session.scalar(
+    draft = await session.write_session.scalar(
         sa.select(RDBConsolidationDraft).where(
             RDBConsolidationDraft.unit_id == owner.unit.id
         )
@@ -59,7 +59,7 @@ async def check_input_influence(
 class ConsolidationBudgetRepository:
     """Reservations commit before physical SDK I/O; unknown usage stays reserved."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def remaining(
         self, principal: ConsolidationJobPrincipal
@@ -93,7 +93,7 @@ class ConsolidationBudgetRepository:
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
             await check_input_influence(session, principal, owner)
-            previous = await session.get(
+            previous = await session.write_session.get(
                 RDBConsolidationModelDispatch, (principal.attempt_id, dispatch_id)
             )
             if previous is not None:
@@ -123,7 +123,7 @@ class ConsolidationBudgetRepository:
                 attempt.model_requests += 1
                 attempt.input_tokens += input_tokens
                 attempt.output_tokens += output_tokens
-                session.add(
+                session.write_session.add(
                     RDBConsolidationModelDispatch(
                         attempt_id=principal.attempt_id,
                         dispatch_id=dispatch_id,
@@ -148,7 +148,7 @@ class ConsolidationBudgetRepository:
         """Return an over-budget signal after durable accounting, not a rollback."""
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
-            row = await session.get(
+            row = await session.write_session.get(
                 RDBConsolidationModelDispatch, (principal.attempt_id, dispatch_id)
             )
             if row is None:

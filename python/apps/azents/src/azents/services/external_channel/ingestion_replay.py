@@ -5,7 +5,6 @@ import datetime
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
@@ -39,6 +38,7 @@ from azents.core.external_channel_participation_state import (
 from azents.core.external_channel_selector_state import selector_state_from_interaction
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequest,
     ExternalChannelConnectionConfiguration,
@@ -99,7 +99,7 @@ class ExternalChannelIngestionReplayService:
     """Reconstruct immutable access, selector, and setup replay."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession],
+        SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
     repository: Annotated[
@@ -244,7 +244,7 @@ class ExternalChannelIngestionReplayService:
 
     async def _load_setup_request(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         setup_claim_id: str,
         deadline: ExternalChannelOperationDeadline,
@@ -387,7 +387,7 @@ class ExternalChannelIngestionReplayService:
 
     async def _load_source(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         connection_id: str,
         conversation_position_id: str,

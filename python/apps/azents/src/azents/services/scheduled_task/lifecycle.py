@@ -5,13 +5,13 @@ from dataclasses import asdict
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgeContext,
     SessionLifecycleTransitionContext,
 )
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleCleanup,
     ScheduledTaskLifecycleRepository,
@@ -35,7 +35,7 @@ class ScheduledTaskLifecycleService:
 
     async def archive_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ScheduledTaskLifecycleCleanup | None:
@@ -49,7 +49,7 @@ class ScheduledTaskLifecycleService:
 
     async def archive_allows_active_runs(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         running_session_ids: Sequence[str],
@@ -63,7 +63,7 @@ class ScheduledTaskLifecycleService:
 
     async def restore_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecycleTransitionContext,
     ) -> ScheduledTaskLifecycleVerification | None:
@@ -77,7 +77,7 @@ class ScheduledTaskLifecycleService:
 
     async def prepare_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ScheduledTaskLifecycleVerification | None:
@@ -91,7 +91,7 @@ class ScheduledTaskLifecycleService:
 
     async def cleanup_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ScheduledTaskLifecycleCleanup | None:
@@ -105,7 +105,7 @@ class ScheduledTaskLifecycleService:
 
     async def verify_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ScheduledTaskLifecycleVerification | None:
@@ -127,7 +127,7 @@ class ScheduledTaskLifecycleService:
 
     async def finalize_purge_participant(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
     ) -> ScheduledTaskLifecycleVerification | None:

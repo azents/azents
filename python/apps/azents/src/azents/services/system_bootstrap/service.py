@@ -10,7 +10,6 @@ from typing import Annotated
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.jwt import create_access_token
 from azents.core.auth.password import (
@@ -23,6 +22,7 @@ from azents.core.deps import get_auth_config, get_system_bootstrap_config
 from azents.core.enums import SystemUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.password_login import PasswordLoginRepository
 from azents.repos.password_login.data import PasswordLoginCreate
 from azents.repos.session import SessionRepository
@@ -60,7 +60,7 @@ class SystemBootstrapService:
     password_login_repository: Annotated[PasswordLoginRepository, Depends()]
     session_repository: Annotated[SessionRepository, Depends()]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)]
     bootstrap_config: Annotated[

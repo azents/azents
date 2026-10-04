@@ -4,8 +4,6 @@ import dataclasses
 import json
 from collections.abc import Mapping
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
 from azents.engine.run.types import FunctionTool, FunctionToolResult
 from azents.engine.tooling.execution_context import (
@@ -14,6 +12,7 @@ from azents.engine.tooling.execution_context import (
 )
 from azents.engine.tools.mutable_storage import RoutedMutationTools
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
 )
@@ -68,7 +67,7 @@ class ConsolidationTestVfsBinding:
 
 
 async def bind_consolidation_test_vfs(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
 ) -> ConsolidationTestVfsBinding:
     corpus = await seed_consolidation_corpus(manager)
     owner_repository = ConsolidationOwnershipRepository(manager)

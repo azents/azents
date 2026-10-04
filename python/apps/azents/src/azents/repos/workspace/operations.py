@@ -5,7 +5,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import WorkspaceUserRole
 from azents.core.workspace import (
@@ -17,6 +16,7 @@ from azents.core.workspace import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import Workspace, WorkspaceList
 from azents.repos.workspace.operation_data import WorkspaceOwnerCreation
@@ -29,7 +29,7 @@ class WorkspaceOperationRepository:
     """Own complete Workspace CRUD and membership projection transactions."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     workspace_repository: Annotated[WorkspaceRepository, Depends(WorkspaceRepository)]
     workspace_user_repository: Annotated[

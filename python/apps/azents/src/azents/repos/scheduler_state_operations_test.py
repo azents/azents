@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.enums import ScheduledTaskStatus
 from azents.rdb.models.scheduled_task_state import RDBScheduledTaskState
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.scheduled_task_state import ScheduledTaskStateRepository
 from azents.repos.scheduled_task_state.data import ScheduledTaskState
 from azents.repos.scheduler_state_operations import SchedulerStateOperationRepository
@@ -29,15 +30,15 @@ def at(minutes: int) -> datetime:
 class SchedulerManager:
     """Observe genuine Session completion, not a fake application SQL adapter."""
 
-    def __init__(self, manager: SessionManager[AsyncSession]) -> None:
+    def __init__(self, manager: SessionManager[WriteSession]) -> None:
         self.manager = manager
-        self.sessions: list[AsyncSession] = []
-        self.active: list[AsyncSession] = []
+        self.sessions: list[WriteSession] = []
+        self.active: list[WriteSession] = []
         self.commits = 0
         self.failures = 0
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
         assert not self.active, "Completed Scheduler operations cannot nest"
         try:
             async with self.manager() as session:
@@ -55,7 +56,9 @@ class SchedulerManager:
 
     def assert_closed(self) -> None:
         assert not self.active
-        assert all(not session.in_transaction() for session in self.sessions)
+        assert all(
+            not session.write_session.in_transaction() for session in self.sessions
+        )
 
 
 class SchedulerFault:
@@ -69,11 +72,11 @@ class SchedulerFault:
         self.pause = False
         self.reached = asyncio.Event()
         self.release = asyncio.Event()
-        self.trace: list[tuple[str, str | None, AsyncSession]] = []
+        self.trace: list[tuple[str, str | None, ReadSession]] = []
 
-    async def point(self, stage: str, key: str | None, session: AsyncSession) -> None:
+    async def point(self, stage: str, key: str | None, session: ReadSession) -> None:
         assert self.manager.active == [session]
-        assert session.in_transaction()
+        assert session.read_session.in_transaction()
         self.trace.append((stage, key, session))
         if stage == self.stage and (self.key is None or self.key == key):
             self.reached.set()
@@ -90,7 +93,7 @@ class FaultStates(ScheduledTaskStateRepository):
         self.fault = fault
 
     async def ensure_state(
-        self, session: AsyncSession, *, task_key: str, next_run_at: datetime
+        self, session: WriteSession, *, task_key: str, next_run_at: datetime
     ) -> ScheduledTaskState:
         result = await super().ensure_state(
             session, task_key=task_key, next_run_at=next_run_at
@@ -98,20 +101,20 @@ class FaultStates(ScheduledTaskStateRepository):
         await self.fault.point("ensure_state", task_key, session)
         return result
 
-    async def list_states(self, session: AsyncSession) -> list[ScheduledTaskState]:
+    async def list_states(self, session: ReadSession) -> list[ScheduledTaskState]:
         result = await super().list_states(session)
         await self.fault.point("list_states", None, session)
         return result
 
     async def get(
-        self, session: AsyncSession, task_key: str
+        self, session: ReadSession, task_key: str
     ) -> ScheduledTaskState | None:
         result = await super().get(session, task_key)
         await self.fault.point("get", task_key, session)
         return result
 
     async def trigger(
-        self, session: AsyncSession, *, task_key: str, now: datetime
+        self, session: WriteSession, *, task_key: str, now: datetime
     ) -> ScheduledTaskState | None:
         result = await super().trigger(session, task_key=task_key, now=now)
         await self.fault.point("trigger", task_key, session)
@@ -119,7 +122,7 @@ class FaultStates(ScheduledTaskStateRepository):
 
     async def claim_due(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         now: datetime,
@@ -138,7 +141,7 @@ class FaultStates(ScheduledTaskStateRepository):
 
     async def mark_success(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         lease_owner: str,
@@ -159,7 +162,7 @@ class FaultStates(ScheduledTaskStateRepository):
 
     async def mark_failure(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         task_key: str,
         lease_owner: str,
@@ -188,7 +191,7 @@ class SchedulerFixture:
     repository: SchedulerStateOperationRepository
 
 
-def scheduler_fixture(manager: SessionManager[AsyncSession]) -> SchedulerFixture:
+def scheduler_fixture(manager: SessionManager[WriteSession]) -> SchedulerFixture:
     observed = SchedulerManager(manager)
     fault = SchedulerFault(observed)
     return SchedulerFixture(
@@ -247,7 +250,7 @@ async def settle(
 
 
 async def test_bulk_ensure_is_ordered_one_scope_idempotent_and_detached(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = scheduler_fixture(rdb_session_manager)
     keys = ("z-disabled", "a-enabled", "m-unregistered", "a-enabled")
@@ -282,7 +285,7 @@ async def test_bulk_ensure_is_ordered_one_scope_idempotent_and_detached(
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_bulk_ensure_later_write_error_or_actual_task_cancel_rolls_back_batch(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     cancel: bool,
 ) -> None:
     fixture = scheduler_fixture(rdb_session_manager)
@@ -326,7 +329,7 @@ async def test_bulk_ensure_later_write_error_or_actual_task_cancel_rolls_back_ba
 @pytest.mark.parametrize("operation", ["list_states", "get", "trigger"])
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_separate_completed_ensure_survives_later_read_trigger_failure(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
     cancel: bool,
 ) -> None:
@@ -353,7 +356,7 @@ async def test_separate_completed_ensure_survives_later_read_trigger_failure(
 
 @pytest.mark.parametrize("due_delta", [-1, 0, 1])
 async def test_claim_due_comparison_is_inclusive_application_time(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     due_delta: int,
 ) -> None:
     fixture = scheduler_fixture(rdb_session_manager)
@@ -373,7 +376,7 @@ async def test_claim_due_comparison_is_inclusive_application_time(
 
 @pytest.mark.parametrize("lease_delta", [-1, 0, 1])
 async def test_reclaim_lease_comparison_is_strict_not_equal(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     lease_delta: int,
 ) -> None:
     fixture = scheduler_fixture(rdb_session_manager)
@@ -396,7 +399,7 @@ async def test_reclaim_lease_comparison_is_strict_not_equal(
     "lease_state", ["current", "expired", "not_running", "same_owner_reclaim"]
 )
 async def test_settlement_has_only_existing_task_key_and_owner_fences(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     success: bool,
     lease_state: str,
 ) -> None:
@@ -406,7 +409,7 @@ async def test_settlement_has_only_existing_task_key_and_owner_fences(
     assert old is not None
     if lease_state == "not_running":
         async with rdb_session_manager() as session:
-            await session.execute(
+            await session.write_session.execute(
                 sa.update(RDBScheduledTaskState)
                 .where(RDBScheduledTaskState.task_key == "task")
                 .values(latest_status=ScheduledTaskStatus.IDLE)
@@ -444,7 +447,7 @@ async def test_settlement_has_only_existing_task_key_and_owner_fences(
 
 @pytest.mark.parametrize("success", [False, True])
 async def test_other_owner_and_unknown_settlement_are_normal_unchanged_none(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     success: bool,
 ) -> None:
     fixture = scheduler_fixture(rdb_session_manager)
@@ -480,7 +483,7 @@ async def test_other_owner_and_unknown_settlement_are_normal_unchanged_none(
 
 
 async def test_failure_streak_and_success_clear_exact_fields_and_opaque_summary(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     fixture = scheduler_fixture(rdb_session_manager)
     await fixture.repository.ensure_registered_states(task_keys=("task",), now=_START)
@@ -488,7 +491,7 @@ async def test_failure_streak_and_success_clear_exact_fields_and_opaque_summary(
     claimed = await claim(fixture, key="task", now=_START, owner="owner-a", until=None)
     assert claimed is not None
     async with rdb_session_manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBScheduledTaskState)
             .where(RDBScheduledTaskState.task_key == "task")
             .values(
@@ -551,7 +554,7 @@ async def test_failure_streak_and_success_clear_exact_fields_and_opaque_summary(
 )
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_postwrite_error_or_actual_task_cancel_restores_only_current_operation(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     operation: str,
     cancel: bool,
 ) -> None:
@@ -613,30 +616,33 @@ class IndependentSchedulerManager:
         self.entered = asyncio.Event()
 
     @asynccontextmanager
-    async def __call__(self) -> AsyncIterator[AsyncSession]:
-        async with AsyncSession(self.engine, expire_on_commit=False) as session:
+    async def __call__(self) -> AsyncIterator[WriteSession]:
+        async with AsyncSession(self.engine, expire_on_commit=False) as _raw_session:
+            session = ReadWriteSession(_raw_session)
             try:
-                pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+                pid = await session.read_session.scalar(
+                    sa.text("SELECT pg_backend_pid()")
+                )
                 assert isinstance(pid, int)
                 self.pids.append(pid)
                 self.entered.set()
                 yield session
             except BaseException:
-                await session.rollback()
+                await session.write_session.rollback()
                 raise
             else:
-                await session.commit()
+                await session.write_session.commit()
 
 
 async def wait_scheduler_blocked(
-    manager: SessionManager[AsyncSession], *, holder: int, contender: int
+    manager: SessionManager[WriteSession], *, holder: int, contender: int
 ) -> None:
     """Prove actual row contention using PostgreSQL, not a timing assumption."""
     assert holder != contender
     async with asyncio.timeout(10):
         async with manager() as observer:
             while True:
-                blockers = await observer.scalar(
+                blockers = await observer.write_session.scalar(
                     sa.text("SELECT pg_blocking_pids(:pid)"), {"pid": contender}
                 )
                 if isinstance(blockers, list) and holder in blockers:
@@ -663,7 +669,7 @@ async def finish_scheduler_holder(
 
 
 async def cleanup_scheduler_race(
-    manager: SessionManager[AsyncSession],
+    manager: SessionManager[WriteSession],
     *,
     key: str,
     tasks: list[asyncio.Task[ScheduledTaskState | None]],
@@ -676,7 +682,7 @@ async def cleanup_scheduler_race(
             task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     async with manager() as session:
-        await session.execute(
+        await session.write_session.execute(
             sa.delete(RDBScheduledTaskState).where(
                 RDBScheduledTaskState.task_key == key
             )

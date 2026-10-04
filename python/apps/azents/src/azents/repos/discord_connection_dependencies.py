@@ -3,10 +3,10 @@
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.discord_connection_operations import (
     DiscordConnectionOperationRepository,
 )
@@ -15,7 +15,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 
 def get_discord_connection_operations(
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ],
     repository: Annotated[
         ExternalChannelRepository, Depends(ExternalChannelRepository.create)

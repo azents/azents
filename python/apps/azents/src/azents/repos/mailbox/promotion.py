@@ -7,7 +7,6 @@ from typing import Annotated
 
 from fastapi import Depends
 from pydantic import TypeAdapter
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.action_execution_data import ActionExecution, ActionExecutionCreate
 from azents.core.enums import ActionExecutionStatus, AgentRunStatus, EventKind
@@ -17,6 +16,7 @@ from azents.core.skill_projection import SkillProjectionItem, resolve_active_ski
 from azents.engine.events.types import AgentMessagePayload, Event
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
@@ -120,7 +120,7 @@ class MailboxPromotionRepository:
     """Compose the final database-only Mailbox promotion transaction."""
 
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     session_repository: Annotated[
@@ -319,7 +319,7 @@ class MailboxPromotionRepository:
 
     async def _append_events(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         buffer: MailboxItem,
@@ -371,7 +371,7 @@ class MailboxPromotionRepository:
 
     async def _acknowledge_agent_results(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_id: str,
         prepared: list[MailboxPromotionEvent],

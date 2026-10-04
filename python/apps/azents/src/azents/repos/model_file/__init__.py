@@ -4,11 +4,11 @@ import datetime
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ModelFileStatus
 from azents.rdb.models.model_file import RDBModelFile
 from azents.rdb.models.model_file_pin import RDBModelFilePin
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 
 from .data import ModelFile, ModelFileCreate
 
@@ -28,7 +28,7 @@ class ModelFileRepository:
 
     async def create(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         create: ModelFileCreate,
     ) -> ModelFile:
         """Create ModelFile metadata."""
@@ -53,30 +53,30 @@ class ModelFileRepository:
             session_id=create.session_id,
             model_file_id=create.id,
         )
-        session.add(rdb)
-        await session.flush()
+        session.write_session.add(rdb)
+        await session.write_session.flush()
         return self._build(rdb)
 
     async def get_by_id(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         model_file_id: str,
     ) -> ModelFile | None:
         """Fetch ModelFile by ID."""
-        rdb = await session.get(RDBModelFile, model_file_id)
+        rdb = await session.read_session.get(RDBModelFile, model_file_id)
         if rdb is None:
             return None
         return self._build(rdb)
 
     async def get_by_id_for_agent(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         model_file_id: str,
         agent_id: str,
     ) -> ModelFile | None:
         """Fetch ModelFile only inside current Agent namespace."""
-        rdb = await session.scalar(
+        rdb = await session.read_session.scalar(
             sa.select(RDBModelFile).where(
                 RDBModelFile.id == model_file_id,
                 RDBModelFile.agent_id == agent_id,
@@ -88,7 +88,7 @@ class ModelFileRepository:
 
     async def list_statuses_for_session(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_id: str,
         model_file_ids: Sequence[str],
@@ -97,7 +97,7 @@ class ModelFileRepository:
         if not model_file_ids:
             return {}
         rows = (
-            await session.execute(
+            await session.read_session.execute(
                 sa.select(RDBModelFile.id, RDBModelFile.status).where(
                     RDBModelFile.session_id == session_id,
                     RDBModelFile.id.in_(model_file_ids),
@@ -108,7 +108,7 @@ class ModelFileRepository:
 
     async def list_for_session_ids(
         self,
-        session: AsyncSession,
+        session: ReadSession,
         *,
         session_ids: Sequence[str],
     ) -> list[ModelFile]:
@@ -116,7 +116,7 @@ class ModelFileRepository:
         if not session_ids:
             return []
         rows = (
-            await session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBModelFile)
                 .where(RDBModelFile.session_id.in_(session_ids))
                 .order_by(RDBModelFile.id)
@@ -126,7 +126,7 @@ class ModelFileRepository:
 
     async def mark_deleted_for_session_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
         deleted_at: datetime.datetime,
@@ -135,7 +135,7 @@ class ModelFileRepository:
         if not session_ids:
             return []
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBModelFile)
                 .where(
                     RDBModelFile.session_id.in_(session_ids),
@@ -152,12 +152,12 @@ class ModelFileRepository:
         for row in rows:
             row.status = ModelFileStatus.DELETED
             row.deleted_at = deleted_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def delete_purged_for_session_ids(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         session_ids: Sequence[str],
     ) -> int:
@@ -165,7 +165,7 @@ class ModelFileRepository:
         if not session_ids:
             return 0
         deleted_ids = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.delete(RDBModelFile)
                 .where(
                     RDBModelFile.session_id.in_(session_ids),
@@ -179,7 +179,7 @@ class ModelFileRepository:
 
     async def mark_deleted_if_unpinned(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         model_file_ids: Sequence[str],
         deleted_at: datetime.datetime,
@@ -189,7 +189,7 @@ class ModelFileRepository:
             return []
 
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBModelFile)
                 .where(
                     RDBModelFile.id.in_(model_file_ids),
@@ -206,32 +206,32 @@ class ModelFileRepository:
         for row in rows:
             row.status = ModelFileStatus.DELETED
             row.deleted_at = deleted_at
-        await session.flush()
+        await session.write_session.flush()
         return [self._build(row) for row in rows]
 
     async def mark_deleted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         model_file_id: str,
         deleted_at: datetime.datetime,
     ) -> ModelFile:
         """Update ModelFile metadata as deleted."""
-        row = await session.get_one(RDBModelFile, model_file_id)
+        row = await session.write_session.get_one(RDBModelFile, model_file_id)
         row.status = ModelFileStatus.DELETED
         row.deleted_at = deleted_at
-        await session.flush()
+        await session.write_session.flush()
         return self._build(row)
 
     async def list_deleted_pending_blob_deletion(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         limit: int,
     ) -> list[ModelFile]:
         """List deleted ModelFiles whose blob deletion has not been recorded."""
         rows = (
-            await session.scalars(
+            await session.write_session.scalars(
                 sa.select(RDBModelFile)
                 .where(
                     RDBModelFile.status == ModelFileStatus.DELETED,
@@ -245,18 +245,18 @@ class ModelFileRepository:
 
     async def mark_blob_deleted(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         *,
         model_file_id: str,
         blob_deleted_at: datetime.datetime,
     ) -> None:
         """Record ModelFile blob deletion success."""
-        await session.execute(
+        await session.write_session.execute(
             sa.update(RDBModelFile)
             .where(RDBModelFile.id == model_file_id)
             .values(blob_deleted_at=blob_deleted_at)
         )
-        await session.flush()
+        await session.write_session.flush()
 
     def _build(self, rdb: RDBModelFile) -> ModelFile:
         """Convert RDB model to domain model."""

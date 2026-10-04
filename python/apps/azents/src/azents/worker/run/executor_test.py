@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.worker.run.executor as run_executor_module
 from azents.broker.types import SessionWakeUp
@@ -156,6 +155,7 @@ from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkit,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
@@ -7916,7 +7916,7 @@ async def test_external_fresh_resolution_failure_does_not_replay_or_discard_prep
 @pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
 @pytest.mark.asyncio
 async def test_real_fresh_executor_materializers_observe_closed_postgres_phases(
-    rdb_session_manager: SessionManager[AsyncSession],
+    rdb_session_manager: SessionManager[WriteSession],
     monkeypatch: pytest.MonkeyPatch,
     outcome: str,
 ) -> None:

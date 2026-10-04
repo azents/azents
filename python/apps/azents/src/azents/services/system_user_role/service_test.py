@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 from azcommon.result import Failure, Success
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from azents.core.enums import SystemUserRole
 from azents.core.system_user_role import (
@@ -15,6 +15,7 @@ from azents.core.system_user_role import (
     SystemUserNotFound,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.session import SessionRepository
 from azents.repos.system_user_role.operations import SystemUserRoleOperationRepository
@@ -30,7 +31,7 @@ from azents.services.user import UserService
 
 
 def _make_role_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> SystemUserRoleService:
     """Create a system role service for tests."""
     return SystemUserRoleService(
@@ -43,7 +44,7 @@ def _make_role_service(
 
 
 def _make_user_service(
-    session_manager: SessionManager[AsyncSession],
+    session_manager: SessionManager[WriteSession],
 ) -> UserService:
     """Create a UserService with owner-lifecycle collaborators for tests."""
     return UserService(
@@ -60,13 +61,14 @@ def _make_user_service(
 
 def _make_committing_session_manager(
     rdb_engine: AsyncEngine,
-) -> SessionManager[AsyncSession]:
+) -> SessionManager[WriteSession]:
     """Create independent committing sessions for concurrency tests."""
     session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
     @asynccontextmanager
-    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        async with session_factory.begin() as session:
+    async def session_manager() -> AsyncGenerator[WriteSession, None]:
+        async with session_factory.begin() as raw_session:
+            session = ReadWriteSession(raw_session)
             yield session
 
     return session_manager
@@ -77,7 +79,7 @@ class TestSystemUserRoleService:
 
     async def test_grant_by_exact_email_is_idempotent(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Resolve normalized exact email and keep one assignment."""
         service = _make_role_service(rdb_session_manager)
@@ -110,7 +112,7 @@ class TestSystemUserRoleService:
 
     async def test_grant_rejects_unknown_email(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Do not grant a role when exact email is absent."""
         service = _make_role_service(rdb_session_manager)
@@ -126,7 +128,7 @@ class TestSystemUserRoleService:
 
     async def test_revoke_rejects_missing_assignment(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Return a typed error when the target assignment does not exist."""
         service = _make_role_service(rdb_session_manager)
@@ -142,7 +144,7 @@ class TestSystemUserRoleService:
 
     async def test_revoke_preserves_final_system_admin(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Reject final-admin revoke and allow revoke when another remains."""
         service = _make_role_service(rdb_session_manager)
@@ -195,7 +197,7 @@ class TestSystemUserRoleService:
 
     async def test_user_delete_preserves_final_system_admin(
         self,
-        rdb_session_manager: SessionManager[AsyncSession],
+        rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Apply the final-admin invariant to global User deletion."""
         role_service = _make_role_service(rdb_session_manager)

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from uuid6 import uuid7
 
 from azents.core.historical_memory_consolidation import (
@@ -20,6 +19,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationWork,
 )
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     consolidation_job_session,
     consolidation_session,
@@ -52,7 +52,7 @@ class ConsolidationClaim:
 class ConsolidationOwnershipRepository:
     """Keep ownership independent of process-local locks, Redis and Sessions."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: SessionManager[WriteSession]
 
     async def validate(self, principal: ConsolidationJobPrincipal) -> None:
         """Finish an admission transaction without leaking a live DB handle."""
@@ -63,12 +63,12 @@ class ConsolidationOwnershipRepository:
         """Claim only an unowned/expired unit; a duplicate leaves work untouched."""
         async with consolidation_session(self.session_manager) as session:
             grant = await lock_unit_authority(session, key)
-            await session.execute(
+            await session.write_session.execute(
                 insert(RDBConsolidationUnit)
                 .values(id=uuid7().hex, **key.model_dump())
                 .on_conflict_do_nothing()
             )
-            unit = await session.scalar(
+            unit = await session.write_session.scalar(
                 sa.select(RDBConsolidationUnit)
                 .where(unit_predicate(key))
                 .with_for_update()
@@ -81,7 +81,7 @@ class ConsolidationOwnershipRepository:
             if unit.retry_at is not None and unit.retry_at > now:
                 return None
             if unit.active_attempt_id is not None:
-                previous = await session.get(
+                previous = await session.write_session.get(
                     RDBConsolidationAttempt, unit.active_attempt_id
                 )
                 if previous is not None:
@@ -89,7 +89,7 @@ class ConsolidationOwnershipRepository:
                     previous.failure_code = "lease_expired"
                     previous.finished_at = now
             upper = unit.pass_upper_sequence
-            remaining = upper is not None and await session.scalar(
+            remaining = upper is not None and await session.write_session.scalar(
                 sa.select(
                     pending_work_query(key, grant)
                     .where(RDBConsolidationWork.sequence <= upper)
@@ -97,7 +97,7 @@ class ConsolidationOwnershipRepository:
                 )
             )
             if not remaining:
-                upper = await session.scalar(
+                upper = await session.write_session.scalar(
                     sa.select(
                         sa.func.coalesce(sa.func.max(RDBConsolidationWork.sequence), 0)
                     ).where(work_predicate(key))
@@ -120,8 +120,8 @@ class ConsolidationOwnershipRepository:
                 pass_upper_sequence=upper,
                 membership_grant_id=grant,
             )
-            session.add(attempt)
-            await session.flush()
+            session.write_session.add(attempt)
+            await session.write_session.flush()
             claim = ConsolidationClaim(
                 unit_id=unit.id,
                 principal=ConsolidationJobPrincipal(
@@ -141,7 +141,7 @@ class ConsolidationOwnershipRepository:
             session, owner = job.session, job.owner
             until = min(owner.database_now + _LEASE, owner.attempt.deadline_at)
             owner.unit.lease_until = until
-            await session.flush()
+            await session.write_session.flush()
         return until
 
     async def fail(
@@ -173,7 +173,7 @@ class ConsolidationOwnershipRepository:
             owner.unit.no_progress_count += 1
             delay = min(60 * 2 ** min(owner.unit.failure_count - 1, 9), 21600)
             owner.unit.retry_at = owner.database_now + datetime.timedelta(seconds=delay)
-            await session.flush()
+            await session.write_session.flush()
             unit_id = owner.unit.id
             no_progress_count = owner.unit.no_progress_count
         if no_progress_count >= 3:

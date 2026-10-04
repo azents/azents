@@ -6,7 +6,6 @@ from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentLifecycleStatus, WorkspaceUserRole
 from azents.core.github_installation import GitHubInstallationSnapshot
@@ -14,6 +13,7 @@ from azents.core.toolkit_errors import NotFound
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
@@ -61,7 +61,7 @@ class AgentToolkitOperationsRepository:
         GithubUserInstallationRepository, Depends()
     ]
     session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
+        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     shared_operations: Annotated[ToolkitOperationsRepository, Depends()]
 
@@ -526,7 +526,7 @@ class AgentToolkitOperationsRepository:
 
     async def _get_managed_agent(
         self,
-        session: AsyncSession,
+        session: WriteSession,
         agent_id: str,
         *,
         workspace_id: str,
