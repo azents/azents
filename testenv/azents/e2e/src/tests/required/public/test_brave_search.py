@@ -163,7 +163,6 @@ def _completed_success_sessions(
                     400,
                     401,
                     403,
-                    404,
                     422,
                 }:
                     # Validation/auth rejection did not admit a turn. Network

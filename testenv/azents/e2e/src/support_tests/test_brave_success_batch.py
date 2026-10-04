@@ -135,5 +135,5 @@ def test_rejection_preserves_http_error_and_drains_previously_admitted_sessions(
         )
     assert caught.value is rejection
     assert len(created) == 3
-    # A server failure can occur after admission; it cannot skip terminal drain.
-    assert drained == list(reversed(created if status == 500 else created[:2]))
+    # Snapshot 404 and server failure can follow admission and must still drain.
+    assert drained == list(reversed(created if status in {404, 500} else created[:2]))

@@ -329,7 +329,6 @@ retains supported native fidelity. Provider SDKs own supported wire handling for
 canonical history without old signatures, rather than application-authored
 substitute encrypted state.
 
-
 Prompt sections distinguish Saved and Historical Memory and include exact Saved,
 summary, and original-source VFS paths. Historical blocks are explicit data
 boundaries. Current instructions and verified current evidence take precedence;
@@ -467,7 +466,6 @@ never replayed merely because durable conversation remains.
 |---|---:|---|
 | 2026-10-04 | 13 | Keep concurrent consumer authority locks FK-compatible and preserve writer exclusion |
 | 2026-10-04 | 12 | Promoted isolated agentic consolidation, fenced exact coverage/manifests, independent 10k documents/20k composition, latest-live aliases, denial continuity and coordinated handover |
-
 | 2026-10-02 | 11 | Refresh Memory during root Run preparation and hook-driven post-compaction context reconstruction, reuse unchanged content, and preserve read-only per-turn filtering and child inheritance |
 | 2026-10-02 | 10 | Promoted Historical preparation, boundary snapshots, live Memory VFS, generic-read cutover, Saved-only mutation, and retained read-only Historical settings |
 | 2026-10-01 | 9 | Moved runtime Memory, prompt-scope, and Session-history transactions into completed repository operations |
