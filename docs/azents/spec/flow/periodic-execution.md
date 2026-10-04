@@ -59,6 +59,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task/**
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/services/scheduled_task/service.py
+  - python/apps/azents/src/azents/services/scheduled_task/management.py
+  - python/apps/azents/src/azents/services/scheduled_task/control.py
+  - python/apps/azents/src/azents/core/scheduled_task_management.py
+  - python/apps/azents/src/azents/core/scheduled_task_control.py
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/cli/scheduler.py
   - python/apps/azents/src/cli/devserver.py
@@ -66,7 +70,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-05
-spec_version: 29
+spec_version: 30
 ---
 
 # Periodic Execution Flow Spec
@@ -132,6 +136,27 @@ Scheduled Task domain service to claim a bounded set of due `scheduled_tasks`
 rows, admit typed Session Mailbox work, and return aggregate claimed, admitted,
 coalesced, skipped, and wake-failure counters. The Scheduler Job Runtime waits
 only for that bounded admission pass, not for Agent work to finish.
+
+`ScheduledTaskDispatcher` sequences completed database-only
+`ScheduledTaskDispatchRepository` claim and admission operations. Claims retain
+the exact lease owner, token, and expiry fence. Admission atomically writes the
+cycle snapshot, typed Mailbox trigger, Session recovery wake state, and Task
+cursor; a lost final claim fence rolls back all admission writes. Each operation
+closes its database scope before returning. Broker wake follows admission commit,
+and a wake failure increments the existing counter without undoing admitted work.
+The injected pure clock retains expiry checks during admission; provider, broker,
+and Runtime I/O remain outside the repository transaction.
+
+Management and provider-control services likewise call completed owner operations.
+Independent management list, get, and current-cycle reads use native PostgreSQL
+read-only scopes. Management mutations preserve Session, Agent, and Binding
+authority checks followed by the shared Mailbox → cycle → Task lock order.
+Provider controls authorize the claimed actor and Binding and mutate the Task in
+one atomic owner operation. Registration and deletion presentation follows
+completed create and delete operations; replacement retains its existing
+no-provider-effect path. Repository-only definition composition shares the
+transaction without exposing live sessions to services. Detached management and
+control contracts are defined in their corresponding core modules.
 
 ## Execution backend
 
@@ -508,6 +533,9 @@ The periodic execution flow does not provide:
 
 - **2026-10-05** (spec_version 29) — Removed candidate freshness locks from
   expired OAuth housekeeping while preserving exact claim/consumption authority.
+- **2026-10-05** (spec_version 29) — Recorded completed Scheduled claim,
+  admission, management, and provider-control ownership with native read-only
+  inspection and preserved post-commit effect boundaries.
 
 - **2026-10-04** (spec_version 26) — Promoted consolidation discovery/recovery/
   cleanup and PostgreSQL ownership, preparation12/consolidation2 combined14
