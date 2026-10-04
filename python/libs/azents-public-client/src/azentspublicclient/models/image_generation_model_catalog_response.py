@@ -20,8 +20,8 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.image_generation_catalog_attempt_response import ImageGenerationCatalogAttemptResponse
 from azentspublicclient.models.image_generation_catalog_entry_response import ImageGenerationCatalogEntryResponse
+from azentspublicclient.models.image_generation_catalog_sync_status_response import ImageGenerationCatalogSyncStatusResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -32,19 +32,16 @@ class ImageGenerationModelCatalogResponse(BaseModel):
     default_available: StrictBool
     explicit_selection_supported: StrictBool
     catalog_id: Optional[StrictStr]
-    snapshot_id: Optional[StrictStr]
-    snapshot_configuration_version: Optional[StrictInt]
-    current_configuration_version: Optional[StrictInt]
-    snapshot_created_at: Optional[datetime]
-    latest_attempt: Optional[ImageGenerationCatalogAttemptResponse]
+    last_success_at: Optional[datetime]
+    latest_sync: Optional[ImageGenerationCatalogSyncStatusResponse]
     stale: StrictBool
-    generation_current: StrictBool
+    usable: StrictBool
     sync_available_at: Optional[datetime]
     automatic_retry_blocked: StrictBool
     entries: List[ImageGenerationCatalogEntryResponse]
     total: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["default_available", "explicit_selection_supported", "catalog_id", "snapshot_id", "snapshot_configuration_version", "current_configuration_version", "snapshot_created_at", "latest_attempt", "stale", "generation_current", "sync_available_at", "automatic_retry_blocked", "entries", "total"]
+    __properties: ClassVar[List[str]] = ["default_available", "explicit_selection_supported", "catalog_id", "last_success_at", "latest_sync", "stale", "usable", "sync_available_at", "automatic_retry_blocked", "entries", "total"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -87,9 +84,9 @@ class ImageGenerationModelCatalogResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of latest_attempt
-        if self.latest_attempt:
-            _dict['latest_attempt'] = self.latest_attempt.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of latest_sync
+        if self.latest_sync:
+            _dict['latest_sync'] = self.latest_sync.to_dict()
         # override the default output from pydantic by calling `to_dict()` of each item in entries (list)
         _items = []
         if self.entries:
@@ -107,30 +104,15 @@ class ImageGenerationModelCatalogResponse(BaseModel):
         if self.catalog_id is None and "catalog_id" in self.model_fields_set:
             _dict['catalog_id'] = None
 
-        # set to None if snapshot_id (nullable) is None
+        # set to None if last_success_at (nullable) is None
         # and model_fields_set contains the field
-        if self.snapshot_id is None and "snapshot_id" in self.model_fields_set:
-            _dict['snapshot_id'] = None
+        if self.last_success_at is None and "last_success_at" in self.model_fields_set:
+            _dict['last_success_at'] = None
 
-        # set to None if snapshot_configuration_version (nullable) is None
+        # set to None if latest_sync (nullable) is None
         # and model_fields_set contains the field
-        if self.snapshot_configuration_version is None and "snapshot_configuration_version" in self.model_fields_set:
-            _dict['snapshot_configuration_version'] = None
-
-        # set to None if current_configuration_version (nullable) is None
-        # and model_fields_set contains the field
-        if self.current_configuration_version is None and "current_configuration_version" in self.model_fields_set:
-            _dict['current_configuration_version'] = None
-
-        # set to None if snapshot_created_at (nullable) is None
-        # and model_fields_set contains the field
-        if self.snapshot_created_at is None and "snapshot_created_at" in self.model_fields_set:
-            _dict['snapshot_created_at'] = None
-
-        # set to None if latest_attempt (nullable) is None
-        # and model_fields_set contains the field
-        if self.latest_attempt is None and "latest_attempt" in self.model_fields_set:
-            _dict['latest_attempt'] = None
+        if self.latest_sync is None and "latest_sync" in self.model_fields_set:
+            _dict['latest_sync'] = None
 
         # set to None if sync_available_at (nullable) is None
         # and model_fields_set contains the field
@@ -152,13 +134,10 @@ class ImageGenerationModelCatalogResponse(BaseModel):
             "default_available": obj.get("default_available"),
             "explicit_selection_supported": obj.get("explicit_selection_supported"),
             "catalog_id": obj.get("catalog_id"),
-            "snapshot_id": obj.get("snapshot_id"),
-            "snapshot_configuration_version": obj.get("snapshot_configuration_version"),
-            "current_configuration_version": obj.get("current_configuration_version"),
-            "snapshot_created_at": obj.get("snapshot_created_at"),
-            "latest_attempt": ImageGenerationCatalogAttemptResponse.from_dict(obj["latest_attempt"]) if obj.get("latest_attempt") is not None else None,
+            "last_success_at": obj.get("last_success_at"),
+            "latest_sync": ImageGenerationCatalogSyncStatusResponse.from_dict(obj["latest_sync"]) if obj.get("latest_sync") is not None else None,
             "stale": obj.get("stale"),
-            "generation_current": obj.get("generation_current"),
+            "usable": obj.get("usable"),
             "sync_available_at": obj.get("sync_available_at"),
             "automatic_retry_blocked": obj.get("automatic_retry_blocked"),
             "entries": [ImageGenerationCatalogEntryResponse.from_dict(_item) for _item in obj["entries"]] if obj.get("entries") is not None else None,

@@ -38,9 +38,9 @@ class TestSelectableModelSettings(unittest.TestCase):
                 context_window_tokens = 1.0,
                 max_output_tokens = 1.0,
                 builtin_tools = [
-                    {
-                        'key' : null
-                        }
+                    azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
+                        name = '', 
+                        config = azentspublicclient.models.config.Config(), )
                     ]
             )
         else:
@@ -48,9 +48,9 @@ class TestSelectableModelSettings(unittest.TestCase):
                 context_window_tokens = 1.0,
                 max_output_tokens = 1.0,
                 builtin_tools = [
-                    {
-                        'key' : null
-                        }
+                    azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
+                        name = '', 
+                        config = azentspublicclient.models.config.Config(), )
                     ],
         )
         """

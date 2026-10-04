@@ -40,7 +40,7 @@ class TestSessionContextResponse(unittest.TestCase):
                     agent_id = '', 
                     created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                     updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
-                usage = { },
+                usage = azentspublicclient.models.git.git(),
                 stats = azentspublicclient.models.session_context_stats_response.SessionContextStatsResponse(
                     total_events = 56, 
                     user_messages = 56, 
@@ -87,7 +87,7 @@ class TestSessionContextResponse(unittest.TestCase):
                     azentspublicclient.models.session_context_raw_event_response.SessionContextRawEventResponse(
                         id = '', 
                         kind = '', 
-                        payload = { }, 
+                        payload = azentspublicclient.models.payload.Payload(), 
                         external_id = '', 
                         adapter = '', 
                         provider = '', 
@@ -123,7 +123,7 @@ class TestSessionContextResponse(unittest.TestCase):
                     azentspublicclient.models.session_context_raw_event_response.SessionContextRawEventResponse(
                         id = '', 
                         kind = '', 
-                        payload = { }, 
+                        payload = azentspublicclient.models.payload.Payload(), 
                         external_id = '', 
                         adapter = '', 
                         provider = '', 

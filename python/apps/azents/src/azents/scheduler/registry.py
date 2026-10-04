@@ -55,7 +55,9 @@ async def system_catalog_projection_handler(context: TaskContext) -> TaskResult:
                 {
                     "provider": summary.provider.value,
                     "catalog_id": summary.catalog_id,
-                    "snapshot_id": summary.snapshot_id,
+                    "last_success_at": summary.last_success_at.isoformat()
+                    if summary.last_success_at is not None
+                    else None,
                     "visible_count": summary.visible_count,
                     "hidden_count": summary.hidden_count,
                 }

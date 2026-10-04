@@ -592,18 +592,30 @@ class ClientToolResultPayload(BaseModel):
 
 
 class ModelCostProvenance(BaseModel):
-    """Distinguish native reported charges from snapshot-backed estimates."""
+    """Distinguish native charges from selected prices and retain old evidence."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="allow")
 
     method: Literal["provider_reported", "estimated"]
     provider: str
     model_identifier: str
     service_tier: str | None
-    source_snapshot_id: str | None
-    source_hash: str | None
+    source_key: str | None
     source_model_key: str | None
+    collected_at: datetime.datetime | None
     estimator_version: str | None
+
+    @model_validator(mode="before")
+    @classmethod
+    def decode_historical_provenance(cls, value: object) -> object:
+        """Read immutable old evidence without making it current price authority."""
+        if isinstance(value, dict):
+            return {
+                "source_key": None,
+                "collected_at": None,
+                **value,
+            }
+        return value
 
 
 class TokenUsagePayload(BaseModel):

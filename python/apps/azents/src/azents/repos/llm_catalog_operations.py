@@ -1,14 +1,15 @@
-"""Completed conversation-catalog reads, claims, and fenced publication operations."""
+"""Completed current conversation catalog reads, claims and atomic publication."""
 
 import dataclasses
 import datetime
 from typing import Annotated, Any
 
+import sqlalchemy as sa
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    LLMCatalogEntryVisibility,
+    LLMCatalogAttemptStatus,
     LLMCatalogPurpose,
     LLMCatalogScope,
     LLMProvider,
@@ -20,82 +21,94 @@ from azents.core.llm_catalog_sync import (
 )
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.rdb.deps import get_session_manager
+from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import CatalogEntryWithCatalog, LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
-    CatalogProjectionProvenance,
     IntegrationCatalogSyncClaim,
     LLMCatalog,
+    LLMCatalogCounts,
     LLMCatalogEntryCreate,
     LLMCatalogEntryList,
-    LLMCatalogSnapshotCounts,
-    LLMCatalogSyncAttempt,
+    LLMCatalogSyncStatus,
 )
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
+from azents.repos.model_catalog_sync_state import fail_sync as fail_current_sync
+from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import (
+    SourceModelExpectation,
+    SourceProjectionMetadata,
+)
 
 
 @dataclasses.dataclass(frozen=True)
 class CatalogReadPage:
-    """One page and workspace policy evidence captured in the same transaction."""
+    """Current page plus workspace cooldown facts captured in a completed read."""
 
     page: LLMCatalogEntryList
-    latest_workspace_attempt: LLMCatalogSyncAttempt | None
+    latest_workspace_sync: LLMCatalogSyncStatus | None
     current_projection_version: CatalogProjectionVersion | None
 
 
 @dataclasses.dataclass(frozen=True)
 class SystemCatalogRead:
-    """Detached state of one provider in a completed system-catalog read."""
+    """One system provider's current owner/counts."""
 
     provider: LLMProvider
     catalog: LLMCatalog | None
-    counts: LLMCatalogSnapshotCounts | None
-    latest_attempt: LLMCatalogSyncAttempt | None
+    counts: LLMCatalogCounts | None
+    latest_sync: LLMCatalogSyncStatus | None
 
 
 @dataclasses.dataclass(frozen=True)
-class CatalogAttemptStart:
-    """Catalog identity and the atomic attempt-policy claim outcome."""
+class CatalogSyncStart:
+    """Stable identity and the existing atomic synchronization policy outcome."""
 
     catalog: LLMCatalog
     claim: IntegrationCatalogSyncClaim | IntegrationCatalogSyncPolicyDecision
 
 
 @dataclasses.dataclass(frozen=True)
-class CatalogAttemptFailure:
-    """Failure metadata to persist without a live service-layer transaction."""
+class CatalogSyncFailure:
+    """Failure facts to record only while the specified work still owns its owner."""
 
-    attempt_id: str
+    catalog_id: str
+    work_token: str
     finished_at: datetime.datetime
     failure_code: str
     failure_message: str
-    action_hint: str
+    action_hint: str | None
     diagnostics: dict[str, Any] | None
 
 
 @dataclasses.dataclass(frozen=True)
 class CatalogPublicationSucceeded:
-    """Detached counts and identity of one atomically published snapshot."""
+    """Current published owner and counts; no dataset identity."""
 
-    snapshot_id: str
+    catalog: LLMCatalog
     visible_count: int
     hidden_count: int
 
 
 @dataclasses.dataclass(frozen=True)
 class CatalogPublicationSuperseded:
-    """Newer attempt authority prevented any candidate/publication write."""
+    """Current work or credential authority rejected stale discovery."""
 
-    superseding_attempt_id: str
+    superseding_work_token: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class CatalogPublicationSourceChanged:
+    """Preparation must repeat after an exact source value/presence change."""
 
 
 @dataclasses.dataclass(frozen=True)
 class LLMCatalogOperationsRepository:
-    """Own completed DB-only operations used by conversation-catalog services."""
+    """Own complete DB-only operations outside service/provider I/O."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -105,24 +118,21 @@ class LLMCatalogOperationsRepository:
         LLMProviderIntegrationRepository,
         Depends(get_llm_provider_integration_repository),
     ]
+    source_repository: Annotated[
+        ModelMetadataSourceRepository, Depends(ModelMetadataSourceRepository)
+    ]
 
     async def load_integration(
         self, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
-        """Finish credential-snapshot reads before discovery or OAuth refresh."""
         async with self.session_manager() as session:
             return await self.integration_repository.get_by_id_with_secrets(
                 session, integration_id
             )
 
     async def selectable_entry(
-        self,
-        *,
-        integration_id: str,
-        workspace_id: str,
-        model_identifier: str,
+        self, *, integration_id: str, workspace_id: str, model_identifier: str
     ) -> CatalogEntryWithCatalog | None:
-        """Resolve exact conversation-model identity in one completed read."""
         async with self.session_manager() as session:
             return (
                 await self.catalog_repository.get_selectable_entry_by_integration_model(
@@ -143,7 +153,6 @@ class LLMCatalogOperationsRepository:
         limit: int,
         offset: int,
     ) -> CatalogReadPage | None:
-        """Capture the page and shared-workspace cooldown evidence atomically."""
         async with self.session_manager() as session:
             page = await self.catalog_repository.list_entries_by_integration(
                 session,
@@ -156,65 +165,59 @@ class LLMCatalogOperationsRepository:
             )
             if page is None:
                 return None
-            latest_workspace_attempt = None
+            latest = None
             if page.catalog.scope == LLMCatalogScope.INTEGRATION:
                 catalogs = self.catalog_repository
-                workspace_attempt = (
-                    catalogs.get_latest_integration_attempt_for_workspace
-                )
-                latest_workspace_attempt = await workspace_attempt(
+                latest = await catalogs.get_latest_integration_sync_for_workspace(
                     session, workspace_id=workspace_id
                 )
-            repository = self.catalog_repository
             return CatalogReadPage(
                 page=page,
-                latest_workspace_attempt=latest_workspace_attempt,
-                current_projection_version=(
-                    await repository.get_current_snapshot_projection_version(
-                        session, catalog=page.catalog
-                    )
+                latest_workspace_sync=latest,
+                current_projection_version=self.catalog_repository.projection_version(
+                    page.catalog
                 ),
             )
 
     async def read_system_catalogs(
         self, providers: tuple[LLMProvider, ...]
     ) -> list[SystemCatalogRead]:
-        """Read one consistent local status group without remote discovery."""
+        """Acquire all owner read locks in the same sorted order as publication."""
         async with self.session_manager() as session:
-            items: list[SystemCatalogRead] = []
-            for provider in providers:
-                catalog = await self.catalog_repository.get_system_catalog(
-                    session,
+            result = await session.execute(
+                sa.select(RDBLLMCatalog.id, RDBLLMCatalog.provider)
+                .where(
+                    RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
+                    RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
+                    RDBLLMCatalog.provider.in_(providers),
+                )
+                .order_by(RDBLLMCatalog.id)
+            )
+            current: dict[LLMProvider, LLMCatalog] = {}
+            for row in result:
+                owner = await self.catalog_repository.lock_catalog(
+                    session, catalog_id=row.id, shared=True
+                )
+                current[owner.provider] = self.catalog_repository.build_catalog(owner)
+            return [
+                SystemCatalogRead(
                     provider=provider,
-                    purpose=LLMCatalogPurpose.CONVERSATION,
+                    catalog=current.get(provider),
+                    counts=None
+                    if provider not in current
+                    or current[provider].last_success_at is None
+                    else LLMCatalogCounts(
+                        visible_count=current[provider].visible_count,
+                        hidden_count=current[provider].hidden_count,
+                    ),
+                    latest_sync=None
+                    if provider not in current
+                    else current[provider].sync_status,
                 )
-                if catalog is None:
-                    items.append(
-                        SystemCatalogRead(
-                            provider=provider,
-                            catalog=None,
-                            counts=None,
-                            latest_attempt=None,
-                        )
-                    )
-                    continue
-                counts = await self.catalog_repository.get_current_snapshot_counts(
-                    session, catalog=catalog
-                )
-                latest_attempt = await self.catalog_repository.get_latest_attempt(
-                    session, catalog=catalog
-                )
-                items.append(
-                    SystemCatalogRead(
-                        provider=provider,
-                        catalog=catalog,
-                        counts=counts,
-                        latest_attempt=latest_attempt,
-                    )
-                )
-            return items
+                for provider in providers
+            ]
 
-    async def begin_attempt(
+    async def begin_sync(
         self,
         *,
         integration_id: str,
@@ -223,25 +226,35 @@ class LLMCatalogOperationsRepository:
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
         required_projection_version: CatalogProjectionVersion,
-    ) -> CatalogAttemptStart:
-        """Create the catalog and claim under the existing workspace/catalog locks."""
+    ) -> CatalogSyncStart:
         async with self.session_manager() as session:
+            integration = await self.catalog_repository.lock_integration(
+                session, integration_id=integration_id, workspace_id=workspace_id
+            )
+            if integration is None or integration.provider != provider:
+                raise ValueError(
+                    "Catalog integration does not belong to this workspace/provider."
+                )
             catalog = await self.catalog_repository.ensure_integration_catalog(
                 session,
                 integration_id=integration_id,
                 provider=provider,
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
-            claim = await self.catalog_repository.begin_integration_attempt(
+            claim = await self.catalog_repository.begin_integration_sync(
                 session,
                 catalog_id=catalog.id,
                 workspace_id=workspace_id,
-                source_key=CATALOG_SOURCE_KEY,
                 started_at=started_at,
                 trigger=trigger,
                 required_projection_version=required_projection_version,
             )
-            return CatalogAttemptStart(catalog=catalog, claim=claim)
+            owner = await self.catalog_repository.lock_catalog(
+                session, catalog_id=catalog.id
+            )
+            return CatalogSyncStart(
+                catalog=self.catalog_repository.build_catalog(owner), claim=claim
+            )
 
     async def publish(
         self,
@@ -249,76 +262,109 @@ class LLMCatalogOperationsRepository:
         catalog: LLMCatalog,
         claim: IntegrationCatalogSyncClaim,
         entries: list[LLMCatalogEntryCreate],
-        provenance: CatalogProjectionProvenance,
-        candidate_diagnostics: dict[str, Any] | None,
-        attempt_diagnostics: dict[str, Any] | None,
+        expected_source_metadata: SourceProjectionMetadata | None,
+        expected_source_models: tuple[SourceModelExpectation, ...],
+        diagnostics: dict[str, Any] | None,
+        sync_diagnostics: dict[str, Any] | None,
         fetched_count: int,
         skipped_count: int,
         finished_at: datetime.datetime,
-    ) -> CatalogPublicationSucceeded | CatalogPublicationSuperseded:
-        """Atomically fence, create, publish and finalize a conversation candidate."""
+    ) -> (
+        CatalogPublicationSucceeded
+        | CatalogPublicationSuperseded
+        | CatalogPublicationSourceChanged
+    ):
+        """Recheck integration, exact source inputs and work before replacing rows."""
+        if catalog.provider_integration_id is None:
+            raise ValueError("Integration publication requires integration ownership.")
         async with self.session_manager() as session:
-            current_attempt_id = (
-                await self.catalog_repository.lock_catalog_for_attempt_completion(
-                    session, catalog_id=catalog.id
-                )
+            integration = await self.catalog_repository.lock_integration(
+                session,
+                integration_id=catalog.provider_integration_id,
+                workspace_id=None,
             )
-            if current_attempt_id is None:
-                raise RuntimeError(
-                    "Integration catalog has no attempt allowed to publish."
+            if integration is None:
+                return CatalogPublicationSuperseded(superseding_work_token=None)
+            await self.source_repository.ensure_authority(
+                session, source_key=CATALOG_SOURCE_KEY
+            )
+            await self.source_repository.lock_authority(
+                session, source_key=CATALOG_SOURCE_KEY
+            )
+            inputs_current = await self.source_repository.projection_inputs_match(
+                session,
+                expected_metadata=expected_source_metadata,
+                expectations=expected_source_models,
+            )
+            owner = await self.catalog_repository.lock_catalog(
+                session, catalog_id=catalog.id
+            )
+            if (
+                owner.provider_integration_id != integration.id
+                or owner.provider != integration.provider
+                or integration.catalog_configuration_version
+                != claim.catalog_configuration_version
+                or not integration.enabled
+                or owner.sync_work_token != claim.work_token
+                or owner.sync_status != LLMCatalogAttemptStatus.RUNNING
+            ):
+                fail_current_sync(
+                    owner,
+                    work_token=claim.work_token,
+                    finished_at=finished_at,
+                    failure_code="CatalogSyncSuperseded",
+                    failure_message="Current integration authority rejected discovery.",
+                    action_hint="Refresh with the current integration configuration.",
+                    diagnostics={
+                        "failure_category": "configuration_superseded",
+                        "automatic_retry_blocked": False,
+                    },
                 )
-            if current_attempt_id != claim.attempt_id:
+                await session.flush()
                 return CatalogPublicationSuperseded(
-                    superseding_attempt_id=current_attempt_id
+                    superseding_work_token=owner.sync_work_token
                 )
-            candidate_snapshot_id = (
-                await self.catalog_repository.create_candidate_snapshot(
-                    session,
-                    catalog=catalog,
-                    entries=entries,
-                    diagnostics=candidate_diagnostics,
-                    provenance=provenance,
-                    catalog_configuration_version=claim.catalog_configuration_version,
-                )
-            )
-            snapshot_id = await self.catalog_repository.publish_candidate_snapshot(
+            if not inputs_current:
+                return CatalogPublicationSourceChanged()
+            await self.catalog_repository.replace_current_entries(
                 session,
-                catalog_id=catalog.id,
-                candidate_snapshot_id=candidate_snapshot_id,
-                expected_current_snapshot_id=claim.expected_current_snapshot_id,
-                expected_catalog_configuration_version=claim.catalog_configuration_version,
-                expected_projection_fingerprint=provenance.projection_fingerprint,
-                fence_latest_attempt=True,
-                expected_latest_attempt_id=claim.attempt_id,
-            )
-            visible_count = sum(
-                entry.visibility_status == LLMCatalogEntryVisibility.SELECTABLE
-                for entry in entries
-            )
-            hidden_count = len(entries) - visible_count
-            await self.catalog_repository.mark_attempt_succeeded(
-                session,
-                attempt_id=claim.attempt_id,
+                owner=owner,
+                entries=entries,
+                diagnostics=diagnostics,
                 finished_at=finished_at,
-                produced_snapshot_id=snapshot_id,
+            )
+            await self.catalog_repository.complete_sync(
+                session,
+                catalog_id=owner.id,
+                work_token=claim.work_token,
+                finished_at=finished_at,
                 fetched_count=fetched_count,
                 matched_count=len(entries),
                 skipped_count=skipped_count,
-                hidden_count=hidden_count,
-                diagnostics=attempt_diagnostics,
+                hidden_count=owner.hidden_count,
+                diagnostics=sync_diagnostics,
             )
             return CatalogPublicationSucceeded(
-                snapshot_id=snapshot_id,
-                visible_count=visible_count,
-                hidden_count=hidden_count,
+                catalog=self.catalog_repository.build_catalog(owner),
+                visible_count=owner.visible_count,
+                hidden_count=owner.hidden_count,
             )
 
-    async def fail_attempt(self, failure: CatalogAttemptFailure) -> None:
-        """Commit failure metadata only after any failed publication rolls back."""
+    async def fail_sync(self, failure: CatalogSyncFailure) -> None:
         async with self.session_manager() as session:
-            await self.catalog_repository.mark_attempt_failed(
+            initial = await session.get(RDBLLMCatalog, failure.catalog_id)
+            if initial is None:
+                return
+            if initial.provider_integration_id is not None:
+                await self.catalog_repository.lock_integration(
+                    session,
+                    integration_id=initial.provider_integration_id,
+                    workspace_id=None,
+                )
+            await self.catalog_repository.fail_sync(
                 session,
-                attempt_id=failure.attempt_id,
+                catalog_id=failure.catalog_id,
+                work_token=failure.work_token,
                 finished_at=failure.finished_at,
                 failure_code=failure.failure_code,
                 failure_message=failure.failure_message,

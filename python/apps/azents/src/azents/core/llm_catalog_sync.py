@@ -1,4 +1,4 @@
-"""Integration model catalog synchronization policy."""
+"""Integration model catalog current synchronization policy."""
 
 import dataclasses
 import datetime
@@ -32,10 +32,11 @@ class IntegrationCatalogSyncDenialReason(enum.StrEnum):
 
 
 @dataclasses.dataclass(frozen=True)
-class CatalogSyncAttemptState:
-    """Attempt fields used to evaluate synchronization policy."""
+class CatalogSyncState:
+    """Current operational facts used to evaluate synchronization policy."""
 
-    id: str
+    owner_id: str
+    work_token: str | None
     status: LLMCatalogAttemptStatus
     started_at: datetime.datetime
     finished_at: datetime.datetime | None
@@ -44,7 +45,7 @@ class CatalogSyncAttemptState:
 
 @dataclasses.dataclass(frozen=True)
 class CatalogProjectionVersion:
-    """Stored or required procedural versions for conversation projections."""
+    """Procedural code/schema compatibility, independent of model data identity."""
 
     schema_version: str | None
     resolver_revision: str | None
@@ -52,72 +53,64 @@ class CatalogProjectionVersion:
 
 @dataclasses.dataclass(frozen=True)
 class IntegrationCatalogSyncPolicyInput:
-    """Inputs required to decide whether a synchronization may start."""
+    """Current success and sync state required to decide whether work may start."""
 
     trigger: IntegrationCatalogSyncTrigger
     now: datetime.datetime
-    current_snapshot_created_at: datetime.datetime | None
+    last_success_at: datetime.datetime | None
     current_projection_version: CatalogProjectionVersion | None
     required_projection_version: CatalogProjectionVersion | None
-    latest_catalog_attempt: CatalogSyncAttemptState | None
-    latest_workspace_attempt: CatalogSyncAttemptState | None
+    latest_catalog_sync: CatalogSyncState | None
+    latest_workspace_sync: CatalogSyncState | None
 
 
 @dataclasses.dataclass(frozen=True)
 class IntegrationCatalogSyncPolicyDecision:
-    """Synchronization policy decision."""
+    """Synchronization decision; tokens identify active work only."""
 
     allowed: bool
     stale: bool
     denial_reason: IntegrationCatalogSyncDenialReason | None
     retry_at: datetime.datetime | None
-    blocking_attempt_id: str | None
-    expired_running_attempt_id: str | None
+    blocking_work_token: str | None
+    expired_work_token: str | None
 
 
 def evaluate_integration_catalog_sync_policy(
     policy_input: IntegrationCatalogSyncPolicyInput,
 ) -> IntegrationCatalogSyncPolicyDecision:
-    """Evaluate integration and workspace synchronization limits."""
-    stale = _snapshot_stale(
-        current_snapshot_created_at=policy_input.current_snapshot_created_at,
-        now=policy_input.now,
+    """Preserve existing integration/workspace cooldown, backoff and lease policy."""
+    stale = (
+        policy_input.last_success_at is None
+        or policy_input.last_success_at + INTEGRATION_CATALOG_STALE_AFTER
+        <= policy_input.now
     ) or (
         policy_input.required_projection_version is not None
         and policy_input.current_projection_version
         != policy_input.required_projection_version
     )
     trigger = policy_input.trigger
-    latest = policy_input.latest_catalog_attempt
-
+    latest = policy_input.latest_catalog_sync
     if trigger == IntegrationCatalogSyncTrigger.STALE_REFRESH and not stale:
-        return _denied(
-            stale=stale,
-            reason=IntegrationCatalogSyncDenialReason.NOT_STALE,
-        )
-
-    expired_running_attempt_id: str | None = None
+        return _denied(stale=stale, reason=IntegrationCatalogSyncDenialReason.NOT_STALE)
+    expired_work_token = None
     if latest is not None and latest.status == LLMCatalogAttemptStatus.RUNNING:
+        if latest.work_token is None:
+            raise ValueError("Running catalog synchronization must own a work token.")
         running_expires_at = latest.started_at + INTEGRATION_CATALOG_RUNNING_TIMEOUT
         if running_expires_at > policy_input.now:
             return _denied(
                 stale=stale,
                 reason=IntegrationCatalogSyncDenialReason.ALREADY_RUNNING,
                 retry_at=running_expires_at,
-                blocking_attempt_id=latest.id,
+                blocking_work_token=latest.work_token,
             )
-        expired_running_attempt_id = latest.id
-
-    state_change_trigger = trigger in {
+        expired_work_token = latest.work_token
+    if trigger in {
         IntegrationCatalogSyncTrigger.CREATE,
         IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
-    }
-    if state_change_trigger:
-        return _allowed(
-            stale=stale,
-            expired_running_attempt_id=expired_running_attempt_id,
-        )
-
+    }:
+        return _allowed(stale=stale, expired_work_token=expired_work_token)
     if (
         trigger == IntegrationCatalogSyncTrigger.STALE_REFRESH
         and latest is not None
@@ -128,9 +121,8 @@ def evaluate_integration_catalog_sync_policy(
             stale=stale,
             reason=IntegrationCatalogSyncDenialReason.AUTOMATIC_RETRY_BLOCKED,
         )
-
     retry_candidates: list[datetime.datetime] = []
-    if latest is not None and expired_running_attempt_id is None:
+    if latest is not None and expired_work_token is None:
         retry_candidates.append(latest.started_at + INTEGRATION_CATALOG_SYNC_COOLDOWN)
         if (
             latest.status == LLMCatalogAttemptStatus.FAILED
@@ -140,10 +132,9 @@ def evaluate_integration_catalog_sync_policy(
             retry_candidates.append(
                 latest.finished_at + INTEGRATION_CATALOG_FAILURE_BACKOFF
             )
-    workspace_latest = policy_input.latest_workspace_attempt
-    if (
-        workspace_latest is not None
-        and workspace_latest.id != expired_running_attempt_id
+    workspace_latest = policy_input.latest_workspace_sync
+    if workspace_latest is not None and (
+        expired_work_token is None or workspace_latest.work_token != expired_work_token
     ):
         retry_candidates.append(
             workspace_latest.started_at + WORKSPACE_CATALOG_SYNC_COOLDOWN
@@ -155,34 +146,19 @@ def evaluate_integration_catalog_sync_policy(
             reason=IntegrationCatalogSyncDenialReason.THROTTLED,
             retry_at=retry_at,
         )
-    return _allowed(
-        stale=stale,
-        expired_running_attempt_id=expired_running_attempt_id,
-    )
-
-
-def _snapshot_stale(
-    *,
-    current_snapshot_created_at: datetime.datetime | None,
-    now: datetime.datetime,
-) -> bool:
-    if current_snapshot_created_at is None:
-        return True
-    return current_snapshot_created_at + INTEGRATION_CATALOG_STALE_AFTER <= now
+    return _allowed(stale=stale, expired_work_token=expired_work_token)
 
 
 def _allowed(
-    *,
-    stale: bool,
-    expired_running_attempt_id: str | None,
+    *, stale: bool, expired_work_token: str | None
 ) -> IntegrationCatalogSyncPolicyDecision:
     return IntegrationCatalogSyncPolicyDecision(
         allowed=True,
         stale=stale,
         denial_reason=None,
         retry_at=None,
-        blocking_attempt_id=None,
-        expired_running_attempt_id=expired_running_attempt_id,
+        blocking_work_token=None,
+        expired_work_token=expired_work_token,
     )
 
 
@@ -191,13 +167,13 @@ def _denied(
     stale: bool,
     reason: IntegrationCatalogSyncDenialReason,
     retry_at: datetime.datetime | None = None,
-    blocking_attempt_id: str | None = None,
+    blocking_work_token: str | None = None,
 ) -> IntegrationCatalogSyncPolicyDecision:
     return IntegrationCatalogSyncPolicyDecision(
         allowed=False,
         stale=stale,
         denial_reason=reason,
         retry_at=retry_at,
-        blocking_attempt_id=blocking_attempt_id,
-        expired_running_attempt_id=None,
+        blocking_work_token=blocking_work_token,
+        expired_work_token=None,
     )

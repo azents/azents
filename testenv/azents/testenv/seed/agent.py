@@ -1,18 +1,14 @@
-"""Agent seeding helpers.
-
-`AgentService` is constructed with `TestenvConfig` and exposes `create()`. The
-old utils.py `create_chat_session` flow mixed WebSocket setup with integration
-creation; this service keeps seeding responsibilities separate (Discussion §3.4).
-
-Normally use this through `TestenvClient.agent`.
-"""
+"""Seed Agents with explicit canonical model options through the public API."""
 
 from dataclasses import dataclass
 
-import httpx
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.selectable_model_candidate_input import SelectableModelCandidateInput
+from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput
+from azentspublicclient.models.selectable_model_settings_input import SelectableModelSettingsInput
 
 from testenv.runtime_config import TestenvConfig
 
@@ -20,13 +16,12 @@ from .client import public_client
 from .types import Agent, Integration, User, Workspace
 from .unique import unique
 
+_SEED_MODEL_LABEL = "Testenv model"
+
 
 @dataclass(frozen=True)
 class AgentService:
-    """Agent seed service used by `TestenvClient.agent`.
-
-    Returned `Agent` values are lightweight `seed.types.Agent` dataclasses.
-    """
+    """Create exact seed selections without inheriting unrelated Workspace defaults."""
 
     config: TestenvConfig
 
@@ -40,41 +35,44 @@ class AgentService:
         name: str | None = None,
         agent_type: str = "public",
         memory_enabled: bool = True,
-        model_config_id: str | None = None,
     ) -> Agent:
-        """Call `POST /workspace/{handle}/agents`.
+        """Create one explicit option for both model roles.
 
-        Phase 5 creates agents through ModelConfig using `model_config_id`. The
-        `model` argument remains only as a legacy field on the returned dataclass.
-
-        Defaults create an Agent with the API's standard capability settings.
+        The server resolves the exact integration/model pair and copies its current
+        capabilities and pricing. Seed callers provide no authoritative model facts
+        or rates, and a missing model fails the ordinary public selection boundary.
         """
+        if integration.workspace.handle != workspace.handle:
+            raise ValueError("The seed integration must belong to the selected Workspace.")
+        if not model.strip():
+            raise ValueError("The seed model identifier must not be blank.")
         actual_name = name if name is not None else f"Test Agent {unique()}"
-        if model_config_id is None:
-            raise RuntimeError(
-                "model_config_id is required. "
-                "Use TestenvClient.llm.create_model_config_from_first_candidate()."
-            )
-
         api = AgentV1Api(public_client(self.config))
         agent_resp = api.agent_v1_create_agent(
             handle=workspace.handle,
             agent_create_request=AgentCreateRequest(
                 name=actual_name,
-                additional_properties={"model_config_id": model_config_id},
+                selectable_model_options=[
+                    SelectableModelOptionInput(
+                        label=_SEED_MODEL_LABEL,
+                        candidates=[
+                            SelectableModelCandidateInput(
+                                model_selection=AgentModelSelectionInput(
+                                    llm_provider_integration_id=integration.id,
+                                    model_identifier=model,
+                                ),
+                                settings=SelectableModelSettingsInput(),
+                            )
+                        ],
+                    )
+                ],
+                main_model_label=_SEED_MODEL_LABEL,
+                lightweight_model_label=_SEED_MODEL_LABEL,
+                memory_enabled=memory_enabled,
                 type=AgentType(agent_type),
             ),
             _headers={"Authorization": f"Bearer {user.access_token}"},
         )
-
-        if not memory_enabled:
-            httpx.patch(
-                f"{self.config.public_url}/agent/v1/workspaces/{workspace.handle}/agents/{agent_resp.id}",
-                json={"memory_enabled": False},
-                headers={"Authorization": f"Bearer {user.access_token}"},
-                timeout=10,
-            ).raise_for_status()
-
         return Agent(
             id=agent_resp.id,
             workspace=workspace,

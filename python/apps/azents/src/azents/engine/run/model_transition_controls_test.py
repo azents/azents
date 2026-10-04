@@ -75,7 +75,7 @@ async def test_frozen_model_validates_effective_not_raw_agent_effort(
         exchange_file_service=AsyncMock(),
         model_file_service=AsyncMock(),
         image_generation_catalog_service=_make_image_generation_catalog_service(),
-        model_metadata_service=make_test_model_metadata_service(snapshot=None),
+        model_metadata_service=make_test_model_metadata_service(source=None),
     )
     assert isinstance(result, Success)
     assert result.value.reasoning_effort == applied

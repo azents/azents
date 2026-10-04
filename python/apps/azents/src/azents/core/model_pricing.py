@@ -1,4 +1,4 @@
-"""Immutable snapshot-local pricing with explicit usage and billing semantics."""
+"""Persisted model prices and call-local usage and billing semantics."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from decimal import Decimal, localcontext
 from enum import StrEnum
 from typing import Literal
 
+from pydantic import BaseModel, ConfigDict, model_validator
+
 from azents.core.catalog_price_rules import (
     CatalogPriceIssue,
     CatalogPriceRules,
@@ -17,10 +19,6 @@ from azents.core.catalog_price_rules import (
     decode_catalog_price_rules,
 )
 from azents.core.enums import LLMProvider
-from azents.core.model_catalog_identity import (
-    provider_namespace_matches,
-    source_model_matches,
-)
 from azents.core.model_catalog_source import CatalogSourceModel
 
 CATALOG_PRICE_ESTIMATOR_VERSION = "1"
@@ -36,6 +34,33 @@ class ModelPricingUnavailableReason(StrEnum):
     UNSUPPORTED_TIER = "unsupported_service_tier"
     UNKNOWN_COMPONENT = "unknown_billable_component"
     UNSUPPORTED_RULE = "unsupported_billing_rule"
+
+
+class ModelPricingDefinition(BaseModel):
+    """Compact normalized prices copied from a catalog into a saved selection."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rules: CatalogPriceRules | None
+    unavailable_reason: ModelPricingUnavailableReason | None
+    source_key: str | None
+    source_model_key: str | None
+    collected_at: datetime.datetime | None
+
+    @model_validator(mode="after")
+    def validate_definition(self) -> ModelPricingDefinition:
+        """Require complete available evidence and an aware collection time."""
+        if self.collected_at is not None and self.collected_at.utcoffset() is None:
+            raise ValueError("Pricing collection time must be timezone-aware.")
+        if (self.rules is None) == (self.unavailable_reason is None):
+            raise ValueError("Pricing requires rules or an unavailable reason.")
+        if self.rules is not None and (
+            self.source_key is None
+            or self.source_model_key is None
+            or self.collected_at is None
+        ):
+            raise ValueError("Available pricing requires source identity and time.")
+        return self
 
 
 PricingComponentKind = Literal[
@@ -58,9 +83,9 @@ class CapturedModelPricing:
 
     provider: LLMProvider
     model_identifier: str
-    source_snapshot_id: str | None
-    source_hash: str | None
+    source_key: str | None
     source_model_key: str | None
+    collected_at: datetime.datetime | None
     estimator_version: str
     rules: CatalogPriceRules | None
     request_timestamp: datetime.datetime
@@ -132,51 +157,66 @@ _FRACTIONAL_METRICS = frozenset(
 
 def normalize_model_pricing(
     *,
-    provider: LLMProvider,
-    model_identifier: str,
-    source_snapshot_id: str | None,
-    source_hash: str | None,
+    source_key: str | None,
     source_model: CatalogSourceModel | None,
-    request_timestamp: datetime.datetime,
-) -> CapturedModelPricing:
-    """Freeze an exact source match and decode its price rules once.
+    collected_at: datetime.datetime | None,
+) -> ModelPricingDefinition:
+    """Decode source prices once at the publication boundary.
 
-    :param source_model: scoped model already resolved by the source lookup boundary
-    :param request_timestamp: aware operation time used for deterministic conditions
-    :returns: immutable rules or an explicit unavailable capture
+    :param source_model: typed source model owned by the publication boundary
+    :param collected_at: aware source collection time, absent without a source
+    :returns: losslessly serializable rules or an explicit unavailable definition
     """
-    if request_timestamp.utcoffset() is None:
-        raise ValueError("Pricing capture requires an aware request timestamp.")
-    if source_snapshot_id is None or source_hash is None:
+    if source_key is None:
         reason = ModelPricingUnavailableReason.SOURCE_UNAVAILABLE
     elif source_model is None:
         reason = ModelPricingUnavailableReason.MODEL_UNMATCHED
-    elif not provider_namespace_matches(
-        provider=provider, source_provider=source_model.provider
-    ):
-        reason = ModelPricingUnavailableReason.PROVIDER_MISMATCH
-    elif not source_model_matches(
-        provider=provider,
-        model_identifier=model_identifier,
-        source_model=source_model,
-    ):
-        reason = ModelPricingUnavailableReason.MODEL_UNMATCHED
     else:
         reason = None
-    return CapturedModelPricing(
-        provider=provider,
-        model_identifier=model_identifier,
-        source_snapshot_id=source_snapshot_id,
-        source_hash=source_hash,
-        source_model_key=source_model.source_key if source_model is not None else None,
-        estimator_version=CATALOG_PRICE_ESTIMATOR_VERSION,
+    return ModelPricingDefinition(
         rules=(
             decode_catalog_price_rules(source_model)
             if source_model is not None and reason is None
             else None
         ),
-        request_timestamp=request_timestamp,
         unavailable_reason=reason,
+        source_key=source_key,
+        source_model_key=source_model.source_key if source_model is not None else None,
+        collected_at=collected_at,
+    )
+
+
+def capture_model_pricing(
+    *,
+    provider: LLMProvider,
+    model_identifier: str,
+    definition: ModelPricingDefinition | None,
+    request_timestamp: datetime.datetime,
+) -> CapturedModelPricing:
+    """Freeze saved prices and aware time without consulting any source.
+
+    :param definition: the actual selected candidate's stored pricing
+    :param request_timestamp: physical call time used for conditional tariffs
+    :returns: immutable call evidence, including unavailable historical pricing
+    """
+    if request_timestamp.utcoffset() is None:
+        raise ValueError("Pricing capture requires an aware request timestamp.")
+    return CapturedModelPricing(
+        provider=provider,
+        model_identifier=model_identifier,
+        source_key=definition.source_key if definition is not None else None,
+        source_model_key=(
+            definition.source_model_key if definition is not None else None
+        ),
+        collected_at=definition.collected_at if definition is not None else None,
+        estimator_version=CATALOG_PRICE_ESTIMATOR_VERSION,
+        rules=definition.rules if definition is not None else None,
+        request_timestamp=request_timestamp,
+        unavailable_reason=(
+            definition.unavailable_reason
+            if definition is not None
+            else ModelPricingUnavailableReason.SOURCE_UNAVAILABLE
+        ),
     )
 
 

@@ -216,17 +216,17 @@ class _IntegrationCatalogEntry:
 
 
 @dataclass(frozen=True)
-class IntegrationCatalogSnapshot:
+class IntegrationCatalogObservation:
     catalog_scope: str
-    latest_attempt_status: str
+    latest_sync_status: str
     entries: tuple[_IntegrationCatalogEntry, ...]
 
     @classmethod
-    def decode(cls, value: object) -> "IntegrationCatalogSnapshot":
+    def decode(cls, value: object) -> "IntegrationCatalogObservation":
         payload = _json_object(value, label="integration catalog response")
-        latest_attempt = _json_object(
-            payload.get("latest_attempt"),
-            label="integration catalog latest attempt",
+        latest_sync = _json_object(
+            payload.get("latest_sync"),
+            label="integration catalog latest sync",
         )
         raw_entries = payload.get("entries")
         if not isinstance(raw_entries, list):
@@ -237,10 +237,10 @@ class IntegrationCatalogSnapshot:
                 "catalog_scope",
                 label="integration catalog response",
             ),
-            latest_attempt_status=_required_string(
-                latest_attempt,
+            latest_sync_status=_required_string(
+                latest_sync,
                 "status",
-                label="integration catalog latest attempt",
+                label="integration catalog latest sync",
             ),
             entries=tuple(
                 _IntegrationCatalogEntry.decode(item) for item in raw_entries
@@ -389,7 +389,7 @@ def list_ready_integration_models(
     token: str,
     handle: str,
     integration_id: str,
-) -> IntegrationCatalogSnapshot:
+) -> IntegrationCatalogObservation:
     """Return the stored catalog once its initial projection has entries."""
     response = http_requests.get(
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}"
@@ -401,10 +401,10 @@ def list_ready_integration_models(
     if response.status_code == 404:
         raise AssertionError("Stored catalog has not been created yet.")
     response.raise_for_status()
-    payload = IntegrationCatalogSnapshot.decode(response.json())
+    payload = IntegrationCatalogObservation.decode(response.json())
     if payload.catalog_scope != "integration":
         raise AssertionError("Integration-scoped catalog is not ready yet.")
-    if payload.latest_attempt_status != "succeeded":
+    if payload.latest_sync_status != "succeeded":
         raise AssertionError("Integration catalog sync has not succeeded yet.")
     if not payload.entries:
         raise AssertionError("Stored catalog does not have selectable entries yet.")

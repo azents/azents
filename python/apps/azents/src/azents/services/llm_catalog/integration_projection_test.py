@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from azcommon.result import Success
+from azcommon.result import Failure, Success
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,7 +43,6 @@ from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
 from azents.repos.model_metadata_operations import ModelMetadataSourceOperations
-from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
@@ -112,6 +111,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 session_manager=rdb_session_manager,
                 catalog_repository=LLMCatalogRepository(),
                 integration_repository=integration_repository,
+                source_repository=ModelMetadataSourceRepository(),
             ),
             listing_clients=create_listing_client_factories(),
             oauth_clients=create_runtime_oauth_client_factories(),
@@ -128,13 +128,10 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
                 session_manager=rdb_session_manager,
             ),
             source_sync_service=ModelMetadataSourceSyncService(
-                read_repository=ModelMetadataReadRepository(
-                    session_manager=rdb_session_manager,
-                    source_snapshot_repository=ModelMetadataSourceRepository(),
-                ),
                 operations=ModelMetadataSourceOperations(
                     session_manager=rdb_session_manager,
                     repository=ModelMetadataSourceRepository(),
+                    catalog_repository=LLMCatalogRepository(),
                 ),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
@@ -144,7 +141,7 @@ async def test_deterministic_integration_sync_does_not_require_source_authority(
         )
 
     assert isinstance(result, Success)
-    assert result.value.snapshot_id is not None
+    assert result.value.last_success_at is not None
     assert result.value.visible_count == 2
 
 
@@ -328,6 +325,7 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
                 session_manager=rdb_session_manager,
                 catalog_repository=LLMCatalogRepository(),
                 integration_repository=integration_repository,
+                source_repository=ModelMetadataSourceRepository(),
             ),
             listing_clients=create_listing_client_factories(),
             oauth_clients=create_runtime_oauth_client_factories(),
@@ -344,27 +342,21 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
                 session_manager=rdb_session_manager,
             ),
             source_sync_service=ModelMetadataSourceSyncService(
-                read_repository=ModelMetadataReadRepository(
-                    session_manager=rdb_session_manager,
-                    source_snapshot_repository=ModelMetadataSourceRepository(),
-                ),
                 operations=ModelMetadataSourceOperations(
                     session_manager=rdb_session_manager,
                     repository=ModelMetadataSourceRepository(),
+                    catalog_repository=LLMCatalogRepository(),
                 ),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
         )
         if user_change_during_listing:
-            with pytest.raises(
-                RuntimeError,
-                match="The integration catalog configuration generation changed",
-            ):
-                await service.sync_integration_catalog(
-                    integration_id=integration.id,
-                    workspace_id=workspace_id,
-                    trigger=IntegrationCatalogSyncTrigger.CREATE,
-                )
+            result = await service.sync_integration_catalog(
+                integration_id=integration.id,
+                workspace_id=workspace_id,
+                trigger=IntegrationCatalogSyncTrigger.CREATE,
+            )
+            assert isinstance(result, Failure)
         else:
             result = await service.sync_integration_catalog(
                 integration_id=integration.id,
@@ -383,18 +375,14 @@ async def test_oauth_sync_refresh_preserves_generation_and_user_update_fence(
                 purpose=LLMCatalogPurpose.CONVERSATION,
             )
             assert catalog is not None
-            assert catalog.current_snapshot_id is None
-            attempt = await LLMCatalogRepository().get_latest_attempt(
-                session, catalog=catalog
-            )
-            assert attempt is not None
-            assert attempt.failure_message == (
-                "The integration catalog configuration generation changed."
-            )
+            assert catalog.last_success_at is None
+            assert catalog.entry_count == 0
+            assert catalog.sync_status is not None
+            assert catalog.sync_status.status.value == "failed"
     assert call_order == ["refresh", "list"]
 
 
-async def test_xai_failure_preserves_last_successful_snapshot(
+async def test_xai_failure_preserves_last_successful_current_data(
     rdb_session_manager: SessionManager[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -485,6 +473,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                 session_manager=rdb_session_manager,
                 catalog_repository=catalog_repository,
                 integration_repository=integration_repository,
+                source_repository=ModelMetadataSourceRepository(),
             ),
             listing_clients=create_listing_client_factories(),
             oauth_clients=create_runtime_oauth_client_factories(),
@@ -501,13 +490,10 @@ async def test_xai_failure_preserves_last_successful_snapshot(
                 session_manager=rdb_session_manager,
             ),
             source_sync_service=ModelMetadataSourceSyncService(
-                read_repository=ModelMetadataReadRepository(
-                    session_manager=rdb_session_manager,
-                    source_snapshot_repository=ModelMetadataSourceRepository(),
-                ),
                 operations=ModelMetadataSourceOperations(
                     session_manager=rdb_session_manager,
                     repository=ModelMetadataSourceRepository(),
+                    catalog_repository=LLMCatalogRepository(),
                 ),
                 source_adapter=AsyncMock(spec=CatalogSourceAdapter),
             ),
@@ -518,7 +504,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
             trigger=IntegrationCatalogSyncTrigger.CREATE,
         )
         assert isinstance(first, Success)
-        first_snapshot_id = first.value.snapshot_id
+        first_success_at = first.value.last_success_at
         failed = await service.sync_integration_catalog(
             integration_id=integration.id,
             workspace_id=workspace_id,
@@ -527,7 +513,7 @@ async def test_xai_failure_preserves_last_successful_snapshot(
 
     assert isinstance(failed, Success)
     assert failed.value.status == "failed"
-    assert failed.value.snapshot_id == first_snapshot_id
+    assert failed.value.last_success_at == first_success_at
     assert failed.value.failure_code == "XaiEntitlementDenied"
     assert failed.value.failure_message == "xAI model listing failed."
     async with rdb_session_manager() as session:
@@ -538,11 +524,8 @@ async def test_xai_failure_preserves_last_successful_snapshot(
             purpose=LLMCatalogPurpose.CONVERSATION,
         )
         assert catalog is not None
-        assert catalog.current_snapshot_id == first_snapshot_id
-        latest_attempt = await catalog_repository.get_latest_attempt(
-            session,
-            catalog=catalog,
-        )
+        assert catalog.last_success_at == first_success_at
+        latest_attempt = catalog.sync_status
     assert latest_attempt is not None
     assert latest_attempt.diagnostics is not None
     assert latest_attempt.diagnostics["automatic_retry_blocked"] is True

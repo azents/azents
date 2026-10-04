@@ -144,4 +144,6 @@ async def test_create_chatgpt_oauth_creates_integration_catalog(
     assert catalog is not None
     assert catalog.scope == LLMCatalogScope.INTEGRATION
     assert catalog.provider == LLMProvider.CHATGPT_OAUTH
-    assert catalog.current_snapshot_id is None
+    assert catalog.last_success_at is None
+    assert catalog.entry_count == 0
+    assert catalog.sync_status is None

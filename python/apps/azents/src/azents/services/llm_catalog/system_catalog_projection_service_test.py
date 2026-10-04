@@ -1,4 +1,4 @@
-"""Active replacement system catalog projection service tests."""
+"""Current system catalog service composition tests."""
 
 from unittest.mock import AsyncMock
 
@@ -9,51 +9,24 @@ from azents.rdb.session import SessionManager
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog_operations import LLMCatalogOperationsRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
-from azents.repos.model_metadata_operations import (
-    ModelMetadataProjectionOperations,
-    ModelMetadataSourceOperations,
-)
-from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.services.llm_catalog import SystemCatalogProjectionService
-from azents.services.model_metadata_projection import (
-    SystemCatalogReplacementProjectionService,
-)
-from azents.services.model_metadata_source import (
-    CatalogSourceAdapter,
-    ModelMetadataSourceSyncService,
-)
+from azents.services.model_metadata_source import ModelMetadataSourceSyncService
 
 
 async def test_system_catalogs_exclude_integration_scoped_providers(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Expose only providers with system-owned model visibility without fetching."""
-    adapter = AsyncMock(spec=CatalogSourceAdapter)
-    repository = LLMCatalogRepository()
-    replacement = SystemCatalogReplacementProjectionService(
-        operations=ModelMetadataProjectionOperations(
-            session_manager=rdb_session_manager, repository=repository
-        ),
-        source_sync_service=ModelMetadataSourceSyncService(
-            read_repository=ModelMetadataReadRepository(
-                session_manager=rdb_session_manager,
-                source_snapshot_repository=ModelMetadataSourceRepository(),
-            ),
-            operations=ModelMetadataSourceOperations(
-                session_manager=rdb_session_manager,
-                repository=ModelMetadataSourceRepository(),
-            ),
-            source_adapter=adapter,
-        ),
-    )
+    """Listing local current state never starts remote source collection."""
+    source = AsyncMock(spec=ModelMetadataSourceSyncService)
     service = SystemCatalogProjectionService(
         operations=LLMCatalogOperationsRepository(
             session_manager=rdb_session_manager,
-            catalog_repository=repository,
+            catalog_repository=LLMCatalogRepository(),
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
+            source_repository=ModelMetadataSourceRepository(),
         ),
-        replacement_projection_service=replacement,
+        source_sync_service=source,
     )
     items = await service.list_system_catalogs()
     assert {item.provider for item in items} == {
@@ -61,4 +34,4 @@ async def test_system_catalogs_exclude_integration_scoped_providers(
         LLMProvider.ANTHROPIC,
         LLMProvider.GOOGLE_GEMINI,
     }
-    adapter.fetch.assert_not_awaited()
+    source.sync_current_source.assert_not_awaited()

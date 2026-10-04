@@ -69,7 +69,6 @@ def test_default_only_provider_returns_no_catalog_or_discovery_state() -> None:
     result = default_only_image_generation_catalog(
         provider=LLMProvider.CHATGPT_OAUTH,
         integration_enabled=True,
-        current_configuration_version=3,
     )
 
     assert result.default_available is True
@@ -77,8 +76,7 @@ def test_default_only_provider_returns_no_catalog_or_discovery_state() -> None:
     assert result.catalog_id is None
     assert result.entries == []
     assert result.total == 0
-    assert result.current_configuration_version == 3
-    assert result.generation_current is True
+    assert result.usable is True
 
 
 def test_disabled_default_provider_is_not_available() -> None:
@@ -158,7 +156,7 @@ async def _publish_flare(
     workspace_id: str,
     integration_id: str,
 ) -> None:
-    """Publish one current-generation Flare entry through repository fencing."""
+    """Publish one current Flare entry through credential fencing."""
     catalog = await service.operations.catalog_repository.ensure_integration_catalog(
         rdb_session,
         integration_id=integration_id,
@@ -166,21 +164,18 @@ async def _publish_flare(
         purpose=LLMCatalogPurpose.IMAGE_GENERATION,
     )
     started_at = datetime.datetime.now(datetime.UTC)
-    claim = await service.operations.catalog_repository.begin_integration_attempt(
+    claim = await service.operations.catalog_repository.begin_integration_sync(
         rdb_session,
         catalog_id=catalog.id,
         workspace_id=workspace_id,
-        source_key="openai_models_list:image_generation",
         started_at=started_at,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
         required_projection_version=None,
     )
     assert isinstance(claim, IntegrationCatalogSyncClaim)
-    repository = service.operations.catalog_repository
-    publication = await repository.replace_current_image_generation_snapshot(
-        rdb_session,
+    publication = await service.operations.publish(
         catalog=catalog,
-        attempt_id=claim.attempt_id,
+        claim=claim,
         entries=[
             ImageGenerationCatalogEntryCreate(
                 provider=LLMProvider.OPENAI,
@@ -192,24 +187,17 @@ async def _publish_flare(
                 visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
                 provider_integration_id=integration_id,
                 source_metadata=None,
-                projection_metadata={"registry_revision": 1},
+                projection_metadata=None,
                 hidden_reason=None,
             )
         ],
         diagnostics={"catalog_purpose": "image_generation"},
-    )
-    assert publication.snapshot_id is not None
-    await service.operations.catalog_repository.mark_attempt_succeeded(
-        rdb_session,
-        attempt_id=claim.attempt_id,
+        sync_diagnostics={"catalog_purpose": "image_generation"},
         finished_at=started_at + datetime.timedelta(seconds=1),
-        produced_snapshot_id=publication.snapshot_id,
         fetched_count=1,
-        matched_count=1,
-        skipped_count=0,
-        hidden_count=0,
-        diagnostics={"catalog_purpose": "image_generation"},
+        trigger=IntegrationCatalogSyncTrigger.CREATE,
     )
+    assert publication.published
 
 
 @pytest.mark.asyncio
@@ -228,7 +216,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
         handle="image-service-credential-snapshot",
     )
     original_begin_attempt = (
-        service.operations.catalog_repository.begin_integration_attempt
+        service.operations.catalog_repository.begin_integration_sync
     )
 
     async def begin_attempt_after_credential_update(
@@ -236,7 +224,6 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
         *,
         catalog_id: str,
         workspace_id: str,
-        source_key: str,
         started_at: datetime.datetime,
         trigger: IntegrationCatalogSyncTrigger,
         required_projection_version: None,
@@ -253,7 +240,6 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
             session,
             catalog_id=catalog_id,
             workspace_id=workspace_id,
-            source_key=source_key,
             started_at=started_at,
             trigger=trigger,
             required_projection_version=required_projection_version,
@@ -274,7 +260,7 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
 
     monkeypatch.setattr(
         service.operations.catalog_repository,
-        "begin_integration_attempt",
+        "begin_integration_sync",
         begin_attempt_after_credential_update,
     )
     monkeypatch.setattr(
@@ -294,7 +280,31 @@ async def test_sync_uses_credential_snapshot_loaded_after_attempt_claim(
 
 
 @pytest.mark.asyncio
-async def test_explicit_pin_requires_current_catalog_generation(
+async def test_disabled_conversation_without_image_tool_has_no_image_gate(
+    rdb_session: AsyncSession,
+) -> None:
+    """Conversation-only saves retain their existing selection predicates."""
+    fixture = await _create_service(
+        rdb_session, handle="disabled-conversation-without-image"
+    )
+    disabled = await fixture.integration_repository.update_by_id(
+        rdb_session, fixture.integration_id, {"enabled": False}
+    )
+    assert isinstance(disabled, Success)
+    errors = await fixture.service.validate_option(
+        workspace_id=fixture.workspace_id,
+        selection=make_test_model_selection(integration_id=fixture.integration_id),
+        settings=SelectableModelSettings(
+            context_window_tokens=None,
+            max_output_tokens=None,
+            builtin_tools=[],
+        ),
+    )
+    assert errors == []
+
+
+@pytest.mark.asyncio
+async def test_explicit_pin_requires_current_catalog_usability(
     rdb_session: AsyncSession,
 ) -> None:
     """Saved and runtime pins stop authorizing after credential generation changes."""
@@ -360,7 +370,7 @@ async def test_explicit_pin_requires_current_catalog_generation(
         settings=settings,
     )
     assert runtime_error is not None
-    assert runtime_error.reason == "catalog_generation_mismatch"
+    assert runtime_error.reason == "catalog_unusable"
     assert runtime_error.model_identifier == "gpt-image-2.5-flare"
 
 

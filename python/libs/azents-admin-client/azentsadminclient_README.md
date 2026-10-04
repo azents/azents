@@ -278,7 +278,7 @@ Class | Method | HTTP request | Description
  - [SystemModelCatalogRefreshListResponse](azentsadminclient/docs/SystemModelCatalogRefreshListResponse.md)
  - [SystemModelCatalogRefreshResponse](azentsadminclient/docs/SystemModelCatalogRefreshResponse.md)
  - [SystemModelCatalogResponse](azentsadminclient/docs/SystemModelCatalogResponse.md)
- - [SystemModelCatalogSyncAttemptResponse](azentsadminclient/docs/SystemModelCatalogSyncAttemptResponse.md)
+ - [SystemModelCatalogSyncStatusResponse](azentsadminclient/docs/SystemModelCatalogSyncStatusResponse.md)
  - [SystemSettingAuditEventListResponse](azentsadminclient/docs/SystemSettingAuditEventListResponse.md)
  - [SystemSettingAuditEventResponse](azentsadminclient/docs/SystemSettingAuditEventResponse.md)
  - [SystemSettingAuditEventType](azentsadminclient/docs/SystemSettingAuditEventType.md)

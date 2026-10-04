@@ -9,7 +9,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionRunState, EventKind
+from azents.core.enums import AgentSessionRunState, EventKind, LLMProvider
 from azents.engine.events.types import UserMessagePayload
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
@@ -24,6 +24,7 @@ from azents.repos.agent_wait_read import AgentWaitReadRepository
 from azents.repos.live_projection_authority_test import _create_session
 from azents.repos.model_metadata_read import ModelMetadataReadRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
+from azents.repos.model_metadata_source_data import ContextModelRequest
 from azents.repos.worker_executor_read import WorkerExecutorReadRepository
 from azents.services.agent_wait import AgentWaitService
 from azents.services.mailbox import MailboxService
@@ -303,16 +304,20 @@ async def test_metadata_skip_and_missing_source_capture_have_no_provider_fetch(
     service = ModelMetadataService(
         repository=ModelMetadataReadRepository(
             session_manager=boundary.session_manager,
-            source_snapshot_repository=ModelMetadataSourceRepository(),
+            source_repository=ModelMetadataSourceRepository(),
         )
     )
-    assert (
-        await service.capture_for_context(capability_maximums=[128_000, 64_000]) is None
-    )
-    assert await service.capture_for_context(capability_maximums=[]) is None
+    assert (await service.capture_for_context(requests=[])).models == ()
     assert not boundary.opened
-    assert (
-        await service.capture_for_context(capability_maximums=[128_000, None]) is None
+    captured = await service.capture_for_context(
+        requests=[
+            ContextModelRequest(
+                provider=LLMProvider.OPENAI,
+                model_identifier="exact-missing-model",
+            )
+        ]
     )
+    assert len(captured.models) == 1
+    assert captured.models[0].max_input_tokens is None
     assert len(boundary.opened) == 1
     boundary.closed()

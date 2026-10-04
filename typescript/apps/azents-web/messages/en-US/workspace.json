@@ -817,7 +817,7 @@
       "reasoningBadge": "Reasoning",
       "hostedToolsBadge": "Hosted tools",
       "toolCallingBadge": "Tool calling",
-      "syncingWithoutSnapshot": "Catalog sync is running. Models will appear after the first successful snapshot."
+      "syncingWithoutData": "Catalog sync is running. Models will appear after the first successful sync."
     },
     "memorySettings": {
       "title": "Agent Memory",

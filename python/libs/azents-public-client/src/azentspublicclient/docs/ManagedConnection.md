@@ -16,8 +16,8 @@ Name | Type | Description | Notes
 **provider_bot_user_id** | **str** |  | 
 **open_access_enabled** | **bool** |  | 
 **credentials_configured** | **bool** |  | 
-**capabilities** | **Dict[str, object]** |  | 
-**provider_config** | **Dict[str, object]** |  | 
+**capabilities** | **object** |  | 
+**provider_config** | **object** |  | 
 **last_verified_at** | **datetime** |  | 
 **last_health_at** | **datetime** |  | 
 **last_health_code** | **str** |  | [optional] 

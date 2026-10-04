@@ -1707,7 +1707,7 @@ class TestModelSupportContract:
         azents_public_server_url: str,
         openai_proxy_url: str,
     ) -> None:
-        """Keep saved support until reselection while refreshing source prices."""
+        """Keep saved support and prices until explicit reselection."""
         catalog_api = ModelCatalogV1Api(admin_api_client)
 
         def refresh_source(variant: str) -> None:
@@ -1722,7 +1722,8 @@ class TestModelSupportContract:
                 provider=SystemCatalogProvider.OPENAI,
                 _request_timeout=20,
             )
-            assert refreshed.snapshot_id is not None
+            assert refreshed.last_success_at is not None
+            assert refreshed.status == "succeeded"
 
         def primary_selection(
             options: list[SelectableModelOptionResponse]
@@ -1863,6 +1864,8 @@ class TestModelSupportContract:
                 f"{handle}/agents/{agent_id}"
             )
             agent_selection = primary_selection(created.selectable_model_options)
+            assert agent_selection.pricing is not None
+            assert agent_selection.pricing == workspace_selection.pricing
             assert contract(agent_selection.normalized_capabilities) == (
                 baseline_contract
             )
@@ -1980,7 +1983,7 @@ class TestModelSupportContract:
             assert effort_state(refreshed_contract, "max") == "unsupported"
             assert effort_state(refreshed_contract, "xhigh") == "supported"
             saved_selections_unchanged()
-            # Normal saves without model selections do not enrich existing snapshots.
+            # Normal saves without model selections preserve embedded prices.
             _response_model(
                 requests.patch(
                     agent_url,
@@ -2000,13 +2003,13 @@ class TestModelSupportContract:
                 WorkspaceModelSettingsResponse,
             )
             saved_selections_unchanged()
-            dispatch("max", 0.000007)
+            dispatch("max", 0.000003)
 
             refresh_source("missing-model")
             assert "gpt-5.5" not in entries()
             saved_selections_unchanged()
-            # This is absent exact model evidence, not an absent current source.
-            dispatch("max", None)
+            # Removing a current row does not rewrite a previously saved price.
+            dispatch("max", 0.000003)
 
             refresh_source("refreshed")
             reselected_workspace = _response_model(
@@ -2033,6 +2036,8 @@ class TestModelSupportContract:
             ):
                 selected = primary_selection(options)
                 assert contract(selected.normalized_capabilities) == refreshed_contract
+                assert selected.pricing is not None
+                assert selected.pricing != agent_selection.pricing
             rejected_session = _create_profile_session(
                 server_url=azents_public_server_url, token=token, agent_id=agent_id
             )

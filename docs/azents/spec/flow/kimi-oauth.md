@@ -30,8 +30,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-01
-spec_version: 5
+last_verified_at: 2026-10-04
+spec_version: 6
 ---
 
 # Kimi OAuth Flow
@@ -214,7 +214,8 @@ The catalog may expose:
 
 Invalid individual model items are skipped. A missing or invalid top-level model list fails the sync.
 Stored catalog lifecycle, cooldown, backoff, fencing, stale refresh, explicit sync, and
-last-successful-snapshot behavior remain shared with other integration catalogs. Picker reads never
+last-successful-current-entry behavior remain shared with other integration catalogs. One current
+sync state replaces catalog snapshot/attempt history. Picker reads never
 call Kimi directly.
 
 ## Subscription Usage
@@ -285,6 +286,7 @@ message submission, or integration management.
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-03 | 6 | Adopted current catalog entries/latest sync without snapshot history | Retain Kimi account visibility and existing synchronization policy |
 | 2026-10-01 | 5 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep Kimi model visibility independent of optional generic metadata |
 | 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |
 | 2026-09-23 | 3 | Documented the shared subscription reauthentication action for connected and failed integrations | Match the current connection-row and management-modal behavior |

@@ -43,8 +43,8 @@ class TestImageGenerationCatalogEntryResponse(unittest.TestCase):
                 recommendation_rank = 56,
                 lifecycle_status = '',
                 visibility_status = '',
-                source_metadata = { },
-                projection_metadata = { }
+                source_metadata = azentspublicclient.models.git.git(),
+                projection_metadata = azentspublicclient.models.git.git()
             )
         else:
             return ImageGenerationCatalogEntryResponse(
@@ -56,8 +56,8 @@ class TestImageGenerationCatalogEntryResponse(unittest.TestCase):
                 recommendation_rank = 56,
                 lifecycle_status = '',
                 visibility_status = '',
-                source_metadata = { },
-                projection_metadata = { },
+                source_metadata = azentspublicclient.models.git.git(),
+                projection_metadata = azentspublicclient.models.git.git(),
         )
         """
 

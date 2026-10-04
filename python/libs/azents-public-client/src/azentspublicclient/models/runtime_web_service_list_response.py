@@ -30,7 +30,6 @@ class RuntimeWebServiceListResponse(BaseModel):
     """ # noqa: E501
     items: List[RuntimeWebServiceResponse]
     total_count: Annotated[int, Field(strict=True, ge=0)]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["items", "total_count"]
 
     model_config = ConfigDict(
@@ -63,10 +62,8 @@ class RuntimeWebServiceListResponse(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -81,11 +78,6 @@ class RuntimeWebServiceListResponse(BaseModel):
                 if _item_items:
                     _items.append(_item_items.to_dict())
             _dict['items'] = _items
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         return _dict
 
     @classmethod
@@ -101,11 +93,6 @@ class RuntimeWebServiceListResponse(BaseModel):
             "items": [RuntimeWebServiceResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
             "total_count": obj.get("total_count")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

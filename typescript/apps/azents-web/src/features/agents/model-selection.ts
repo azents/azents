@@ -11,6 +11,7 @@ import type {
   ImageGenerationModelCatalogResponse,
   LlmProviderIntegrationResponse,
   ModelCapabilities,
+  ModelCatalogSyncStatusResponse,
   SelectableModelOption,
   SelectableModelOptionInput,
 } from "@azents/public-client";
@@ -30,6 +31,7 @@ export interface SelectableModelCandidate {
   model_identifier: string;
   model_display_name: string;
   normalized_capabilities: ModelCapabilities;
+  pricing?: AgentModelSelection["pricing"];
 }
 
 export interface ModelContextRange {
@@ -272,25 +274,13 @@ export function createSelectableModelOptionFormValue(
   };
 }
 
-export interface ModelCatalogAttemptState {
-  status: string;
-  started_at: string;
-  finished_at: string | null;
-  failure_code: string | null;
-  failure_message: string | null;
-  action_hint: string | null;
-  fetched_count: number;
-  matched_count: number;
-  skipped_count: number;
-  hidden_count: number;
-}
+export type ModelCatalogSyncStatus = ModelCatalogSyncStatusResponse;
 
 export interface ModelCatalogState {
   catalogId: string;
   catalogScope: "system" | "integration";
-  currentSnapshotId: string | null;
-  currentSnapshotCreatedAt: string | null;
-  latestAttempt: ModelCatalogAttemptState | null;
+  lastSuccessAt: string | null;
+  latestSync: ModelCatalogSyncStatus | null;
   stale: boolean;
   syncAvailableAt: string | null;
   automaticRetryBlocked: boolean;
@@ -348,7 +338,7 @@ export function imageGenerationModelAvailability(
   if (state.type === "UNSUPPORTED") {
     return "UNAVAILABLE";
   }
-  if (!state.data.generation_current || state.data.snapshot_id == null) {
+  if (!state.data.usable) {
     return "UNVERIFIED";
   }
   return state.data.entries.some(

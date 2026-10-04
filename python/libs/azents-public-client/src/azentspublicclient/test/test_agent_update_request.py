@@ -38,11 +38,35 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 name = '',
                 description = '',
                 selectable_model_options = [
-                    { }
+                    azentspublicclient.models.selectable_model_option_input.SelectableModelOptionInput(
+                        label = '0', 
+                        candidates = [
+                            azentspublicclient.models.selectable_model_candidate_input.SelectableModelCandidateInput(
+                                model_selection = azentspublicclient.models.agent_model_selection_input.AgentModelSelectionInput(
+                                    llm_provider_integration_id = '', 
+                                    model_identifier = '', ), 
+                                settings = azentspublicclient.models.selectable_model_settings_input.SelectableModelSettingsInput(
+                                    context_window_tokens = 1.0, 
+                                    max_output_tokens = 1.0, 
+                                    builtin_tools = [
+                                        azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
+                                            name = '', 
+                                            config = azentspublicclient.models.config.Config(), )
+                                        ], ), )
+                            ], 
+                        subagent_enabled = True, 
+                        subagent_guidance = '', )
                     ],
                 main_model_label = '',
                 lightweight_model_label = '',
-                model_parameters = { },
+                model_parameters = azentspublicclient.models.model_parameters.ModelParameters(
+                    temperature = 0.0, 
+                    top_p = 0.0, 
+                    top_k = 1.0, 
+                    stop_sequences = [
+                        ''
+                        ], 
+                    reasoning_effort = 'none', ),
                 system_prompt = '',
                 enabled = True,
                 type = 'public',
@@ -53,7 +77,9 @@ class TestAgentUpdateRequest(unittest.TestCase):
                 tool_search_enabled = True,
                 max_turns = 56,
                 auto_archive_ttl_days = 56,
-                subagent_settings = { }
+                subagent_settings = azentspublicclient.models.subagent_settings.SubagentSettings(
+                    max_subagents = 0.0, 
+                    max_depth = 0.0, )
             )
         else:
             return AgentUpdateRequest(

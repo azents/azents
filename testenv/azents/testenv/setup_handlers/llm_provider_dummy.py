@@ -44,11 +44,10 @@ def main() -> int:
         ws,
         name="__testenv_model_listing:deterministic-success",
     )
-    model_config_id = client.llm.create_model_config_from_first_candidate(
+    model_identifier = client.llm.wait_for_initial_model_identifier(
         user,
         ws,
         integration,
-        label="Testenv default model",
     )
 
     bucket.setdefault("integration", {}).update(
@@ -56,11 +55,11 @@ def main() -> int:
             "id": integration.id,
             "provider": integration.provider,
             "name": integration.name,
-            "model_config_id": model_config_id,
+            "model_identifier": model_identifier,
         }
     )
     state.save()
-    print(f"SEEDED integration.id={integration.id} model_config.id={model_config_id}")
+    print(f"SEEDED integration.id={integration.id} model.identifier={model_identifier}")
     return 0
 
 

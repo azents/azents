@@ -39,7 +39,7 @@ class TestSystemModelCatalogRefreshListResponse(unittest.TestCase):
                     azentsadminclient.models.system_model_catalog_refresh_response.SystemModelCatalogRefreshResponse(
                         provider = 'openai', 
                         catalog_id = '', 
-                        snapshot_id = '', 
+                        last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         visible_count = 56, 
                         hidden_count = 56, 
                         status = '', 
@@ -54,7 +54,7 @@ class TestSystemModelCatalogRefreshListResponse(unittest.TestCase):
                     azentsadminclient.models.system_model_catalog_refresh_response.SystemModelCatalogRefreshResponse(
                         provider = 'openai', 
                         catalog_id = '', 
-                        snapshot_id = '', 
+                        last_success_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         visible_count = 56, 
                         hidden_count = 56, 
                         status = '', 

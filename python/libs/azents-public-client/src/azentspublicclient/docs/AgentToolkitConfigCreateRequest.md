@@ -10,9 +10,9 @@ Name | Type | Description | Notes
 **slug** | **str** | Optional base alias. Explicit values are normalized to lowercase ASCII letters, numbers, and underscores. | [optional] 
 **name** | **str** | Display name | [optional] 
 **description** | **str** |  | [optional] 
-**config** | **Dict[str, object]** | Tool configuration | 
+**config** | **object** | Tool configuration | 
 **prompt** | **str** |  | [optional] 
-**credentials** | **Dict[str, object]** |  | [optional] 
+**credentials** | **object** |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
 **always_expose_tools** | **bool** | Expose every toolkit tool directly instead of through Tool Search | [optional] [default to False]
 

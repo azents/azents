@@ -479,14 +479,11 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
             if lightweight_option is None:
                 raise FunctionToolError("Agent lightweight model target was not found")
             lightweight = lightweight_option.candidates[0].model_selection
-            capability_maximums = [
-                selection.normalized_capabilities.context_window.max_input_tokens,
-                lightweight.normalized_capabilities.context_window.max_input_tokens,
-            ]
+            requests = ModelMetadataService.context_requests([selection, lightweight])
             source_snapshot = (
                 None
-                if all(maximum is not None for maximum in capability_maximums)
-                else await self.operations.load_model_source_snapshot()
+                if not requests
+                else await self.operations.load_model_context(requests=requests)
             )
             compaction_input_tokens = resolve_model_input_tokens(
                 lightweight.normalized_capabilities.context_window.default_input_tokens,

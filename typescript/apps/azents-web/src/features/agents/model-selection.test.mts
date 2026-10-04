@@ -8,6 +8,7 @@ import {
   fallbackSelectableModelLabel,
   hasDuplicateSelectableModelCandidates,
   hasInvalidImageGenerationSelections,
+  imageGenerationModelAvailability,
   imageGenerationModelIdentifier,
   imageGenerationModelSelectionVisible,
   isSubagentGuidanceWithinLimit,
@@ -23,6 +24,7 @@ import {
   withImageGenerationModelIdentifier,
 } from "./model-selection.ts";
 import type {
+  ImageGenerationModelCatalogResponse,
   ModelCapabilities,
   SelectableModelOption,
 } from "@azents/public-client";
@@ -88,6 +90,7 @@ void test("stored v2 capability evidence and omitted settings survive form loadi
             model_display_name: "Evidence fixture",
             model_developer: "openai",
             normalized_capabilities: partialReasoningCapabilities,
+            pricing: null,
             model_snapshot: {},
           },
           settings: {
@@ -369,13 +372,10 @@ void test("default-only image providers hide explicit model selection", () => {
         default_available: true,
         explicit_selection_supported: false,
         catalog_id: null,
-        snapshot_id: null,
-        snapshot_configuration_version: null,
-        current_configuration_version: 1,
-        snapshot_created_at: null,
-        latest_attempt: null,
+        last_success_at: null,
+        latest_sync: null,
         stale: false,
-        generation_current: true,
+        usable: true,
         sync_available_at: null,
         automatic_retry_blocked: false,
         entries: [],
@@ -385,6 +385,69 @@ void test("default-only image providers hide explicit model selection", () => {
     false,
   );
   assert.equal(imageGenerationModelSelectionVisible({ type: "LOADING" }), true);
+});
+
+void test("image model availability uses current usability and retains choices after failed sync", () => {
+  const data: ImageGenerationModelCatalogResponse = {
+    default_available: true,
+    explicit_selection_supported: true,
+    catalog_id: "catalog-1",
+    last_success_at: "2026-09-10T00:00:00Z",
+    latest_sync: {
+      status: "failed",
+      started_at: "2026-09-11T00:00:00Z",
+      finished_at: "2026-09-11T00:00:01Z",
+      failure_code: "provider_unavailable",
+      failure_message: "Provider listing failed.",
+      action_hint: "Try again.",
+      fetched_count: 0,
+      matched_count: 0,
+      skipped_count: 0,
+      hidden_count: 0,
+    },
+    stale: true,
+    usable: true,
+    sync_available_at: null,
+    automatic_retry_blocked: false,
+    entries: [
+      {
+        id: "image-entry-1",
+        provider: "openai",
+        provider_model_identifier: "gpt-image-current",
+        display_name: "Current Image Model",
+        description: "Current image model.",
+        recommendation_rank: 1,
+        lifecycle_status: "active",
+        visibility_status: "selectable",
+        source_metadata: null,
+        projection_metadata: null,
+      },
+    ],
+    total: 1,
+  };
+  const before = JSON.stringify(data);
+  assert.equal(
+    imageGenerationModelAvailability("gpt-image-current", {
+      type: "LOADED",
+      data,
+    }),
+    "AVAILABLE",
+  );
+  assert.equal(
+    imageGenerationModelAvailability("gpt-image-removed", {
+      type: "LOADED",
+      data,
+    }),
+    "UNAVAILABLE",
+  );
+  assert.equal(
+    imageGenerationModelAvailability("gpt-image-current", {
+      type: "LOADED",
+      data: { ...data, usable: false },
+    }),
+    "UNVERIFIED",
+  );
+  assert.equal(JSON.stringify(data), before);
 });
 
 void test("form serialization preserves complete built-in tool config", () => {
@@ -636,13 +699,10 @@ void test("explicit image selection is invalid until a current catalog authorize
               default_available: true,
               explicit_selection_supported: true,
               catalog_id: "catalog-1",
-              snapshot_id: "snapshot-1",
-              snapshot_configuration_version: 1,
-              current_configuration_version: 1,
-              snapshot_created_at: "2026-09-10T00:00:00Z",
-              latest_attempt: null,
+              last_success_at: "2026-09-10T00:00:00Z",
+              latest_sync: null,
               stale: false,
-              generation_current: true,
+              usable: true,
               sync_available_at: null,
               automatic_retry_blocked: false,
               entries: [

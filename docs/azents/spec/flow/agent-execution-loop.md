@@ -180,8 +180,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-03
-spec_version: 208
+last_verified_at: 2026-10-04
+spec_version: 209
 ---
 
 # Agent Execution Loop
@@ -810,11 +810,14 @@ is forwarded as a provider-hosted image tool or placed in model-visible argument
 
 OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
 the SDK usage object serialized to plain JSON and does not synthesize adapter-private hidden parameters.
-Azents captures only the selected `litellm_catalog` DB source before each physical
-model call. Exact hosting/API scope and literal model identity resolve an immutable
-record of typed price rules, source snapshot/hash/key, estimator revision and aware
-request time. The output stream freezes this view and requested tier; it never
-rematches after refresh. Decimal evaluation uses per-token/named-unit amounts and
+Azents captures the actual selected candidate's saved normalized pricing definition
+and aware request time before each physical model call. Exact hosting/API scope and
+literal model identity accompany immutable typed price rules, descriptive source/model
+key, collection time, and code estimator version. Capture performs no price DB read,
+whole-source restore, raw-price interpretation, hashing, or caching. Primary/fallback and
+lightweight candidates retain their own prices; Responses and PydanticAI output paths
+use the same cheap capture contract. The output stream freezes this view and requested
+tier and never rematches after catalog refresh. Decimal evaluation uses per-token/named-unit amounts and
 explicit usage inclusion flags, TTL writes, whole-request context brackets,
 applicable service tiers, media/tool quantities and bounded off-peak windows without
 model content. Every used specialized dimension needs its price; unknown required
@@ -828,10 +831,15 @@ Installed price maps, SDK estimates and private hidden-response costs are not es
 ChatGPT OAuth cost remains an API-price estimate, not subscription billing.
 
 Known costs carry optional `cost_provenance` with `provider_reported` or `estimated` method,
-semantic provider/model, applicable tier, and snapshot/hash/key/estimator version for estimates.
+semantic provider/model, applicable tier, descriptive source/model key, collection time,
+and code estimator version for estimates. New estimates carry no snapshot ID, hash,
+catalog foreign key, or archived full price payload.
 Explicit native OpenRouter `usage.cost` remains a separately reported charge even without source
 prices. It is not added to an estimate for the same usage. Historical amounts without provenance
-stay unlabeled; this metadata does not introduce a new cost UI or retroactive history rewrite.
+stay unlabeled; old opaque provenance remains readable without resolving deleted history.
+Missing historical selected-model pricing decodes read-only as absent and leaves local
+estimation unavailable at dispatch, with no lazy fill. This metadata does not introduce
+a new cost UI or retroactive history rewrite.
 
 Saved v2 capability descriptors authorize requests independently from pricing.
 Explicit effort then a known saved default resolves conditions; omission is not
@@ -1578,7 +1586,10 @@ detached facts from completed repositories. Requested-profile selection, quota
 advancement, fresh model preparation/finalization and compaction preparation own
 their exact database groups without returning live Sessions. Engine request,
 candidate and Toolkit resolution receive concrete completed read collaborators;
-runtime token preparation follows those reads. Local metadata capture and Wait
+runtime token preparation follows those reads. Optional context capture reads only
+requested exact current source-model maxima, groups missing saved maxima within the
+existing paired-operation boundary, and preserves saved maximum/default/cap/fallback
+precedence without complete source restoration. These exact reads and Wait
 descendant snapshots also close before their external continuations.
 
 Fresh preparation retains its separate unlocked snapshot, locked chain/claim
@@ -1856,6 +1867,9 @@ icon.
 
 ## Changelog
 
+- **2026-10-03** (spec_version 209) — Froze saved candidate pricing and physical
+  call time without source/price lookup; replaced whole-source context captures with
+  exact current model reads while preserving operation boundaries and historical usage.
 - **2026-10-03** (spec_version 207) — Completed top-k request carriers,
   actual family codec encoding and sampling no-loss guards.
 - **2026-10-03** (spec_version 206) — Preserved saved-authorized compatible

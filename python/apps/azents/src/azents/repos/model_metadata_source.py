@@ -1,315 +1,436 @@
-"""Persistence for durable model metadata source authority."""
+"""Current source authority, exact per-model rows and narrow context queries."""
 
 import datetime
 import json
-from typing import Any
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import LLMCatalogAttemptStatus
+from azents.core.model_catalog_identity import CatalogIdentityError, catalog_source_keys
 from azents.core.model_catalog_source import (
     CATALOG_SOURCE_KEY,
     CATALOG_SOURCE_KIND,
     CATALOG_SOURCE_SCHEMA_VERSION,
+    CatalogSourceModel,
     CatalogSourcePayload,
-    ModelMetadataSourceKind,
 )
-from azents.rdb.models.llm_catalog import RDBLLMCatalogSyncAttempt
+from azents.core.model_metadata_collection_data import (
+    CurrentSourceModel,
+    FetchedModelMetadataSource,
+)
+from azents.core.model_pricing import ModelPricingDefinition
 from azents.rdb.models.model_metadata_source import (
     RDBModelMetadataSource,
-    RDBModelMetadataSourceSnapshot,
+    RDBModelMetadataSourceModel,
+)
+from azents.repos.llm_catalog.data import LLMCatalogSyncStatus
+from azents.repos.model_catalog_sync_state import (
+    current_sync_status,
+    fail_sync,
+    start_sync,
+    succeed_sync,
 )
 from azents.repos.model_metadata_source_data import (
-    ModelMetadataSourceAttempt,
-    ModelMetadataSourceSnapshot,
+    CapturedContextSource,
+    ContextModelMetadata,
+    ContextModelRequest,
+    ModelMetadataSource,
+    SourceModelExpectation,
+    SourceProjectionMetadata,
 )
+
+_ROW_BATCH_SIZE = 250
 
 
 class ModelMetadataSourceRepository:
-    """Repository for model metadata source authority and snapshots."""
+    """Persist only current normalized facts; publication callers own transactions."""
 
     async def ensure_authority(
-        self,
-        session: AsyncSession,
-        *,
-        source_key: str,
+        self, session: AsyncSession, *, source_key: str
     ) -> RDBModelMetadataSource:
-        """Create or load the logical source authority row."""
+        if source_key != CATALOG_SOURCE_KEY:
+            raise ValueError("Only the current data-only source can own publication.")
         result = await session.execute(
             insert(RDBModelMetadataSource)
             .values(
                 source_key=source_key,
-                current_snapshot_id=None,
-                latest_attempt_id=None,
+                source_kind=CATALOG_SOURCE_KIND,
+                source_schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
             )
             .on_conflict_do_nothing(index_elements=["source_key"])
             .returning(RDBModelMetadataSource)
         )
-        authority = result.scalar_one_or_none()
-        if authority is None:
-            authority = await session.get(RDBModelMetadataSource, source_key)
-        if authority is None:
-            raise RuntimeError("Model metadata source authority upsert failed.")
-        await session.flush()
-        return authority
-
-    async def begin_attempt(
-        self,
-        session: AsyncSession,
-        *,
-        source_key: str,
-        started_at: datetime.datetime,
-    ) -> str:
-        """Create the latest source attempt and retire abandoned work."""
-        authority = await self.ensure_authority(session, source_key=source_key)
-        await session.execute(
-            sa.update(RDBLLMCatalogSyncAttempt)
-            .where(
-                RDBLLMCatalogSyncAttempt.catalog_id.is_(None),
-                RDBLLMCatalogSyncAttempt.source_key == source_key,
-                RDBLLMCatalogSyncAttempt.status == LLMCatalogAttemptStatus.RUNNING,
-            )
-            .values(
-                status=LLMCatalogAttemptStatus.FAILED,
-                finished_at=started_at,
-                failure_code="ModelMetadataSourceSyncInterrupted",
-                failure_message=(
-                    "A newer model metadata source synchronization replaced an "
-                    "unfinished attempt."
-                ),
-                action_hint="Use the newer source synchronization result.",
-                diagnostics={"failure_category": "source_sync_interrupted"},
-            )
-        )
-        attempt_id = uuid7().hex
-        session.add(
-            RDBLLMCatalogSyncAttempt(
-                id=attempt_id,
-                catalog_id=None,
-                source_key=source_key,
-                status=LLMCatalogAttemptStatus.RUNNING,
-                started_at=started_at,
-                fetched_count=0,
-                matched_count=0,
-                skipped_count=0,
-                hidden_count=0,
-                catalog_configuration_version=None,
-            )
-        )
-        authority.latest_attempt_id = attempt_id
-        await session.flush()
-        return attempt_id
+        owner = result.scalar_one_or_none()
+        if owner is None:
+            owner = await session.get(RDBModelMetadataSource, source_key)
+        if owner is None:
+            raise RuntimeError("Current source authority upsert failed.")
+        return owner
 
     async def lock_authority(
-        self,
-        session: AsyncSession,
-        *,
-        source_key: str,
-    ) -> RDBModelMetadataSource:
-        """Lock the source authority for validation and publication."""
+        self, session: AsyncSession, *, source_key: str, shared: bool = False
+    ) -> RDBModelMetadataSource | None:
         result = await session.execute(
             sa.select(RDBModelMetadataSource)
             .where(RDBModelMetadataSource.source_key == source_key)
-            .with_for_update()
+            .with_for_update(read=shared)
+            .execution_options(populate_existing=True)
         )
-        authority = result.scalar_one_or_none()
-        if authority is None:
-            raise RuntimeError("Model metadata source authority does not exist.")
-        return authority
+        return result.scalar_one_or_none()
 
-    async def publish_snapshot(
-        self,
-        session: AsyncSession,
-        *,
-        authority: RDBModelMetadataSource,
-        attempt_id: str,
-        source_kind: ModelMetadataSourceKind,
-        source_schema_version: str,
-        source_url: str,
-        source_hash: str,
-        producer_name: str,
-        producer_version: str,
-        provider_count: int,
-        model_count: int,
-        payload: CatalogSourcePayload,
-        finished_at: datetime.datetime,
-        diagnostics: dict[str, Any],
-    ) -> ModelMetadataSourceSnapshot | None:
-        """Publish a snapshot only while the attempt remains current."""
-        if authority.latest_attempt_id != attempt_id:
-            return None
-        result = await session.execute(
-            insert(RDBModelMetadataSourceSnapshot)
-            .values(
-                id=uuid7().hex,
-                source_key=authority.source_key,
-                source_kind=source_kind,
-                source_schema_version=source_schema_version,
-                source_url=source_url,
-                source_hash=source_hash,
-                producer_name=producer_name,
-                producer_version=producer_version,
-                provider_count=provider_count,
-                model_count=model_count,
-                payload=payload.model_dump(mode="json"),
-            )
-            .on_conflict_do_nothing(
-                index_elements=[
-                    "source_key",
-                    "source_schema_version",
-                    "source_hash",
-                ]
-            )
-            .returning(RDBModelMetadataSourceSnapshot)
-        )
-        snapshot = result.scalar_one_or_none()
-        if snapshot is None:
-            snapshot_result = await session.execute(
-                sa.select(RDBModelMetadataSourceSnapshot).where(
-                    RDBModelMetadataSourceSnapshot.source_key == authority.source_key,
-                    RDBModelMetadataSourceSnapshot.source_schema_version
-                    == source_schema_version,
-                    RDBModelMetadataSourceSnapshot.source_hash == source_hash,
-                )
-            )
-            snapshot = snapshot_result.scalar_one()
-        authority.current_snapshot_id = snapshot.id
-        await session.execute(
-            sa.update(RDBLLMCatalogSyncAttempt)
-            .where(RDBLLMCatalogSyncAttempt.id == attempt_id)
-            .values(
-                status=LLMCatalogAttemptStatus.SUCCEEDED,
-                finished_at=finished_at,
-                produced_snapshot_id=snapshot.id,
-                fetched_count=model_count,
-                matched_count=model_count,
-                skipped_count=0,
-                hidden_count=0,
-                diagnostics=diagnostics,
-            )
+    async def begin_sync(
+        self, session: AsyncSession, *, source_key: str, started_at: datetime.datetime
+    ) -> str:
+        await self.ensure_authority(session, source_key=source_key)
+        owner = await self.lock_authority(session, source_key=source_key)
+        if owner is None:
+            raise RuntimeError("Current source authority was not found.")
+        token = start_sync(
+            owner, work_token=None, started_at=started_at, diagnostics=None
         )
         await session.flush()
-        return self._build_snapshot(snapshot)
+        return token
 
-    async def fail_attempt(
+    async def get_current(
+        self, session: AsyncSession, *, source_key: str
+    ) -> ModelMetadataSource | None:
+        """Maintenance-only complete view; owner lock makes all rows coherent."""
+        owner = await self.lock_authority(session, source_key=source_key, shared=True)
+        if owner is None or owner.last_success_at is None:
+            return None
+        self._validate_owner(owner)
+        if owner.source_url is None or owner.producer_name is None:
+            raise ValueError("Published source provenance is incomplete.")
+        result = await session.execute(
+            sa.select(RDBModelMetadataSourceModel)
+            .where(RDBModelMetadataSourceModel.source_key == source_key)
+            .order_by(
+                RDBModelMetadataSourceModel.provider,
+                RDBModelMetadataSourceModel.source_model_key,
+            )
+            .execution_options(populate_existing=True)
+        )
+        models = tuple(self._build_model(row) for row in result.scalars())
+        payload = CatalogSourcePayload(
+            schema_version=CATALOG_SOURCE_SCHEMA_VERSION,
+            interpreter_version="1",
+            models=tuple(row.model for row in models),
+        )
+        if (
+            payload.model_count != owner.model_count
+            or payload.provider_count != owner.provider_count
+        ):
+            raise ValueError("Current source counts and model facts disagree.")
+        return ModelMetadataSource(
+            source_key=owner.source_key,
+            source_kind=owner.source_kind,
+            source_schema_version=owner.source_schema_version,
+            source_url=owner.source_url,
+            producer_name=owner.producer_name,
+            producer_version=owner.producer_version,
+            provider_count=owner.provider_count,
+            model_count=owner.model_count,
+            collected_at=owner.last_success_at,
+            payload=payload,
+            models=models,
+        )
+
+    async def get_projection_metadata(
+        self, session: AsyncSession, *, source_key: str
+    ) -> SourceProjectionMetadata | None:
+        owner = await self.lock_authority(session, source_key=source_key, shared=True)
+        if owner is None or owner.last_success_at is None:
+            return None
+        self._validate_owner(owner)
+        return SourceProjectionMetadata(
+            source_key=owner.source_key,
+            source_kind=owner.source_kind,
+            collected_at=owner.last_success_at,
+        )
+
+    async def get_models(
+        self, session: AsyncSession, *, source_key: str, keys: Sequence[tuple[str, str]]
+    ) -> dict[tuple[str, str], CurrentSourceModel]:
+        """Read only exact adopted namespace/key pairs, including missing keys."""
+        if not keys:
+            return {}
+        result = await session.execute(
+            sa.select(RDBModelMetadataSourceModel)
+            .where(
+                RDBModelMetadataSourceModel.source_key == source_key,
+                sa.tuple_(
+                    RDBModelMetadataSourceModel.provider,
+                    RDBModelMetadataSourceModel.source_model_key,
+                ).in_(set(keys)),
+            )
+            .execution_options(populate_existing=True)
+        )
+        return {
+            (row.provider, row.source_model_key): self._build_model(row)
+            for row in result.scalars()
+        }
+
+    async def projection_inputs_match(
         self,
         session: AsyncSession,
         *,
-        attempt_id: str,
+        expected_metadata: SourceProjectionMetadata | None,
+        expectations: Sequence[SourceModelExpectation],
+    ) -> bool:
+        """Compare relevant values/presence, never work tokens or dataset identities."""
+        metadata = await self.get_projection_metadata(
+            session, source_key=CATALOG_SOURCE_KEY
+        )
+        if metadata != expected_metadata:
+            return False
+        expected_by_key: dict[tuple[str, str], CurrentSourceModel | None] = {}
+        for expected in expectations:
+            key = (expected.provider, expected.source_model_key)
+            if key in expected_by_key and expected_by_key[key] != expected.current:
+                raise ValueError(
+                    "Conflicting preparation inputs for an exact source key."
+                )
+            expected_by_key[key] = expected.current
+        actual = await self.get_models(
+            session, source_key=CATALOG_SOURCE_KEY, keys=tuple(expected_by_key)
+        )
+        return all(actual.get(key) == value for key, value in expected_by_key.items())
+
+    async def replace_current(
+        self,
+        session: AsyncSession,
+        *,
+        owner: RDBModelMetadataSource,
+        work_token: str,
+        fetched: FetchedModelMetadataSource,
+        finished_at: datetime.datetime,
+        diagnostics: dict[str, object],
+    ) -> None:
+        """Atomically overwrite incoming exact keys and remove missing current keys."""
+        self._validate_owner(owner)
+        if (
+            fetched.source_kind != CATALOG_SOURCE_KIND
+            or fetched.source_schema_version != CATALOG_SOURCE_SCHEMA_VERSION
+        ):
+            raise ValueError("Source collection uses an incompatible contract.")
+        if (
+            tuple(row.model for row in fetched.models) != fetched.payload.models
+            or fetched.model_count != fetched.payload.model_count
+            or fetched.provider_count != fetched.payload.provider_count
+        ):
+            raise ValueError("Prepared source rows and validated collection disagree.")
+        keys: set[tuple[str, str]] = set()
+        for row in fetched.models:
+            key = (row.model.provider, row.model.source_key)
+            if (
+                key in keys
+                or row.collected_at != fetched.collected_at
+                or row.pricing.collected_at != fetched.collected_at
+                or row.pricing.source_key != owner.source_key
+                or row.pricing.source_model_key != row.model.source_key
+            ):
+                raise ValueError(
+                    "Prepared source identity or pricing provenance disagrees."
+                )
+            keys.add(key)
+        existing_result = await session.execute(
+            sa.select(
+                RDBModelMetadataSourceModel.provider,
+                RDBModelMetadataSourceModel.source_model_key,
+            )
+            .where(RDBModelMetadataSourceModel.source_key == owner.source_key)
+            .with_for_update()
+        )
+        obsolete = sorted(
+            {(row.provider, row.source_model_key) for row in existing_result} - keys
+        )
+        for start in range(0, len(fetched.models), _ROW_BATCH_SIZE):
+            rows = fetched.models[start : start + _ROW_BATCH_SIZE]
+            statement = insert(RDBModelMetadataSourceModel).values(
+                [
+                    {
+                        "source_key": owner.source_key,
+                        "provider": row.model.provider,
+                        "source_model_key": row.model.source_key,
+                        "model_data": row.model.model_dump(mode="json"),
+                        "pricing": row.pricing.model_dump(mode="json"),
+                        "collected_at": row.collected_at,
+                    }
+                    for row in rows
+                ]
+            )
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=["source_key", "provider", "source_model_key"],
+                    set_={
+                        "model_data": statement.excluded.model_data,
+                        "pricing": statement.excluded.pricing,
+                        "collected_at": statement.excluded.collected_at,
+                    },
+                )
+            )
+        for start in range(0, len(obsolete), _ROW_BATCH_SIZE):
+            await session.execute(
+                sa.delete(RDBModelMetadataSourceModel).where(
+                    RDBModelMetadataSourceModel.source_key == owner.source_key,
+                    sa.tuple_(
+                        RDBModelMetadataSourceModel.provider,
+                        RDBModelMetadataSourceModel.source_model_key,
+                    ).in_(obsolete[start : start + _ROW_BATCH_SIZE]),
+                )
+            )
+        owner.source_url = fetched.source_url
+        owner.producer_name = fetched.producer_name
+        owner.producer_version = fetched.producer_version
+        owner.provider_count = fetched.provider_count
+        owner.model_count = fetched.model_count
+        owner.last_success_at = fetched.collected_at
+        succeed_sync(
+            owner,
+            work_token=work_token,
+            finished_at=finished_at,
+            fetched_count=fetched.model_count,
+            matched_count=fetched.model_count,
+            skipped_count=0,
+            hidden_count=0,
+            diagnostics=diagnostics,
+        )
+        await session.flush()
+
+    async def fail_sync(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+        work_token: str,
         finished_at: datetime.datetime,
         failure_code: str,
         failure_message: str,
-        action_hint: str,
-        fetched_count: int,
-        diagnostics: dict[str, Any],
-    ) -> None:
-        """Record one source synchronization failure."""
-        await session.execute(
-            sa.update(RDBLLMCatalogSyncAttempt)
-            .where(RDBLLMCatalogSyncAttempt.id == attempt_id)
-            .values(
-                status=LLMCatalogAttemptStatus.FAILED,
-                finished_at=finished_at,
-                failure_code=failure_code,
-                failure_message=failure_message,
-                action_hint=action_hint,
-                fetched_count=fetched_count,
-                matched_count=0,
-                skipped_count=fetched_count,
-                hidden_count=0,
-                diagnostics=diagnostics,
-            )
+        action_hint: str | None,
+        diagnostics: dict[str, object],
+    ) -> bool:
+        owner = await self.lock_authority(session, source_key=source_key)
+        if owner is None:
+            return False
+        changed = fail_sync(
+            owner,
+            work_token=work_token,
+            finished_at=finished_at,
+            failure_code=failure_code,
+            failure_message=failure_message,
+            action_hint=action_hint,
+            diagnostics=diagnostics,
         )
         await session.flush()
+        return changed
 
-    async def get_current(
-        self,
-        session: AsyncSession,
-        *,
-        source_key: str,
-    ) -> ModelMetadataSourceSnapshot | None:
-        """Return the explicitly selected current source snapshot."""
-        result = await session.execute(
-            sa.select(RDBModelMetadataSourceSnapshot)
-            .join(
-                RDBModelMetadataSource,
-                RDBModelMetadataSource.current_snapshot_id
-                == RDBModelMetadataSourceSnapshot.id,
-            )
-            .where(RDBModelMetadataSource.source_key == source_key)
-        )
-        snapshot = result.scalar_one_or_none()
-        return self._build_snapshot(snapshot) if snapshot is not None else None
+    async def get_sync_status(
+        self, session: AsyncSession, *, source_key: str
+    ) -> LLMCatalogSyncStatus | None:
+        owner = await self.lock_authority(session, source_key=source_key, shared=True)
+        return None if owner is None else current_sync_status(owner)
 
-    async def get_latest_attempt(
-        self,
-        session: AsyncSession,
-        *,
-        source_key: str,
-    ) -> ModelMetadataSourceAttempt | None:
-        """Return the attempt selected by the source authority."""
-        result = await session.execute(
-            sa.select(RDBLLMCatalogSyncAttempt)
-            .join(
-                RDBModelMetadataSource,
-                RDBModelMetadataSource.latest_attempt_id == RDBLLMCatalogSyncAttempt.id,
-            )
-            .where(RDBModelMetadataSource.source_key == source_key)
+    async def capture_for_context(
+        self, session: AsyncSession, *, requests: Sequence[ContextModelRequest]
+    ) -> CapturedContextSource:
+        """Project only requested maxima; never load model payloads or price rules."""
+        if not requests:
+            return CapturedContextSource(models=())
+        owner = await self.lock_authority(
+            session, source_key=CATALOG_SOURCE_KEY, shared=True
         )
-        attempt = result.scalar_one_or_none()
-        return self._build_attempt(attempt) if attempt is not None else None
+        if owner is None or owner.last_success_at is None:
+            return CapturedContextSource(
+                models=tuple(
+                    ContextModelMetadata(
+                        provider=request.provider,
+                        model_identifier=request.model_identifier,
+                        max_input_tokens=None,
+                    )
+                    for request in requests
+                )
+            )
+        self._validate_owner(owner)
+        request_keys = {
+            request: catalog_source_keys(
+                provider=request.provider, model_identifier=request.model_identifier
+            )
+            for request in requests
+        }
+        keys = {
+            (key.provider, key.source_model_key)
+            for values in request_keys.values()
+            for key in values
+        }
+        maxima: dict[tuple[str, str], int | None] = {}
+        if keys:
+            result = await session.execute(
+                sa.select(
+                    RDBModelMetadataSourceModel.provider,
+                    RDBModelMetadataSourceModel.source_model_key,
+                    sa.cast(
+                        RDBModelMetadataSourceModel.model_data["facts"][
+                            "max_input_tokens"
+                        ]["value"].astext,
+                        sa.BigInteger,
+                    ).label("maximum"),
+                ).where(
+                    RDBModelMetadataSourceModel.source_key == CATALOG_SOURCE_KEY,
+                    sa.tuple_(
+                        RDBModelMetadataSourceModel.provider,
+                        RDBModelMetadataSourceModel.source_model_key,
+                    ).in_(keys),
+                )
+            )
+            maxima = {
+                (row.provider, row.source_model_key): row.maximum for row in result
+            }
+        models: list[ContextModelMetadata] = []
+        for request in requests:
+            found = [
+                maxima[(key.provider, key.source_model_key)]
+                for key in request_keys[request]
+                if (key.provider, key.source_model_key) in maxima
+            ]
+            if len(found) > 1:
+                raise CatalogIdentityError("Conflicting canonical catalog identities.")
+            maximum = found[0] if found else None
+            models.append(
+                ContextModelMetadata(
+                    provider=request.provider,
+                    model_identifier=request.model_identifier,
+                    max_input_tokens=maximum
+                    if maximum is not None and maximum > 0
+                    else None,
+                )
+            )
+        return CapturedContextSource(models=tuple(models))
 
     @staticmethod
-    def _build_snapshot(
-        snapshot: RDBModelMetadataSourceSnapshot,
-    ) -> ModelMetadataSourceSnapshot:
+    def _validate_owner(owner: RDBModelMetadataSource) -> None:
         if (
-            snapshot.source_key != CATALOG_SOURCE_KEY
-            or snapshot.source_kind != CATALOG_SOURCE_KIND
-            or snapshot.source_schema_version != CATALOG_SOURCE_SCHEMA_VERSION
+            owner.source_key != CATALOG_SOURCE_KEY
+            or owner.source_kind != CATALOG_SOURCE_KIND
+            or owner.source_schema_version != CATALOG_SOURCE_SCHEMA_VERSION
         ):
-            raise ValueError("The selected model source uses an unsupported contract.")
-        payload = CatalogSourcePayload.model_validate_json(
-            json.dumps(snapshot.payload, allow_nan=False)
-        )
-        if (
-            payload.content_hash != snapshot.source_hash
-            or payload.model_count != snapshot.model_count
-            or payload.provider_count != snapshot.provider_count
-        ):
-            raise ValueError("Stored model source content and provenance disagree.")
-        return ModelMetadataSourceSnapshot(
-            id=snapshot.id,
-            source_key=snapshot.source_key,
-            source_kind=snapshot.source_kind,
-            source_schema_version=snapshot.source_schema_version,
-            source_url=snapshot.source_url,
-            source_hash=snapshot.source_hash,
-            producer_name=snapshot.producer_name,
-            producer_version=snapshot.producer_version,
-            provider_count=snapshot.provider_count,
-            model_count=snapshot.model_count,
-            payload=payload,
-            created_at=snapshot.created_at,
-        )
+            raise ValueError("Current source owner uses an incompatible contract.")
 
     @staticmethod
-    def _build_attempt(
-        attempt: RDBLLMCatalogSyncAttempt,
-    ) -> ModelMetadataSourceAttempt:
-        return ModelMetadataSourceAttempt(
-            id=attempt.id,
-            source_key=attempt.source_key,
-            status=attempt.status,
-            started_at=attempt.started_at,
-            finished_at=attempt.finished_at,
-            produced_snapshot_id=attempt.produced_snapshot_id,
-            failure_code=attempt.failure_code,
-            failure_message=attempt.failure_message,
-            action_hint=attempt.action_hint,
-            fetched_count=attempt.fetched_count,
-            diagnostics=attempt.diagnostics,
+    def _build_model(row: RDBModelMetadataSourceModel) -> CurrentSourceModel:
+        model = CatalogSourceModel.model_validate_json(
+            json.dumps(row.model_data, allow_nan=False)
+        )
+        pricing = ModelPricingDefinition.model_validate(row.pricing)
+        if (
+            model.provider != row.provider
+            or model.source_key != row.source_model_key
+            or pricing.source_key != row.source_key
+            or pricing.source_model_key != row.source_model_key
+            or pricing.collected_at != row.collected_at
+        ):
+            raise ValueError("Current source facts and pricing provenance disagree.")
+        return CurrentSourceModel(
+            model=model, pricing=pricing, collected_at=row.collected_at
         )

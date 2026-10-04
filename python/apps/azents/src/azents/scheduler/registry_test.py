@@ -127,7 +127,7 @@ async def test_system_catalog_handler_publishes_replacement_authority() -> None:
             SystemCatalogProjectionSummary(
                 provider=LLMProvider.OPENAI,
                 catalog_id="catalog-id",
-                snapshot_id="snapshot-id",
+                last_success_at=None,
                 visible_count=3,
                 hidden_count=2,
             )
@@ -150,7 +150,7 @@ async def test_system_catalog_handler_publishes_replacement_authority() -> None:
         {
             "provider": "openai",
             "catalog_id": "catalog-id",
-            "snapshot_id": "snapshot-id",
+            "last_success_at": None,
             "visible_count": 3,
             "hidden_count": 2,
         }

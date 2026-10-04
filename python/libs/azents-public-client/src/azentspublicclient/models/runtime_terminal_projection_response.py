@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from azentspublicclient.models.runtime_terminal_denied_scope import RuntimeTerminalDeniedScope
 from azentspublicclient.models.runtime_terminal_reason_code import RuntimeTerminalReasonCode
 from azentspublicclient.models.runtime_terminal_summary_response import RuntimeTerminalSummaryResponse
@@ -35,7 +35,6 @@ class RuntimeTerminalProjectionResponse(BaseModel):
     can_start_runtime: StrictBool
     can_open_or_attach: StrictBool
     terminal: Optional[RuntimeTerminalSummaryResponse]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["state", "reason_code", "denied_scope", "can_start_runtime", "can_open_or_attach", "terminal"]
 
     model_config = ConfigDict(
@@ -68,10 +67,8 @@ class RuntimeTerminalProjectionResponse(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -82,11 +79,6 @@ class RuntimeTerminalProjectionResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of terminal
         if self.terminal:
             _dict['terminal'] = self.terminal.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if reason_code (nullable) is None
         # and model_fields_set contains the field
         if self.reason_code is None and "reason_code" in self.model_fields_set:
@@ -121,11 +113,6 @@ class RuntimeTerminalProjectionResponse(BaseModel):
             "can_open_or_attach": obj.get("can_open_or_attach"),
             "terminal": RuntimeTerminalSummaryResponse.from_dict(obj["terminal"]) if obj.get("terminal") is not None else None
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

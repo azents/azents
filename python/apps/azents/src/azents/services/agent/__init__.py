@@ -47,7 +47,7 @@ from azents.repos.agent_operations import (
     AgentOperationWorkspaceMismatch,
     AgentRuntimeProfileSelectionChange,
 )
-from azents.repos.model_metadata_source_data import ModelMetadataSourceSnapshot
+from azents.repos.model_metadata_source_data import CapturedContextSource
 from azents.services.image_generation_catalog import ImageGenerationCatalogService
 from azents.services.llm_catalog import ModelCatalogReadService
 from azents.services.model_metadata import ModelMetadataService
@@ -1025,21 +1025,16 @@ class AgentService:
 
     async def _capture_context_source(
         self, agents: list[Agent]
-    ) -> ModelMetadataSourceSnapshot | None:
-        """Share one local source read across models and Agents needing fallback."""
-        capability_maximums: list[int | None] = []
+    ) -> CapturedContextSource | None:
+        """Share one narrow read across selected models needing a maximum."""
+        selections: list[AgentModelSelection] = []
         for agent in agents:
             selected_labels = {agent.main_model_label, agent.lightweight_model_label}
             for option in agent.selectable_model_options:
                 if option.label in selected_labels:
-                    capabilities = option.candidates[
-                        0
-                    ].model_selection.normalized_capabilities
-                    capability_maximums.append(
-                        capabilities.context_window.max_input_tokens
-                    )
+                    selections.append(option.candidates[0].model_selection)
         return await self.model_metadata_service.capture_for_context(
-            capability_maximums=capability_maximums
+            requests=self.model_metadata_service.context_requests(selections)
         )
 
     async def _build_output(
@@ -1047,7 +1042,7 @@ class AgentService:
         agent: Agent,
         *,
         can_manage: bool,
-        source_snapshot: ModelMetadataSourceSnapshot | None,
+        source_snapshot: CapturedContextSource | None,
     ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
@@ -1118,7 +1113,7 @@ class AgentService:
         self,
         agent: Agent,
         *,
-        source_snapshot: ModelMetadataSourceSnapshot | None,
+        source_snapshot: CapturedContextSource | None,
     ) -> EffectiveContextWindow | None:
         """Calculate effective context window using same criteria as Runtime."""
         option_by_label = {

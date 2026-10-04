@@ -34,7 +34,6 @@ class RuntimeNetworkProjection(BaseModel):
     domain_mode: Optional[RuntimeProxyDomainMode]
     allowed_domains: List[StrictStr]
     denied_domains: List[StrictStr]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["mode", "allowed_cidrs", "denied_cidrs", "domain_mode", "allowed_domains", "denied_domains"]
 
     model_config = ConfigDict(
@@ -67,10 +66,8 @@ class RuntimeNetworkProjection(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -78,11 +75,6 @@ class RuntimeNetworkProjection(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if domain_mode (nullable) is None
         # and model_fields_set contains the field
         if self.domain_mode is None and "domain_mode" in self.model_fields_set:
@@ -107,11 +99,6 @@ class RuntimeNetworkProjection(BaseModel):
             "allowed_domains": obj.get("allowed_domains"),
             "denied_domains": obj.get("denied_domains")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

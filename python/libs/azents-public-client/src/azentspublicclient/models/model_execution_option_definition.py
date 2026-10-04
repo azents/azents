@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.model_execution_option_id import ModelExecutionOptionId
 from typing import Optional, Set
@@ -34,7 +34,6 @@ class ModelExecutionOptionDefinition(BaseModel):
     cost_hint: Annotated[str, Field(min_length=1, strict=True)]
     control: StrictStr
     exclusive_group: Optional[Annotated[str, Field(min_length=1, strict=True)]]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["id", "label", "description", "cost_hint", "control", "exclusive_group"]
 
     @field_validator('control')
@@ -74,10 +73,8 @@ class ModelExecutionOptionDefinition(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -85,11 +82,6 @@ class ModelExecutionOptionDefinition(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if exclusive_group (nullable) is None
         # and model_fields_set contains the field
         if self.exclusive_group is None and "exclusive_group" in self.model_fields_set:
@@ -114,11 +106,6 @@ class ModelExecutionOptionDefinition(BaseModel):
             "control": obj.get("control"),
             "exclusive_group": obj.get("exclusive_group")
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

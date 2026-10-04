@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.kubernetes_container_resources import KubernetesContainerResources
 from azentspublicclient.models.kubernetes_din_d_module import KubernetesDinDModule
@@ -41,7 +41,6 @@ class KubernetesPodProfileSpecV3(BaseModel):
     service_account_name: Optional[Annotated[str, Field(strict=True, max_length=253)]]
     scheduling: KubernetesSchedulingModule
     dind: Optional[KubernetesDinDModule]
-    additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["profile_kind", "contract_family", "schema_version", "runner_resources", "workspace_volume", "network_access", "service_account_name", "scheduling", "dind"]
 
     @field_validator('profile_kind')
@@ -95,10 +94,8 @@ class KubernetesPodProfileSpecV3(BaseModel):
         * `None` is only added to the output dict for nullable fields that
           were set at model initialization. Other fields with value `None`
           are ignored.
-        * Fields in `self.additional_properties` are added to the output dict.
         """
         excluded_fields: Set[str] = set([
-            "additional_properties",
         ])
 
         _dict = self.model_dump(
@@ -121,11 +118,6 @@ class KubernetesPodProfileSpecV3(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of dind
         if self.dind:
             _dict['dind'] = self.dind.to_dict()
-        # puts key-value pairs in additional_properties in the top level
-        if self.additional_properties is not None:
-            for _key, _value in self.additional_properties.items():
-                _dict[_key] = _value
-
         # set to None if service_account_name (nullable) is None
         # and model_fields_set contains the field
         if self.service_account_name is None and "service_account_name" in self.model_fields_set:
@@ -158,11 +150,6 @@ class KubernetesPodProfileSpecV3(BaseModel):
             "scheduling": KubernetesSchedulingModule.from_dict(obj["scheduling"]) if obj.get("scheduling") is not None else None,
             "dind": KubernetesDinDModule.from_dict(obj["dind"]) if obj.get("dind") is not None else None
         })
-        # store additional fields in additional_properties
-        for _key in obj.keys():
-            if _key not in cls.__properties:
-                _obj.additional_properties[_key] = obj.get(_key)
-
         return _obj
 
 

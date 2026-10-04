@@ -39,7 +39,12 @@ class TestChatInputWriteRequest(unittest.TestCase):
                 client_request_id = '0',
                 message = '',
                 action = None,
-                inference_profile = { },
+                inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], ),
                 attachments = [
                     ''
                     ]
@@ -49,7 +54,12 @@ class TestChatInputWriteRequest(unittest.TestCase):
                 agent_id = '',
                 client_request_id = '0',
                 message = '',
-                inference_profile = { },
+                inference_profile = azentspublicclient.models.requested_inference_profile.RequestedInferenceProfile(
+                    model_target_label = '0', 
+                    reasoning_effort = '', 
+                    enabled_execution_options = [
+                        'fast'
+                        ], ),
         )
         """
 

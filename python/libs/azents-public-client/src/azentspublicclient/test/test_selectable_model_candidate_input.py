@@ -35,12 +35,23 @@ class TestSelectableModelCandidateInput(unittest.TestCase):
         model = SelectableModelCandidateInput()
         if include_optional:
             return SelectableModelCandidateInput(
-                model_selection = { },
-                settings = { }
+                model_selection = azentspublicclient.models.agent_model_selection_input.AgentModelSelectionInput(
+                    llm_provider_integration_id = '', 
+                    model_identifier = '', ),
+                settings = azentspublicclient.models.selectable_model_settings_input.SelectableModelSettingsInput(
+                    context_window_tokens = 1.0, 
+                    max_output_tokens = 1.0, 
+                    builtin_tools = [
+                        azentspublicclient.models.builtin_tool_config.BuiltinToolConfig(
+                            name = '', 
+                            config = azentspublicclient.models.config.Config(), )
+                        ], )
             )
         else:
             return SelectableModelCandidateInput(
-                model_selection = { },
+                model_selection = azentspublicclient.models.agent_model_selection_input.AgentModelSelectionInput(
+                    llm_provider_integration_id = '', 
+                    model_identifier = '', ),
         )
         """
 

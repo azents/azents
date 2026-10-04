@@ -17,29 +17,45 @@ import pprint
 import re  # noqa: F401
 import json
 
-from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from azentspublicclient.models.price_metric import PriceMetric
+from azentspublicclient.models.price_tier import PriceTier
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ModelCatalogSyncAttemptResponse(BaseModel):
+class CatalogPriceRate(BaseModel):
     """
-    Latest model catalog sync attempt response.
+    A whole-quantity tariff, not a progressive marginal bracket.
     """ # noqa: E501
-    id: StrictStr
-    status: StrictStr
-    started_at: datetime
-    finished_at: Optional[datetime]
-    failure_code: Optional[StrictStr]
-    failure_message: Optional[StrictStr]
-    action_hint: Optional[StrictStr]
-    fetched_count: StrictInt
-    matched_count: StrictInt
-    skipped_count: StrictInt
-    hidden_count: StrictInt
+    metric: PriceMetric
+    tier: Optional[PriceTier]
+    above_input_tokens: Optional[StrictInt]
+    usd_per_unit: Optional[Annotated[str, Field(strict=True)]]
+    search_context_size: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "status", "started_at", "finished_at", "failure_code", "failure_message", "action_hint", "fetched_count", "matched_count", "skipped_count", "hidden_count"]
+    __properties: ClassVar[List[str]] = ["metric", "tier", "above_input_tokens", "usd_per_unit", "search_context_size"]
+
+    @field_validator('usd_per_unit')
+    def usd_per_unit_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if value is None:
+            return value
+
+        if not re.match(r"^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$", value):
+            raise ValueError(r"must validate the regular expression /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/")
+        return value
+
+    @field_validator('search_context_size')
+    def search_context_size_validate_enum(cls, value):
+        """Validates the enum"""
+        if value is None:
+            return value
+
+        if value not in set(['low', 'medium', 'high']):
+            raise ValueError("must be one of enum values ('low', 'medium', 'high')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -59,7 +75,7 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ModelCatalogSyncAttemptResponse from a JSON string"""
+        """Create an instance of CatalogPriceRate from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -87,31 +103,31 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if finished_at (nullable) is None
+        # set to None if tier (nullable) is None
         # and model_fields_set contains the field
-        if self.finished_at is None and "finished_at" in self.model_fields_set:
-            _dict['finished_at'] = None
+        if self.tier is None and "tier" in self.model_fields_set:
+            _dict['tier'] = None
 
-        # set to None if failure_code (nullable) is None
+        # set to None if above_input_tokens (nullable) is None
         # and model_fields_set contains the field
-        if self.failure_code is None and "failure_code" in self.model_fields_set:
-            _dict['failure_code'] = None
+        if self.above_input_tokens is None and "above_input_tokens" in self.model_fields_set:
+            _dict['above_input_tokens'] = None
 
-        # set to None if failure_message (nullable) is None
+        # set to None if usd_per_unit (nullable) is None
         # and model_fields_set contains the field
-        if self.failure_message is None and "failure_message" in self.model_fields_set:
-            _dict['failure_message'] = None
+        if self.usd_per_unit is None and "usd_per_unit" in self.model_fields_set:
+            _dict['usd_per_unit'] = None
 
-        # set to None if action_hint (nullable) is None
+        # set to None if search_context_size (nullable) is None
         # and model_fields_set contains the field
-        if self.action_hint is None and "action_hint" in self.model_fields_set:
-            _dict['action_hint'] = None
+        if self.search_context_size is None and "search_context_size" in self.model_fields_set:
+            _dict['search_context_size'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ModelCatalogSyncAttemptResponse from a dict"""
+        """Create an instance of CatalogPriceRate from a dict"""
         if obj is None:
             return None
 
@@ -119,17 +135,11 @@ class ModelCatalogSyncAttemptResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
-            "status": obj.get("status"),
-            "started_at": obj.get("started_at"),
-            "finished_at": obj.get("finished_at"),
-            "failure_code": obj.get("failure_code"),
-            "failure_message": obj.get("failure_message"),
-            "action_hint": obj.get("action_hint"),
-            "fetched_count": obj.get("fetched_count"),
-            "matched_count": obj.get("matched_count"),
-            "skipped_count": obj.get("skipped_count"),
-            "hidden_count": obj.get("hidden_count")
+            "metric": obj.get("metric"),
+            "tier": obj.get("tier"),
+            "above_input_tokens": obj.get("above_input_tokens"),
+            "usd_per_unit": obj.get("usd_per_unit"),
+            "search_context_size": obj.get("search_context_size")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

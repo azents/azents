@@ -14,6 +14,7 @@ from azents.core.model_pricing import (
     ModelPricingComponentUsage,
     ModelPricingUnavailableReason,
     ModelPricingUsage,
+    capture_model_pricing,
     estimate_model_cost,
     normalize_model_pricing,
 )
@@ -77,14 +78,16 @@ def _pricing(
             {"selected-exact-id": {"litellm_provider": "openai", **fields}}
         ).encode()
     ).models[0]
-    return normalize_model_pricing(
+    timestamp = timestamp or datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC)
+    return capture_model_pricing(
         provider=LLMProvider.OPENAI,
         model_identifier="selected-exact-id",
-        source_snapshot_id="snapshot-before-stream",
-        source_hash="captured-hash",
-        source_model=source,
-        request_timestamp=timestamp
-        or datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
+        definition=normalize_model_pricing(
+            source_key="litellm_catalog",
+            source_model=source,
+            collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+        ),
+        request_timestamp=timestamp,
     )
 
 
@@ -428,31 +431,18 @@ def test_invalid_required_time_rule_is_unavailable(rule: dict[str, object]) -> N
     assert result.unavailable_reason is ModelPricingUnavailableReason.INVALID_PRICE
 
 
-def test_source_absent_and_mismatched_provider_captures_are_explicit() -> None:
+def test_source_absent_and_unmatched_model_definitions_are_explicit() -> None:
     timestamp = datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC)
-    for snapshot_id, expected in [
+    for source_key, expected in [
         (None, ModelPricingUnavailableReason.SOURCE_UNAVAILABLE),
-        ("s", ModelPricingUnavailableReason.MODEL_UNMATCHED),
+        ("litellm_catalog", ModelPricingUnavailableReason.MODEL_UNMATCHED),
     ]:
         pricing = normalize_model_pricing(
-            provider=LLMProvider.OPENAI,
-            model_identifier="literal",
-            source_snapshot_id=snapshot_id,
-            source_hash="h",
+            source_key=source_key,
             source_model=None,
-            request_timestamp=timestamp,
+            collected_at=timestamp,
         )
         assert pricing.unavailable_reason is expected
-    source = decode_catalog_source(b'{"m":{"litellm_provider":"anthropic"}}').models[0]
-    pricing = normalize_model_pricing(
-        provider=LLMProvider.OPENAI,
-        model_identifier="literal",
-        source_snapshot_id="s",
-        source_hash="h",
-        source_model=source,
-        request_timestamp=timestamp,
-    )
-    assert pricing.unavailable_reason is ModelPricingUnavailableReason.PROVIDER_MISMATCH
 
 
 def test_capture_requires_aware_time_and_preserves_literal_identity() -> None:
@@ -463,19 +453,16 @@ def test_capture_requires_aware_time_and_preserves_literal_identity() -> None:
         _pricing(_prices(), timestamp=datetime.datetime(2026, 10, 2))
 
 
-def test_capture_rejects_a_different_model_in_the_same_provider() -> None:
-    source = decode_catalog_source(
-        b'{"wrong-model":{"litellm_provider":"openai","input_cost_per_token":0}}'
-    ).models[0]
-    captured = normalize_model_pricing(
+def test_missing_saved_definition_stays_unavailable_without_source_fallback() -> None:
+    captured = capture_model_pricing(
         provider=LLMProvider.OPENAI,
         model_identifier="selected-model",
-        source_snapshot_id="s",
-        source_hash="h",
-        source_model=source,
+        definition=None,
         request_timestamp=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
     )
-    assert captured.unavailable_reason is ModelPricingUnavailableReason.MODEL_UNMATCHED
+    assert (
+        captured.unavailable_reason is ModelPricingUnavailableReason.SOURCE_UNAVAILABLE
+    )
     assert captured.rules is None
 
 
@@ -484,12 +471,14 @@ def test_verified_producer_prefix_keeps_execution_identity_literal() -> None:
         b'{"gemini/literal-model":{"litellm_provider":"gemini",'
         b'"input_cost_per_token":0.000001}}'
     ).models[0]
-    captured = normalize_model_pricing(
+    captured = capture_model_pricing(
         provider=LLMProvider.GOOGLE_GEMINI,
         model_identifier="literal-model",
-        source_snapshot_id="s",
-        source_hash="h",
-        source_model=source,
+        definition=normalize_model_pricing(
+            source_key="litellm_catalog",
+            source_model=source,
+            collected_at=datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC),
+        ),
         request_timestamp=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
     )
     assert captured.model_identifier == "literal-model"

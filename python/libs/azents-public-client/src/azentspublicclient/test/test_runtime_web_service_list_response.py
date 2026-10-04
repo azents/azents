@@ -36,14 +36,38 @@ class TestRuntimeWebServiceListResponse(unittest.TestCase):
         if include_optional:
             return RuntimeWebServiceListResponse(
                 items = [
-                    { }
+                    azentspublicclient.models.runtime_web_service_response.RuntimeWebServiceResponse(
+                        id = '012345678910111213141516171819202122232425262728293031', 
+                        port = 1.0, 
+                        label = '', 
+                        url = '', 
+                        configuration_state = 'configured', 
+                        on = True, 
+                        selected_duration_seconds = 3600, 
+                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        revision = 0.0, 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total_count = 0.0
             )
         else:
             return RuntimeWebServiceListResponse(
                 items = [
-                    { }
+                    azentspublicclient.models.runtime_web_service_response.RuntimeWebServiceResponse(
+                        id = '012345678910111213141516171819202122232425262728293031', 
+                        port = 1.0, 
+                        label = '', 
+                        url = '', 
+                        configuration_state = 'configured', 
+                        on = True, 
+                        selected_duration_seconds = 3600, 
+                        expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        revision = 0.0, 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
                 total_count = 0.0,
         )
