@@ -103,7 +103,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-05
-spec_version: 95
+spec_version: 96
 ---
 
 # Agent Runtime Control
@@ -458,7 +458,18 @@ Backend lifecycle policy remains a later infrastructure-owned defense and is not
 Runtime Transfer authorization or startup input.
 
 Cleanup responsibility is `pending` before the first exact external cleanup
-attempt. A handled multipart-abort, completed-object-delete, combined, or
+attempt. Outstanding direct capabilities defer physical cleanup without delaying
+logical terminal settlement or correlation: an owned Direct GET source is protected
+until its admission deadline plus five minutes, and Direct PUT ingress is protected
+until the later of ingress expiry and admission deadline plus five minutes.
+Terminal and stale-stream repair derive the same boundary from retained exact-attempt
+metadata, retain pending responsibility or existing genuine failure evidence, and
+skip external cleanup while protected. Repeated expected deferral emits no per-attempt
+warning or traceback and does not increment cleanup failure evidence; it remains
+observable through the existing aggregate repair observation. The object-store
+boundary independently signals typed expected deferral instead of cleanup success.
+At the exact safe time, ordinary idempotent cleanup becomes eligible.
+A handled multipart-abort, completed-object-delete, combined, or
 preparation cleanup failure changes it to `retryable_failure` with bounded latest
 evidence. Each later failed repair updates the observation and saturating attempt
 count; successful cleanup clears the evidence and marks cleanup complete. The
@@ -1251,6 +1262,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-10-05** (spec_version 96) — Distinguished expected direct-capability
+  cleanup deferral from genuine failure in terminal and stale-stream repair,
+  preserving read/write grace, exact cleanup identity, and real failure diagnostics.
 - **2026-10-05** (spec_version 95) — Separated Runtime, Runner, binding and worktree
   descriptions from actual mutation fences; retained captured removal/decommission
   attempts, exact resource acknowledgements, recreation targets and path overlap.
