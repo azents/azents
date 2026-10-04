@@ -32,7 +32,7 @@ from azents.repos.historical_memory_consolidation.drafts import (
     check_draft_influence,
 )
 from azents.repos.historical_memory_consolidation.sources import (
-    lock_source,
+    read_source,
     record_evidence,
     source_predicate,
 )
@@ -174,7 +174,7 @@ class ConsolidationWorkRepository:
             )
             entries: list[ConsolidationWorkEntry] = []
             for row in rows[:limit]:
-                source = await lock_source(
+                source = await read_source(
                     session, key=principal.unit, source_session_id=row.source_session_id
                 )
                 if (

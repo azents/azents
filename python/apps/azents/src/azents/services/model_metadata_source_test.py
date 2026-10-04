@@ -80,6 +80,7 @@ def _service(
     return ModelMetadataSourceSyncService(
         operations=ModelMetadataSourceOperations(
             session_manager=manager,
+            read_session_manager=manager,
             repository=ModelMetadataSourceRepository(),
             catalog_repository=LLMCatalogRepository(),
         ),
@@ -241,6 +242,7 @@ async def test_local_projection_failure_preserves_data_and_truthful_summary(
     system_service = SystemCatalogProjectionService(
         operations=LLMCatalogOperationsRepository(
             session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
             catalog_repository=repository,
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
             source_repository=ModelMetadataSourceRepository(),

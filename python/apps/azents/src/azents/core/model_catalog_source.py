@@ -242,7 +242,9 @@ class CatalogSourcePayload(_FrozenModel):
     @model_validator(mode="after")
     def validate_identities(self) -> CatalogSourcePayload:
         """Reject ambiguous exact identities, including restored current rows."""
-        if not 0 < len(self.models) <= _MAX_MODELS:
+        # Current-storage reads can observe a successfully published empty set.
+        # External transport decoding still rejects empty downloads independently.
+        if not 0 <= len(self.models) <= _MAX_MODELS:
             raise ValueError("Source must contain bounded model records.")
         identities = [(model.provider, model.source_key) for model in self.models]
         if len(identities) != len(set(identities)):

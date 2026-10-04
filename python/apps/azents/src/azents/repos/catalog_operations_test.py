@@ -141,6 +141,7 @@ async def test_picker_bundles_local_capture_before_finishing_the_same_transactio
     catalogs.projection_version.return_value = None
     operations = LLMCatalogOperationsRepository(
         session_manager=transactions,
+        read_session_manager=transactions,
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=AsyncMock(spec=ModelMetadataSourceRepository),
@@ -235,6 +236,7 @@ async def test_prepared_source_change_rejects_before_any_catalog_write() -> None
     sources.projection_inputs_match.return_value = False
     operations = LLMCatalogOperationsRepository(
         session_manager=transactions,
+        read_session_manager=transactions,
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=sources,
@@ -273,6 +275,7 @@ async def test_credential_change_rejects_old_discovery_even_with_current_work() 
     sources.projection_inputs_match.return_value = True
     operations = LLMCatalogOperationsRepository(
         session_manager=transactions,
+        read_session_manager=transactions,
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=sources,
@@ -315,6 +318,7 @@ async def test_failed_current_write_exits_through_rollback() -> None:
     sources.projection_inputs_match.return_value = True
     operations = LLMCatalogOperationsRepository(
         session_manager=transactions,
+        read_session_manager=transactions,
         catalog_repository=catalogs,
         integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
         source_repository=sources,
@@ -358,6 +362,7 @@ async def test_source_work_token_is_not_source_freshness_authority() -> None:
     sources.get_current.return_value = changed
     operations = ModelMetadataSourceOperations(
         session_manager=transactions,
+        read_session_manager=transactions,
         repository=sources,
         catalog_repository=AsyncMock(spec=LLMCatalogRepository),
     )
@@ -403,7 +408,10 @@ async def test_atomic_system_lease_check_does_not_reclaim_unexpired_work() -> No
     ]
     transactions.raw_session.execute.return_value = records
     operations = ModelMetadataSourceOperations(
-        session_manager=transactions, repository=sources, catalog_repository=catalogs
+        session_manager=transactions,
+        read_session_manager=transactions,
+        repository=sources,
+        catalog_repository=catalogs,
     )
     outcome = await operations.begin_sync(
         started_at=_NOW + datetime.timedelta(minutes=1)
@@ -496,6 +504,7 @@ async def test_only_expired_system_lease_is_reclaimed_by_combined_work() -> None
     catalogs.lock_catalog.side_effect = lock_owner
     operations = ModelMetadataSourceOperations(
         session_manager=transactions,
+        read_session_manager=transactions,
         repository=sources,
         catalog_repository=catalogs,
     )

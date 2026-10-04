@@ -108,6 +108,22 @@ class LLMCatalogRepository:
         )
         return result.scalar_one()
 
+    async def read_integration(
+        self,
+        session: ReadSession,
+        *,
+        integration_id: str,
+        workspace_id: str,
+    ) -> RDBLLMProviderIntegration | None:
+        return await session.read_session.scalar(
+            sa.select(RDBLLMProviderIntegration)
+            .where(
+                RDBLLMProviderIntegration.id == integration_id,
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+
     async def lock_integration(
         self,
         session: WriteSession,
@@ -488,154 +504,143 @@ class LLMCatalogRepository:
 
     async def get_selectable_entries_for_identities(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         identities: Sequence[ConfiguredModelIdentity],
     ) -> dict[ConfiguredModelIdentity, CatalogEntryWithCatalog]:
-        """Read exact choices in bulk, locking current owners in stable ID order."""
-        integrations = {}
-        for integration_id in sorted(
-            {identity.integration_id for identity in identities}
-        ):
-            integration = await self.lock_integration(
-                session,
-                integration_id=integration_id,
-                workspace_id=workspace_id,
-                shared=True,
-            )
-            if integration is not None:
-                integrations[integration_id] = integration
-        authorized = tuple(
-            identity
-            for identity in identities
-            if identity.integration_id in integrations
-            and integrations[identity.integration_id].provider == identity.provider
-        )
-        if not authorized:
+        """Observe exact scoped owner/entry pairs without exclusion locks."""
+        if not identities:
             return {}
-        system_providers = {
-            identity.provider
-            for identity in authorized
-            if identity.provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS
-        }
-        owners_result = await session.write_session.execute(
-            sa.select(RDBLLMCatalog)
-            .where(
-                RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
-                sa.or_(
-                    RDBLLMCatalog.provider_integration_id.in_(integrations),
-                    sa.and_(
-                        RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
-                        RDBLLMCatalog.provider.in_(system_providers),
+        result = await session.read_session.execute(
+            sa.select(RDBLLMProviderIntegration.id, RDBLLMCatalog, RDBLLMCatalogEntry)
+            .select_from(RDBLLMProviderIntegration)
+            .join(
+                RDBLLMCatalog,
+                sa.and_(
+                    RDBLLMCatalog.provider == RDBLLMProviderIntegration.provider,
+                    RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
+                    sa.or_(
+                        RDBLLMCatalog.provider_integration_id
+                        == RDBLLMProviderIntegration.id,
+                        sa.and_(
+                            RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
+                            RDBLLMProviderIntegration.provider.not_in(
+                                INTEGRATION_SCOPED_CATALOG_PROVIDERS
+                            ),
+                        ),
                     ),
                 ),
             )
-            .order_by(RDBLLMCatalog.id)
-            .with_for_update(read=True)
-            .execution_options(populate_existing=True)
-        )
-        owners = list(owners_result.scalars())
-        exact_owners = {}
-        for identity in authorized:
-            owner = next(
-                (
-                    item
-                    for item in owners
-                    if item.provider == identity.provider
-                    and item.provider_integration_id == identity.integration_id
-                ),
-                None,
-            )
-            if owner is None and identity.provider in system_providers:
-                owner = next(
-                    (
-                        item
-                        for item in owners
-                        if item.provider == identity.provider
-                        and item.scope == LLMCatalogScope.SYSTEM
+            .outerjoin(
+                RDBLLMCatalogEntry,
+                sa.and_(
+                    RDBLLMCatalogEntry.catalog_id == RDBLLMCatalog.id,
+                    RDBLLMCatalogEntry.provider == RDBLLMCatalog.provider,
+                    RDBLLMCatalogEntry.provider_integration_id.is_not_distinct_from(
+                        RDBLLMCatalog.provider_integration_id
                     ),
-                    None,
-                )
-            if owner is not None:
-                exact_owners[identity] = owner
-        if not exact_owners:
-            return {}
-        rows_result = await session.write_session.execute(
-            sa.select(RDBLLMCatalogEntry)
-            .where(
-                sa.tuple_(
-                    RDBLLMCatalogEntry.catalog_id,
-                    RDBLLMCatalogEntry.provider_model_identifier,
-                ).in_(
-                    {
-                        (owner.id, identity.model_identifier)
-                        for identity, owner in exact_owners.items()
-                    }
+                    RDBLLMCatalogEntry.visibility_status
+                    == LLMCatalogEntryVisibility.SELECTABLE,
+                    sa.tuple_(
+                        RDBLLMProviderIntegration.id,
+                        RDBLLMProviderIntegration.provider,
+                        RDBLLMCatalogEntry.provider_model_identifier,
+                    ).in_(
+                        {
+                            (i.integration_id, i.provider, i.model_identifier)
+                            for i in identities
+                        }
+                    ),
                 ),
-                RDBLLMCatalogEntry.visibility_status
-                == LLMCatalogEntryVisibility.SELECTABLE,
+            )
+            .where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+                RDBLLMProviderIntegration.id.in_(
+                    {i.integration_id for i in identities}
+                ),
             )
             .execution_options(populate_existing=True)
         )
-        rows = {
-            (row.catalog_id, row.provider_model_identifier): row
-            for row in rows_result.scalars()
-        }
-        return {
-            identity: CatalogEntryWithCatalog(
-                catalog=self.build_catalog(owner), entry=self._build_entry(row)
+        rows = result.all()
+        captured: dict[ConfiguredModelIdentity, CatalogEntryWithCatalog] = {}
+        for identity in identities:
+            scoped = [
+                (owner, entry)
+                for integration_id, owner, entry in rows
+                if integration_id == identity.integration_id
+                and owner.provider == identity.provider
+            ]
+            owners = [
+                owner
+                for owner, _ in scoped
+                if owner.provider_integration_id == identity.integration_id
+            ]
+            selected_id = (
+                owners[0].id if owners else (scoped[0][0].id if scoped else None)
             )
-            for identity, owner in exact_owners.items()
-            if (row := rows.get((owner.id, identity.model_identifier))) is not None
-        }
+            for owner, entry in scoped:
+                if (
+                    owner.id == selected_id
+                    and entry is not None
+                    and entry.provider_model_identifier == identity.model_identifier
+                ):
+                    captured[identity] = CatalogEntryWithCatalog(
+                        self.build_catalog(owner), self._build_entry(entry)
+                    )
+        return captured
 
     async def _read_owner_for_integration(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         integration_id: str,
         workspace_id: str,
         purpose: LLMCatalogPurpose,
         require_enabled: bool,
     ) -> RDBLLMCatalog | None:
-        integration = await self.lock_integration(
-            session,
-            integration_id=integration_id,
-            workspace_id=workspace_id,
-            shared=True,
-        )
-        if integration is None or (require_enabled and not integration.enabled):
-            return None
-        result = await session.write_session.execute(
-            sa.select(RDBLLMCatalog.id).where(
-                RDBLLMCatalog.provider_integration_id == integration_id,
+        """Read retained exact integration/catalog authority for description only."""
+        stmt = (
+            sa.select(RDBLLMCatalog)
+            .join(
+                RDBLLMProviderIntegration,
+                sa.and_(
+                    RDBLLMProviderIntegration.provider == RDBLLMCatalog.provider,
+                    sa.or_(
+                        RDBLLMCatalog.provider_integration_id
+                        == RDBLLMProviderIntegration.id,
+                        sa.and_(
+                            RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
+                            RDBLLMProviderIntegration.provider.not_in(
+                                INTEGRATION_SCOPED_CATALOG_PROVIDERS
+                            ),
+                            RDBLLMCatalog.purpose == LLMCatalogPurpose.CONVERSATION,
+                        ),
+                    ),
+                ),
+            )
+            .where(
+                RDBLLMProviderIntegration.id == integration_id,
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
                 RDBLLMCatalog.purpose == purpose,
             )
         )
-        catalog_id = result.scalar_one_or_none()
-        if (
-            catalog_id is None
-            and purpose == LLMCatalogPurpose.CONVERSATION
-            and integration.provider not in INTEGRATION_SCOPED_CATALOG_PROVIDERS
-        ):
-            result = await session.write_session.execute(
-                sa.select(RDBLLMCatalog.id).where(
-                    RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
-                    RDBLLMCatalog.provider == integration.provider,
-                    RDBLLMCatalog.purpose == purpose,
-                )
+        if require_enabled:
+            stmt = stmt.where(RDBLLMProviderIntegration.enabled.is_(True))
+        result = await session.read_session.execute(
+            stmt.order_by(
+                (RDBLLMCatalog.provider_integration_id == integration_id)
+                .desc()
+                .nullslast()
             )
-            catalog_id = result.scalar_one_or_none()
-        return (
-            None
-            if catalog_id is None
-            else await self.lock_catalog(session, catalog_id=catalog_id, shared=True)
+            .limit(1)
+            .execution_options(populate_existing=True)
         )
+        return result.scalar_one_or_none()
 
     async def list_entries_by_integration(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         integration_id: str,
         workspace_id: str,
@@ -665,12 +670,30 @@ class LLMCatalogRepository:
                     RDBLLMCatalogEntry.provider_model_identifier.ilike(f"%{search}%"),
                 )
             )
-        total_result = await session.write_session.execute(
+        total_result = await session.read_session.execute(
             sa.select(sa.func.count()).select_from(RDBLLMCatalogEntry).where(*filters)
         )
-        result = await session.write_session.execute(
-            sa.select(RDBLLMCatalogEntry)
-            .where(*filters)
+        result = await session.read_session.execute(
+            sa.select(RDBLLMCatalog, RDBLLMCatalogEntry)
+            .join(
+                RDBLLMCatalogEntry,
+                sa.and_(
+                    RDBLLMCatalogEntry.catalog_id == RDBLLMCatalog.id,
+                    RDBLLMCatalogEntry.provider == RDBLLMCatalog.provider,
+                    RDBLLMCatalogEntry.provider_integration_id.is_not_distinct_from(
+                        RDBLLMCatalog.provider_integration_id
+                    ),
+                ),
+            )
+            .join(
+                RDBLLMProviderIntegration,
+                RDBLLMProviderIntegration.id == integration_id,
+            )
+            .where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+                RDBLLMProviderIntegration.provider == RDBLLMCatalog.provider,
+                *filters,
+            )
             .order_by(
                 _catalog_entry_freshness_rank().desc().nullslast(),
                 RDBLLMCatalogEntry.display_name,
@@ -680,52 +703,41 @@ class LLMCatalogRepository:
             .offset(offset)
             .execution_options(populate_existing=True)
         )
+        rows = result.all()
         return LLMCatalogEntryList(
-            catalog=self.build_catalog(owner),
-            entries=[self._build_entry(row) for row in result.scalars()],
+            catalog=self.build_catalog(rows[0][0] if rows else owner),
+            entries=[self._build_entry(row) for _, row in rows],
             total=total_result.scalar_one(),
         )
 
     async def get_selectable_entry_by_integration_model(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         integration_id: str,
         workspace_id: str,
         model_identifier: str,
         purpose: LLMCatalogPurpose,
     ) -> CatalogEntryWithCatalog | None:
-        """Copy current exact data/price with existing conversation predicates."""
-        owner = await self._read_owner_for_integration(
-            session,
-            integration_id=integration_id,
-            workspace_id=workspace_id,
-            purpose=purpose,
-            require_enabled=False,
+        integration = await self.read_integration(
+            session, integration_id=integration_id, workspace_id=workspace_id
         )
-        if owner is None:
+        if integration is None:
             return None
-        result = await session.write_session.execute(
-            sa.select(RDBLLMCatalogEntry)
-            .where(
-                RDBLLMCatalogEntry.catalog_id == owner.id,
-                RDBLLMCatalogEntry.provider_model_identifier == model_identifier,
-                RDBLLMCatalogEntry.visibility_status
-                == LLMCatalogEntryVisibility.SELECTABLE,
-            )
-            .execution_options(populate_existing=True)
+        if purpose != LLMCatalogPurpose.CONVERSATION:
+            return None
+        identity = ConfiguredModelIdentity(
+            integration_id=integration_id,
+            provider=integration.provider,
+            model_identifier=model_identifier,
         )
-        row = result.scalar_one_or_none()
-        return (
-            None
-            if row is None
-            else CatalogEntryWithCatalog(
-                catalog=self.build_catalog(owner), entry=self._build_entry(row)
-            )
+        entries = await self.get_selectable_entries_for_identities(
+            session, workspace_id=workspace_id, identities=(identity,)
         )
+        return entries.get(identity)
 
     async def list_image_generation_entries_by_integration(
-        self, session: WriteSession, *, integration_id: str, workspace_id: str
+        self, session: ReadSession, *, integration_id: str, workspace_id: str
     ) -> ImageGenerationCatalogEntryList | None:
         owner = await self._read_owner_for_integration(
             session,
@@ -736,9 +748,25 @@ class LLMCatalogRepository:
         )
         if owner is None:
             return None
-        result = await session.write_session.execute(
-            sa.select(RDBImageGenerationCatalogEntry)
+        result = await session.read_session.execute(
+            sa.select(RDBLLMCatalog, RDBImageGenerationCatalogEntry)
+            .join(
+                RDBImageGenerationCatalogEntry,
+                sa.and_(
+                    RDBImageGenerationCatalogEntry.catalog_id == RDBLLMCatalog.id,
+                    RDBImageGenerationCatalogEntry.provider == RDBLLMCatalog.provider,
+                    RDBImageGenerationCatalogEntry.provider_integration_id.is_not_distinct_from(
+                        RDBLLMCatalog.provider_integration_id
+                    ),
+                ),
+            )
+            .join(
+                RDBLLMProviderIntegration,
+                RDBLLMProviderIntegration.id == integration_id,
+            )
             .where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+                RDBLLMProviderIntegration.provider == RDBLLMCatalog.provider,
                 RDBImageGenerationCatalogEntry.catalog_id == owner.id,
                 RDBImageGenerationCatalogEntry.visibility_status
                 == LLMCatalogEntryVisibility.SELECTABLE,
@@ -750,14 +778,17 @@ class LLMCatalogRepository:
             )
             .execution_options(populate_existing=True)
         )
-        entries = [self._build_image_entry(row) for row in result.scalars()]
+        rows = result.all()
+        if rows:
+            owner = rows[0][0]
+        entries = [self._build_image_entry(row) for _, row in rows]
         return ImageGenerationCatalogEntryList(
             catalog=self.build_catalog(owner), entries=entries, total=len(entries)
         )
 
     async def get_selectable_image_generation_entry(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         integration_id: str,
         workspace_id: str,
@@ -776,9 +807,25 @@ class LLMCatalogRepository:
             or owner.last_success_at is None
         ):
             return None
-        result = await session.write_session.execute(
-            sa.select(RDBImageGenerationCatalogEntry)
+        result = await session.read_session.execute(
+            sa.select(RDBLLMCatalog, RDBImageGenerationCatalogEntry)
+            .join(
+                RDBImageGenerationCatalogEntry,
+                sa.and_(
+                    RDBImageGenerationCatalogEntry.catalog_id == RDBLLMCatalog.id,
+                    RDBImageGenerationCatalogEntry.provider == RDBLLMCatalog.provider,
+                    RDBImageGenerationCatalogEntry.provider_integration_id.is_not_distinct_from(
+                        RDBLLMCatalog.provider_integration_id
+                    ),
+                ),
+            )
+            .join(
+                RDBLLMProviderIntegration,
+                RDBLLMProviderIntegration.id == integration_id,
+            )
             .where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
+                RDBLLMProviderIntegration.provider == RDBLLMCatalog.provider,
                 RDBImageGenerationCatalogEntry.catalog_id == owner.id,
                 RDBImageGenerationCatalogEntry.provider_model_identifier
                 == model_identifier,
@@ -787,7 +834,11 @@ class LLMCatalogRepository:
             )
             .execution_options(populate_existing=True)
         )
-        row = result.scalar_one_or_none()
+        observed = result.one_or_none()
+        if observed is not None:
+            owner, row = observed
+        else:
+            row = None
         return (
             None
             if row is None
@@ -798,19 +849,18 @@ class LLMCatalogRepository:
 
     async def get_system_catalog(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         provider: LLMProvider,
         purpose: LLMCatalogPurpose,
     ) -> LLMCatalog | None:
-        result = await session.write_session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBLLMCatalog)
             .where(
                 RDBLLMCatalog.scope == LLMCatalogScope.SYSTEM,
                 RDBLLMCatalog.provider == provider,
                 RDBLLMCatalog.purpose == purpose,
             )
-            .with_for_update(read=True)
             .execution_options(populate_existing=True)
         )
         owner = result.scalar_one_or_none()
@@ -818,37 +868,41 @@ class LLMCatalogRepository:
 
     async def get_by_integration(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         integration_id: str,
         workspace_id: str,
         purpose: LLMCatalogPurpose,
     ) -> LLMCatalog | None:
-        integration = await self.lock_integration(
-            session,
-            integration_id=integration_id,
-            workspace_id=workspace_id,
-            shared=True,
-        )
-        if integration is None:
-            return None
-        result = await session.write_session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBLLMCatalog)
+            .join(
+                RDBLLMProviderIntegration,
+                sa.and_(
+                    RDBLLMProviderIntegration.id
+                    == RDBLLMCatalog.provider_integration_id,
+                    RDBLLMProviderIntegration.provider == RDBLLMCatalog.provider,
+                ),
+            )
             .where(
+                RDBLLMProviderIntegration.workspace_id == workspace_id,
                 RDBLLMCatalog.provider_integration_id == integration_id,
                 RDBLLMCatalog.purpose == purpose,
             )
-            .with_for_update(read=True)
             .execution_options(populate_existing=True)
         )
         owner = result.scalar_one_or_none()
         return None if owner is None else self.build_catalog(owner)
 
     async def get_sync_status(
-        self, session: WriteSession, *, catalog: LLMCatalog
+        self, session: ReadSession, *, catalog: LLMCatalog
     ) -> LLMCatalogSyncStatus | None:
-        owner = await self.lock_catalog(session, catalog_id=catalog.id, shared=True)
-        return current_sync_status(owner)
+        owner = await session.read_session.scalar(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog.id)
+            .execution_options(populate_existing=True)
+        )
+        return None if owner is None else current_sync_status(owner)
 
     async def get_latest_integration_sync_for_workspace(
         self, session: ReadSession, *, workspace_id: str
@@ -871,12 +925,16 @@ class LLMCatalogRepository:
         return None if owner is None else current_sync_status(owner)
 
     async def get_current_counts(
-        self, session: WriteSession, *, catalog: LLMCatalog
+        self, session: ReadSession, *, catalog: LLMCatalog
     ) -> LLMCatalogCounts | None:
-        owner = await self.lock_catalog(session, catalog_id=catalog.id, shared=True)
+        owner = await session.read_session.scalar(
+            sa.select(RDBLLMCatalog)
+            .where(RDBLLMCatalog.id == catalog.id)
+            .execution_options(populate_existing=True)
+        )
         return (
             None
-            if owner.last_success_at is None
+            if owner is None or owner.last_success_at is None
             else LLMCatalogCounts(
                 visible_count=owner.visible_count, hidden_count=owner.hidden_count
             )

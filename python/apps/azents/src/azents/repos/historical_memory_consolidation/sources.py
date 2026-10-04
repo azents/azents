@@ -21,7 +21,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationEvidence
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
     LockedConsolidationOwner,
@@ -75,24 +75,24 @@ def source_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
     )
 
 
-async def lock_source(
-    session: WriteSession,
+async def read_source(
+    session: ReadSession,
     *,
     key: ConsolidationUnitKey,
     source_session_id: str,
 ) -> RDBHistoricalMemorySource:
-    """Lock root then current evidence without waiting on source/lifecycle writers."""
-    root = await session.write_session.scalar(
-        sa.select(RDBAgentSession)
-        .where(RDBAgentSession.id == source_session_id, source_predicate(key))
-        .with_for_update(read=True, nowait=True)
-    )
-    if root is None:
-        raise ConsolidationAuthorityError("Consolidation source is unavailable.")
-    source = await session.write_session.scalar(
+    """Observe exact permitted source identity, bytes and version together."""
+    source = await session.read_session.scalar(
         sa.select(RDBHistoricalMemorySource)
-        .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
-        .with_for_update(read=True, nowait=True)
+        .join(
+            RDBAgentSession,
+            RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
+        )
+        .where(
+            RDBHistoricalMemorySource.source_session_id == source_session_id,
+            source_predicate(key),
+        )
+        .execution_options(populate_existing=True)
     )
     if source is None:
         raise ConsolidationAuthorityError("Consolidation source is unavailable.")
@@ -171,7 +171,7 @@ class ConsolidationSourceRepository:
             ids = list(await session.write_session.scalars(query))
             entries: list[ConsolidationSourceInventoryEntry] = []
             for source_id in ids[:limit]:
-                source = await lock_source(
+                source = await read_source(
                     session, key=principal.unit, source_session_id=source_id
                 )
                 if source.evidence_hash is None:
@@ -220,7 +220,7 @@ class ConsolidationSourceRepository:
             raise ValueError("Consolidation source read bounds are invalid.")
         async with consolidation_job_session(self.session_manager, principal) as job:
             session, owner = job.session, job.owner
-            source = await lock_source(
+            source = await read_source(
                 session, key=principal.unit, source_session_id=source_session_id
             )
             if (

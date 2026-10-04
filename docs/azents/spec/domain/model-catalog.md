@@ -97,7 +97,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/workspace-model-settings.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-10-04
-spec_version: 45
+spec_version: 46
 ---
 
 # Model Catalog Domain Spec
@@ -105,6 +105,26 @@ spec_version: 45
 ## Purpose
 
 The model catalog stores projected model choices for Agent and Workspace model selection. Normal picker and submit paths use stored catalog projections instead of request-time provider model listing.
+
+## Descriptive read and acceptance boundary
+
+Picker/exact-entry descriptions, source metadata/current rows and optional
+context maxima use ordinary scoped reads without integration/source/catalog
+shared read locks. Owner provenance and exact current rows are observed together
+where multi-query publication interleaves would otherwise require a newest-count
+check. Successful empty publication remains distinct from absent publication;
+intrinsically malformed stored facts and genuine canonical identity ambiguity
+remain errors. Offset page/count descriptions can lag under the current-data
+contract; this adds no catalog revision or cache authority.
+
+Completed descriptive operations use independent read-only managers. Active
+capability capture uses the same exact local value/absence inputs without
+descriptive fencing. Final new-operation/profile acceptance still acquires the
+sorted integration, source and catalog guards in the existing owner write scope,
+revalidates consumed inputs and keeps that exclusion through the persisted
+mutation. Catalog publication retains its producer/input guard. Stale preparation
+can be rejected at actual acceptance; it does not authorize a new operation by
+itself, recapture saved prices or downgrade captured output capabilities.
 
 ## Catalog scopes
 

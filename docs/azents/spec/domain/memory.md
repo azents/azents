@@ -72,7 +72,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-04
-spec_version: 13
+spec_version: 14
 ---
 
 # Memory
@@ -303,14 +303,18 @@ update snapshot text, or admit newly published documents. Missing/corrupt state 
 only by explicit lifecycle refresh, not ordinary prompt reads. A failed refresh
 or snapshot CAS conflict contributes no automatic Memory to that execution.
 
-Consumer authority checks hold FK-compatible `FOR NO KEY UPDATE` locks on the
-selected root Session and Agent. These locks exclude authority writers while
-allowing the `KEY SHARE` parent protection used by Session/event FK operations.
-Current User membership is locked separately and the existing enablement,
-root lifecycle, Workspace, and product-scope checks remain unchanged.
-Concurrent consumers that already hold canonical Agent parent `KEY SHARE`
-protection can authorize both the same root and distinct roots sharing that
-Agent without mutually upgrading the parent locks to `FOR UPDATE`.
+Consumer descriptions use scoped ordinary reads of the exact root Session,
+Agent, Workspace, product scope and durable associated User. Context prompt
+filtering has an independent database-enforced read-only manager that remains
+unfenced when the snapshot mutation manager binds to an execution owner.
+Foreground eligibility and the selected revision's own complete manifest are
+evaluated in one correlated ordinary projection; they do not acquire Agent,
+membership, source, revision or execution-tree locks to enforce newest read
+coherence. Denied, missing or collected exact references contribute no document.
+Snapshot refresh remains a write operation, and producer claims, receipts,
+draft/attempt and critical publication acceptance retain their own mutation
+authority. Descriptive lag does not replace current permission/denial filtering
+at subsequent model/tool admission or live VFS use.
 
 Saved index entries are type/name/ID sorted. Each independently framed whole
 Historical document is at most 10,000 UTF-8 bytes, including headings, scope
@@ -475,6 +479,7 @@ never replayed merely because durable conversation remains.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-04 | 14 | Make consumer/foreground descriptions read-only and unfenced while retaining exact own-manifest denial and producer mutation authority |
 | 2026-10-04 | 13 | Keep concurrent consumer authority locks FK-compatible and preserve writer exclusion |
 | 2026-10-04 | 12 | Promoted isolated agentic consolidation, fenced exact coverage/manifests, independent 10k documents/20k composition, latest-live aliases, denial continuity and coordinated handover |
 | 2026-10-02 | 11 | Refresh Memory during root Run preparation and hook-driven post-compaction context reconstruction, reuse unchanged content, and preserve read-only per-turn filtering and child inheritance |

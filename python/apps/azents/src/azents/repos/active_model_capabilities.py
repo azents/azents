@@ -12,11 +12,11 @@ from azents.core.active_model_capabilities import (
     CapturedStoredChoice,
     ConfiguredModelIdentity,
 )
-from azents.core.enums import LLMModelDeveloper
+from azents.core.enums import LLMCatalogPurpose, LLMModelDeveloper
 from azents.core.model_catalog_identity import catalog_source_keys
 from azents.core.model_catalog_source import CATALOG_SOURCE_KEY
 from azents.core.model_execution_options import ModelExecutionOptionId
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.active_model_capabilities_data import (
@@ -35,7 +35,7 @@ class ActiveModelCapabilitiesRepository:
     """Capture local inputs without provider discovery or configuration writes."""
 
     session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     source_repository: Annotated[
@@ -44,19 +44,18 @@ class ActiveModelCapabilitiesRepository:
 
     async def prepare_read_scope_in_session(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         integration_ids: Sequence[str],
     ) -> ActiveReadScope:
-        """Acquire sorted integration locks then source lock before catalog reads."""
+        """Read scoped integration and optional source descriptions without locks."""
         scopes: list[CapturedIntegrationScope] = []
         for integration_id in sorted(set(integration_ids)):
-            integration = await self.catalog_repository.lock_integration(
+            integration = await self.catalog_repository.read_integration(
                 session,
                 integration_id=integration_id,
                 workspace_id=workspace_id,
-                shared=True,
             )
             scopes.append(
                 CapturedIntegrationScope(
@@ -90,12 +89,12 @@ class ActiveModelCapabilitiesRepository:
 
     async def capture_exact_choices_in_session(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         workspace_id: str,
         identities: Sequence[ConfiguredModelIdentity],
     ) -> CapturedActiveChoiceInputs:
-        """Capture only configured IDs with integration/source/catalog lock order."""
+        """Capture configured identities without authorizing a final mutation."""
         ordered = tuple(dict.fromkeys(identities))
         scope = await self.prepare_read_scope_in_session(
             session,
@@ -127,7 +126,7 @@ class ActiveModelCapabilitiesRepository:
         integration_id: str,
         entries: Sequence[CatalogEntryWithCatalog],
     ) -> CapturedActiveChoiceInputs:
-        """Reuse page rows after prepare_read_scope acquired owner locks."""
+        """Reuse observed page rows for descriptive capability compilation."""
         identities = tuple(
             ConfiguredModelIdentity(
                 integration_id=integration_id,
@@ -318,10 +317,46 @@ class ActiveModelCapabilitiesRepository:
             failure=None,
         )
 
+    async def guard_acceptance_in_session(
+        self,
+        session: WriteSession,
+        *,
+        captured: CapturedActiveChoiceInputs,
+    ) -> None:
+        """Retain integration → source → catalog exclusion through owner commit."""
+        identities = tuple(choice.identity for choice in captured.catalog_choices)
+        for integration_id in sorted({i.integration_id for i in identities}):
+            await self.catalog_repository.lock_integration(
+                session,
+                integration_id=integration_id,
+                workspace_id=captured.workspace_id,
+                shared=True,
+            )
+        if identities:
+            await self.source_repository.lock_authority(
+                session, source_key=CATALOG_SOURCE_KEY, shared=True
+            )
+        owners = []
+        for identity in identities:
+            owner = await self.catalog_repository._read_owner_for_integration(
+                session,
+                integration_id=identity.integration_id,
+                workspace_id=captured.workspace_id,
+                purpose=LLMCatalogPurpose.CONVERSATION,
+                require_enabled=False,
+            )
+            if owner is not None:
+                owners.append(owner.id)
+        for catalog_id in sorted(set(owners)):
+            await self.catalog_repository.lock_catalog(
+                session, catalog_id=catalog_id, shared=True
+            )
+
     async def inputs_match_in_session(
         self, session: WriteSession, *, captured: CapturedActiveChoiceInputs
     ) -> bool:
         """Recheck current compiler input values and presence under the same locks."""
+        await self.guard_acceptance_in_session(session, captured=captured)
         current = await self.capture_exact_choices_in_session(
             session,
             workspace_id=captured.workspace_id,

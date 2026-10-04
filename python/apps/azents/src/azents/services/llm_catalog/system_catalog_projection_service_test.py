@@ -22,6 +22,7 @@ async def test_system_catalogs_exclude_integration_scoped_providers(
     service = SystemCatalogProjectionService(
         operations=LLMCatalogOperationsRepository(
             session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
             catalog_repository=LLMCatalogRepository(),
             integration_repository=AsyncMock(spec=LLMProviderIntegrationRepository),
             source_repository=ModelMetadataSourceRepository(),

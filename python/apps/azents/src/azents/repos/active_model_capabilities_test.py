@@ -169,7 +169,7 @@ def _repository() -> tuple[
     manager = _Manager()
     catalogs = AsyncMock(spec=LLMCatalogRepository)
     source = AsyncMock(spec=ModelMetadataSourceRepository)
-    catalogs.lock_integration.return_value = _integration()
+    catalogs.read_integration.return_value = _integration()
     source.get_projection_metadata.return_value = SourceProjectionMetadata(
         source_key="litellm_catalog",
         source_kind=ModelMetadataSourceKind.LITELLM_JSON,
@@ -210,9 +210,7 @@ async def test_capture_recompiles_old_current_row_without_remote_or_writes() -> 
     manager.raw_session.execute.assert_not_awaited()
 
 
-async def test_exact_capture_deduplicates_but_keeps_user_order_and_lock_hierarchy() -> (
-    None
-):
+async def test_exact_capture_deduplicates_but_keeps_user_order_without_locks() -> None:
     repository, manager, catalogs, source = _repository()
     order: list[str] = []
 
@@ -235,7 +233,7 @@ async def test_exact_capture_deduplicates_but_keeps_user_order_and_lock_hierarch
         order.append("catalog")
         return {identity: _entry() for identity in identities}
 
-    catalogs.lock_integration.side_effect = integration
+    catalogs.read_integration.side_effect = integration
     source.get_projection_metadata.side_effect = metadata
     catalogs.get_selectable_entries_for_identities.side_effect = entries
     a = ConfiguredModelIdentity("a", LLMProvider.OPENROUTER, "openai/model")
@@ -258,9 +256,9 @@ async def test_exact_capture_deduplicates_but_keeps_user_order_and_lock_hierarch
 async def test_scope_and_exact_missing_failures_keep_identity(reason: str) -> None:
     repository, manager, catalogs, source = _repository()
     if reason == "integration_scope_unavailable":
-        catalogs.lock_integration.return_value = None
+        catalogs.read_integration.return_value = None
     elif reason == "provider_scope_mismatch":
-        catalogs.lock_integration.return_value = _integration(LLMProvider.XAI)
+        catalogs.read_integration.return_value = _integration(LLMProvider.XAI)
     else:
         catalogs.get_selectable_entries_for_identities.return_value = {}
     selection = _selection()
@@ -319,7 +317,7 @@ async def test_revalidation_checks_inputs_and_presence_not_clocks_or_old_caps() 
     assert original_metadata["provider_metadata"]["supported_parameters"] != []
 
 
-async def test_page_capture_reuses_rows_after_scope_locks() -> None:
+async def test_page_capture_reuses_rows_without_scope_locks() -> None:
     repository, manager, catalogs, source = _repository()
     scope = await repository.prepare_read_scope_in_session(
         manager.session, workspace_id="workspace", integration_ids=["integration"]
@@ -579,7 +577,7 @@ async def test_empty_capture_performs_no_scope_source_or_catalog_io() -> None:
     )
     assert captured.choices == ()
     assert captured.source_expectations == ()
-    catalogs.lock_integration.assert_not_awaited()
+    catalogs.read_integration.assert_not_awaited()
     catalogs.get_selectable_entries_for_identities.assert_not_awaited()
     source.get_projection_metadata.assert_not_awaited()
     source.get_models.assert_not_awaited()

@@ -8,10 +8,10 @@ from fastapi import Depends
 
 from azents.core.enums import LLMCatalogAttemptStatus, LLMCatalogPurpose, LLMProvider
 from azents.core.llm_catalog_sync import IntegrationCatalogSyncTrigger
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.models.llm_catalog import RDBLLMCatalog
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.llm_catalog import (
     ImageGenerationCatalogEntryWithCatalog,
     LLMCatalogRepository,
@@ -67,6 +67,9 @@ class ImageGenerationCatalogOperationsRepository:
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
+    read_session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
     catalog_repository: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
@@ -76,13 +79,13 @@ class ImageGenerationCatalogOperationsRepository:
     async def load_integration(
         self, integration_id: str
     ) -> LLMProviderIntegration | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.integration_repository.get_by_id(session, integration_id)
 
     async def load_listing_integration(
         self, integration_id: str
     ) -> LLMProviderIntegrationWithSecrets | None:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             return await self.integration_repository.get_by_id_with_secrets(
                 session, integration_id
             )
@@ -90,12 +93,11 @@ class ImageGenerationCatalogOperationsRepository:
     async def read(
         self, *, integration_id: str, workspace_id: str
     ) -> ImageCatalogRead | None:
-        async with self.session_manager() as session:
-            authority = await self.catalog_repository.lock_integration(
+        async with self.read_session_manager() as session:
+            authority = await self.catalog_repository.read_integration(
                 session,
                 integration_id=integration_id,
                 workspace_id=workspace_id,
-                shared=True,
             )
             if authority is None:
                 return None
@@ -108,20 +110,10 @@ class ImageGenerationCatalogOperationsRepository:
                 return ImageCatalogRead(
                     integration=integration, page=None, latest_workspace_sync=None
                 )
-            await self.catalog_repository.ensure_integration_catalog(
-                session,
-                integration_id=integration.id,
-                provider=integration.provider,
-                purpose=LLMCatalogPurpose.IMAGE_GENERATION,
-            )
             catalogs = self.catalog_repository
             page = await catalogs.list_image_generation_entries_by_integration(
                 session, integration_id=integration.id, workspace_id=workspace_id
             )
-            if page is None:
-                raise RuntimeError(
-                    "Current image catalog creation did not become readable."
-                )
             workspace_sync = (
                 await self.catalog_repository.get_latest_integration_sync_for_workspace(
                     session, workspace_id=workspace_id
@@ -284,12 +276,11 @@ class ImageGenerationCatalogOperationsRepository:
         expected_provider: LLMProvider,
         model_identifier: str | None,
     ) -> ImageOptionAuthority:
-        async with self.session_manager() as session:
-            authority = await self.catalog_repository.lock_integration(
+        async with self.read_session_manager() as session:
+            authority = await self.catalog_repository.read_integration(
                 session,
                 integration_id=integration_id,
                 workspace_id=workspace_id,
-                shared=True,
             )
             if authority is None:
                 return ImageOptionAuthority(integration=None, entry=None)
@@ -317,7 +308,7 @@ class ImageGenerationCatalogOperationsRepository:
     async def runtime_authority(
         self, *, integration_id: str, workspace_id: str, model_identifier: str
     ) -> ImageRuntimeAuthority:
-        async with self.session_manager() as session:
+        async with self.read_session_manager() as session:
             catalogs = self.catalog_repository
             page = await catalogs.list_image_generation_entries_by_integration(
                 session, integration_id=integration_id, workspace_id=workspace_id

@@ -492,10 +492,13 @@ def test_persisted_payload_enforces_model_bounds_and_price_key_uniqueness(
     prices.append(prices[0])
     with pytest.raises(ValidationError, match="price evidence keys"):
         CatalogSourcePayload.model_validate_json(json.dumps(document))
-    with pytest.raises(ValidationError, match="bounded model"):
-        CatalogSourcePayload.model_validate_json(
-            '{"schema_version":"1","interpreter_version":"1","models":[]}'
-        )
+    empty = CatalogSourcePayload.model_validate_json(
+        '{"schema_version":"1","interpreter_version":"1","models":[]}'
+    )
+    assert empty.model_count == 0 and empty.provider_count == 0
+    # Empty persisted projection is representable, but transport must still be useful.
+    with pytest.raises(CatalogSourceDecodeError, match="bounded model"):
+        decode_catalog_source(b"{}")
     monkeypatch.setattr(model_catalog_source, "_MAX_MODELS", 1)
     with pytest.raises(ValidationError, match="bounded model"):
         CatalogSourcePayload.model_validate_json(payload.model_dump_json())
