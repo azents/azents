@@ -4,6 +4,7 @@ Provides pure functions required for OAuth2 Authorization Code Grant flow.
 """
 
 import base64
+import binascii
 import dataclasses
 import datetime
 import hashlib
@@ -11,9 +12,10 @@ import json
 import os
 import secrets
 import urllib.parse
-from typing import TypeGuard
+from typing import NamedTuple, TypeGuard
 
 import httpx
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import BaseModel, model_validator
 
@@ -52,18 +54,43 @@ class OAuthTokenResponse(BaseModel):
         return self
 
 
-def generate_pkce_pair() -> tuple[str, str]:
+class PkcePair(NamedTuple):
+    """Named PKCE verifier and its S256 challenge."""
+
+    code_verifier: str
+    code_challenge: str
+
+
+class OAuthState(NamedTuple):
+    """Verified legacy OAuth state fields."""
+
+    toolkit_id: str
+    user_id: str
+    code_verifier: str | None
+
+
+class ToolkitOAuthState(NamedTuple):
+    """Verified shared Toolkit OAuth state fields."""
+
+    toolkit_id: str
+    workspace_id: str
+    user_id: str
+    redirect_uri: str
+    code_verifier: str
+
+
+def generate_pkce_pair() -> PkcePair:
     """Create PKCE code_verifier and code_challenge pair.
 
     code_verifier: 64-byte URL-safe random token
     code_challenge: SHA256(code_verifier) → base64url(no padding)
 
-    :return: (code_verifier, code_challenge) tuple
+    :return: Named verifier and challenge
     """
     code_verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return code_verifier, code_challenge
+    return PkcePair(code_verifier=code_verifier, code_challenge=code_challenge)
 
 
 def build_authorization_url(
@@ -241,16 +268,19 @@ def _decrypt_state(state: str, secret_key: str) -> dict[str, object] | None:
         # Restore base64url padding
         padded = state + "=" * (-len(state) % 4)
         raw = base64.urlsafe_b64decode(padded)
-        if len(raw) < 13:  # 12-byte IV + at least 1 byte
-            return None
-        iv, ct = raw[:12], raw[12:]
-        key = _derive_aes_key(secret_key)
+    except binascii.Error, ValueError:
+        return None
+    if len(raw) < 13:  # 12-byte IV + at least 1 byte
+        return None
+    iv, ct = raw[:12], raw[12:]
+    key = _derive_aes_key(secret_key)
+    try:
         plaintext = AESGCM(key).decrypt(iv, ct, None)
         data: object = json.loads(plaintext)
         if not _is_string_object_dict(data):
             return None
         return data
-    except Exception:  # noqa: BLE001
+    except InvalidTag, UnicodeError, json.JSONDecodeError:
         return None
 
 
@@ -287,9 +317,7 @@ def create_oauth_state(
     return _encrypt_state(payload, secret_key)
 
 
-def verify_oauth_state(
-    state: str, secret_key: str
-) -> tuple[str, str, str | None] | None:
+def verify_oauth_state(state: str, secret_key: str) -> OAuthState | None:
     """Decrypt and verify encrypted OAuth state.
 
     :param state: Encrypted state string
@@ -304,7 +332,11 @@ def verify_oauth_state(
     if not isinstance(tid, str) or not isinstance(uid, str):
         return None
     cv = data.get("cv")
-    return (tid, uid, cv if isinstance(cv, str) else None)
+    return OAuthState(
+        toolkit_id=tid,
+        user_id=uid,
+        code_verifier=cv if isinstance(cv, str) else None,
+    )
 
 
 def create_toolkit_oauth_state(
@@ -338,9 +370,7 @@ def create_toolkit_oauth_state(
     return _encrypt_state(payload, secret_key)
 
 
-def verify_toolkit_oauth_state(
-    state: str, secret_key: str
-) -> tuple[str, str, str, str, str] | None:
+def verify_toolkit_oauth_state(state: str, secret_key: str) -> ToolkitOAuthState | None:
     """Verify encrypted toolkit-level OAuth state.
 
     :param state: Encrypted state string
@@ -365,7 +395,13 @@ def verify_toolkit_oauth_state(
         return None
     if not isinstance(code_verifier, str):
         return None
-    return (tid, wid, uid, redirect_uri, code_verifier)
+    return ToolkitOAuthState(
+        toolkit_id=tid,
+        workspace_id=wid,
+        user_id=uid,
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+    )
 
 
 @dataclasses.dataclass(frozen=True)

@@ -26,7 +26,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 last_verified_at: 2026-10-04
-spec_version: 10
+spec_version: 11
 ---
 
 # MCP OAuth Flow
@@ -54,6 +54,11 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
 - Final refresh success or failure locks the current row, compares the loaded
   credential snapshot, and yields to a concurrently committed credential change.
 - A refresh failure with `invalid_grant` marks the connection `reconnect_required`.
+- Encrypted callback state rejects malformed encoding, invalid authenticated
+  ciphertext, and malformed decoded JSON. Unexpected state-processing failures
+  propagate instead of being classified as an invalid callback.
+- Internal PKCE, verified shared callback state, and MCP discovery results expose
+  named immutable fields. Their wire formats and transport selection are unchanged.
 
 ## Shared Setup Transaction Boundaries
 

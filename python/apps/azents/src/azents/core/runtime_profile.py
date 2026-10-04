@@ -6,7 +6,7 @@ import ipaddress
 import json
 import re
 from collections.abc import Mapping
-from typing import Annotated, Literal, assert_never
+from typing import Annotated, Literal, NamedTuple, assert_never
 
 from pydantic import (
     BaseModel,
@@ -710,9 +710,9 @@ class RuntimeProviderProfileContractSupport(_FrozenProfileModel):
         """Require positive versions and constraints for the declared Profile kind."""
         if any(version < 1 for version in self.schema_versions):
             raise ValueError("Profile contract schema versions must be positive.")
-        allowed_numeric, allowed_string = _constraint_paths_for_kind(self.profile_kind)
-        unsupported_numeric = set(self.constraints.maximums) - allowed_numeric
-        unsupported_string = set(self.constraints.allowed_values) - allowed_string
+        allowed = _constraint_paths_for_kind(self.profile_kind)
+        unsupported_numeric = set(self.constraints.maximums) - allowed.numeric
+        unsupported_string = set(self.constraints.allowed_values) - allowed.string
         if unsupported_numeric or unsupported_string:
             raise ValueError(
                 "Provider Profile constraints do not apply to the declared "
@@ -1057,7 +1057,7 @@ def evaluate_runtime_profile_compatibility(
         sorted(
             path.value
             for path, maximum in support.constraints.maximums.items()
-            if (value := _profile_value_at_path(spec, path.value)) is not None
+            if (value := _profile_value_at_path(spec, path)) is not None
             and isinstance(value, int)
             and value > maximum
         )
@@ -1066,7 +1066,7 @@ def evaluate_runtime_profile_compatibility(
         sorted(
             path.value
             for path, allowed in support.constraints.allowed_values.items()
-            if (value := _profile_value_at_path(spec, path.value)) is not None
+            if (value := _profile_value_at_path(spec, path)) is not None
             and isinstance(value, str)
             and value not in allowed
         )
@@ -1092,15 +1092,19 @@ def evaluate_runtime_profile_compatibility(
     )
 
 
+class _ConstraintPaths(NamedTuple):
+    """Constraint paths applicable to one Profile kind."""
+
+    numeric: frozenset[RuntimeProfileNumericConstraintPath]
+    string: frozenset[RuntimeProfileStringConstraintPath]
+
+
 def _constraint_paths_for_kind(
     profile_kind: RuntimeInfrastructureProfileKind,
-) -> tuple[
-    frozenset[RuntimeProfileNumericConstraintPath],
-    frozenset[RuntimeProfileStringConstraintPath],
-]:
+) -> _ConstraintPaths:
     if profile_kind is RuntimeInfrastructureProfileKind.KUBERNETES_POD:
-        return (
-            frozenset(
+        return _ConstraintPaths(
+            numeric=frozenset(
                 {
                     RuntimeProfileNumericConstraintPath.RUNNER_CPU_REQUEST,
                     RuntimeProfileNumericConstraintPath.RUNNER_CPU_LIMIT,
@@ -1115,15 +1119,15 @@ def _constraint_paths_for_kind(
                     RuntimeProfileNumericConstraintPath.DIND_SHARED_TEMPORARY_STORAGE,
                 }
             ),
-            frozenset(
+            string=frozenset(
                 {
                     RuntimeProfileStringConstraintPath.WORKSPACE_STORAGE_CLASS,
                     RuntimeProfileStringConstraintPath.SERVICE_ACCOUNT,
                 }
             ),
         )
-    return (
-        frozenset(
+    return _ConstraintPaths(
+        numeric=frozenset(
             {
                 RuntimeProfileNumericConstraintPath.RUNNER_CPU_RESERVATION,
                 RuntimeProfileNumericConstraintPath.RUNNER_CPU_LIMIT,
@@ -1131,7 +1135,7 @@ def _constraint_paths_for_kind(
                 RuntimeProfileNumericConstraintPath.RUNNER_MEMORY_LIMIT,
             }
         ),
-        frozenset({RuntimeProfileStringConstraintPath.DOCKER_NETWORK}),
+        string=frozenset({RuntimeProfileStringConstraintPath.DOCKER_NETWORK}),
     )
 
 
@@ -1461,16 +1465,78 @@ def _subnet_of_same_family(
 
 def _profile_value_at_path(
     spec: RuntimeInfrastructureProfileInternalSpec,
-    path: str,
-) -> object:
-    value: object = spec
-    for segment in path.split("."):
-        if value is None:
-            return None
-        if not isinstance(value, BaseModel):
-            raise AssertionError("Profile constraint path traversed a non-model value.")
-        value = getattr(value, segment)
-    return value
+    path: RuntimeProfileNumericConstraintPath | RuntimeProfileStringConstraintPath,
+) -> int | str | None:
+    """Read a finite constraint through declared provider-specific fields."""
+    if isinstance(spec, DockerContainerProfileSpecV1 | DockerContainerProfileSpecV2):
+        match path:
+            case RuntimeProfileNumericConstraintPath.RUNNER_CPU_RESERVATION:
+                return spec.runner_resources.cpu_reservation_millicores
+            case RuntimeProfileNumericConstraintPath.RUNNER_CPU_LIMIT:
+                return spec.runner_resources.cpu_limit_millicores
+            case RuntimeProfileNumericConstraintPath.RUNNER_MEMORY_RESERVATION:
+                return spec.runner_resources.memory_reservation_bytes
+            case RuntimeProfileNumericConstraintPath.RUNNER_MEMORY_LIMIT:
+                return spec.runner_resources.memory_limit_bytes
+            case RuntimeProfileStringConstraintPath.DOCKER_NETWORK:
+                return spec.network_name
+            case _:
+                raise AssertionError("Constraint path does not apply to Docker.")
+    match path:
+        case RuntimeProfileNumericConstraintPath.RUNNER_CPU_REQUEST:
+            return spec.runner_resources.cpu_request_millicores
+        case RuntimeProfileNumericConstraintPath.RUNNER_CPU_LIMIT:
+            return spec.runner_resources.cpu_limit_millicores
+        case RuntimeProfileNumericConstraintPath.RUNNER_MEMORY_REQUEST:
+            return spec.runner_resources.memory_request_bytes
+        case RuntimeProfileNumericConstraintPath.RUNNER_MEMORY_LIMIT:
+            return spec.runner_resources.memory_limit_bytes
+        case RuntimeProfileNumericConstraintPath.WORKSPACE_STORAGE:
+            return spec.workspace_volume.storage_request_bytes
+        case RuntimeProfileStringConstraintPath.WORKSPACE_STORAGE_CLASS:
+            return spec.workspace_volume.storage_class_name
+        case RuntimeProfileStringConstraintPath.SERVICE_ACCOUNT:
+            return spec.service_account_name
+        case RuntimeProfileNumericConstraintPath.DIND_ENGINE_CPU_REQUEST:
+            return (
+                spec.dind.engine_resources.cpu_request_millicores
+                if spec.dind is not None
+                else None
+            )
+        case RuntimeProfileNumericConstraintPath.DIND_ENGINE_CPU_LIMIT:
+            return (
+                spec.dind.engine_resources.cpu_limit_millicores
+                if spec.dind is not None
+                else None
+            )
+        case RuntimeProfileNumericConstraintPath.DIND_ENGINE_MEMORY_REQUEST:
+            return (
+                spec.dind.engine_resources.memory_request_bytes
+                if spec.dind is not None
+                else None
+            )
+        case RuntimeProfileNumericConstraintPath.DIND_ENGINE_MEMORY_LIMIT:
+            return (
+                spec.dind.engine_resources.memory_limit_bytes
+                if spec.dind is not None
+                else None
+            )
+        case RuntimeProfileNumericConstraintPath.DIND_DOCKER_STORAGE:
+            return spec.dind.docker_storage_bytes if spec.dind is not None else None
+        case RuntimeProfileNumericConstraintPath.DIND_SHARED_TEMPORARY_STORAGE:
+            return (
+                spec.dind.shared_temporary_storage_bytes
+                if spec.dind is not None
+                else None
+            )
+        case (
+            RuntimeProfileNumericConstraintPath.RUNNER_CPU_RESERVATION
+            | RuntimeProfileNumericConstraintPath.RUNNER_MEMORY_RESERVATION
+            | RuntimeProfileStringConstraintPath.DOCKER_NETWORK
+        ):
+            raise AssertionError("Constraint path does not apply to Kubernetes.")
+        case _:
+            assert_never(path)
 
 
 def _configuration_section(
