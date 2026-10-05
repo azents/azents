@@ -8,7 +8,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from psycopg.errors import LockNotAvailable, QueryCanceled
+from psycopg.errors import (
+    DeadlockDetected,
+    LockNotAvailable,
+    QueryCanceled,
+    SerializationFailure,
+)
 from sqlalchemy.exc import OperationalError
 
 from azents.core.enums import AgentLifecycleStatus
@@ -52,7 +57,9 @@ async def consolidation_session(
             raise ConsolidationDeadlineError(
                 "Consolidation database deadline was exceeded."
             ) from None
-        if not isinstance(error.orig, LockNotAvailable):
+        if not isinstance(
+            error.orig, LockNotAvailable | DeadlockDetected | SerializationFailure
+        ):
             raise
         raise ConsolidationAuthorityBusyError(
             "Consolidation authority is temporarily unavailable."
@@ -92,6 +99,88 @@ class ConsolidationJobSession:
     owner: LockedConsolidationOwner
 
 
+@dataclass(frozen=True)
+class ObservedConsolidationTime:
+    """Unfenced time observation; it cannot authorize any model or DB mutation."""
+
+    lease_until: datetime.datetime
+    deadline_at: datetime.datetime
+    database_now: datetime.datetime
+
+
+async def observe_operation_time(
+    session: ReadSession, principal: ConsolidationJobPrincipal
+) -> ObservedConsolidationTime:
+    """Read a conservative time bound, never an authorization to mutate."""
+    limits = (
+        await session.read_session.execute(
+            sa.select(
+                RDBConsolidationUnit.lease_until,
+                RDBConsolidationAttempt.deadline_at,
+            )
+            .join(
+                RDBConsolidationAttempt,
+                RDBConsolidationAttempt.id == RDBConsolidationUnit.active_attempt_id,
+            )
+            .where(
+                unit_predicate(principal.unit),
+                RDBConsolidationUnit.owner_generation == principal.owner_generation,
+                RDBConsolidationUnit.owner_token == principal.owner_token,
+                RDBConsolidationUnit.active_attempt_id == principal.attempt_id,
+                RDBConsolidationAttempt.unit_id == RDBConsolidationUnit.id,
+                RDBConsolidationAttempt.owner_generation == principal.owner_generation,
+                RDBConsolidationAttempt.owner_token == principal.owner_token,
+                RDBConsolidationAttempt.state == ConsolidationAttemptState.RUNNING,
+            )
+        )
+    ).one_or_none()
+    if limits is None or limits.lease_until is None:
+        raise ConsolidationAuthorityError("Consolidation owner is no longer current.")
+    now = await database_now(session)
+    return ObservedConsolidationTime(limits.lease_until, limits.deadline_at, now)
+
+
+async def observe_attempt_seconds(
+    session: ReadSession, principal: ConsolidationJobPrincipal
+) -> float:
+    """Capture only the immutable attempt cutoff across contention retries."""
+    time = await observe_operation_time(session, principal)
+    remaining = (time.deadline_at - time.database_now).total_seconds()
+    if remaining <= 0:
+        raise ConsolidationDeadlineError(
+            "Consolidation database deadline was exceeded."
+        )
+    return remaining
+
+
+async def observe_operation_seconds(
+    session: ReadSession, principal: ConsolidationJobPrincipal
+) -> float:
+    """Bound one transaction by the current lease and immutable attempt cutoff."""
+    time = await observe_operation_time(session, principal)
+    remaining = (
+        min(time.lease_until, time.deadline_at) - time.database_now
+    ).total_seconds()
+    if remaining <= 0:
+        raise ConsolidationDeadlineError(
+            "Consolidation database deadline was exceeded."
+        )
+    return remaining
+
+
+async def install_statement_deadline(session: WriteSession, seconds: float) -> None:
+    """Bound SQL before the first authority or owner lock can wait."""
+    await session.write_session.execute(
+        sa.select(
+            sa.func.set_config(
+                "statement_timeout",
+                str(max(1, math.ceil(seconds * 1000))),
+                True,
+            )
+        )
+    )
+
+
 @asynccontextmanager
 async def consolidation_job_session(
     manager: SessionManager[WriteSession], principal: ConsolidationJobPrincipal
@@ -101,6 +190,9 @@ async def consolidation_job_session(
     try:
         async with timeout:
             async with consolidation_session(manager) as session:
+                remaining = await observe_operation_seconds(session, principal)
+                timeout.reschedule(asyncio.get_running_loop().time() + remaining)
+                await install_statement_deadline(session, remaining)
                 owner = await lock_job_owner(session, principal)
                 if owner.unit.lease_until is None:
                     raise ConsolidationAuthorityError(
@@ -114,16 +206,16 @@ async def consolidation_job_session(
                     raise ConsolidationDeadlineError(
                         "Consolidation database deadline was exceeded."
                     )
-                timeout.reschedule(asyncio.get_running_loop().time() + remaining)
-                await session.write_session.execute(
-                    sa.select(
-                        sa.func.set_config(
-                            "statement_timeout",
-                            str(max(1, math.ceil(remaining * 1000))),
-                            True,
-                        )
+                current_deadline = timeout.when()
+                if current_deadline is None:
+                    raise RuntimeError("Consolidation operation deadline is missing.")
+                timeout.reschedule(
+                    min(
+                        current_deadline,
+                        asyncio.get_running_loop().time() + remaining,
                     )
                 )
+                await install_statement_deadline(session, remaining)
                 yield ConsolidationJobSession(session, owner)
     except asyncio.CancelledError:
         raise

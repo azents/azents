@@ -62,7 +62,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-10-05
-spec_version: 30
+spec_version: 31
 ---
 
 # External Channel Authorization
@@ -305,6 +305,16 @@ account, unlink, archive and configuration writes remain ordered with actual App
 The final native mutation lock acquisition is nonblocking and its DB-only bounded
 retry returns a retryable busy result on exhaustion without mutation or provider
 I/O. An observed applied-profile generation rejects stale and ABA drafts.
+
+Owner unlink uses exact-owner conditional revocation DML with ordinary row
+waiting and the existing bounded database retry/busy contract. Already-revoked
+matching links retain their original revocation metadata. Current User/auth
+Session and elapsed expiry are revalidated after a write wait before commit.
+Matching accepted-model mutation replay observes immutable committed identity
+and profile/audit values without a redundant exclusive replay-row lock.
+Final authorization, unique Apply identity and once-only generation/audit/notice
+remain authoritative; neither simplification retries provider effects or adds
+a new OAuth callback recovery contract.
 
 Execution-option group metadata does not grant model or integration authority.
 Private model handlers validate exclusive selections against the bounded selected

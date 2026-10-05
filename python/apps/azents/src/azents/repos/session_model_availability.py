@@ -263,7 +263,6 @@ class SessionModelAvailabilityRepository:
                 agent_id=agent_id,
                 session_id=session_id,
                 user_id=user_id,
-                nowait=False,
             )
         except ValueError:
             return None

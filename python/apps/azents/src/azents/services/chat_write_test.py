@@ -115,11 +115,9 @@ class _SubagentLockRepository(AgentSessionRepository):
         self,
         session: WriteSession,
         agent_session_id: str,
-        *,
-        nowait: bool = False,
     ) -> AgentSession | None:
         """Return a subagent AgentSession for idle-control lock attempts."""
-        del session, nowait
+        del session
         self.calls.append("lock_by_id")
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
@@ -439,10 +437,8 @@ class _ControlAgentSessionRepository(AgentSessionRepository):
         self,
         session: WriteSession,
         agent_session_id: str,
-        *,
-        nowait: bool = False,
     ) -> AgentSession:
-        del session, nowait
+        del session
         assert agent_session_id == self.session.id
         self.lock_calls += 1
         return self.session

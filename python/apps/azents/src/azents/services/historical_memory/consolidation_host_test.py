@@ -1,19 +1,26 @@
 """Deterministic real-storage multi-turn internal Agent and fail-closed completion."""
 
+import asyncio
 import dataclasses
 import json
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import asynccontextmanager
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+import azents.repos.historical_memory_consolidation.retry as retry_module
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import EventKind
 from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
-from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
+from azents.core.historical_memory_consolidation import (
+    ConsolidationAttemptState,
+    ConsolidationJobPrincipal,
+)
 from azents.core.historical_memory_publication import (
     ConsolidationOutputError,
     ValidatedConsolidationOverview,
@@ -24,6 +31,7 @@ from azents.core.llm_catalog import (
     ModelParameterCapabilities,
     ModelToolCallingCapabilities,
 )
+from azents.engine.events.iteration import AdmittedIteration
 from azents.engine.events.model_messages import (
     TransientModelMessage,
     transient_model_message,
@@ -44,9 +52,17 @@ from azents.engine.model_stream import (
     InternalModelStreamCallContext,
     admit_model_dispatch,
 )
-from azents.rdb.models.historical_memory_consolidation import RDBConsolidationRevision
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.base import RDBModel
+from azents.rdb.models.historical_memory_consolidation import (
+    RDBConsolidationAttempt,
+    RDBConsolidationModelDispatch,
+    RDBConsolidationMutationReceipt,
+    RDBConsolidationRevision,
+    RDBConsolidationUnit,
+)
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.historical_memory_consolidation.budget import (
     ConsolidationExecutionRepository,
 )
@@ -70,7 +86,9 @@ from azents.repos.historical_memory_consolidation.work import (
     ConsolidationWorkRepository,
 )
 from azents.services.historical_memory.consolidation_host import (
+    ConsolidationAdmission,
     ConsolidationIterationHost,
+    ConsolidationPreparedTurn,
 )
 from azents.services.historical_memory.consolidation_model import (
     PreparedConsolidationRequest,
@@ -79,6 +97,7 @@ from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
 )
 from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 from azents.testing.consolidation import (
     consolidation_deadline,
     seed_consolidation_corpus,
@@ -384,6 +403,128 @@ async def test_multi_turn_shared_host_edits_handles_errors_and_publishes_files(
         assert "never committed" not in revision.markdown
     inspected = await host.publication_repository.inspect_outcome(host.claim.principal)
     assert inspected is not None and inspected == outcome
+
+
+async def test_captured_model_output_survives_agent_contention_without_rerunning_turn(
+    rdb_engine: AsyncEngine, latest_db_schema: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same RAM output/claim publishes after its local admission retries."""
+    factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def manager() -> AsyncGenerator[WriteSession, None]:
+        async with factory.begin() as session:
+            yield ReadWriteSession(session)
+
+    async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
+        host = await _host(
+            manager, personal=False, empty=False, invalid_final=False, hard_input=False
+        )
+        model = host.model
+        assert isinstance(model, _ScriptedModel)
+        captured = asyncio.Event()
+        writer_locked = asyncio.Event()
+        release_writer = asyncio.Event()
+        rolled_back = asyncio.Event()
+        resume_retry = asyncio.Event()
+        admit = ConsolidationIterationHost.admit_output
+        retries = 0
+
+        async def paused_admission(
+            self: ConsolidationIterationHost,
+            prepared: ConsolidationPreparedTurn,
+            output: NormalizedAdapterOutput[TransientModelMessage],
+        ) -> AdmittedIteration[ConsolidationAdmission]:
+            if self is host and model.turn == 1:
+                captured.set()
+                await writer_locked.wait()
+            return await admit(self, prepared, output)
+
+        async def contention_yield() -> None:
+            nonlocal retries
+            retries += 1
+            rolled_back.set()
+            await resume_retry.wait()
+
+        async def writer() -> None:
+            await captured.wait()
+            async with manager() as session:
+                await session.write_session.scalar(
+                    sa.select(RDBAgent)
+                    .where(RDBAgent.id == host.claim.principal.unit.agent_id)
+                    .with_for_update()
+                )
+                writer_locked.set()
+                await release_writer.wait()
+
+        monkeypatch.setattr(
+            ConsolidationIterationHost, "admit_output", paused_admission
+        )
+        monkeypatch.setattr(retry_module, "wait_for_contention_retry", contention_yield)
+        holder = asyncio.create_task(writer())
+        execution = asyncio.create_task(host.run())
+        try:
+            async with asyncio.timeout(5):
+                await rolled_back.wait()
+            assert model.turn == 1 and host.started_turns == 1
+            release_writer.set()
+            await holder
+            resume_retry.set()
+            async with asyncio.timeout(10):
+                outcome = await execution
+            assert retries == 1
+            assert model.turn == host.started_turns == 8
+            assert model.closed and host.closed
+            async with manager() as session:
+                attempt = await session.read_session.get(
+                    RDBConsolidationAttempt, host.claim.principal.attempt_id
+                )
+                unit = await session.read_session.get(
+                    RDBConsolidationUnit, host.claim.unit_id
+                )
+                assert attempt is not None and unit is not None
+                assert attempt.state is ConsolidationAttemptState.COMPLETED
+                assert attempt.model_requests == 8 and attempt.tool_calls == 7
+                assert attempt.input_tokens == 160 and attempt.output_tokens == 40
+                assert attempt.failure_code is None and unit.retry_at is None
+                assert unit.failure_count == unit.no_progress_count == 0
+                assert unit.published_revision_id == outcome.revision_id
+                dispatches = list(
+                    await session.read_session.scalars(
+                        sa.select(RDBConsolidationModelDispatch).where(
+                            RDBConsolidationModelDispatch.attempt_id == attempt.id
+                        )
+                    )
+                )
+                assert len(dispatches) == 8
+                assert all(row.usage_recorded for row in dispatches)
+                assert (
+                    await session.read_session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(RDBConsolidationMutationReceipt)
+                        .where(RDBConsolidationMutationReceipt.attempt_id == attempt.id)
+                    )
+                    == 3
+                )
+                assert (
+                    await session.read_session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(RDBConsolidationAttempt)
+                        .where(RDBConsolidationAttempt.unit_id == unit.id)
+                    )
+                    == 1
+                )
+            assert (
+                await host.publication_repository.inspect_outcome(host.claim.principal)
+                == outcome
+            )
+        finally:
+            release_writer.set()
+            resume_retry.set()
+            for task in (holder, execution):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(holder, execution, return_exceptions=True)
 
 
 async def test_normal_final_response_without_valid_files_is_not_success(

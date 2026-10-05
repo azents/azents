@@ -716,7 +716,7 @@ async def test_applied_fast_snapshot_replay_preserves_immutable_result(
     authorize.assert_awaited_once()
     refresh.assert_not_called()
     fixture.active_repository.capture_exact_choices_in_session.assert_not_awaited()
-    fixture.agent_repository.lock_by_id_nowait.assert_not_awaited()
+    fixture.agent_repository.lock_by_id.assert_not_awaited()
     fixture.agent_session_repository.set_applied_inference_profile.assert_not_awaited()
     fixture.raw_session.add.assert_not_called()
     fixture.raw_session.flush.assert_not_awaited()

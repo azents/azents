@@ -80,7 +80,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-05
-spec_version: 31
+spec_version: 32
 ---
 
 # Periodic Execution Flow Spec
@@ -417,6 +417,12 @@ quota candidate handoff. Jobs renew 120-second leases every 30 seconds and
 preserve exact pending work across
 productive finite slices. Productive progress requeues without failure delay;
 failures/no progress use one-minute exponential backoff capped at six hours.
+Temporary rollback-confirmed database contention is recovered in the same
+claim's database operation rather than immediately counting as a failed/no-progress
+attempt. Heartbeat shares this recovery policy; actual expired/replaced ownership
+remains terminal. The existing absolute deadline/lease and cancellation cover
+initial owner lock acquisition and operation retry without another call/count
+budget, model replay or execution loop.
 Elapsed cutoff settlement compares the exact active attempt/generation/token
 and writes terminal/retry metadata without restoring expired execution or
 publication authority. Internal faults/cutoffs store no user-facing failure code.

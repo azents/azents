@@ -31,6 +31,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftConflict,
     check_draft_influence,
 )
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 from azents.repos.historical_memory_consolidation.sources import (
     read_source,
     record_evidence,
@@ -124,6 +127,7 @@ class ConsolidationWorkRepository:
 
     session_manager: SessionManager[WriteSession]
 
+    @retry_consolidation_operation
     async def retire_obsolete_pending(
         self, principal: ConsolidationJobPrincipal
     ) -> int:
@@ -151,6 +155,7 @@ class ConsolidationWorkRepository:
             await require_commit_owner(job.session, job.owner)
         return count
 
+    @retry_consolidation_operation
     async def page(
         self,
         principal: ConsolidationJobPrincipal,
@@ -218,6 +223,7 @@ class ConsolidationWorkRepository:
             await require_commit_owner(session, owner)
         return result
 
+    @retry_consolidation_operation
     async def record_coverage(
         self,
         principal: ConsolidationJobPrincipal,

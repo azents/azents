@@ -53,6 +53,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
 from azents.repos.historical_memory_consolidation.operations import (
     finish_consolidation_model_operation,
 )
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 from azents.repos.historical_memory_consolidation.work import (
     pending_work_query,
     work_predicate,
@@ -144,6 +147,7 @@ class ConsolidationPublicationRepository:
     session_manager: SessionManager[WriteSession]
     read_session_manager: SessionManager[ReadSession]
 
+    @retry_consolidation_operation
     async def freeze(
         self, principal: ConsolidationJobPrincipal
     ) -> FrozenConsolidationDraft:
@@ -269,6 +273,7 @@ class ConsolidationPublicationRepository:
                 "Consolidation publication outcome is uncertain."
             ) from error
 
+    @retry_consolidation_operation
     async def _publish(
         self,
         principal: ConsolidationJobPrincipal,

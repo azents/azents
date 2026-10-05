@@ -36,7 +36,9 @@ from azents.core.external_channel_management import (
 from azents.core.external_model_settings import (
     ExternalModelActorContext,
     ExternalModelApplied,
+    ExternalModelBusy,
     ExternalModelEditorReady,
+    ExternalModelNoticeOutcome,
     ExternalModelRejected,
     ExternalModelTargetContext,
 )
@@ -56,6 +58,7 @@ from azents.rdb.models.external_model_settings import (
     RDBExternalModelDraft,
     RDBExternalModelMutation,
 )
+from azents.rdb.models.session import RDBSession
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session_capabilities import (
@@ -69,7 +72,9 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_account_link import (
     ExternalAccountLinkBusy,
+    ExternalAccountLinkNotFound,
     ExternalAccountLinkRepository,
+    ExternalAccountLinkUnavailable,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrantCreate,
@@ -85,6 +90,7 @@ from azents.repos.external_channel.model_settings import (
     _AuthorizationResult,
     _AuthorizedModelTarget,
 )
+from azents.repos.external_channel.model_settings_data import ExternalModelApplyCommit
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.repository_test import _connection_create
 from azents.repos.runtime_web.nonblocking_management_test import _committed_authority
@@ -381,13 +387,12 @@ async def test_final_model_apply_orders_actual_authority_mutators(
 
         async def change_authority() -> None:
             if change == "link":
-                with pytest.raises(ExternalAccountLinkBusy):
-                    await links.unlink(
-                        user_id=fixture.user_id,
-                        auth_session_id=fixture.auth_session_id,
-                        link_id=fixture.link_id,
-                        now=now,
-                    )
+                await links.unlink(
+                    user_id=fixture.user_id,
+                    auth_session_id=fixture.auth_session_id,
+                    link_id=fixture.link_id,
+                    now=now,
+                )
                 return
             async with writes() as session:
                 if change == "disable":
@@ -419,8 +424,13 @@ async def test_final_model_apply_orders_actual_authority_mutators(
             _context: object,
             _executemany: object,
         ) -> None:
-            if (change == "disable" and "UPDATE users" in statement) or (
-                change in {"block", "grant"} and "pg_advisory_xact_lock" in statement
+            if (
+                (change == "disable" and "UPDATE users" in statement)
+                or (
+                    change in {"block", "grant"}
+                    and "pg_advisory_xact_lock" in statement
+                )
+                or (change == "link" and "UPDATE external_account_links" in statement)
             ):
                 attempted.set()
 
@@ -438,22 +448,12 @@ async def test_final_model_apply_orders_actual_authority_mutators(
         try:
             await asyncio.wait_for(gate.wait(), timeout=2)
             changed = asyncio.create_task(change_authority())
-            if change == "link":
-                await asyncio.wait_for(changed, timeout=3)
-            else:
-                await asyncio.wait_for(attempted.wait(), timeout=2)
-                assert not changed.done()
+            await asyncio.wait_for(attempted.wait(), timeout=2)
+            assert not changed.done()
             release.set()
             result = await asyncio.wait_for(pending, timeout=3)
             assert isinstance(result.result, ExternalModelApplied)
             await asyncio.wait_for(changed, timeout=3)
-            if change == "link":
-                await links.unlink(
-                    user_id=fixture.user_id,
-                    auth_session_id=fixture.auth_session_id,
-                    link_id=fixture.link_id,
-                    now=now,
-                )
             denied = await repository.open_editor(
                 actor=fixture.actor,
                 target=fixture.target,
@@ -470,6 +470,364 @@ async def test_final_model_apply_orders_actual_authority_mutators(
                 if task is not None and not task.done():
                     task.cancel()
                     await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("change", ["disable", "revoke", "expire"])
+async def test_unlink_revalidates_authority_after_wait_and_rolls_back(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    change: str,
+) -> None:
+    """A blocked unlink cannot publish after its earlier auth read becomes stale."""
+    writes = create_read_write_session_manager(rdb_engine)
+    attempted = asyncio.Event()
+
+    def observe(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: object,
+    ) -> None:
+        if statement.startswith("UPDATE external_account_links"):
+            attempted.set()
+
+    async with _authority(
+        rdb_engine, app_mode=ExternalChannelAppMode.SINGLE
+    ) as fixture:
+        async with writes() as holder:
+            await holder.write_session.scalar(
+                sa.select(RDBExternalAccountLink)
+                .where(RDBExternalAccountLink.id == fixture.link_id)
+                .with_for_update()
+            )
+            event.listen(rdb_engine.sync_engine, "before_cursor_execute", observe)
+            pending = asyncio.create_task(
+                ExternalAccountLinkRepository(writes).unlink(
+                    user_id=fixture.user_id,
+                    auth_session_id=fixture.auth_session_id,
+                    link_id=fixture.link_id,
+                    now=datetime.now(UTC) - timedelta(minutes=5),
+                )
+            )
+            try:
+                await asyncio.wait_for(attempted.wait(), timeout=2)
+                assert not pending.done()
+                async with writes() as security:
+                    if change == "disable":
+                        await UserRepository().disable_access(
+                            security,
+                            fixture.user_id,
+                            disabled_at=datetime.now(UTC),
+                        )
+                    elif change == "revoke":
+                        await SessionRepository().revoke(
+                            security, fixture.auth_session_id
+                        )
+                    else:
+                        await security.write_session.execute(
+                            sa.update(RDBSession)
+                            .where(RDBSession.id == fixture.auth_session_id)
+                            .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+                        )
+                await holder.write_session.commit()
+                with pytest.raises(ExternalAccountLinkUnavailable):
+                    await asyncio.wait_for(pending, timeout=3)
+            finally:
+                event.remove(rdb_engine.sync_engine, "before_cursor_execute", observe)
+                if not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
+        async with writes() as session:
+            link = await session.read_session.get(
+                RDBExternalAccountLink, fixture.link_id
+            )
+            assert link is not None
+            assert link.revoked_at is None
+            assert link.revocation_reason is None
+
+
+async def test_unlink_concurrent_replay_preserves_first_terminal_record(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Concurrent conditional revokes converge and subsequent replay keeps history."""
+    writes = create_read_write_session_manager(rdb_engine)
+    links = ExternalAccountLinkRepository(writes)
+    async with _authority(
+        rdb_engine, app_mode=ExternalChannelAppMode.SINGLE
+    ) as fixture:
+        now = datetime.now(UTC)
+        first, second = await asyncio.gather(
+            links.unlink(
+                user_id=fixture.user_id,
+                auth_session_id=fixture.auth_session_id,
+                link_id=fixture.link_id,
+                now=now,
+            ),
+            links.unlink(
+                user_id=fixture.user_id,
+                auth_session_id=fixture.auth_session_id,
+                link_id=fixture.link_id,
+                now=now + timedelta(seconds=1),
+            ),
+        )
+        assert first == second
+        assert first.revocation_reason == second.revocation_reason
+        async with writes() as session:
+            revoked_at = await session.read_session.scalar(
+                sa.select(RDBExternalAccountLink.revoked_at).where(
+                    RDBExternalAccountLink.id == fixture.link_id
+                )
+            )
+        assert revoked_at is not None
+        replay = await links.unlink(
+            user_id=fixture.user_id,
+            auth_session_id=fixture.auth_session_id,
+            link_id=fixture.link_id,
+            now=now + timedelta(seconds=2),
+        )
+        assert replay == first
+        assert replay.revocation_reason == first.revocation_reason
+        async with writes() as session:
+            assert (
+                await session.read_session.scalar(
+                    sa.select(RDBExternalAccountLink.revoked_at).where(
+                        RDBExternalAccountLink.id == fixture.link_id
+                    )
+                )
+                == revoked_at
+            )
+        with pytest.raises(ExternalAccountLinkNotFound):
+            await links.unlink(
+                user_id=fixture.user_id,
+                auth_session_id=fixture.auth_session_id,
+                link_id=uuid4().hex,
+                now=now,
+            )
+        async with _committed_authority(rdb_engine) as other:
+            async with writes() as session:
+                other_auth = await SessionRepository().create(
+                    session,
+                    SessionCreate(
+                        user_id=other.user_id,
+                        refresh_token=uuid4().hex,
+                        expires_at=now + timedelta(hours=1),
+                        max_expires_at=None,
+                        user_agent=None,
+                        ip_address=None,
+                    ),
+                )
+            with pytest.raises(ExternalAccountLinkNotFound):
+                await links.unlink(
+                    user_id=other.user_id,
+                    auth_session_id=other_auth.id,
+                    link_id=fixture.link_id,
+                    now=now,
+                )
+
+
+async def test_unlink_retains_existing_busy_exhaustion(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """A write that remains locked still exhausts the existing two-second policy."""
+    writes = create_read_write_session_manager(rdb_engine)
+    statements: list[str] = []
+
+    def observe(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: object,
+    ) -> None:
+        statements.append(statement)
+
+    async with _authority(
+        rdb_engine, app_mode=ExternalChannelAppMode.SINGLE
+    ) as fixture:
+        async with writes() as holder:
+            await holder.write_session.scalar(
+                sa.select(RDBExternalAccountLink)
+                .where(RDBExternalAccountLink.id == fixture.link_id)
+                .with_for_update()
+            )
+            event.listen(rdb_engine.sync_engine, "before_cursor_execute", observe)
+            try:
+                with pytest.raises(ExternalAccountLinkBusy):
+                    await asyncio.wait_for(
+                        ExternalAccountLinkRepository(writes).unlink(
+                            user_id=fixture.user_id,
+                            auth_session_id=fixture.auth_session_id,
+                            link_id=fixture.link_id,
+                            now=datetime.now(UTC),
+                        ),
+                        timeout=10,
+                    )
+            finally:
+                event.remove(rdb_engine.sync_engine, "before_cursor_execute", observe)
+        assert (
+            sum(sql.startswith("UPDATE external_account_links") for sql in statements)
+            == 3
+        )
+        assert sum("SET LOCAL lock_timeout = '2s'" in sql for sql in statements) == 3
+        assert all("NOWAIT" not in sql for sql in statements)
+
+
+class _LocalOptionRepository(ExternalModelSettingsRepository):
+    """Use fixture-local options while testing database mutation concurrency."""
+
+    async def _project_authorized_options(
+        self, session: WriteSession, authorized: _AuthorizedModelTarget
+    ) -> _AuthorizedModelTarget:
+        return authorized
+
+
+def _local_option_repository(engine: AsyncEngine) -> ExternalModelSettingsRepository:
+    writes = create_read_write_session_manager(engine)
+    agents, roots = AgentRepository(), AgentSessionRepository()
+    return _LocalOptionRepository(
+        session_manager=writes,
+        external_channel_repository=ExternalChannelRepository(),
+        external_account_link_repository=ExternalAccountLinkRepository(writes),
+        session_model_profile_repository=SessionModelProfileRepository(
+            agents,
+            roots,
+            WorkspaceUserRepository(),
+            ChatWriteRequestRepository(),
+            AsyncMock(spec=ActiveProfileAdmissionRepository),
+            writes,
+        ),
+        agent_repository=agents,
+        agent_session_repository=roots,
+        active_model_capabilities_repository=AsyncMock(
+            spec=ActiveModelCapabilitiesRepository
+        ),
+    )
+
+
+async def test_model_apply_replay_reads_committed_audit_without_notice_row_lock(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """A notice-only writer cannot make immutable replay busy or repeat effects."""
+    writes = create_read_write_session_manager(rdb_engine)
+    repository = _local_option_repository(rdb_engine)
+    async with _authority(
+        rdb_engine, app_mode=ExternalChannelAppMode.SINGLE
+    ) as fixture:
+        now = datetime.now(UTC)
+        opened = await repository.open_editor(
+            actor=fixture.actor,
+            target=fixture.target,
+            owner_interaction_key="immutable-open",
+            now=now,
+            offset=0,
+            limit=10,
+        )
+        assert isinstance(opened, ExternalModelEditorReady)
+        first = await repository.apply_draft(
+            actor=fixture.actor,
+            draft_id=opened.editor.draft.id,
+            expected_selection_fingerprint=opened.editor.draft.selection_fingerprint,
+            apply_interaction_key="immutable-apply",
+            now=now,
+        )
+        assert isinstance(first.result, ExternalModelApplied)
+        assert first.result.created is True
+        assert first.notice_plan is not None
+        async with writes() as holder:
+            await holder.write_session.execute(
+                sa.update(RDBExternalModelMutation)
+                .where(RDBExternalModelMutation.id == first.result.mutation_id)
+                .values(notice_outcome=ExternalModelNoticeOutcome.DELIVERED)
+            )
+            replay = await asyncio.wait_for(
+                repository.apply_draft(
+                    actor=fixture.actor,
+                    draft_id=opened.editor.draft.id,
+                    expected_selection_fingerprint=(
+                        opened.editor.draft.selection_fingerprint
+                    ),
+                    apply_interaction_key="immutable-apply",
+                    now=now,
+                ),
+                timeout=2,
+            )
+            assert isinstance(replay.result, ExternalModelApplied)
+            assert replay.result.created is False
+            assert replay.result.mutation_id == first.result.mutation_id
+            assert replay.result.notice_outcome is ExternalModelNoticeOutcome.UNKNOWN
+            assert replay.notice_plan is None
+            assert replay.result.editor.current_generation == (
+                first.result.editor.current_generation
+            )
+        async with writes() as session:
+            assert (
+                await session.read_session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(RDBExternalModelMutation)
+                    .where(
+                        RDBExternalModelMutation.session_id == fixture.target.session_id
+                    )
+                )
+                == 1
+            )
+
+
+async def test_concurrent_model_apply_has_one_profile_audit_and_notice_plan(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Removing the replay lock retains draft/authority once-only Apply fences."""
+    repository = _local_option_repository(rdb_engine)
+    async with _authority(
+        rdb_engine, app_mode=ExternalChannelAppMode.SINGLE
+    ) as fixture:
+        now = datetime.now(UTC)
+        opened = await repository.open_editor(
+            actor=fixture.actor,
+            target=fixture.target,
+            owner_interaction_key="concurrent-open",
+            now=now,
+            offset=0,
+            limit=10,
+        )
+        assert isinstance(opened, ExternalModelEditorReady)
+
+        async def apply() -> ExternalModelApplyCommit:
+            return await repository.apply_draft(
+                actor=fixture.actor,
+                draft_id=opened.editor.draft.id,
+                expected_selection_fingerprint=opened.editor.draft.selection_fingerprint,
+                apply_interaction_key="concurrent-apply",
+                now=now,
+            )
+
+        results = await asyncio.gather(apply(), apply())
+        assert all(
+            isinstance(commit.result, ExternalModelApplied | ExternalModelBusy)
+            for commit in results
+        )
+        assert (
+            sum(
+                isinstance(commit.result, ExternalModelApplied)
+                and commit.result.created
+                for commit in results
+            )
+            == 1
+        )
+        assert sum(commit.notice_plan is not None for commit in results) == 1
+        replay = await apply()
+        assert isinstance(replay.result, ExternalModelApplied)
+        assert replay.result.created is False
+        assert replay.notice_plan is None
+        assert replay.result.editor.current_generation == (
+            opened.editor.current_generation + 1
+        )
 
 
 @pytest.mark.parametrize("first", ["replace", "disconnect"])

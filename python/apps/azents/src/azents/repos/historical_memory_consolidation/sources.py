@@ -28,6 +28,9 @@ from azents.repos.historical_memory_consolidation.authority import (
     consolidation_job_session,
     require_commit_owner,
 )
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,7 @@ class ConsolidationSourceRepository:
 
     session_manager: SessionManager[WriteSession]
 
+    @retry_consolidation_operation
     async def inventory(
         self,
         principal: ConsolidationJobPrincipal,
@@ -207,6 +211,7 @@ class ConsolidationSourceRepository:
             )
         return result
 
+    @retry_consolidation_operation
     async def read(
         self,
         principal: ConsolidationJobPrincipal,

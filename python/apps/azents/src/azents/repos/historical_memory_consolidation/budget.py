@@ -25,6 +25,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftConflict,
     check_draft_influence,
 )
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 
 
 async def check_input_influence(
@@ -48,11 +51,13 @@ class ConsolidationExecutionRepository:
 
     session_manager: SessionManager[WriteSession]
 
+    @retry_consolidation_operation
     async def authorize(self, principal: ConsolidationJobPrincipal) -> None:
         async with consolidation_job_session(self.session_manager, principal) as job:
             await check_input_influence(job.session, principal, job.owner)
             await require_commit_owner(job.session, job.owner)
 
+    @retry_consolidation_operation
     async def reserve_model(
         self,
         principal: ConsolidationJobPrincipal,
@@ -104,6 +109,7 @@ class ConsolidationExecutionRepository:
             await require_commit_owner(session, owner)
         return result
 
+    @retry_consolidation_operation
     async def record_usage(
         self,
         principal: ConsolidationJobPrincipal,
@@ -139,6 +145,7 @@ class ConsolidationExecutionRepository:
                 row.usage_recorded = True
             await require_commit_owner(session, owner)
 
+    @retry_consolidation_operation
     async def reserve_tools(
         self, principal: ConsolidationJobPrincipal, *, count: int
     ) -> None:

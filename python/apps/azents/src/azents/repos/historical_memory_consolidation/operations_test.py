@@ -1,16 +1,25 @@
 """Real PostgreSQL Lightweight operation selection, routing and settlement."""
 
+import asyncio
 import json
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+import azents.repos.historical_memory_consolidation.retry as retry_module
 from azents.core.active_model_capabilities import (
     CapturedStoredChoice,
     ConfiguredModelIdentity,
 )
 from azents.core.enums import LLMProvider
-from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
+from azents.core.historical_memory_consolidation import (
+    ConsolidationAttemptState,
+    ConsolidationJobPrincipal,
+)
 from azents.core.model_catalog_identity import catalog_source_keys
 from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_operation import (
@@ -25,10 +34,14 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureRetryability,
 )
 from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.historical_memory_consolidation import RDBConsolidationAttempt
+from azents.rdb.models.base import RDBModel
+from azents.rdb.models.historical_memory_consolidation import (
+    RDBConsolidationAttempt,
+    RDBConsolidationUnit,
+)
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -49,6 +62,7 @@ from azents.repos.historical_memory_consolidation.ownership import (
 )
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 from azents.testing.consolidation import (
     consolidation_deadline,
     seed_consolidation_corpus,
@@ -139,6 +153,69 @@ def _failure(
         integration=selection.llm_provider_integration_id,
         model=selection.model_identifier if model is None else model,
     )
+
+
+async def test_begin_retries_agent_contention_without_new_attempt_or_model_request(
+    rdb_engine: AsyncEngine, latest_db_schema: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Initial provider preparation repeats only its rollback-confirmed DB work."""
+    factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def manager() -> AsyncGenerator[WriteSession, None]:
+        async with factory.begin() as session:
+            yield ReadWriteSession(session)
+
+    async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
+        principal = await _principal(manager)
+        metadata = _active_metadata_repository(structured_output=True)
+        repository = ConsolidationModelOperationRepository(
+            manager,
+            AgentRepository(),
+            ModelCandidateHealthRepository(manager),
+            metadata,
+        )
+        rolled_back = asyncio.Event()
+        resume = asyncio.Event()
+
+        async def contention_yield() -> None:
+            rolled_back.set()
+            await resume.wait()
+
+        monkeypatch.setattr(retry_module, "wait_for_contention_retry", contention_yield)
+        async with manager() as holder:
+            await holder.write_session.scalar(
+                sa.select(RDBAgent)
+                .where(RDBAgent.id == principal.unit.agent_id)
+                .with_for_update()
+            )
+            task = asyncio.create_task(repository.begin(principal))
+            async with asyncio.timeout(3):
+                await rolled_back.wait()
+        resume.set()
+        async with asyncio.timeout(3):
+            operation = await task
+        assert operation.kind is ModelOperationKind.HISTORICAL_MEMORY
+        metadata.capture_exact_choices_in_session.assert_awaited_once()
+        assert await repository.begin(principal) == operation
+        async with manager() as session:
+            attempt = await session.read_session.get(
+                RDBConsolidationAttempt, principal.attempt_id
+            )
+            unit = await session.read_session.scalar(
+                sa.select(RDBConsolidationUnit).where(
+                    RDBConsolidationUnit.agent_id == principal.unit.agent_id,
+                    RDBConsolidationUnit.associated_user_id.is_(None),
+                )
+            )
+            assert attempt is not None and unit is not None
+            assert attempt.state is ConsolidationAttemptState.RUNNING
+            assert attempt.model_requests == 0
+            assert attempt.failure_code is None
+            assert unit.active_attempt_id == attempt.id
+            assert unit.owner_generation == principal.owner_generation
+            assert unit.failure_count == unit.no_progress_count == 0
+            assert unit.retry_at is None
 
 
 async def test_begin_freezes_only_lightweight_and_replays_without_foreground_claim(

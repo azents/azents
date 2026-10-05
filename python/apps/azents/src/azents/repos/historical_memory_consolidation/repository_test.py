@@ -34,7 +34,6 @@ from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory_consolidation.authority import (
-    ConsolidationAuthorityBusyError,
     ConsolidationAuthorityError,
 )
 from azents.repos.historical_memory_consolidation.drafts import (
@@ -487,7 +486,7 @@ async def test_membership_repository_restores_fresh_enrollment(
 
 
 async def test_two_real_transactions_admit_exactly_one_owner(
-    rdb_engine: AsyncEngine, latest_db_schema: None
+    rdb_engine: AsyncEngine, latest_db_schema: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Two released contenders use independent connections and committed state."""
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
@@ -564,8 +563,22 @@ async def test_two_real_transactions_admit_exactly_one_owner(
             await holder.write_session.scalar(
                 sa.select(RDBAgent).where(RDBAgent.id == key.agent_id).with_for_update()
             )
-            with pytest.raises(ConsolidationAuthorityBusyError, match="temporarily"):
-                await repository.renew(principal)
+            rolled_back = asyncio.Event()
+            resume = asyncio.Event()
+
+            async def contention_yield() -> None:
+                rolled_back.set()
+                await resume.wait()
+
+            monkeypatch.setattr(
+                "azents.repos.historical_memory_consolidation.retry.wait_for_contention_retry",
+                contention_yield,
+            )
+            renewal = asyncio.create_task(repository.renew(principal))
+            async with asyncio.timeout(3):
+                await rolled_back.wait()
+        resume.set()
+        assert await renewal is not None
         assert await repository.renew(principal) is not None
     finally:
         async with manager() as session:
