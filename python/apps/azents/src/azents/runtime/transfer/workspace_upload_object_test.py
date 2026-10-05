@@ -13,6 +13,7 @@ from azcommon.infra.s3.service import (
     S3ObjectIdentity,
     S3ObjectSummaryPage,
 )
+from botocore.exceptions import ClientError, ParamValidationError
 
 from azents.runtime.transfer.workspace_upload_object import (
     WorkspaceUploadObjectHandles,
@@ -306,3 +307,71 @@ async def _empty_handles() -> WorkspaceUploadObjectHandles:
         ingress_handles=frozenset(),
         source_handles=frozenset(),
     )
+
+
+class _FailingCleanupS3(_PagedS3):
+    """Inject an object deletion or multipart abort failure."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__()
+        self.error = error
+
+    async def delete(self, bucket: str, key: str) -> None:
+        """Raise the selected deletion failure."""
+        raise self.error
+
+    async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
+        """Raise the selected multipart abort failure."""
+        raise self.error
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+@pytest.mark.parametrize(
+    "error,expected_storage_failure",
+    [
+        (ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObject"), True),
+        (TypeError("cleanup bug"), False),
+        (ParamValidationError(report="invalid cleanup request"), False),
+    ],
+)
+async def test_orphan_repair_only_counts_expected_storage_failures(
+    multipart: bool,
+    error: Exception,
+    expected_storage_failure: bool,
+) -> None:
+    """Programming failures propagate instead of becoming outage counters."""
+    s3 = _FailingCleanupS3(error)
+    if multipart:
+        s3.multipart_page = S3MultipartUploadPage(
+            uploads=(_listed_multipart("workspace-upload-sources/orphan", "upload"),),
+            next_key_marker=None,
+            next_upload_id_marker=None,
+            skipped_entries=0,
+        )
+    else:
+        s3.object_pages[("workspace-upload-ingress/", None)] = S3ObjectSummaryPage(
+            objects=(_listed_object("workspace-upload-ingress/orphan"),),
+            next_continuation_token=None,
+            skipped_entries=0,
+        )
+    cleanup = WorkspaceUploadObjectOrphanRepair(
+        object_store=_object_store(s3),
+        live_object_handles=_empty_handles,
+    )
+    if expected_storage_failure:
+        result = await cleanup.repair_orphans(
+            now=_NOW,
+            maximum_age=timedelta(minutes=30),
+            page_size=2,
+        )
+        assert result.failed_cleanups == 1
+        assert result.deleted_objects == 0
+        assert result.aborted_multipart_uploads == 0
+    else:
+        with pytest.raises(type(error)) as raised:
+            await cleanup.repair_orphans(
+                now=_NOW,
+                maximum_age=timedelta(minutes=30),
+                page_size=2,
+            )
+        assert raised.value is error

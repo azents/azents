@@ -67,14 +67,27 @@ from azents.repos.runtime_connection_generation.repository import (
     CURRENT_ALLOCATOR_VERSION,
     RuntimeConnectionGenerationRepository,
 )
+from azents.repos.runtime_connection_registration_operations import (
+    RuntimeProviderConnectionRegistrationOperationRepository,
+    RuntimeRunnerConnectionRegistrationOperationRepository,
+)
 from azents.repos.runtime_control_read import RuntimeControlReadRepository
 from azents.repos.runtime_lifecycle_dispatch.repository import (
     RuntimeLifecycleDispatchRepository,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_profile_reconciliation_operations import (
+    RuntimeProfileReconciliationOperationRepository,
+)
+from azents.repos.runtime_profile_resolution_operations import (
+    RuntimeProfileResolutionOperationRepository,
+)
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
+)
+from azents.repos.runtime_provider_contract_operations import (
+    RuntimeProviderContractOperationsRepository,
 )
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
@@ -83,7 +96,13 @@ from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.runtime_reconciliation import RuntimeReconciliationOperationRepository
+from azents.repos.runtime_recreation_operations import (
+    RuntimeRecreationReconcileOperationRepository,
+)
 from azents.repos.runtime_report_operations import RuntimeReportOperationRepository
+from azents.repos.runtime_runner_auth_operations import (
+    RuntimeRunnerAuthenticationOperationRepository,
+)
 from azents.repos.runtime_stream_route import RuntimeStreamRouteOperationRepository
 from azents.repos.runtime_web.session_route_repository import (
     RuntimeWebSessionRouteConflict,
@@ -210,17 +229,14 @@ from azents.services.runtime_connection_registration.service import (
 from azents.services.runtime_profile_reconciliation.service import (
     RuntimeProfileReconciliationService,
 )
-from azents.services.runtime_profile_resolution.service import (
-    RuntimeProfileResolutionService,
-)
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractService,
 )
+from azents.services.runtime_provider_control.deps import (
+    create_runtime_provider_enrollment_service,
+)
 from azents.services.runtime_provider_control.provider_auth import (
     KubernetesApiTokenReviewer,
-)
-from azents.services.runtime_provider_control.service import (
-    RuntimeProviderEnrollmentService,
 )
 from azents.services.runtime_recreation.service import RuntimeRecreationReconciler
 from azents.services.runtime_runner_auth.service import (
@@ -879,7 +895,7 @@ async def runtime_control_server_lifespan(
     profile_repository = RuntimeProfileRepository()
     provider_repository = RuntimeProviderRepository()
     provider_control_repository = RuntimeProviderControlRepository()
-    profile_resolution = RuntimeProfileResolutionService(
+    resolution_operations = RuntimeProfileResolutionOperationRepository(
         session_manager=session_manager,
         agent_repository=agent_repository,
         runtime_repository=runtime_repository,
@@ -888,9 +904,11 @@ async def runtime_control_server_lifespan(
         provider_policy_repository=policy_repository,
     )
     profile_reconciliation = RuntimeProfileReconciliationService(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        resolution_service=profile_resolution,
+        operations=RuntimeProfileReconciliationOperationRepository(
+            session_manager=session_manager,
+            profile_repository=profile_repository,
+            resolution_operations=resolution_operations,
+        ),
     )
     kubernetes_api_client: ApiClient | None = None
     kubernetes_token_reviewer = None
@@ -900,7 +918,7 @@ async def runtime_control_server_lifespan(
         kubernetes_token_reviewer = KubernetesApiTokenReviewer(
             AuthenticationV1Api(kubernetes_api_client)
         )
-    enrollment_service = RuntimeProviderEnrollmentService(
+    enrollment_service = create_runtime_provider_enrollment_service(
         session_manager=session_manager,
         repository=provider_control_repository,
         provider_repository=provider_repository,
@@ -910,10 +928,12 @@ async def runtime_control_server_lifespan(
         auth_registry=None,
     )
     contract_service = RuntimeProviderContractService(
-        session_manager=session_manager,
-        provider_repository=provider_repository,
-        policy_repository=policy_repository,
-        profile_repository=profile_repository,
+        operations=RuntimeProviderContractOperationsRepository(
+            session_manager=session_manager,
+            provider_repository=provider_repository,
+            policy_repository=policy_repository,
+            profile_repository=profile_repository,
+        )
     )
     report_operations = RuntimeReportOperationRepository(
         runtime_repository=runtime_repository,
@@ -932,28 +952,32 @@ async def runtime_control_server_lifespan(
         settings.credential_encryption_key
     )
     runner_authenticator = RuntimeRunnerAuthenticationService(
-        session_manager=session_manager,
-        runtime_repository=runtime_repository,
         verifier=runner_credential_verifier,
+        operations=RuntimeRunnerAuthenticationOperationRepository(
+            session_manager=create_read_only_session_manager(engine),
+            runtime_repository=runtime_repository,
+        ),
     )
     provider_connection_registrar = RuntimeProviderConnectionRegistrationService(
-        session_manager=session_manager,
-        generation_repository=generation_repository,
         coordination_store=coordination_store,
-        provider_control=enrollment_service,
         clock=clock,
-        heartbeat_interval_seconds=(
-            settings.testenv_runtime_control_heartbeat_interval_seconds
+        heartbeat_interval_seconds=settings.testenv_runtime_control_heartbeat_interval_seconds,
+        operations=RuntimeProviderConnectionRegistrationOperationRepository(
+            session_manager=session_manager,
+            read_session_manager=create_read_only_session_manager(engine),
+            generation_repository=generation_repository,
+            provider_control=enrollment_service.operations,
         ),
     )
     runner_connection_registrar = RuntimeRunnerConnectionRegistrationService(
-        session_manager=session_manager,
-        generation_repository=generation_repository,
         coordination_store=coordination_store,
-        runner_authentication=runner_authenticator,
         generation_observer=runner_generation_observer,
-        heartbeat_interval_seconds=(
-            settings.testenv_runtime_control_heartbeat_interval_seconds
+        heartbeat_interval_seconds=settings.testenv_runtime_control_heartbeat_interval_seconds,
+        operations=RuntimeRunnerConnectionRegistrationOperationRepository(
+            session_manager=session_manager,
+            read_session_manager=create_read_only_session_manager(engine),
+            generation_repository=generation_repository,
+            runner_authentication=runner_authenticator.operations,
         ),
     )
     stream_session_offer_provider: RuntimeStreamSessionOfferProvider = (
@@ -1086,16 +1110,14 @@ async def runtime_control_server_lifespan(
         ),
     )
     recreation_reconciler = RuntimeRecreationReconciler(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        runtime_repository=runtime_repository,
-        agent_repository=agent_repository,
-        terminal_invalidation_publisher=(
-            CoordinatedRuntimeTerminalInvalidationPublisher(
-                store=terminal_coordination,
-                dispatcher=terminal_dispatcher,
-                clock=clock,
-            )
+        terminal_invalidation_publisher=CoordinatedRuntimeTerminalInvalidationPublisher(
+            store=terminal_coordination, dispatcher=terminal_dispatcher, clock=clock
+        ),
+        operations=RuntimeRecreationReconcileOperationRepository(
+            session_manager=session_manager,
+            profile_repository=profile_repository,
+            runtime_repository=runtime_repository,
+            agent_repository=agent_repository,
         ),
     )
     stop_reconciler = asyncio.Event()

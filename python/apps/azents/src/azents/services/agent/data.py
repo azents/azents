@@ -15,9 +15,9 @@ from azents.core.agent import (
     SubagentSettings,
 )
 from azents.core.enums import AgentRuntimeCapability, AgentType
+from azents.core.upload_images import UploadedImage
 from azents.repos.agent.data import Agent
 from azents.repos.agent_decommission.data import AgentDecommissionJob
-from azents.services.uploads.schema import UploadedImage
 
 
 class AgentOutput(BaseModel):

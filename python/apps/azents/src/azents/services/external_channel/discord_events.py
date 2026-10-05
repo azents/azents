@@ -4,7 +4,7 @@ import datetime
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import discord
 
@@ -178,7 +178,7 @@ def project_discord_sdk_gateway_message(
     embeds = [_sdk_embed(embed) for embed in message.embeds]
     if embeds:
         source["embeds"] = embeds
-    channel_name = getattr(channel, "name", None)
+    channel_name = channel.name
     if isinstance(channel_name, str) and channel_name:
         source["channel_name"] = channel_name
     if isinstance(channel, discord.Thread):
@@ -195,7 +195,7 @@ def project_discord_sdk_gateway_message(
             ),
         }
         parent = channel.parent
-        parent_name = getattr(parent, "name", None)
+        parent_name = parent.name if parent is not None else None
         if isinstance(parent_name, str) and parent_name:
             source["parent_channel_name"] = parent_name
     return project_discord_message(message=source, guild_id=guild_id)
@@ -250,7 +250,11 @@ def project_discord_sdk_history_message(
 
 def _sdk_user(user: discord.abc.User) -> dict[str, object]:
     """Project public Discord user attributes without profile URLs."""
-    global_name = getattr(user, "global_name", None)
+    global_name = (
+        user.global_name
+        if isinstance(user, discord.User | discord.Member | discord.ClientUser)
+        else None
+    )
     return {
         "id": str(user.id),
         "username": user.name,
@@ -413,16 +417,16 @@ def normalize_projected_discord_event(
         raise DiscordEventExcluded("Discord event Guild does not match the connection.")
     message_id = _required_string(raw_message, "id")
     channel_id = _required_string(raw_message, "channel_id")
-    author_type, provider_user_id, sender_display_name = _author(
-        raw_message.get("author")
-    )
+    author = _author(raw_message.get("author"))
+    author_type = author.kind
+    provider_user_id = author.provider_user_id
     if connected_bot_user_id is not None and provider_user_id == connected_bot_user_id:
         author_type = ExternalChannelPrincipalAuthorType.BOT
     normalized_body = _optional_content(raw_message)
     attachment_metadata = _attachment_metadata(raw_message)
     created_at = _discord_timestamp(raw_message.get("timestamp"))
     updated_at = _discord_timestamp(raw_message.get("edited_timestamp"))
-    thread_id, parent_channel_id = _thread_identity(raw_message)
+    thread = _thread_identity(raw_message)
     invocation = _mentions_connected_bot(
         raw_message.get("mentions"),
         connected_bot_user_id=connected_bot_user_id,
@@ -434,8 +438,8 @@ def normalize_projected_discord_event(
     return DiscordNormalizedMessage(
         tenant_id=tenant_id,
         channel_id=channel_id,
-        thread_id=thread_id,
-        parent_channel_id=parent_channel_id,
+        thread_id=thread.thread_id,
+        parent_channel_id=thread.parent_channel_id,
         message_id=message_id,
         provider_message_key=f"discord:{tenant_id}:{message_id}",
         provider_position=_discord_position(message_id),
@@ -444,7 +448,7 @@ def normalize_projected_discord_event(
         lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         author_type=author_type,
         provider_user_id=provider_user_id,
-        sender_display_name=sender_display_name,
+        sender_display_name=author.display_name,
         normalized_body=normalized_body,
         attachment_metadata=attachment_metadata,
         reference_mappings=reference_mappings,
@@ -683,22 +687,26 @@ def _bounded_string(value: object) -> str | None:
     return value[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]
 
 
-def _author(
-    value: object,
-) -> tuple[ExternalChannelPrincipalAuthorType, str | None, str | None]:
+class _DiscordAuthor(NamedTuple):
+    """Canonical author identity and optional bounded display data."""
+
+    kind: ExternalChannelPrincipalAuthorType
+    provider_user_id: str | None
+    display_name: str | None
+
+
+def _author(value: object) -> _DiscordAuthor:
     if not is_external_channel_projection(value):
-        return ExternalChannelPrincipalAuthorType.SYSTEM, None, None
+        return _DiscordAuthor(ExternalChannelPrincipalAuthorType.SYSTEM, None, None)
     provider_user_id = _bounded_string(value.get("id"))
     display_name = _discord_display_name(value)
     if value.get("system") is True:
-        return (
-            ExternalChannelPrincipalAuthorType.SYSTEM,
-            provider_user_id,
-            display_name,
-        )
-    if value.get("bot") is True:
-        return ExternalChannelPrincipalAuthorType.BOT, provider_user_id, display_name
-    return ExternalChannelPrincipalAuthorType.HUMAN, provider_user_id, display_name
+        kind = ExternalChannelPrincipalAuthorType.SYSTEM
+    elif value.get("bot") is True:
+        kind = ExternalChannelPrincipalAuthorType.BOT
+    else:
+        kind = ExternalChannelPrincipalAuthorType.HUMAN
+    return _DiscordAuthor(kind, provider_user_id, display_name)
 
 
 def _reference_mappings(
@@ -792,15 +800,22 @@ def _attachment_metadata(message: dict[str, object]) -> dict[str, object] | None
     return metadata
 
 
-def _thread_identity(message: dict[str, object]) -> tuple[str | None, str | None]:
+class _DiscordThreadIdentity(NamedTuple):
+    """Thread and parent channel identity in a projected message."""
+
+    thread_id: str | None
+    parent_channel_id: str | None
+
+
+def _thread_identity(message: dict[str, object]) -> _DiscordThreadIdentity:
     raw_thread = message.get("thread")
     if not is_external_channel_projection(raw_thread):
-        return None, None
+        return _DiscordThreadIdentity(None, None)
     thread_id = _bounded_string(raw_thread.get("id"))
     parent_channel_id = _bounded_string(raw_thread.get("parent_id"))
     if thread_id is None:
         raise DiscordEventNormalizationError("Discord thread projection is invalid.")
-    return thread_id, parent_channel_id
+    return _DiscordThreadIdentity(thread_id, parent_channel_id)
 
 
 def _mentions_connected_bot(

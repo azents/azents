@@ -679,8 +679,10 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.AGENT_MESSAGE
         case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
             return EventKind.EXTERNAL_CHANNEL_MESSAGE
-        case _:
+        case MailboxItemKind.TURN_ACTION_CONTINUATION:
             raise ValueError(f"Unsupported MailboxItem kind: {kind}")
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class LiveEventStore(Protocol):

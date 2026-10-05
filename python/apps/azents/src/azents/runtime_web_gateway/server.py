@@ -45,6 +45,12 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_web.data import RuntimeWebServiceRecord
+from azents.repos.runtime_web.gateway_auth_operations import (
+    RuntimeWebGatewayAuthOperationsRepository,
+)
+from azents.repos.runtime_web.gateway_authority_operations import (
+    RuntimeWebGatewayAuthorityOperationsRepository,
+)
 from azents.repos.runtime_web.gateway_data import (
     RuntimeWebBrokerBinding,
     RuntimeWebDesiredConfiguration,
@@ -352,23 +358,27 @@ async def runtime_web_gateway_lifespan(
         fingerprint=settings.security_fingerprint(),
     )
     auth = RuntimeWebGatewayAuthService(
-        session_manager=session_manager,
-        repository=gateway_repository,
-        agent_repository=AgentRepository(),
-        agent_admin_repository=AgentAdminRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
+        operations=RuntimeWebGatewayAuthOperationsRepository(
+            session_manager=session_manager,
+            repository=gateway_repository,
+            agent_repository=AgentRepository(),
+            agent_admin_repository=AgentAdminRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+        ),
         identity_lifetime=datetime.timedelta(seconds=config.identity_lifetime_seconds),
         desired_configuration=desired_configuration,
     )
     await auth.synchronize_configuration(desired_configuration)
     authority = RuntimeWebGatewayAuthorityService(
-        session_manager=session_manager,
-        gateway_repository=gateway_repository,
-        runtime_web_repository=RuntimeWebRepository(),
-        agent_repository=AgentRepository(),
-        agent_admin_repository=AgentAdminRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
-        runtime_repository=AgentRuntimeRepository(),
+        operations=RuntimeWebGatewayAuthorityOperationsRepository(
+            session_manager=session_manager,
+            gateway_repository=gateway_repository,
+            runtime_web_repository=RuntimeWebRepository(),
+            agent_repository=AgentRepository(),
+            agent_admin_repository=AgentAdminRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            runtime_repository=AgentRuntimeRepository(),
+        ),
     )
     control_endpoint = settings.runtime_web_gateway_control_endpoint
     if control_endpoint is None:

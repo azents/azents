@@ -47,11 +47,19 @@ from azents.repos.agent_runtime_add.repository import (
     AgentRuntimeAddReceiptRepository,
 )
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime_transition_operations import (
+    AgentRuntimeTransitionOperationRepository,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfileCreate,
     WorkspaceRuntimeProfileCreate,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_profile_resolution_operations import (
+    PreparedRuntimeProfileSelection,
+    RuntimeProfileResolutionOperationRepository,
+    RuntimeProfileResolutionRecord,
+)
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
@@ -61,13 +69,6 @@ from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.services.runtime_profile_resolution.data import (
-    RuntimeProfileResolutionResult,
-)
-from azents.services.runtime_profile_resolution.service import (
-    PreparedRuntimeProfileSelection,
-    RuntimeProfileResolutionService,
-)
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -98,10 +99,10 @@ class _RuntimeFreeAgentFixture:
     workspace_runtime_profile_id: str
 
 
-class _SourceRacingResolutionService(RuntimeProfileResolutionService):
+class _SourceRacingResolutionService(RuntimeProfileResolutionOperationRepository):
     """Force the exact-source CAS to lose immediately before final attachment."""
 
-    async def attach_prepared_selection(
+    async def attach_selection_in_transaction(
         self,
         session: WriteSession,
         *,
@@ -109,13 +110,13 @@ class _SourceRacingResolutionService(RuntimeProfileResolutionService):
         runtime: AgentRuntime,
         prepared: PreparedRuntimeProfileSelection,
         runtime_created: bool,
-    ) -> RuntimeProfileResolutionResult | None:
+    ) -> RuntimeProfileResolutionRecord | None:
         with patch.object(
             self.runtime_repository,
             "attach_desired_configuration_state",
             AsyncMock(return_value=None),
         ):
-            return await super().attach_prepared_selection(
+            return await super().attach_selection_in_transaction(
                 session,
                 agent=agent,
                 runtime=runtime,
@@ -336,8 +337,8 @@ async def _seed_runtime_free_agent(
 
 def _resolution_service(
     session_manager: SessionManager[WriteSession],
-) -> RuntimeProfileResolutionService:
-    return RuntimeProfileResolutionService(
+) -> RuntimeProfileResolutionOperationRepository:
+    return RuntimeProfileResolutionOperationRepository(
         session_manager=session_manager,
         agent_repository=AgentRepository(),
         runtime_repository=AgentRuntimeRepository(),
@@ -350,18 +351,20 @@ def _resolution_service(
 def _transition_service(
     session_manager: SessionManager[WriteSession],
     *,
-    resolution_service: RuntimeProfileResolutionService | None = None,
+    resolution_service: RuntimeProfileResolutionOperationRepository | None = None,
 ) -> AgentRuntimeTransitionService:
     return AgentRuntimeTransitionService(
-        session_manager=session_manager,
-        agent_repository=AgentRepository(),
-        runtime_repository=AgentRuntimeRepository(),
-        removal_repository=AgentRuntimeRemovalRepository(),
-        add_receipt_repository=AgentRuntimeAddReceiptRepository(),
-        profile_repository=RuntimeProfileRepository(),
-        resolution_service=resolution_service
-        if resolution_service is not None
-        else _resolution_service(session_manager),
+        operations=AgentRuntimeTransitionOperationRepository(
+            session_manager=session_manager,
+            agent_repository=AgentRepository(),
+            runtime_repository=AgentRuntimeRepository(),
+            removal_repository=AgentRuntimeRemovalRepository(),
+            add_receipt_repository=AgentRuntimeAddReceiptRepository(),
+            profile_repository=RuntimeProfileRepository(),
+            resolution_operations=resolution_service
+            if resolution_service is not None
+            else _resolution_service(session_manager),
+        )
     )
 
 
