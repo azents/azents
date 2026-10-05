@@ -44,6 +44,9 @@ from azents.core.enums import RuntimeProviderKind
 from azents.core.runtime_connection_registration import (
     RuntimeConnectionRegistrationUnavailable,
 )
+from azents.core.runtime_provider_contract_errors import (
+    RuntimeProviderContractUnavailable,
+)
 from azents.core.runtime_provider_control import (
     RuntimeProviderCredentialAuthentication,
     RuntimeProviderCredentialUnavailable,
@@ -69,9 +72,6 @@ from azents.runtime.coordination.data import (
 )
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrar,
-)
-from azents.services.runtime_provider_contract.service import (
-    RuntimeProviderContractUnavailable,
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500

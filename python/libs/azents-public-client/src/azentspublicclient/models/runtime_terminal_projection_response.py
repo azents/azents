@@ -105,13 +105,16 @@ class RuntimeTerminalProjectionResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "state": obj.get("state"),
             "reason_code": obj.get("reason_code"),
             "denied_scope": obj.get("denied_scope"),
             "can_start_runtime": obj.get("can_start_runtime"),
             "can_open_or_attach": obj.get("can_open_or_attach"),
             "terminal": RuntimeTerminalSummaryResponse.from_dict(obj["terminal"]) if obj.get("terminal") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

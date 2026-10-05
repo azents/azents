@@ -1,6 +1,5 @@
 """Testenv broker inject-resume endpoint tests."""
 
-from typing import cast
 from unittest.mock import AsyncMock
 
 from fastapi import FastAPI
@@ -39,7 +38,7 @@ class TestInjectResume:
         broker.send_message.assert_awaited_once()
         call_args = broker.send_message.await_args
         assert call_args is not None
-        message = cast(SessionWakeUp, call_args.args[0])
+        message = call_args.args[0]
         assert isinstance(message, SessionWakeUp)
         assert message.session_id == "sess-1"
 

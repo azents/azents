@@ -90,11 +90,14 @@ class PlatformGitHubAppBindingResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "affected_user_count": obj.get("affected_user_count"),
             "affected_installation_count": obj.get("affected_installation_count"),
             "affected_toolkit_count": obj.get("affected_toolkit_count"),
             "affected_agent_count": obj.get("affected_agent_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

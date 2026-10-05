@@ -3,7 +3,6 @@
 import datetime
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,6 +38,9 @@ from azents.repos.external_channel.ingestion_replay_operations import (
     ExternalChannelReplayOperations,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_channel.ingestion import (
+    ExternalChannelConversationIngestionService,
+)
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
 )
@@ -47,7 +49,7 @@ from azents.testing.types import require_instance
 
 class _SessionContext(AbstractAsyncContextManager[WriteSession]):
     async def __aenter__(self) -> WriteSession:
-        return ReadWriteSession(cast(AsyncSession, SimpleNamespace(commit=AsyncMock())))
+        return ReadWriteSession(AsyncMock(spec=AsyncSession))
 
     async def __aexit__(self, *args: object) -> None:
         return None
@@ -72,7 +74,12 @@ def _service(
                 ExternalChannelRepository,
             ),
         ),
-        ingestion_service=cast(Any, ingestion),
+        ingestion_service=require_instance(
+            MagicMock(
+                spec=ExternalChannelConversationIngestionService, wraps=ingestion
+            ),
+            ExternalChannelConversationIngestionService,
+        ),
     )
 
 

@@ -90,10 +90,13 @@ class ChatFailedRunRetryRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "agent_id": obj.get("agent_id"),
             "failed_event_id": obj.get("failed_event_id"),
             "client_request_id": obj.get("client_request_id")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

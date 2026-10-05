@@ -89,9 +89,12 @@ class RuntimeProviderCredentialExchangeRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "grant_id": obj.get("grant_id"),
             "secret": obj.get("secret")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

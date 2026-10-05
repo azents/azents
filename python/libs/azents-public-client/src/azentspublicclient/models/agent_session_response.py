@@ -168,7 +168,9 @@ class AgentSessionResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "agent_id": obj.get("agent_id"),
             "current_model_target_label": obj.get("current_model_target_label"),
@@ -188,6 +190,7 @@ class AgentSessionResponse(BaseModel):
             "archive_retention_days_snapshot": obj.get("archive_retention_days_snapshot"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

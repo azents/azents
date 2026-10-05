@@ -12,6 +12,7 @@ from typing import Annotated, ClassVar, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from azents.core.mailbox_activity import MailboxActivityObserverProtocol
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.engine.hooks.types import RuntimeHooks
 from azents.engine.run.emit import PublishedEvent
@@ -81,7 +82,7 @@ class TurnContext:
     tool_search_enabled: bool = False
     check_stop: CheckStop | None = None
     resource_authority: SessionResourceAuthority | None = None
-    mailbox_activity_observer: object | None = None
+    mailbox_activity_observer: MailboxActivityObserverProtocol | None = None
 
 
 @dataclasses.dataclass(frozen=True)

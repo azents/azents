@@ -17,6 +17,9 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.operations import (
+    LLMProviderIntegrationOperations,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.services.llm_provider_integration import (
     LLMProviderIntegrationService,
@@ -105,11 +108,14 @@ async def test_create_chatgpt_oauth_creates_integration_catalog(
 
     catalog_repository = LLMCatalogRepository()
     service = LLMProviderIntegrationService(
-        repository=LLMProviderIntegrationRepository(
-            CredentialCipher(Fernet.generate_key().decode())
-        ),
-        catalog_repository=catalog_repository,
-        session_manager=rdb_session_manager,
+        operations=LLMProviderIntegrationOperations(
+            repository=LLMProviderIntegrationRepository(
+                CredentialCipher(Fernet.generate_key().decode())
+            ),
+            catalog_repository=catalog_repository,
+            session_manager=rdb_session_manager,
+            read_session_manager=rdb_session_manager,
+        )
     )
     created = await service.create(
         LLMProviderIntegrationCreateInput(

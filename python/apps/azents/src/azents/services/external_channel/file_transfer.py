@@ -1116,11 +1116,12 @@ def _discord_transfer_error_message(
             CoordinatorTransferFailure.ADMISSION
             | CoordinatorTransferFailure.FENCED
             | CoordinatorTransferFailure.STREAM
+            | CoordinatorTransferFailure.DESTINATION_CONFLICT
             | None
         ):
             return f"Failed to write the Runtime file: {path}."
-        case _:
-            return f"Failed to write the Runtime file: {path}."
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def _validate_slack_file_metadata(
@@ -1220,11 +1221,12 @@ def _slack_transfer_error_message(
             CoordinatorTransferFailure.ADMISSION
             | CoordinatorTransferFailure.FENCED
             | CoordinatorTransferFailure.STREAM
+            | CoordinatorTransferFailure.DESTINATION_CONFLICT
             | None
         ):
             return f"Failed to write the Runtime file: {path}."
-        case _:
-            return f"Failed to write the Runtime file: {path}."
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 async def iter_external_channel_outbound_file_chunks(
