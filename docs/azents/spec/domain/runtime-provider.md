@@ -137,6 +137,12 @@ not read-getter flags.
 
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
 
+Public discovery delegates one completed read-only repository operation for Workspace
+eligibility. It retains the enabled filter, ACTIVE lifecycle, system/Workspace scope,
+selected-Workspace grants and Provider-ID ordering, returning detached domain descriptions.
+The service neither owns a database scope nor exposes binding state; descriptive discovery
+does not replace the admission and mutation checks required by Runtime operations.
+
 ## Runtime binding
 
 An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
@@ -385,6 +391,8 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 - **37 (2026-10-05):** Separated ordinary recreation target description from actual
   dispatch fencing and retained the checked target version and item-attempt identity.
+  Moved public Workspace Provider discovery into a completed read-only repository
+  operation without changing eligibility or safe output.
 - **35 (2026-10-04):** Removed row-lock modes from independent revision, Profile
   and retained configuration-state getters while preserving mutation fencing.
 
