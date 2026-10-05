@@ -36,6 +36,9 @@ from azents.repos.historical_memory_consolidation.authority import (
     require_commit_owner,
 )
 from azents.repos.historical_memory_consolidation.budget import check_input_influence
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.model_candidate_selection import select_model_operation_candidate
@@ -91,6 +94,7 @@ class ConsolidationModelOperationRepository:
     health_repository: ModelCandidateHealthRepository
     active_capabilities_repository: ActiveModelCapabilitiesRepository
 
+    @retry_consolidation_operation
     async def begin(
         self, principal: ConsolidationJobPrincipal
     ) -> ModelOperationSnapshot:
@@ -197,6 +201,7 @@ class ConsolidationModelOperationRepository:
             raise selection_error
         return updated
 
+    @retry_consolidation_operation
     async def advance_after_quota(
         self,
         principal: ConsolidationJobPrincipal,

@@ -552,14 +552,12 @@ class ExternalModelSettingsRepository:
                 )
             authorized = self._require_authorized(authorization)
             existing = await session.write_session.scalar(
-                sa.select(RDBExternalModelMutation)
-                .where(
+                sa.select(RDBExternalModelMutation).where(
                     RDBExternalModelMutation.provider == actor.provider,
                     RDBExternalModelMutation.connection_id == actor.connection_id,
                     RDBExternalModelMutation.apply_interaction_key
                     == apply_interaction_key,
                 )
-                .with_for_update(nowait=True)
             )
             if existing is not None:
                 if self._selection_fingerprint(

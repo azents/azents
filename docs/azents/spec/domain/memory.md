@@ -74,7 +74,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-05
-spec_version: 16
+spec_version: 17
 ---
 
 # Memory
@@ -291,6 +291,25 @@ not fabricated as zero or an exact billing ceiling. Generic text reads honor
 caller bounds. Source/work inventory pages still batch database retrieval and
 provide continuation routes. The independent 10,000-byte publication contract,
 complete manifests and atomic publication remain unchanged.
+
+Temporary producer lock contention retries the complete rollback-confirmed
+database operation inside the same claim, including heartbeat, source/file
+receipts, usage, output authorization and publication. Partial-lock NOWAIT guards
+remain where lifecycle/source writer ordering requires refusal and rollback;
+they no longer immediately fail otherwise valid expensive model work.
+The same absolute attempt/lease time and cancellation bound each fresh
+operation, with time scheduling installed before its first owner lock.
+Nonauthoritative time observation never replaces locked current-owner/grant and
+commit-time checks. Initial claim repeats only its database admission under the
+submitted deadline. Retry does not repeat a model/tool handler, consume another
+logical turn, reset time, or add a memory-only retry-count budget.
+
+Only contention or database errors that guarantee an aborted transaction are
+eligible for this local replay; uncertain connection/commit outcomes use existing
+idempotency and durable-outcome handling. Real revocation, takeover, lease/deadline
+loss and cancellation still reject stale work. Terminal metadata uses ordered
+unit/attempt waiting locks with exact current RUNNING owner identity, without
+source/publication authority or revival of expired execution.
 
 Only quota failures advance the Lightweight chain; other failures do not change
 health or use Main fallback. Persisted attempt `failure_code` is restricted to

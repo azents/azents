@@ -218,21 +218,41 @@ class ExternalAccountLinkRepository:
                 now=now,
             )
             link = await session.write_session.scalar(
-                sa.select(RDBExternalAccountLink)
+                sa.update(RDBExternalAccountLink)
                 .where(
                     RDBExternalAccountLink.id == link_id,
                     RDBExternalAccountLink.user_id == user_id,
+                    RDBExternalAccountLink.revoked_at.is_(None),
                 )
-                .with_for_update(nowait=True)
+                .values(
+                    revoked_at=now,
+                    revocation_reason=(
+                        ExternalAccountLinkRevocationReason.OWNER_DISCONNECTED
+                    ),
+                )
+                .returning(RDBExternalAccountLink)
+                .execution_options(populate_existing=True)
             )
             if link is None:
-                raise ExternalAccountLinkNotFound
-            if link.revoked_at is None:
-                link.revoked_at = now
-                link.revocation_reason = (
-                    ExternalAccountLinkRevocationReason.OWNER_DISCONNECTED
+                link = await session.write_session.scalar(
+                    sa.select(RDBExternalAccountLink).where(
+                        RDBExternalAccountLink.id == link_id,
+                        RDBExternalAccountLink.user_id == user_id,
+                    )
                 )
-                await session.write_session.flush()
+            if link is None:
+                raise ExternalAccountLinkNotFound
+            current_time = await session.write_session.scalar(
+                sa.select(sa.func.clock_timestamp())
+            )
+            if not isinstance(current_time, datetime.datetime):
+                raise TypeError("Database clock did not return a datetime.")
+            await self._require_active_user_session(
+                session,
+                user_id=user_id,
+                auth_session_id=auth_session_id,
+                now=max(now, current_time),
+            )
             return await self._build_link_view(session, link)
 
         return await self._run_retryable(operation)
@@ -519,13 +539,17 @@ class ExternalAccountLinkRepository:
         now: datetime.datetime,
     ) -> None:
         user = await session.read_session.scalar(
-            sa.select(RDBUser).where(RDBUser.id == user_id)
+            sa.select(RDBUser)
+            .where(RDBUser.id == user_id)
+            .execution_options(populate_existing=True)
         )
         auth_session = await session.read_session.scalar(
-            sa.select(RDBSession).where(
+            sa.select(RDBSession)
+            .where(
                 RDBSession.id == auth_session_id,
                 RDBSession.user_id == user_id,
             )
+            .execution_options(populate_existing=True)
         )
         if (
             user is None

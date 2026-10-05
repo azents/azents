@@ -1,5 +1,6 @@
 """Repository-owned claim, renewal and terminal transactions for private jobs."""
 
+import asyncio
 import datetime
 import logging
 from dataclasses import dataclass
@@ -25,11 +26,17 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
     ConsolidationAuthorityError,
+    ConsolidationDeadlineError,
     consolidation_job_session,
     consolidation_session,
     database_now,
+    install_statement_deadline,
     lock_unit_authority,
     unit_predicate,
+)
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+    retry_rolled_back_operation,
 )
 from azents.repos.historical_memory_consolidation.work import (
     pending_work_query,
@@ -107,7 +114,33 @@ class ConsolidationOwnershipRepository:
         self, key: ConsolidationUnitKey, *, deadline: datetime.datetime
     ) -> ConsolidationClaim | None:
         """Claim only an unowned/expired unit; a duplicate leaves work untouched."""
+        seconds = (deadline - datetime.datetime.now(datetime.UTC)).total_seconds()
+        if seconds <= 0:
+            return None
+        timeout = asyncio.timeout(seconds)
+        try:
+            async with timeout:
+                return await self._claim_once(key, deadline=deadline)
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            if not timeout.expired():
+                raise
+            raise ConsolidationDeadlineError(
+                "Consolidation claim deadline was exceeded."
+            ) from None
+
+    @retry_rolled_back_operation
+    async def _claim_once(
+        self, key: ConsolidationUnitKey, *, deadline: datetime.datetime
+    ) -> ConsolidationClaim | None:
+        """One complete rollback-safe claim under the caller's absolute deadline."""
         async with consolidation_session(self.session_manager) as session:
+            now = await database_now(session)
+            remaining = (deadline - now).total_seconds()
+            if remaining <= 0:
+                return None
+            await install_statement_deadline(session, remaining)
             grant = await lock_unit_authority(session, key)
             await session.write_session.execute(
                 insert(RDBConsolidationUnit)
@@ -183,6 +216,7 @@ class ConsolidationOwnershipRepository:
             )
         return claim
 
+    @retry_consolidation_operation
     async def renew(self, principal: ConsolidationJobPrincipal) -> datetime.datetime:
         """Extend a still-current lease, never revive an expired owner."""
         async with consolidation_job_session(self.session_manager, principal) as job:
@@ -192,6 +226,7 @@ class ConsolidationOwnershipRepository:
             await session.write_session.flush()
         return until
 
+    @retry_rolled_back_operation
     async def fail(
         self,
         principal: ConsolidationJobPrincipal,
@@ -208,7 +243,7 @@ class ConsolidationOwnershipRepository:
             unit = await session.write_session.scalar(
                 sa.select(RDBConsolidationUnit)
                 .where(unit_predicate(principal.unit))
-                .with_for_update(nowait=True)
+                .with_for_update()
             )
             if (
                 unit is None
@@ -229,7 +264,7 @@ class ConsolidationOwnershipRepository:
                     RDBConsolidationAttempt.owner_token == principal.owner_token,
                     RDBConsolidationAttempt.state == ConsolidationAttemptState.RUNNING,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update()
             )
             if attempt is None:
                 raise ConsolidationAuthorityError(

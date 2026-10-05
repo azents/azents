@@ -32,6 +32,9 @@ from azents.repos.historical_memory_consolidation.authority import (
     consolidation_job_session,
     require_commit_owner,
 )
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 from azents.repos.historical_memory_consolidation.sources import source_predicate
 
 
@@ -238,6 +241,7 @@ class ConsolidationDraftRepository:
 
     session_manager: SessionManager[WriteSession]
 
+    @retry_consolidation_operation
     async def inventory(
         self, principal: ConsolidationJobPrincipal
     ) -> tuple[DraftObservedFile, ...]:
@@ -268,6 +272,7 @@ class ConsolidationDraftRepository:
             await require_commit_owner(session, owner)
         return result
 
+    @retry_consolidation_operation
     async def observe(
         self, principal: ConsolidationJobPrincipal, *, path: str
     ) -> DraftFileObservation:
@@ -292,6 +297,7 @@ class ConsolidationDraftRepository:
             await session.write_session.flush()
         return result
 
+    @retry_consolidation_operation
     async def replay_receipt(
         self,
         principal: ConsolidationJobPrincipal,
@@ -317,6 +323,7 @@ class ConsolidationDraftRepository:
             await require_commit_owner(session, owner)
         return result
 
+    @retry_consolidation_operation
     async def mutate(
         self,
         principal: ConsolidationJobPrincipal,

@@ -130,21 +130,6 @@ class AgentRepository:
             return None
         return self._build_row(rdb_agent)
 
-    async def lock_by_id_nowait(
-        self,
-        session: WriteSession,
-        agent_id: str,
-    ) -> Agent | None:
-        """Try to lock one Agent without waiting on a lifecycle writer."""
-        result = await session.write_session.execute(
-            sa.select(RDBAgent)
-            .where(RDBAgent.id == agent_id)
-            .with_for_update(key_share=True, nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        rdb_agent = result.scalar_one_or_none()
-        return None if rdb_agent is None else self._build_row(rdb_agent)
-
     async def get_runtime_selection_input_for_update(
         self,
         session: WriteSession,

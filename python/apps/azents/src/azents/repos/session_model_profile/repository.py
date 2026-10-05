@@ -91,7 +91,6 @@ class SessionModelProfileRepository:
                         agent_id=agent_id,
                         session_id=session_id,
                         user_id=user_id,
-                        nowait=False,
                     )
                     existing = await write_request_repository.get_by_client_request_id(
                         session,
@@ -173,19 +172,11 @@ class SessionModelProfileRepository:
         agent_id: str,
         session_id: str,
         user_id: str,
-        nowait: bool,
     ) -> AgentSession:
         """Lock and validate the exact web-writable root Session authority."""
-        locked = (
-            await self.agent_session_repository.lock_by_id_nowait(
-                session,
-                session_id,
-            )
-            if nowait
-            else await self.agent_session_repository.lock_by_id(
-                session,
-                session_id,
-            )
+        locked = await self.agent_session_repository.lock_by_id(
+            session,
+            session_id,
         )
         if locked is None:
             raise ValueError("AgentSession not found")
@@ -200,16 +191,9 @@ class SessionModelProfileRepository:
             and locked.associated_user_id != user_id
         ):
             raise ValueError("Requester does not have session access")
-        agent = (
-            await self.agent_repository.lock_by_id_nowait(
-                session,
-                agent_id,
-            )
-            if nowait
-            else await self.agent_repository.lock_by_id(
-                session,
-                agent_id,
-            )
+        agent = await self.agent_repository.lock_by_id(
+            session,
+            agent_id,
         )
         if (
             agent is None

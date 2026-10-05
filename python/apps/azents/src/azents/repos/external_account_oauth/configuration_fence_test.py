@@ -7,7 +7,9 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from cryptography.fernet import Fernet
+from psycopg.errors import LockNotAvailable
 from sqlalchemy import event
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.crypto import CredentialCipher
@@ -21,7 +23,9 @@ from azents.core.system_setting import (
 from azents.core.system_setting_data import SystemSettingCurrentWrite
 from azents.core.system_setting_registry import get_system_setting_registry
 from azents.rdb.models.external_account_oauth import RDBExternalAccountOAuthAttempt
+from azents.rdb.models.session import RDBSession
 from azents.rdb.models.system_setting import RDBSystemSetting
+from azents.rdb.models.user import RDBUser
 from azents.rdb.session_capabilities import (
     ReadSession,
     create_read_write_session_manager,
@@ -39,6 +43,115 @@ from azents.repos.session import SessionRepository
 from azents.repos.session.data import SessionCreate
 from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.user import UserRepository
+
+
+@pytest.mark.parametrize("held", ["user", "auth", "attempt"])
+async def test_oauth_claim_contention_refuses_before_consumption_and_releases_guards(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    held: str,
+) -> None:
+    """Each partial security-lock collision rolls back without admitting exchange."""
+    writes = create_read_write_session_manager(rdb_engine)
+    key = Fernet.generate_key().decode()
+    settings = SystemSettingRepository()
+    section = SystemSettingSection.DISCORD_IDENTITY_OAUTH
+
+    class FixedGenerationAttempts(ExternalAccountOAuthAttemptRepository):
+        async def _current_setting_generation(
+            self, session: ReadSession, *, section: SystemSettingSection
+        ) -> str:
+            return "observed-generation"
+
+    attempts = FixedGenerationAttempts(
+        writes,
+        settings,
+        get_system_setting_registry(),
+        CredentialCipher(key),
+        SystemSettingEnvironment(values={}),
+        SystemSettingGenerationHasher(key),
+    )
+    now = datetime.now(UTC)
+    async with _committed_authority(rdb_engine) as fixture:
+        async with writes() as session:
+            auth = await SessionRepository().create(
+                session,
+                SessionCreate(
+                    user_id=fixture.user_id,
+                    refresh_token=uuid4().hex,
+                    expires_at=now + timedelta(hours=1),
+                    max_expires_at=None,
+                    user_agent=None,
+                    ip_address=None,
+                ),
+            )
+        attempt = await attempts.create(
+            create=ExternalAccountOAuthAttemptCreate(
+                id=uuid4().hex,
+                state_hash=uuid4().hex,
+                user_id=fixture.user_id,
+                auth_session_id=auth.id,
+                provider=ExternalChannelProvider.DISCORD,
+                setting_generation="observed-generation",
+                redirect_uri="https://example.test/callback",
+                encrypted_pkce_verifier=None,
+                expires_at=now + timedelta(minutes=10),
+            )
+        )
+        try:
+            async with writes() as holder:
+                if held == "user":
+                    await holder.write_session.scalar(
+                        sa.select(RDBUser)
+                        .where(RDBUser.id == fixture.user_id)
+                        .with_for_update()
+                    )
+                elif held == "auth":
+                    await holder.write_session.scalar(
+                        sa.select(RDBSession)
+                        .where(RDBSession.id == auth.id)
+                        .with_for_update()
+                    )
+                else:
+                    await holder.write_session.scalar(
+                        sa.select(RDBExternalAccountOAuthAttempt)
+                        .where(RDBExternalAccountOAuthAttempt.id == attempt.id)
+                        .with_for_update()
+                    )
+                with pytest.raises(DBAPIError) as failure:
+                    await asyncio.wait_for(
+                        attempts.claim_open(
+                            state_hash=attempt.state_hash,
+                            user_id=fixture.user_id,
+                            auth_session_id=auth.id,
+                            provider=attempt.provider,
+                            setting_generation=attempt.setting_generation,
+                            redirect_uri=attempt.redirect_uri,
+                            now=now,
+                        ),
+                        timeout=2,
+                    )
+                assert isinstance(failure.value.orig, LockNotAvailable)
+                # A separate section writer may proceed while the original holder
+                # still owns its row: the failed claim retained no partial guard.
+                async with writes() as observer:
+                    await asyncio.wait_for(
+                        settings.acquire_section_lock(observer, section=section),
+                        timeout=2,
+                    )
+                    untouched = await observer.read_session.get(
+                        RDBExternalAccountOAuthAttempt, attempt.id
+                    )
+                    assert untouched is not None
+                    assert untouched.status.value == "open"
+                    assert untouched.claimed_at is None
+        finally:
+            async with writes() as session:
+                await session.write_session.execute(
+                    sa.delete(RDBExternalAccountOAuthAttempt).where(
+                        RDBExternalAccountOAuthAttempt.id == attempt.id
+                    )
+                )
 
 
 async def test_cleanup_deletes_only_bounded_expired_rows_without_read_locks(

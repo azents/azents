@@ -1,5 +1,6 @@
 """Complete-manifest query bounds and real PostgreSQL deadline rollback evidence."""
 
+import asyncio
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -30,7 +31,6 @@ from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.historical_memory_consolidation.authority import (
-    ConsolidationAuthorityBusyError,
     ConsolidationAuthorityError,
     ConsolidationDeadlineError,
     consolidation_job_session,
@@ -126,7 +126,9 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
     assert len(checks) == 3
     assert sum("FOR SHARE NOWAIT" in query for query in checks) == 2
     assert all("SELECT DISTINCT" in query for query in checks[:2])
-    assert len(statements) <= 20
+    # Retry-cutoff observation and pre-lock SQL timeout add constant queries,
+    # independent of manifest size; complete-manifest checks remain exactly three.
+    assert len(statements) <= 25
     statements.clear()
     event.listen(rdb_engine.sync_engine, "before_cursor_execute", capture)
     try:
@@ -172,7 +174,10 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
 
 @pytest.mark.parametrize("deadline", ["statement", "operation"])
 async def test_deadline_rolls_back_files_receipts_and_releases_fence(
-    rdb_engine: AsyncEngine, latest_db_schema: None, deadline: str
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    deadline: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
@@ -213,8 +218,24 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                 )
                 .with_for_update()
             )
-            with pytest.raises(ConsolidationAuthorityBusyError):
-                await drafts.observe(claim.principal, path="summary.md")
+            rolled_back = asyncio.Event()
+            resume = asyncio.Event()
+
+            async def contention_yield() -> None:
+                rolled_back.set()
+                await resume.wait()
+
+            monkeypatch.setattr(
+                "azents.repos.historical_memory_consolidation.retry.wait_for_contention_retry",
+                contention_yield,
+            )
+            observation = asyncio.create_task(
+                drafts.observe(claim.principal, path="summary.md")
+            )
+            async with asyncio.timeout(3):
+                await rolled_back.wait()
+        resume.set()
+        assert (await observation).draft_revision_id == created.draft_revision_id
         # Rejected nonwaiting manifest checks release the owner fence for renewal.
         assert await ConsolidationOwnershipRepository(manager).renew(claim.principal)
         async with manager() as session:

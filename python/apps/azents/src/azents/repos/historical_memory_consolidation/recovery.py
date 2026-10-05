@@ -32,6 +32,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
     check_dependency_manifest,
     check_draft_influence,
 )
+from azents.repos.historical_memory_consolidation.retry import (
+    retry_consolidation_operation,
+)
 from azents.repos.historical_memory_consolidation.sources import source_predicate
 from azents.repos.historical_memory_consolidation.work import work_predicate
 
@@ -52,6 +55,7 @@ class ConsolidationRecoveryRepository:
 
     session_manager: SessionManager[WriteSession]
 
+    @retry_consolidation_operation
     async def prepare(
         self, principal: ConsolidationJobPrincipal
     ) -> ConsolidationRecoveryCheckpoint:
