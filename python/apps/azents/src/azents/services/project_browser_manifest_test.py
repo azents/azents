@@ -24,6 +24,9 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
+from azents.repos.agent_project_catalog.operations import (
+    AgentProjectCatalogOperationsRepository,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.project_browser_manifest_read import (
@@ -237,8 +240,11 @@ def _service(session: WriteSession) -> ProjectBrowserManifestService:
             read_session_manager=session_manager,
         ),
         catalog_service=AgentProjectCatalogService(
-            catalog_repository=catalog_repository,
-            session_manager=session_manager,
+            repository=AgentProjectCatalogOperationsRepository(
+                catalog_repository=catalog_repository,
+                session_manager=session_manager,
+                read_session_manager=session_manager,
+            ),
             runtime_target_resolver=runtime_target_resolver,
             runner_operations=None,
         ),

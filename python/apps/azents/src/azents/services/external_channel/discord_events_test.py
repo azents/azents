@@ -2,19 +2,50 @@
 
 import datetime
 import json
+from unittest.mock import MagicMock
 
+import discord
 import pytest
+from discord.state import ConnectionState
 
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordEventNormalizationError,
     DiscordGatewayMessageEvent,
     DiscordMessageContentUnavailable,
+    _sdk_user,
     normalize_projected_discord_event,
     project_discord_gateway_event,
     project_discord_message,
 )
 from azents.testing.types import is_string_object_dict
+
+
+@pytest.mark.parametrize("user_class", [discord.User, discord.ClientUser])
+@pytest.mark.parametrize("global_name", ["Display Name", None, ""])
+def test_sdk_user_preserves_public_global_name_projection(
+    user_class: type[discord.User] | type[discord.ClientUser],
+    global_name: str | None,
+) -> None:
+    """Public user models retain only nonempty display names in the projection."""
+    user = user_class(
+        state=MagicMock(spec=ConnectionState),
+        data={
+            "id": "100",
+            "username": "username",
+            "discriminator": "0",
+            "avatar": None,
+            "global_name": global_name,
+        },
+    )
+
+    projection = _sdk_user(user)
+
+    assert projection == {
+        "id": "100",
+        "username": "username",
+        **({"global_name": global_name} if global_name else {}),
+    }
 
 
 def _event(

@@ -3,7 +3,6 @@
 import datetime
 import logging
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -33,6 +32,7 @@ from azents.services.external_channel.credentials import ExternalChannelCredenti
 from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.slack_events import SlackConversationClient
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 9, 12, tzinfo=datetime.UTC)
 _ACTOR = ExternalModelActorContext(
@@ -109,10 +109,18 @@ def _service(
         codec = MagicMock(spec=ExternalChannelCredentialsCodec)
         codec.decrypt.return_value = SimpleNamespace(bot_token="secret")
     return ExternalModelSettingsService(
-        repository=cast(ExternalModelSettingsRepository, repository),
+        repository=require_instance(
+            MagicMock(spec=ExternalModelSettingsRepository, wraps=repository),
+            ExternalModelSettingsRepository,
+        ),
         credentials_codec=codec,
-        slack_client=cast(SlackConversationClient, slack_client),
-        discord_client=cast(DiscordDeliveryClient, object()),
+        slack_client=require_instance(
+            MagicMock(spec=SlackConversationClient, wraps=slack_client),
+            SlackConversationClient,
+        ),
+        discord_client=require_instance(
+            MagicMock(spec=DiscordDeliveryClient), DiscordDeliveryClient
+        ),
     )
 
 

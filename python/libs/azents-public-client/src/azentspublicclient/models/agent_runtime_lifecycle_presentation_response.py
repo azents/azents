@@ -121,7 +121,9 @@ class AgentRuntimeLifecyclePresentationResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "target": obj.get("target"),
             "convergence": obj.get("convergence"),
             "provider": AgentRuntimeLifecycleProviderResponse.from_dict(obj["provider"]) if obj.get("provider") is not None else None,
@@ -129,6 +131,7 @@ class AgentRuntimeLifecyclePresentationResponse(BaseModel):
             "availability": obj.get("availability"),
             "reason_code": obj.get("reason_code"),
             "desired_generation": obj.get("desired_generation")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

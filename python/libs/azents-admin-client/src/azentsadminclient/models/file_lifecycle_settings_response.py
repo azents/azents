@@ -113,13 +113,16 @@ class FileLifecycleSettingsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "archived_session_retention_days": obj.get("archived_session_retention_days"),
             "revision": obj.get("revision"),
             "updated_by_user_id": obj.get("updated_by_user_id"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at"),
             "active_application": ArchiveRetentionApplicationResponse.from_dict(obj["active_application"]) if obj.get("active_application") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -19,7 +19,6 @@ from azcommon.infra.s3.service import (
 )
 from azcommon.result import Failure, Result, Success
 from PIL import Image
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession, SessionAgent
@@ -64,6 +63,7 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileCreateBatch,
     ExchangeFileMetadataFailure,
     ExchangeFileOperationRepository,
+    ExchangeFilePublicationRecoveryError,
 )
 from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.workspace_user.data import WorkspaceUser
@@ -1010,7 +1010,9 @@ async def test_uncertain_recovery_read_retains_verified_preview() -> None:
     service, repository, s3_service = _make_authority_service(
         authority_results=[True, False]
     )
-    service.recovery_read.side_effect = SQLAlchemyError("recovery read failed")
+    service.recovery_read.side_effect = ExchangeFilePublicationRecoveryError(
+        "recovery read failed"
+    )
     source = S3ObjectIdentity(bucket="transfer-bucket", key="verified-image")
     body = _jpeg_bytes()
     s3_service.objects[source.key] = body
