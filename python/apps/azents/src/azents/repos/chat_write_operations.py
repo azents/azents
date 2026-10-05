@@ -745,7 +745,7 @@ class ChatWriteOperationsRepository:
         payload: dict[str, object],
     ) -> _IdempotentRecordResult:
         """Create REST write idempotency record and verify payload match."""
-        record, created = await self.chat_write_request_repository.create_idempotent(
+        request_result = await self.chat_write_request_repository.create_idempotent(
             session,
             ChatWriteRequestCreate(
                 session_id=session_id,
@@ -759,6 +759,8 @@ class ChatWriteOperationsRepository:
                 payload=payload,
             ),
         )
+        record = request_result.record
+        created = request_result.created
         if record.write_type != write_type:
             raise ValueError("Client request ID already used for another write type")
         if record.session_id != session_id:

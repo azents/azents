@@ -1,6 +1,5 @@
 """Tests for one-shot post-commit provider controls."""
 
-from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -20,6 +19,7 @@ from azents.services.external_channel.channel_action import ExternalChannelActio
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
+from azents.testing.types import require_instance
 
 
 def _plan() -> ProviderEffectPlan:
@@ -56,7 +56,7 @@ async def test_attempt_delegates_exactly_once_without_drain() -> None:
         error_summary=None,
     )
     service = ExternalChannelProviderControlService(
-        action_service=cast(ExternalChannelActionService, action_service)
+        action_service=require_instance(action_service, ExternalChannelActionService)
     )
     plan = _plan()
 

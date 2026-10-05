@@ -101,11 +101,14 @@ class DiscordConnectionConfiguration(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider") if obj.get("provider") is not None else 'discord',
             "target_guild_id": obj.get("target_guild_id"),
             "suppress_url_previews": obj.get("suppress_url_previews") if obj.get("suppress_url_previews") is not None else True,
             "thread_auto_archive_duration_minutes": obj.get("thread_auto_archive_duration_minutes")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

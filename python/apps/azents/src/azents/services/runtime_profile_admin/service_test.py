@@ -4,6 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -122,13 +123,17 @@ def _workspace_profile() -> WorkspaceRuntimeProfile:
     )
 
 
-def _service() -> tuple[
-    RuntimeProfileAdminService,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    dict[str, bool],
-]:
+class _ProfileFixture(NamedTuple):
+    """Profile deletion dependencies and transaction observation."""
+
+    service: RuntimeProfileAdminService
+    profiles: AsyncMock
+    providers: AsyncMock
+    workspaces: AsyncMock
+    transaction: dict[str, bool]
+
+
+def _service() -> _ProfileFixture:
     """Build the service with transaction-state tracking dependencies."""
     transaction = {"committed": False, "rolled_back": False}
 
@@ -162,7 +167,7 @@ def _service() -> tuple[
         ),
     )
     provider_repository.get_by_provider_id.return_value = _provider()
-    return (
+    return _ProfileFixture(
         service,
         profile_repository,
         provider_repository,

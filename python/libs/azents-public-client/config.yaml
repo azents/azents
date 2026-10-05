@@ -1,4 +1,5 @@
 generatorName: python
+templateDir: ../../openapi-templates/python
 outputDir: .
 inputSpec: ../../apps/azents/specs/public/openapi.json
 additionalProperties:

@@ -105,7 +105,9 @@ class ManagedBlock(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "agent_id": obj.get("agent_id"),
             "principal_id": obj.get("principal_id"),
@@ -114,6 +116,7 @@ class ManagedBlock(BaseModel):
             "reason": obj.get("reason"),
             "created_at": obj.get("created_at"),
             "removed_at": obj.get("removed_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

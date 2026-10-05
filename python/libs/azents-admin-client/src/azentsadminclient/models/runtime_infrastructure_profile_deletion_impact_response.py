@@ -104,7 +104,9 @@ class RuntimeInfrastructureProfileDeletionImpactResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "profile_id": obj.get("profile_id"),
             "profile_kind": obj.get("profile_kind"),
             "display_name": obj.get("display_name"),
@@ -114,6 +116,7 @@ class RuntimeInfrastructureProfileDeletionImpactResponse(BaseModel):
             "applied_only_running_runtime_count": obj.get("applied_only_running_runtime_count"),
             "offset": obj.get("offset"),
             "limit": obj.get("limit")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

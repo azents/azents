@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+from collections.abc import Awaitable
 from typing import Protocol
 
 from kubernetes_asyncio.client.models.v1_secret import V1Secret
@@ -13,22 +14,22 @@ _PROVIDER_ID_ANNOTATION = "azents.io/runtime-provider-id"
 class KubernetesSecretApi(Protocol):
     """Narrow Kubernetes Secret operations required by credential bootstrap."""
 
-    async def read_namespaced_secret(
+    def read_namespaced_secret(
         self,
         *,
         name: str,
         namespace: str,
-    ) -> V1Secret:
+    ) -> Awaitable[V1Secret]:
         """Read one Secret."""
         ...
 
-    async def patch_namespaced_secret(
+    def patch_namespaced_secret(
         self,
         *,
         name: str,
         namespace: str,
         body: dict[str, object],
-    ) -> V1Secret:
+    ) -> Awaitable[V1Secret]:
         """Patch one Secret."""
         ...
 

@@ -5,6 +5,12 @@ tags: [backend, frontend, admin, runtime, security, infra]
 spec_type: domain
 domain: runtime-provider
 code_paths:
+  - python/apps/azents/src/azents/core/runtime_profile_workspace.py
+  - python/apps/azents/src/azents/core/runtime_provider_admin.py
+  - python/apps/azents/src/azents/core/runtime_provider_contract_errors.py
+  - python/apps/azents/src/azents/repos/runtime_profile_workspace_operations.py
+  - python/apps/azents/src/azents/repos/runtime_provider_admin_operations.py
+  - python/apps/azents/src/azents/repos/runtime_provider_contract_operations.py
   - python/apps/azents/src/azents/core/agent_runtime_removal.py
   - python/apps/azents/src/azents/repos/agent_runtime/lifecycle_operations.py
   - python/apps/azents/src/azents/repos/agent_runtime_removal/operations.py
@@ -71,7 +77,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-05
-spec_version: 41
+spec_version: 42
 ---
 
 # Runtime Provider
@@ -452,6 +458,11 @@ network controls, and infrastructure access are operator responsibilities outsid
 Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
+
+- **42 (2026-10-05):** Completed Workspace Profile/default and Provider
+  policy/availability/contract operations in repository-owned scopes. Existing CAS,
+  error translation and reconcile enqueue remain atomic; terminal invalidation and
+  deletion logging follow completion.
 
 - **41 (2026-10-05):** Completed Agent Runtime lifecycle and irreversible removal
   database operations before external coordination. Configuration CAS, exact

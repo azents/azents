@@ -104,12 +104,15 @@ class ValidationError(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "loc": [ValidationErrorLocInner.from_dict(_item) for _item in obj["loc"]] if obj.get("loc") is not None else None,
             "msg": obj.get("msg"),
             "type": obj.get("type"),
             "input": obj.get("input"),
             "ctx": obj.get("ctx")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
