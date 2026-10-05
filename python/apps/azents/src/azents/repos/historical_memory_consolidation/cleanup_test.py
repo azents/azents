@@ -312,7 +312,7 @@ async def test_completed_private_payload_cleanup_keeps_published_bytes_and_manif
     )
     assert (
         await ConsolidationCleanupRepository(rdb_session_manager).sweep(limit=50)
-    ).drafts == 1
+    ).drafts == 0
     assert await publication.inspect_outcome(ready.principal) == outcome
     async with rdb_session_manager() as session:
         revision = await session.read_session.get(
@@ -381,7 +381,7 @@ async def test_completed_slice_cleanup_preserves_its_unfinished_finite_pass(
         upper = unit.pass_upper_sequence
     assert (
         await ConsolidationCleanupRepository(rdb_session_manager).sweep(limit=50)
-    ).drafts == 1
+    ).drafts == 0
     async with rdb_session_manager() as session:
         unit = await session.read_session.get(RDBConsolidationUnit, ready.unit_id)
         assert unit is not None and unit.pass_upper_sequence == upper

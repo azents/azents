@@ -587,7 +587,7 @@ async def test_publication_retries_frozen_result_without_repeating_authorship(
         revision = await session.read_session.get(
             RDBConsolidationRevision, result.revision_id
         )
-        assert draft is not None and draft.revision_id == frozen.revision_id
+        assert draft is None
         assert revision is not None and revision.markdown == frozen.markdown
         assert revision.attempt_id == principal.attempt_id
         assert attempt is not None and unit is not None
@@ -614,5 +614,5 @@ async def test_publication_retries_frozen_result_without_repeating_authorship(
                     RDBConsolidationMutationReceipt.attempt_id == principal.attempt_id
                 )
             )
-            == 1
+            == 0
         )

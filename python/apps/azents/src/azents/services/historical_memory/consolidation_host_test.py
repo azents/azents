@@ -504,7 +504,7 @@ async def test_captured_model_output_survives_agent_contention_without_rerunning
                         .select_from(RDBConsolidationMutationReceipt)
                         .where(RDBConsolidationMutationReceipt.attempt_id == attempt.id)
                     )
-                    == 3
+                    == 0
                 )
                 assert (
                     await session.read_session.scalar(

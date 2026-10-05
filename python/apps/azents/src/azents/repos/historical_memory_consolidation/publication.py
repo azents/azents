@@ -30,6 +30,7 @@ from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationDraftDependency,
     RDBConsolidationDraftFile,
     RDBConsolidationEvidence,
+    RDBConsolidationMutationReceipt,
     RDBConsolidationRevision,
     RDBConsolidationRevisionDependency,
     RDBConsolidationUnit,
@@ -388,6 +389,35 @@ class ConsolidationPublicationRepository:
                 row.state = ConsolidationWorkState.PUBLISHED
                 row.published_revision_id = revision_id
             await session.write_session.flush()
+            # Copy published bytes and the complete manifest before retiring the
+            # workspace; both commit atomically before a successor can claim.
+            await session.write_session.execute(
+                sa.update(RDBConsolidationWork)
+                .where(
+                    work_predicate(principal.unit),
+                    RDBConsolidationWork.considered_draft_id == draft.id,
+                    RDBConsolidationWork.state == ConsolidationWorkState.CONSIDERED,
+                )
+                .values(
+                    state=ConsolidationWorkState.PENDING,
+                    considered_draft_id=None,
+                    considered_draft_revision_id=None,
+                    disposition=None,
+                    consideration_reason=None,
+                    presented_attempt_id=None,
+                )
+            )
+            await session.write_session.delete(draft)
+            await session.write_session.execute(
+                sa.delete(RDBConsolidationMutationReceipt).where(
+                    RDBConsolidationMutationReceipt.attempt_id == principal.attempt_id
+                )
+            )
+            await session.write_session.execute(
+                sa.delete(RDBConsolidationEvidence).where(
+                    RDBConsolidationEvidence.attempt_id == principal.attempt_id
+                )
+            )
             remaining = await session.write_session.scalar(
                 sa.select(
                     pending_work_query(
