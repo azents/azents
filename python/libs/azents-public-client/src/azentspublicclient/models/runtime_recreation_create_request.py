@@ -89,9 +89,12 @@ class RuntimeRecreationCreateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_version": obj.get("expected_version"),
             "concurrency_limit": obj.get("concurrency_limit") if obj.get("concurrency_limit") is not None else 5
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

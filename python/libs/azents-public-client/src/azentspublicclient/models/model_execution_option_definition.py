@@ -98,13 +98,16 @@ class ModelExecutionOptionDefinition(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "label": obj.get("label"),
             "description": obj.get("description"),
             "cost_hint": obj.get("cost_hint"),
             "control": obj.get("control"),
             "exclusive_group": obj.get("exclusive_group")
+            }.items() if _key in obj
         })
         return _obj
 

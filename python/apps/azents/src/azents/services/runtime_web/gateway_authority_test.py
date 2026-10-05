@@ -10,7 +10,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.services.runtime_web.gateway_authority import (
+from azents.repos.runtime_web.gateway_authority_operations import (
     _runtime_ready,
 )
 

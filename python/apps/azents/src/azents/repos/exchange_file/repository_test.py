@@ -1,9 +1,9 @@
 """ExchangeFileRepository tests."""
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.session_capabilities import ReadWriteSession
@@ -14,7 +14,9 @@ from . import ExchangeFileRepository
 async def test_detach_source_user_id_clears_retained_provenance() -> None:
     """Detach one deleted User from retained ExchangeFile provenance."""
     session = MagicMock(spec=AsyncSession)
-    session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=4))
+    result = MagicMock(spec=CursorResult)
+    result.rowcount = 4
+    session.execute = AsyncMock(return_value=result)
     session.flush = AsyncMock()
 
     detached = await ExchangeFileRepository().detach_source_user_id(

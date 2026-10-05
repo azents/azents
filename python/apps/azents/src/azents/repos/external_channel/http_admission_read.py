@@ -35,3 +35,15 @@ class ExternalChannelHTTPAdmissionReadRepository:
                 )
             )
         return result
+
+    async def get_discord_configuration(
+        self, *, selector_hash: str
+    ) -> ExternalChannelConnectionConfiguration | None:
+        """Capture the exact Discord selector configuration before authentication."""
+        async with self.session_manager() as session:
+            result = (
+                await self.repository.get_discord_http_configuration_by_selector_hash(
+                    session, selector_hash=selector_hash
+                )
+            )
+        return result

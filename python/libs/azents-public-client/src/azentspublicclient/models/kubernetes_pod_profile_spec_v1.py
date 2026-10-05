@@ -139,7 +139,9 @@ class KubernetesPodProfileSpecV1(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "profile_kind": obj.get("profile_kind"),
             "contract_family": obj.get("contract_family"),
             "schema_version": obj.get("schema_version"),
@@ -149,6 +151,7 @@ class KubernetesPodProfileSpecV1(BaseModel):
             "service_account_name": obj.get("service_account_name"),
             "scheduling": KubernetesSchedulingModule.from_dict(obj["scheduling"]) if obj.get("scheduling") is not None else None,
             "dind": KubernetesDinDModule.from_dict(obj["dind"]) if obj.get("dind") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

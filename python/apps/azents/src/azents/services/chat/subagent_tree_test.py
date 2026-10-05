@@ -2,6 +2,7 @@
 
 import datetime
 from typing import Any
+from unittest.mock import MagicMock
 
 from azcommon.result import Failure, Success
 
@@ -45,9 +46,15 @@ from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
+from azents.repos.scheduled_task_lifecycle_participant import (
+    ScheduledTaskLifecycleParticipantRepository,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_lifecycle_operations import (
     SessionLifecycleOperationsRepository,
+)
+from azents.repos.session_lifecycle_purge_operations import (
+    SessionLifecyclePurgeOperations,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit_state.engine import TodoStateStore
@@ -56,11 +63,9 @@ from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
-from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
-from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -68,6 +73,7 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+from azents.testing.types import require_instance
 
 from . import (
     ChatSessionService,
@@ -197,7 +203,6 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
     kwargs.pop("mailbox_item_service")
     registry = kwargs.pop("lifecycle_orchestrator").registry
     scheduled = kwargs.pop("scheduled_task_lifecycle_service")
-    external = kwargs["external_channel_lifecycle_service"]
     database_keys = (
         "message_repository",
         "agent_repository",
@@ -219,9 +224,7 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
     lifecycle = SessionLifecycleOperationsRepository(
         registry=registry,
         agent_session_repository=database["agent_session_repository"],
-        external_channel_repository=external.repository
-        if isinstance(external, ExternalChannelLifecycleService)
-        else ExternalChannelLifecycleRepository(),
+        external_channel_repository=ExternalChannelLifecycleRepository(),
         scheduled_task_repository=scheduled.repository,
     )
     operations = ChatOperationsRepository(
@@ -266,9 +269,14 @@ def _service(rdb_session_manager: SessionManager[WriteSession]) -> ChatSessionSe
             agent_session_repository=AgentSessionRepository(),
         ),
         session_git_worktree_service=object(),
-        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(
+            require_instance(
+                MagicMock(spec=SessionLifecyclePurgeOperations),
+                SessionLifecyclePurgeOperations,
+            )
+        ),
         external_channel_lifecycle_service=object(),
-        scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
+        scheduled_task_lifecycle_service=ScheduledTaskLifecycleParticipantRepository(
             ScheduledTaskLifecycleRepository()
         ),
         terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),

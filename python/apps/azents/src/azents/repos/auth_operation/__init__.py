@@ -128,7 +128,8 @@ class AuthOperationRepository:
             if matched is None:
                 return Failure(RefreshTokenRejected())
 
-            authentication_session, token_match = matched
+            authentication_session = matched.session
+            token_match = matched.token_match
             eligibility_now = tznow()
             if (
                 authentication_session.revoked_at is not None

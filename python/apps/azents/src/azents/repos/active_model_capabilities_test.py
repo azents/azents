@@ -6,6 +6,7 @@ import datetime
 import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock
 
 import pytest
@@ -163,9 +164,16 @@ def _selection() -> AgentModelSelection:
     )
 
 
-def _repository() -> tuple[
-    ActiveModelCapabilitiesRepository, _Manager, AsyncMock, AsyncMock
-]:
+class _RepositoryFixture(NamedTuple):
+    """Named collaborators for active model capture tests."""
+
+    repository: ActiveModelCapabilitiesRepository
+    manager: _Manager
+    catalogs: AsyncMock
+    source: AsyncMock
+
+
+def _repository() -> _RepositoryFixture:
     manager = _Manager()
     catalogs = AsyncMock(spec=LLMCatalogRepository)
     source = AsyncMock(spec=ModelMetadataSourceRepository)
@@ -178,16 +186,20 @@ def _repository() -> tuple[
     source.get_models.return_value = {}
     identity = ConfiguredModelIdentity.from_selection(_selection())
     catalogs.get_selectable_entries_for_identities.return_value = {identity: _entry()}
-    return (
-        ActiveModelCapabilitiesRepository(manager, catalogs, source),
-        manager,
-        catalogs,
-        source,
+    return _RepositoryFixture(
+        repository=ActiveModelCapabilitiesRepository(manager, catalogs, source),
+        manager=manager,
+        catalogs=catalogs,
+        source=source,
     )
 
 
 async def test_capture_recompiles_old_current_row_without_remote_or_writes() -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
+    source = fixture.source
     selection = _selection()
     captured = await repository.capture_exact_choices(
         workspace_id="workspace",
@@ -211,7 +223,11 @@ async def test_capture_recompiles_old_current_row_without_remote_or_writes() -> 
 
 
 async def test_exact_capture_deduplicates_but_keeps_user_order_without_locks() -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
+    source = fixture.source
     order: list[str] = []
 
     async def integration(*args: object, **kwargs: object) -> RDBLLMProviderIntegration:
@@ -254,7 +270,11 @@ async def test_exact_capture_deduplicates_but_keeps_user_order_without_locks() -
     ],
 )
 async def test_scope_and_exact_missing_failures_keep_identity(reason: str) -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
+    source = fixture.source
     if reason == "integration_scope_unavailable":
         catalogs.read_integration.return_value = None
     elif reason == "provider_scope_mismatch":
@@ -279,7 +299,10 @@ async def test_scope_and_exact_missing_failures_keep_identity(reason: str) -> No
 
 
 async def test_revalidation_checks_inputs_and_presence_not_clocks_or_old_caps() -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
     selection = _selection()
     identity = ConfiguredModelIdentity.from_selection(selection)
     captured = await repository.capture_exact_choices_in_session(
@@ -318,7 +341,11 @@ async def test_revalidation_checks_inputs_and_presence_not_clocks_or_old_caps() 
 
 
 async def test_page_capture_reuses_rows_without_scope_locks() -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
+    source = fixture.source
     scope = await repository.prepare_read_scope_in_session(
         manager.session, workspace_id="workspace", integration_ids=["integration"]
     )
@@ -519,7 +546,10 @@ def test_malformed_stored_declarations_diagnose_without_saved_fallback(
 
 
 async def test_malformed_execution_option_keeps_selected_identity() -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
     selection = _selection()
     identity = ConfiguredModelIdentity.from_selection(selection)
     entry = _entry()
@@ -571,7 +601,11 @@ def test_foreign_source_route_is_never_same_named_model_evidence() -> None:
 
 
 async def test_empty_capture_performs_no_scope_source_or_catalog_io() -> None:
-    repository, manager, catalogs, source = _repository()
+    fixture = _repository()
+    repository = fixture.repository
+    manager = fixture.manager
+    catalogs = fixture.catalogs
+    source = fixture.source
     captured = await repository.capture_exact_choices_in_session(
         manager.session, workspace_id="workspace", identities=[]
     )

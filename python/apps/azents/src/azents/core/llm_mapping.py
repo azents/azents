@@ -1,5 +1,7 @@
 """Convert saved integration credentials into operation-scoped SDK settings."""
 
+from typing import assert_never
+
 from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_BACKEND_BASE_URL,
     build_chatgpt_oauth_headers,
@@ -100,5 +102,4 @@ def build_credential_kwargs(
                 "vertex_credentials": json_str,
             }
         case _:
-            msg = f"Unsupported secrets type: {type(integration.secrets).__name__}"
-            raise ValueError(msg)
+            assert_never(integration.secrets)
