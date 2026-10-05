@@ -1,4 +1,8 @@
-"""Pinned discord.py REST lifecycle and bounded private-HTTP adapter."""
+"""Pinned discord.py REST lifecycle and approved private-HTTP adapter.
+
+The External Channel domain and delivery Specs authorize this bounded SDK
+exception; its production boundary and rationale are documented on _DiscordPySession.
+"""
 
 import contextlib
 from collections.abc import AsyncIterator
@@ -8,6 +12,8 @@ from typing import Literal, Protocol, runtime_checkable
 
 import aiohttp
 import discord
+
+# This pinned helper belongs to the same approved private HTTP boundary below.
 from discord.http import handle_message_parameters
 
 from azents.core.external_channel_projection import is_external_channel_projection
@@ -400,9 +406,18 @@ class _DiscordPySession:
 
     def __init__(self, client: discord.Client) -> None:
         self._client = client
-        # This private boundary is intentional: high-level public operations can add
-        # resource prefetches, while the pinned HTTP client reuses the authenticated
-        # session and rate-limit state and preserves nonce/no-replay delivery semantics.
+        # Approved exception to prefer-supported-external-service-sdks for this adapter.
+        # Introduced in PR #1253 and reaffirmed in PR #1492:
+        # https://github.com/azents/azents/pull/1253
+        # docs/azents/spec/domain/external-channel.md (SDK ownership boundary) and
+        # docs/azents/spec/flow/external-channel-delivery.md (provider effects)
+        # explicitly authorize this adapter, superseding the earlier public-only
+        # policy for this bounded surface. High-level discord.py operations can add
+        # channel/message prefetches; the pinned HTTP client instead reuses the
+        # authenticated session and SDK rate-limit state across caller-owned effects,
+        # preserving nonce enforcement and post-ambiguity no-replay semantics.
+        # Private access stays isolated here, with bounded response validation and
+        # signature tests in discord_sdk_test.py and provider_sdk_boundary_test.py.
         self._http = client.http
         self._commands: dict[str, DiscordSDKCommand] = {}
         self._command_application_id: int | None = None
