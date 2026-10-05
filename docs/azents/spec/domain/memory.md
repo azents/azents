@@ -73,8 +73,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
-last_verified_at: 2026-10-05
-spec_version: 18
+last_verified_at: 2026-10-06
+spec_version: 19
 ---
 
 # Memory
@@ -193,6 +193,15 @@ permits a later inactive refresh while the previous permitted summary remains
 available. Publication rechecks enablement, active source, and access; it does
 not require equality with a current content revision.
 
+Preparation admission and publication explicitly acquire current Agent,
+associated membership, root Session and canonical source in that order. Preliminary
+identities only route those acquisitions; locked relationships and eligibility
+are refreshed before acceptance. The Agent settings gate uses NO KEY UPDATE,
+preserving writer exclusion while allowing enrollment's foreign-key KEY SHARE
+references. A Memory toggle uses the same sufficient gate and records source
+availability/enrollment atomically rather than failing an ordinary source wait.
+Provider summarization remains outside these owning DB operations.
+
 Registered `historical_memory.prepare` jobs coalesce by Agent execution key in
 process-local Job Runtime. A job attempts at most ten source operations under an
 absolute thirty-minute request deadline. Handler concurrency defaults to 12 of
@@ -304,19 +313,35 @@ complete manifests and atomic publication remain unchanged.
 
 Temporary producer lock contention retries the complete rollback-confirmed
 database operation inside the same claim, including heartbeat, source/file
-receipts, usage, output authorization and publication. Partial-lock NOWAIT guards
-remain where lifecycle/source writer ordering requires refusal and rollback;
-they no longer immediately fail otherwise valid expensive model work.
-The same absolute attempt/lease time and cancellation bound each fresh
-operation, with time scheduling installed before its first owner lock.
+receipts, usage, output authorization and publication. Authority and complete
+manifest fences use ordinary waiting locks. Complete-influence and new-exposure
+operations acquire exact Agent/grant/root/source participants before the unit,
+so a manifest wait does not prevent independent heartbeat renewal. Existing
+exact-scope identities are prelocked even when currently archived or denied;
+current permission remains a separate post-owner acceptance check. An ephemeral
+plan contains only exact mutation anchors and body-free distinct source IDs,
+including bounded candidate-page lookahead; it is not authority or a corpus cap.
+After exact original unit/attempt acquisition, current revision/epoch/publication
+anchors, complete source sets and candidate identities are revalidated before
+server-side full influence validation or exposure. A changed plan rolls back and
+replans that DB operation; stable missing/denied influence retains normal
+authorization failure or recovery invalidation/rebuild.
+
+The original immutable attempt deadline and cancellation bound waiting before
+unit acquisition, with SQL/async time scheduling installed before the first
+potential lock wait. Under the unit lock, the current renewable lease is sampled
+and the operation is bounded by that lease and the same absolute attempt cutoff.
+A valid heartbeat extension is not frozen to the initially observed lease;
+genuine lease/deadline loss still prevents acceptance.
 Nonauthoritative time observation never replaces locked current-owner/grant and
 commit-time checks. Initial claim repeats only its database admission under the
 submitted deadline. Retry does not repeat a model/tool handler, consume another
 logical turn, reset time, or add a memory-only retry-count budget.
 
-Only contention or database errors that guarantee an aborted transaction are
-eligible for this local replay; uncertain connection/commit outcomes use existing
-idempotency and durable-outcome handling. Real revocation, takeover, lease/deadline
+Changed participant plans replay only after the owning scope confirms rollback.
+Database contention/serialization recovery likewise requires a confirmed aborted
+transaction; uncertain connection/commit outcomes use existing idempotency and
+durable-outcome handling. Real revocation, takeover, lease/deadline
 loss and cancellation still reject stale work. Terminal metadata uses ordered
 unit/attempt waiting locks with exact current RUNNING owner identity, without
 source/publication authority or revival of expired execution.
@@ -542,6 +567,13 @@ automatic discovery of deployed process absence.
 Forward resets old automatic snapshots, fences units and enrolls existing
 prepared sources without waiting for Stage 1. Rollback resets snapshots/fences
 units while preserving Saved/source data and durable foreground Run history.
+Each DB page uses ordinary waiting locks and rechecks actual reset/participant
+preconditions after waiting; contention alone is not a quiescence violation.
+Source reconciliation acquires explicit sorted Agent/membership/root/source
+participants and refreshes the candidate page before mutation. Database-confirmed
+abort or changed page planning retries only the rolled-back page from its original
+committed cursor. Earlier committed pages and ambiguous commits are not replayed,
+and no new local timeout or retry-count limit is introduced.
 Reactivation after old-code writes conservatively reconciles canonical summaries
 and availability continuity before new admission. Interrupted root/child Runs
 reconstruct from the root after an explicit boundary; obsolete snapshots are
@@ -551,6 +583,7 @@ never replayed merely because durable conversation remains.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-06 | 19 | Replace nonwaiting producer/source/handover fences with exact waiting admission, renewable-lease-safe participant planning and whole-operation/page recovery |
 | 2026-10-05 | 16 | Make uncertain publication inspection read-only and unfenced; condition revision GC on exact current/reference exclusions without candidate locks |
 | 2026-10-04 | 14 | Make consumer/foreground descriptions read-only and unfenced while retaining exact own-manifest denial and producer mutation authority |
 | 2026-10-04 | 13 | Keep concurrent consumer authority locks FK-compatible and preserve writer exclusion |

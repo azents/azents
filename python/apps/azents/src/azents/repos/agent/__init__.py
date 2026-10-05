@@ -299,7 +299,8 @@ class AgentRepository:
             previous_memory_enabled = await session.write_session.scalar(
                 sa.select(RDBAgent.memory_enabled)
                 .where(RDBAgent.id == agent_id)
-                .with_for_update()
+                # Serialize settings writers while allowing enrollment FK locks.
+                .with_for_update(key_share=True)
             )
         await session.write_session.execute(
             sa.update(RDBAgent).where(RDBAgent.id == agent_id).values(**db_values)

@@ -124,12 +124,14 @@ class ExternalAccountLinkRepository:
         """Read the globally active link for repository composition."""
         del workspace_id
         rdb = await session.read_session.scalar(
-            sa.select(RDBExternalAccountLink).where(
+            sa.select(RDBExternalAccountLink)
+            .where(
                 RDBExternalAccountLink.provider == provider,
                 RDBExternalAccountLink.identity_scope == identity_scope,
                 RDBExternalAccountLink.provider_user_id == provider_user_id,
                 RDBExternalAccountLink.revoked_at.is_(None),
             )
+            .execution_options(populate_existing=True)
         )
         return None if rdb is None else _link_record(rdb)
 
@@ -318,10 +320,16 @@ class ExternalAccountLinkRepository:
                     session,
                     section=section,
                 )
+                await self._lock_user_session_for_oauth_finalization(
+                    session,
+                    user_id=user_id,
+                    auth_session_id=auth_session_id,
+                )
                 attempt = await session.write_session.scalar(
                     sa.select(RDBExternalAccountOAuthAttempt)
                     .where(RDBExternalAccountOAuthAttempt.id == attempt_id)
-                    .with_for_update(nowait=True)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
                 )
                 if (
                     attempt is None
@@ -333,7 +341,7 @@ class ExternalAccountLinkRepository:
                     or attempt.redirect_uri != redirect_uri
                 ):
                     return ExternalAccountOAuthFinalizeResult(None, "invalid_attempt")
-                await self._lock_active_user_session_for_oauth_finalization(
+                await self._require_active_user_session(
                     session,
                     user_id=user_id,
                     auth_session_id=auth_session_id,
@@ -378,9 +386,22 @@ class ExternalAccountLinkRepository:
                             == identity.provider_user_id,
                             RDBExternalAccountLink.revoked_at.is_(None),
                         )
-                        .with_for_update(nowait=True)
+                        .order_by(RDBExternalAccountLink.id)
+                        .with_for_update()
+                        .execution_options(populate_existing=True)
                     )
                 ).all()
+                current_time = await session.write_session.scalar(
+                    sa.select(sa.func.clock_timestamp())
+                )
+                if not isinstance(current_time, datetime.datetime):
+                    raise TypeError("Database clock did not return a datetime.")
+                await self._require_active_user_session(
+                    session,
+                    user_id=user_id,
+                    auth_session_id=auth_session_id,
+                    now=max(now, current_time),
+                )
                 if active_links and active_links[0].user_id != user_id:
                     attempt.status = ExternalAccountOAuthAttemptStatus.FAILED
                     attempt.failed_at = now
@@ -505,29 +526,25 @@ class ExternalAccountLinkRepository:
             workspace_id=connection.workspace_id, identity_scope=_identity_scope(actor)
         )
 
-    async def _lock_active_user_session_for_oauth_finalization(
+    async def _lock_user_session_for_oauth_finalization(
         self,
         session: WriteSession,
         *,
         user_id: str,
         auth_session_id: str,
-        now: datetime.datetime,
     ) -> None:
-        """Keep actor disable and session revocation ordered through OAuth commit."""
+        """Acquire security rows before Attempt; validate only its exact context."""
         await session.write_session.scalar(
             sa.select(RDBUser)
             .where(RDBUser.id == user_id)
-            .with_for_update(nowait=True)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
         await session.write_session.scalar(
             sa.select(RDBSession)
             .where(RDBSession.id == auth_session_id, RDBSession.user_id == user_id)
-            .with_for_update(nowait=True)
+            .with_for_update()
             .execution_options(populate_existing=True)
-        )
-        await self._require_active_user_session(
-            session, user_id=user_id, auth_session_id=auth_session_id, now=now
         )
 
     async def _require_active_user_session(

@@ -32,6 +32,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
     check_dependency_manifest,
     check_draft_influence,
 )
+from azents.repos.historical_memory_consolidation.participant_types import (
+    DraftParticipants,
+)
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
 )
@@ -59,8 +62,14 @@ class ConsolidationRecoveryRepository:
     async def prepare(
         self, principal: ConsolidationJobPrincipal
     ) -> ConsolidationRecoveryCheckpoint:
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=True),
+        ) as job:
             session, owner = job.session, job.owner
+            if owner.participants is None:
+                raise RuntimeError("Consolidation recovery participants are missing.")
             published_available = owner.unit.published_revision_id is not None
             if owner.unit.published_revision_id is not None:
                 revision = await session.write_session.get(
@@ -89,6 +98,7 @@ class ConsolidationRecoveryRepository:
                             key=principal.unit,
                             membership_grant_id=owner.attempt.membership_grant_id,
                             influence=manifest,
+                            participants=owner.participants,
                         )
                     except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
                         raise

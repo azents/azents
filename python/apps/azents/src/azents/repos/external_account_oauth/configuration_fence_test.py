@@ -7,9 +7,7 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 from cryptography.fernet import Fernet
-from psycopg.errors import LockNotAvailable
 from sqlalchemy import event
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.crypto import CredentialCipher
@@ -45,13 +43,28 @@ from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.user import UserRepository
 
 
+async def _wait_for_blocked(engine: AsyncEngine, holder_pid: int) -> None:
+    """Observe the actual PostgreSQL blocker before releasing a held writer."""
+    async with AsyncSession(engine) as observer, asyncio.timeout(3):
+        while not await observer.scalar(
+            sa.text(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                "WHERE :holder = ANY(pg_blocking_pids(pid)))"
+            ),
+            {"holder": holder_pid},
+        ):
+            pass
+
+
 @pytest.mark.parametrize("held", ["user", "auth", "attempt"])
-async def test_oauth_claim_contention_refuses_before_consumption_and_releases_guards(
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_oauth_claim_waits_or_cancels_without_retaining_guards(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
     held: str,
+    cancel: bool,
 ) -> None:
-    """Each partial security-lock collision rolls back without admitting exchange."""
+    """A claim waits for the writer, or cancellation releases all partial guards."""
     writes = create_read_write_session_manager(rdb_engine)
     key = Fernet.generate_key().decode()
     settings = SystemSettingRepository()
@@ -100,6 +113,10 @@ async def test_oauth_claim_contention_refuses_before_consumption_and_releases_gu
         )
         try:
             async with writes() as holder:
+                holder_pid = await holder.write_session.scalar(
+                    sa.select(sa.func.pg_backend_pid())
+                )
+                assert isinstance(holder_pid, int)
                 if held == "user":
                     await holder.write_session.scalar(
                         sa.select(RDBUser)
@@ -118,22 +135,33 @@ async def test_oauth_claim_contention_refuses_before_consumption_and_releases_gu
                         .where(RDBExternalAccountOAuthAttempt.id == attempt.id)
                         .with_for_update()
                     )
-                with pytest.raises(DBAPIError) as failure:
-                    await asyncio.wait_for(
-                        attempts.claim_open(
-                            state_hash=attempt.state_hash,
-                            user_id=fixture.user_id,
-                            auth_session_id=auth.id,
-                            provider=attempt.provider,
-                            setting_generation=attempt.setting_generation,
-                            redirect_uri=attempt.redirect_uri,
-                            now=now,
-                        ),
-                        timeout=2,
+                pending = asyncio.create_task(
+                    attempts.claim_open(
+                        state_hash=attempt.state_hash,
+                        user_id=fixture.user_id,
+                        auth_session_id=auth.id,
+                        provider=attempt.provider,
+                        setting_generation=attempt.setting_generation,
+                        redirect_uri=attempt.redirect_uri,
+                        now=now,
                     )
-                assert isinstance(failure.value.orig, LockNotAvailable)
-                # A separate section writer may proceed while the original holder
-                # still owns its row: the failed claim retained no partial guard.
+                )
+                try:
+                    await _wait_for_blocked(rdb_engine, holder_pid)
+                    if cancel:
+                        pending.cancel()
+                        with pytest.raises(asyncio.CancelledError):
+                            await pending
+                    else:
+                        await holder.write_session.commit()
+                        result = await asyncio.wait_for(pending, timeout=3)
+                        assert result is not None
+                        assert result.status.value == "claimed"
+                finally:
+                    if not pending.done():
+                        pending.cancel()
+                        await asyncio.gather(pending, return_exceptions=True)
+                # Cancellation releases Section before the holder's row is released.
                 async with writes() as observer:
                     await asyncio.wait_for(
                         settings.acquire_section_lock(observer, section=section),
@@ -143,8 +171,8 @@ async def test_oauth_claim_contention_refuses_before_consumption_and_releases_gu
                         RDBExternalAccountOAuthAttempt, attempt.id
                     )
                     assert untouched is not None
-                    assert untouched.status.value == "open"
-                    assert untouched.claimed_at is None
+                    assert untouched.status.value == ("open" if cancel else "claimed")
+                    assert (untouched.claimed_at is None) == cancel
         finally:
             async with writes() as session:
                 await session.write_session.execute(

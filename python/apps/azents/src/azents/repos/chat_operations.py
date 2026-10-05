@@ -122,6 +122,7 @@ from azents.repos.goal.store import (
     GoalInvalidStatusTransitionError,
     GoalStateStore,
 )
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox.admission_data import (
@@ -1080,6 +1081,7 @@ class ChatOperationsRepository:
                 )
             )
 
+    @retry_hierarchy_operation
     async def restore_agent_session(
         self,
         *,
@@ -1119,6 +1121,23 @@ class ChatOperationsRepository:
                 item.status != AgentSessionStatus.ARCHIVED for item in tree
             ):
                 return Failure(SessionNotFound())
+            locked_root = next((item for item in tree if item.id == session_id), None)
+            if locked_root is None:
+                return Failure(SessionNotFound())
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=locked_root,
+                user_id=user_id,
+                denied_as_not_found=True,
+            )
+            if authorized is not None:
+                return Failure(authorized)
             if await self.archived_session_retention_repository.purge_fencing_started(
                 session,
                 root_session_id=session_id,
@@ -1163,13 +1182,13 @@ class ChatOperationsRepository:
                     payload=None,
                 ),
             )
-            await session.write_session.commit()
             restored = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
             )
             if restored is None:
                 raise RuntimeError("Restored AgentSession disappeared")
+            await session.write_session.commit()
             return Success(restored)
 
     async def update_session_title(
@@ -1656,6 +1675,7 @@ class ChatOperationsRepository:
             await session.write_session.commit()
         return Success(created)
 
+    @retry_hierarchy_operation
     async def archive_agent_session(
         self,
         *,
@@ -1704,6 +1724,15 @@ class ChatOperationsRepository:
                 return Failure(SessionNotFound())
             if root.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
                 return Failure(PrimarySessionArchiveBlocked())
+            if user_id is not None:
+                authorized = await self._authorize_public_session(
+                    session,
+                    agent_session=root,
+                    user_id=user_id,
+                    denied_as_not_found=True,
+                )
+                if authorized is not None:
+                    return Failure(authorized)
             if not await self.lifecycle_operations.archive_allows_active_runs(
                 session,
                 session_ids=session_ids,

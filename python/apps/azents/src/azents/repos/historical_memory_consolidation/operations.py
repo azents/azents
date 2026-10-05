@@ -36,6 +36,9 @@ from azents.repos.historical_memory_consolidation.authority import (
     require_commit_owner,
 )
 from azents.repos.historical_memory_consolidation.budget import check_input_influence
+from azents.repos.historical_memory_consolidation.participant_types import (
+    DraftParticipants,
+)
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
 )
@@ -99,7 +102,11 @@ class ConsolidationModelOperationRepository:
         self, principal: ConsolidationJobPrincipal
     ) -> ModelOperationSnapshot:
         selection_error: ModelOperationChainExhaustedError | None = None
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             await check_input_influence(session, principal, owner)
             # Eligibility already holds a shared Agent lock. Read its typed
@@ -210,7 +217,9 @@ class ConsolidationModelOperationRepository:
     ) -> ModelOperationSnapshot | None:
         if failure.category is not ModelProviderFailureCategory.QUOTA_OR_BILLING:
             raise ValueError("Only provider quota may advance the consolidation chain.")
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager, principal, participants=None
+        ) as job:
             session, owner = job.session, job.owner
             if owner.attempt.model_operation_state is None:
                 raise ConsolidationAuthorityError(

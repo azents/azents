@@ -42,11 +42,19 @@ from azents.repos.historical_memory_consolidation.enrollment import (
 
 @dataclasses.dataclass(frozen=True)
 class HistoricalMemoryPreparationAdmission:
-    """Historical and Session rows locked for one preparation attempt."""
+    """Fresh source boundary with Agent, grant, root, and source locks held."""
 
     source: HistoricalMemoryDueSource
     product_mode: AgentSessionProductMode
     associated_user_id: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _LockedHistoricalSource:
+    """Current source and root protected by ordered authority locks."""
+
+    source: RDBHistoricalMemorySource
+    root: RDBAgentSession
 
 
 class HistoricalMemoryRepository:
@@ -394,36 +402,18 @@ class HistoricalMemoryRepository:
         attempted_at: datetime.datetime,
         inactive_before: datetime.datetime,
     ) -> HistoricalMemoryPreparationAdmission | None:
-        """Lock Historical then Session authority and capture the source boundary."""
-        row = (
-            await session.write_session.execute(
-                sa.select(RDBHistoricalMemorySource)
-                .where(
-                    RDBHistoricalMemorySource.source_session_id == source_session_id,
-                    sa.or_(
-                        RDBHistoricalMemorySource.next_retry_at.is_(None),
-                        RDBHistoricalMemorySource.next_retry_at <= attempted_at,
-                    ),
-                )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        if row is None:
+        """Acquire ordered authority and capture fresh preparation eligibility."""
+        locked = await self._lock_source_authority_in_session(
+            session, source_session_id=source_session_id
+        )
+        if locked is None:
             return None
-        source = (
-            await session.write_session.execute(
-                sa.select(RDBAgentSession)
-                .where(
-                    RDBAgentSession.id == source_session_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                    RDBAgentSession.run_state == AgentSessionRunState.IDLE,
-                    RDBAgentSession.last_activity_at <= inactive_before,
-                )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        if source is None:
+        row, source = locked.source, locked.root
+        if (
+            source.run_state is not AgentSessionRunState.IDLE
+            or source.last_activity_at > inactive_before
+            or (row.next_retry_at is not None and row.next_retry_at > attempted_at)
+        ):
             return None
         if (
             row.prepared_at is not None
@@ -457,29 +447,6 @@ class HistoricalMemoryRepository:
             product_mode=source.product_mode,
             associated_user_id=source.associated_user_id,
         )
-
-    async def lock_preparation_membership_in_session(
-        self,
-        session: WriteSession,
-        admission: HistoricalMemoryPreparationAdmission,
-    ) -> bool:
-        """Lock current User membership after the Agent lock is held."""
-        if admission.product_mode is AgentSessionProductMode.TEAM:
-            return True
-        if (
-            admission.product_mode is not AgentSessionProductMode.USER
-            or admission.associated_user_id is None
-        ):
-            return False
-        membership_id = await session.write_session.scalar(
-            sa.select(RDBWorkspaceUser.id)
-            .where(
-                RDBWorkspaceUser.workspace_id == admission.source.workspace_id,
-                RDBWorkspaceUser.user_id == admission.associated_user_id,
-            )
-            .with_for_update()
-        )
-        return membership_id is not None
 
     async def persist_preparation_operation_in_session(
         self,
@@ -567,40 +534,13 @@ class HistoricalMemoryRepository:
         source_session_id: str,
         completion: HistoricalMemoryCompletion,
     ) -> HistoricalMemorySource | None:
-        """Publish one completed result inside a caller-owned transaction."""
-        locked = (
-            await session.write_session.execute(
-                sa.select(
-                    RDBHistoricalMemorySource,
-                    RDBAgentSession,
-                    RDBAgent,
-                )
-                .join(
-                    RDBAgentSession,
-                    RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
-                )
-                .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
-                .where(
-                    RDBHistoricalMemorySource.source_session_id == source_session_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-                    RDBAgent.memory_enabled.is_(True),
-                    self._authorized_source(),
-                )
-                .with_for_update(
-                    of=(
-                        RDBHistoricalMemorySource,
-                        RDBAgentSession,
-                        RDBAgent,
-                    ),
-                )
-            )
-        ).one_or_none()
+        """Publish atomically after Agent, membership, root, and source admission."""
+        locked = await self._lock_source_authority_in_session(
+            session, source_session_id=source_session_id
+        )
         if locked is None:
             return None
-        row, source, _agent = locked
-        if not await self._lock_associated_user_membership(session, source):
-            return None
+        row, source = locked.source, locked.root
         row.last_attempt_at = completion.prepared_at
         row.next_retry_at = None
         row.failure_count = 0
@@ -624,27 +564,89 @@ class HistoricalMemoryRepository:
         return self._build(row)
 
     @staticmethod
-    async def _lock_associated_user_membership(
+    async def _lock_source_authority_in_session(
         session: WriteSession,
-        source: RDBAgentSession | MemorySnapshotConsumer,
-    ) -> bool:
-        """Lock the current User-source membership authority when required."""
-        if source.product_mode is AgentSessionProductMode.TEAM:
-            return True
+        *,
+        source_session_id: str,
+    ) -> _LockedHistoricalSource | None:
+        """Acquire Agent -> membership -> root -> source with fresh relationships.
+
+        Caller-owned compositions must acquire these participants in this order;
+        a preliminary identity read only routes the acquisitions.
+        """
+        identity = (
+            await session.read_session.execute(
+                sa.select(
+                    RDBAgentSession.agent_id,
+                    RDBAgentSession.workspace_id,
+                    RDBAgentSession.product_mode,
+                    RDBAgentSession.associated_user_id,
+                ).where(RDBAgentSession.id == source_session_id)
+            )
+        ).one_or_none()
+        if identity is None:
+            return None
+        agent = (
+            await session.write_session.execute(
+                sa.select(RDBAgent)
+                .where(RDBAgent.id == identity.agent_id)
+                .with_for_update(key_share=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
         if (
-            source.product_mode is not AgentSessionProductMode.USER
-            or source.associated_user_id is None
+            agent is None
+            or agent.workspace_id != identity.workspace_id
+            or not agent.memory_enabled
         ):
-            return False
-        membership_id = await session.write_session.scalar(
-            sa.select(RDBWorkspaceUser.id)
+            return None
+        if identity.product_mode is AgentSessionProductMode.USER:
+            if identity.associated_user_id is None:
+                return None
+            membership_id = await session.write_session.scalar(
+                sa.select(RDBWorkspaceUser.id)
+                .where(
+                    RDBWorkspaceUser.workspace_id == identity.workspace_id,
+                    RDBWorkspaceUser.user_id == identity.associated_user_id,
+                )
+                .with_for_update()
+            )
+            if membership_id is None:
+                return None
+        elif (
+            identity.product_mode is not AgentSessionProductMode.TEAM
+            or identity.associated_user_id is not None
+        ):
+            return None
+        root = (
+            await session.write_session.execute(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == source_session_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            root is None
+            or root.agent_id != agent.id
+            or root.workspace_id != agent.workspace_id
+            or root.product_mode != identity.product_mode
+            or root.associated_user_id != identity.associated_user_id
+            or root.session_kind is not AgentSessionKind.ROOT
+            or root.status is not AgentSessionStatus.ACTIVE
+        ):
+            return None
+        source = await session.write_session.scalar(
+            sa.select(RDBHistoricalMemorySource)
             .where(
-                RDBWorkspaceUser.workspace_id == source.workspace_id,
-                RDBWorkspaceUser.user_id == source.associated_user_id,
+                RDBHistoricalMemorySource.source_session_id == root.id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        return membership_id is not None
+        if source is None:
+            return None
+        return _LockedHistoricalSource(source=source, root=root)
 
     @staticmethod
     def _authorized_source() -> sa.ColumnElement[bool]:

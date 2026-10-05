@@ -1,13 +1,14 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
-updated: 2026-10-05
+updated: 2026-10-06
 tags: [backend, engine]
 spec_type: domain
 domain: agent
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
   - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/session_execution/ownership.py
@@ -147,8 +148,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-05
-spec_version: 94
+last_verified_at: 2026-10-06
+spec_version: 95
 ---
 
 # Agent Domain Spec
@@ -419,10 +420,13 @@ Subagent creation and follow-up capacity admission coordinate with the existing
 root SessionAgent hierarchy row. Ordinary path/tree/status reads, message
 inventory and single-target interruption do not inherit that root gate. Actual
 collaboration mutations admit only their source/target Session rows in stable
-order. A NOWAIT collision rolls back the complete admission savepoint before
-retry, allowing child terminal delivery to its parent to progress without an
-inverse parent-to-child wait. Source owner-generation validation is fenced only
-after the required mutation rows have been admitted.
+order with ordinary waiting locks. A database-confirmed deadlock or serialization
+abort releases the complete owning transaction before retry; recovery covers
+either hierarchy mutation or terminal-delivery victim without replaying model,
+tool or broker effects. Original source ownership and detached inputs are
+retained and revalidated in a fresh scope. Source owner-generation validation is
+fenced only after the required mutation rows have been admitted. Cancellation,
+ownership loss and uncertain commit do not retry.
 
 Stop, archive, restore, purge and decommission admit the existing root and its
 current Session tree as a mutation boundary shared with child creation. A child
@@ -848,6 +852,10 @@ Following contracts do not exist in current system.
 - legacy persistent subagent-Agent model inheritance
 
 ## 8. Change History
+
+- **2026-10-06** (spec_version 95) — Replaced partial hierarchy NOWAIT admission
+  with exact waiting locks and complete DB-operation recovery for both terminal
+  and hierarchy deadlock victims, preserving capacity and source ownership.
 
 - **2026-10-05** (spec_version 94) — Completed decommission repository transaction
   ownership while preserving ordered root retirement, claimed-attempt fencing,

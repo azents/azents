@@ -25,6 +25,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftConflict,
     check_draft_influence,
 )
+from azents.repos.historical_memory_consolidation.participant_types import (
+    DraftParticipants,
+)
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
 )
@@ -53,7 +56,11 @@ class ConsolidationExecutionRepository:
 
     @retry_consolidation_operation
     async def authorize(self, principal: ConsolidationJobPrincipal) -> None:
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             await check_input_influence(job.session, principal, job.owner)
             await require_commit_owner(job.session, job.owner)
 
@@ -72,7 +79,11 @@ class ConsolidationExecutionRepository:
             or (output_tokens is not None and output_tokens < 1)
         ):
             raise ValueError("Consolidation model request observation is invalid.")
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             await check_input_influence(session, principal, owner)
             previous = await session.write_session.get(
@@ -118,7 +129,9 @@ class ConsolidationExecutionRepository:
         usage: ConsolidationUsage | None,
     ) -> None:
         """Retain unknown per-dispatch usage; sum only reported actual tokens."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager, principal, participants=None
+        ) as job:
             session, owner = job.session, job.owner
             row = await session.write_session.get(
                 RDBConsolidationModelDispatch, (principal.attempt_id, dispatch_id)
@@ -151,7 +164,11 @@ class ConsolidationExecutionRepository:
     ) -> None:
         if count < 1:
             raise ValueError("Consolidation tool count must be positive.")
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             await check_input_influence(job.session, principal, job.owner)
             job.owner.attempt.tool_calls += count
             await require_commit_owner(job.session, job.owner)

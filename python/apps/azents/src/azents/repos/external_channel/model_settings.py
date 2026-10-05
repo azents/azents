@@ -298,14 +298,21 @@ class ExternalModelSettingsRepository:
                     RDBExternalModelDraft.owner_interaction_key
                     == owner_interaction_key,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if existing is not None:
+                authorization = await self._authorize(
+                    session, actor=actor, target=target
+                )
+                if authorization.rejection is not None:
+                    return authorization.rejection
+                authorized = self._require_authorized(authorization)
                 rejection = self._validate_draft(
                     existing,
                     actor=actor,
                     target=target,
-                    now=now,
+                    now=await self._current_time(session, now=now),
                     allow_applied=False,
                 )
                 if rejection is not None:
@@ -550,6 +557,15 @@ class ExternalModelSettingsRepository:
                     result=authorization.rejection,
                     notice_plan=None,
                 )
+            rejection = self._validate_draft(
+                draft,
+                actor=actor,
+                target=target,
+                now=await self._current_time(session, now=now),
+                allow_applied=True,
+            )
+            if rejection is not None:
+                return ExternalModelApplyCommit(result=rejection, notice_plan=None)
             authorized = self._require_authorized(authorization)
             existing = await session.write_session.scalar(
                 sa.select(RDBExternalModelMutation).where(
@@ -847,36 +863,55 @@ class ExternalModelSettingsRepository:
         initial = await self._authorize(session, actor=actor, target=target)
         if initial.rejection is not None:
             return initial
+        observed = self._require_authorized(initial)
+        route_id, resource_id = observed.binding.route_id, observed.binding.resource_id
         connection = await session.write_session.scalar(
             sa.select(RDBExternalChannelConnection)
             .where(RDBExternalChannelConnection.id == actor.connection_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        await session.write_session.scalar(
-            sa.select(RDBExternalChannelPrincipal)
-            .where(RDBExternalChannelPrincipal.id == actor.principal_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        binding = await session.write_session.scalar(
-            sa.select(RDBExternalChannelBinding)
-            .where(RDBExternalChannelBinding.id == target.binding_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        if connection is None or binding is None:
-            return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
-        await session.write_session.scalar(
-            sa.select(RDBExternalChannelResource)
-            .where(RDBExternalChannelResource.id == binding.resource_id)
-            .with_for_update(nowait=True)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
         await session.write_session.scalar(
             sa.select(RDBExternalChannelAgentRoute)
-            .where(RDBExternalChannelAgentRoute.id == binding.route_id)
-            .with_for_update(nowait=True)
+            .where(RDBExternalChannelAgentRoute.id == route_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        await session.write_session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(RDBExternalChannelResource.id == resource_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        binding = await session.write_session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(RDBExternalChannelBinding.id == target.binding_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            connection is None
+            or binding is None
+            or binding.route_id != route_id
+            or binding.resource_id != resource_id
+        ):
+            return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
+        channels = self.external_channel_repository
+        await channels.acquire_principal_agent_authorization_fence(
+            session,
+            agent_id=target.agent_id,
+            principal_id=actor.principal_id,
+        )
+        await session.write_session.scalar(
+            sa.select(RDBExternalChannelPrincipal)
+            .where(RDBExternalChannelPrincipal.id == actor.principal_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        await session.write_session.scalar(
+            sa.select(RDBUser)
+            .where(RDBUser.id == observed.link.user_id)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
         identity_scope = (
@@ -892,41 +927,28 @@ class ExternalModelSettingsRepository:
                 RDBExternalAccountLink.provider_user_id == actor.provider_user_id,
                 RDBExternalAccountLink.revoked_at.is_(None),
             )
-            .with_for_update(nowait=True)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
-        if locked_link is None:
+        if (
+            locked_link is None
+            or locked_link.id != observed.link.id
+            or locked_link.user_id != observed.link.user_id
+        ):
             return self._rejected(ExternalModelSettingsRejectionCode.LINK_REQUIRED)
-        await session.write_session.scalar(
-            sa.select(RDBUser)
-            .where(RDBUser.id == locked_link.user_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
         # Exact owners protect profile generation and lifecycle through commit.
-        await session.write_session.scalar(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == target.session_id)
-            .with_for_update(nowait=True)
-            .execution_options(populate_existing=True)
-        )
         await session.write_session.scalar(
             sa.select(RDBAgent)
             .where(RDBAgent.id == target.agent_id)
-            .with_for_update(nowait=True)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
-        fence = (
-            self.external_channel_repository.acquire_principal_agent_authorization_fence
+        await session.write_session.scalar(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id == target.session_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        acquired = await fence(
-            session,
-            agent_id=target.agent_id,
-            principal_id=actor.principal_id,
-            nowait=True,
-        )
-        if not acquired:
-            raise self._lock_not_available()
         # This key orders block insertion and grant deletion even for absent rows.
         await session.write_session.scalars(
             sa.select(RDBExternalChannelAccessGrant)
@@ -939,7 +961,8 @@ class ExternalModelSettingsRepository:
                     RDBExternalChannelAccessGrant.agent_session_id.is_(None),
                 ),
             )
-            .with_for_update(nowait=True)
+            .order_by(RDBExternalChannelAccessGrant.id)
+            .with_for_update()
             .execution_options(populate_existing=True)
         )
         return await self._authorize(session, actor=actor, target=target)
@@ -952,9 +975,9 @@ class ExternalModelSettingsRepository:
         target: ExternalModelTargetContext,
     ) -> _AuthorizationResult:
         connection = await session.read_session.scalar(
-            sa.select(RDBExternalChannelConnection).where(
-                RDBExternalChannelConnection.id == actor.connection_id
-            )
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == actor.connection_id)
+            .execution_options(populate_existing=True)
         )
         if (
             connection is None
@@ -969,9 +992,9 @@ class ExternalModelSettingsRepository:
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
         principal = await session.read_session.scalar(
-            sa.select(RDBExternalChannelPrincipal).where(
-                RDBExternalChannelPrincipal.id == actor.principal_id
-            )
+            sa.select(RDBExternalChannelPrincipal)
+            .where(RDBExternalChannelPrincipal.id == actor.principal_id)
+            .execution_options(populate_existing=True)
         )
         if (
             principal is None
@@ -982,9 +1005,9 @@ class ExternalModelSettingsRepository:
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.ACTOR_MISMATCH)
         binding = await session.read_session.scalar(
-            sa.select(RDBExternalChannelBinding).where(
-                RDBExternalChannelBinding.id == target.binding_id
-            )
+            sa.select(RDBExternalChannelBinding)
+            .where(RDBExternalChannelBinding.id == target.binding_id)
+            .execution_options(populate_existing=True)
         )
         if (
             binding is None
@@ -993,14 +1016,14 @@ class ExternalModelSettingsRepository:
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
         resource = await session.read_session.scalar(
-            sa.select(RDBExternalChannelResource).where(
-                RDBExternalChannelResource.id == binding.resource_id
-            )
+            sa.select(RDBExternalChannelResource)
+            .where(RDBExternalChannelResource.id == binding.resource_id)
+            .execution_options(populate_existing=True)
         )
         route = await session.read_session.scalar(
-            sa.select(RDBExternalChannelAgentRoute).where(
-                RDBExternalChannelAgentRoute.id == binding.route_id
-            )
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(RDBExternalChannelAgentRoute.id == binding.route_id)
+            .execution_options(populate_existing=True)
         )
         if (
             resource is None
@@ -1026,12 +1049,19 @@ class ExternalModelSettingsRepository:
         if link is None:
             return self._rejected(ExternalModelSettingsRejectionCode.LINK_REQUIRED)
         user = await session.read_session.scalar(
-            sa.select(RDBUser).where(RDBUser.id == link.user_id)
+            sa.select(RDBUser)
+            .where(RDBUser.id == link.user_id)
+            .execution_options(populate_existing=True)
         )
         if user is None or user.access_disabled_at is not None:
             return self._rejected(
                 ExternalModelSettingsRejectionCode.ACCOUNT_UNAVAILABLE
             )
+        await session.read_session.scalar(
+            sa.select(RDBAgentSession)
+            .where(RDBAgentSession.id == target.session_id)
+            .execution_options(populate_existing=True)
+        )
         try:
             agent_session = (
                 await self.session_model_profile_repository.get_readable_root(
@@ -1059,11 +1089,13 @@ class ExternalModelSettingsRepository:
         ):
             return self._rejected(ExternalModelSettingsRejectionCode.TARGET_UNAVAILABLE)
         block = await session.read_session.scalar(
-            sa.select(RDBExternalChannelBlock).where(
+            sa.select(RDBExternalChannelBlock)
+            .where(
                 RDBExternalChannelBlock.agent_id == agent.id,
                 RDBExternalChannelBlock.principal_id == principal.id,
                 RDBExternalChannelBlock.removed_at.is_(None),
             )
+            .execution_options(populate_existing=True)
         )
         if block is not None:
             return self._rejected(
@@ -1100,6 +1132,7 @@ class ExternalModelSettingsRepository:
                 )
             )
             .limit(1)
+            .execution_options(populate_existing=True)
         )
         if grant is None and not route.open_access_enabled:
             return self._rejected(
@@ -1422,7 +1455,8 @@ class ExternalModelSettingsRepository:
         return await session.write_session.scalar(
             sa.select(RDBExternalModelDraft)
             .where(RDBExternalModelDraft.id == draft_id)
-            .with_for_update(nowait=True)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
 
     @staticmethod
@@ -1620,16 +1654,12 @@ class ExternalModelSettingsRepository:
         return False
 
     @staticmethod
-    def _lock_not_available() -> DBAPIError:
-        return DBAPIError(
-            statement=None,
-            params=None,
-            orig=_RetryableLockConflict(),
-            connection_invalidated=False,
+    async def _current_time(
+        session: ReadSession, *, now: datetime.datetime
+    ) -> datetime.datetime:
+        current = await session.read_session.scalar(
+            sa.select(sa.func.clock_timestamp())
         )
-
-
-class _RetryableLockConflict(Exception):
-    """Synthetic advisory-fence conflict classified like PostgreSQL NOWAIT."""
-
-    sqlstate = "55P03"
+        if not isinstance(current, datetime.datetime):
+            raise TypeError("Database clock did not return a datetime.")
+        return max(now, current)

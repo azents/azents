@@ -19,6 +19,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.terminal_finalization_data import (
     TerminalDeliveryDisposition,
     TerminalFinalizationOutcome,
@@ -40,6 +41,7 @@ class TerminalRunFinalizationRepository:
         AgentMailboxRepository, Depends(AgentMailboxRepository)
     ]
 
+    @retry_hierarchy_operation
     async def finalize_run(
         self,
         run_id: str,

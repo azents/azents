@@ -13,6 +13,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.engine_event_contracts import RunStateRepository
 from azents.repos.engine_event_mutation import EngineEventMutationRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.model_operation_completion import ModelOperationCompletion
 from azents.repos.session_execution.ownership import (
     fence_owned_session_mutation,
@@ -59,6 +60,7 @@ class EngineRunFinalizationOperationRepository:
     model_file_pin_repository: TerminalModelFilePinRepository | None
     owner: SessionExecutionOwner | None
 
+    @retry_hierarchy_operation
     async def interrupt_before_turn(self, *, run_id: str) -> None:
         """Interrupt the Run before a turn without adding a marker."""
         async with self.session_manager() as session:
@@ -73,6 +75,7 @@ class EngineRunFinalizationOperationRepository:
                 suppress_parent_result=False,
             )
 
+    @retry_hierarchy_operation
     async def complete_polled_run(
         self, *, run_id: str, suppress_parent_result: bool
     ) -> None:
@@ -93,6 +96,7 @@ class EngineRunFinalizationOperationRepository:
         """Complete bridge ownership transfer while suppressing parent delivery."""
         await self.complete_polled_run(run_id=run_id, suppress_parent_result=True)
 
+    @retry_hierarchy_operation
     async def complete_model_run(
         self,
         *,
@@ -123,6 +127,7 @@ class EngineRunFinalizationOperationRepository:
             )
             return marker
 
+    @retry_hierarchy_operation
     async def interrupt_after_tool_stop_if_running(
         self, *, session_id: str, run_id: str
     ) -> Event | None:
@@ -151,6 +156,7 @@ class EngineRunFinalizationOperationRepository:
             )
             return marker
 
+    @retry_hierarchy_operation
     async def interrupt_turn_limit(self, *, session_id: str, run_id: str) -> None:
         """Commit a turn-limit interruption without adding a publication effect."""
         async with self.session_manager() as session:
@@ -168,6 +174,7 @@ class EngineRunFinalizationOperationRepository:
                 suppress_parent_result=False,
             )
 
+    @retry_hierarchy_operation
     async def interrupt_model_stream(
         self, *, session_id: str, run_id: str, assistant_events: Sequence[Event]
     ) -> InterruptedModelOutput:
@@ -192,6 +199,7 @@ class EngineRunFinalizationOperationRepository:
             )
             return InterruptedModelOutput(events=events, run_marker=marker)
 
+    @retry_hierarchy_operation
     async def complete_committed_scheduled_result(
         self,
         *,

@@ -23,6 +23,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.repos.session_execution.ownership import (
@@ -384,6 +385,7 @@ class WorkerSessionOperationRepository:
                 session, session_id, now=now
             )
 
+    @retry_hierarchy_operation
     async def cancel_pending_agent_run(
         self,
         session_id: str,
@@ -477,6 +479,7 @@ class WorkerSessionOperationRepository:
             await session.write_session.commit()
             return run
 
+    @retry_hierarchy_operation
     async def mark_session_agent_runs_terminal(
         self,
         session_id: str,
@@ -501,6 +504,7 @@ class WorkerSessionOperationRepository:
             )
             return transitioned
 
+    @retry_hierarchy_operation
     async def mark_agent_run_terminal_if_running(
         self,
         session_id: str,
@@ -527,6 +531,7 @@ class WorkerSessionOperationRepository:
                 session, run_id=run_id
             )
 
+    @retry_hierarchy_operation
     async def mark_agent_run_stopped_for_user_stop(
         self,
         session_id: str,

@@ -73,7 +73,6 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
     historical = Mock()
     historical.list_due_for_agent_in_session = AsyncMock(return_value=[source])
     historical.lock_preparation_admission_in_session = AsyncMock(return_value=admission)
-    historical.lock_preparation_membership_in_session = AsyncMock(return_value=True)
     prepared = SimpleNamespace(source_session_id="s" * 32)
     historical.persist_preparation_operation_in_session = AsyncMock(
         return_value=prepared
@@ -91,8 +90,8 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
         selectable_model_options=[option],
     )
     agent_repository = Mock()
-    agent_repository.lock_by_id = AsyncMock(return_value=agent)
-    agent_repository.get_by_id = AsyncMock()
+    agent_repository.lock_by_id = AsyncMock()
+    agent_repository.get_by_id = AsyncMock(return_value=agent)
     frozen = build_model_operation(
         option=option,
         profile=RequestedInferenceProfile(
@@ -150,8 +149,8 @@ async def test_begin_next_freezes_lightweight_candidate_and_source_boundary(
         _raw_session.commit.assert_not_awaited()
         return
     assert result is prepared
-    agent_repository.lock_by_id.assert_awaited_once_with(session, "a" * 32)
-    agent_repository.get_by_id.assert_not_awaited()
+    agent_repository.get_by_id.assert_awaited_once_with(session, "a" * 32)
+    agent_repository.lock_by_id.assert_not_awaited()
     if reuse:
         build.assert_not_called()
         active_metadata.capture_exact_choices_in_session.assert_not_awaited()

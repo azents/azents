@@ -11,9 +11,8 @@ import pytest
 import pytest_asyncio
 import sqlalchemy as sa
 from azcommon.result import Success
-from psycopg.errors import LockNotAvailable
-from sqlalchemy import event
-from sqlalchemy.engine import ExceptionContext
+from psycopg.errors import DeadlockDetected
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.agent_session_data import (
@@ -30,7 +29,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
-from azents.engine.events.types import SystemErrorPayload
+from azents.engine.events.types import AgentRunState, SystemErrorPayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -537,10 +536,11 @@ async def test_parent_archive_before_terminal_admission_commits_suppression(
         await asyncio.gather(task, return_exceptions=True)
 
 
+@pytest.mark.parametrize("victim", ["stop", "terminal"])
 async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery(
-    rdb_engine: AsyncEngine, owned_session: _OwnerFixture
+    rdb_engine: AsyncEngine, owned_session: _OwnerFixture, victim: str
 ) -> None:
-    """Actual public Stop cannot retain a parent while retrying a child writer."""
+    """Either actual owning operation recovers the root/child deadlock once."""
     writes = create_read_write_session_manager(rdb_engine)
     reads = create_read_only_session_manager(rdb_engine)
     users = UserRepository()
@@ -567,72 +567,102 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
             title=None,
             last_task_message=None,
         )
-        run = await runs.create(
+        run = await runs.create_pending(
             setup,
-            AgentRunCreate(
-                session_id=child.agent_session_id,
-                parent_agent_run_id=None,
-                scheduled_task_cycle_id=None,
-            ),
+            session_id=child.agent_session_id,
+            parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
         )
         for session_id in (owned_session.session_id, child.agent_session_id):
             await AgentSessionRepository().mark_running(setup, session_id)
-    collision = asyncio.Event()
+    child_fenced = asyncio.Event()
+    release_terminal = asyncio.Event()
+    pids: dict[str, int] = {}
+    attempts: dict[str, int] = {}
+    aborts: list[str] = []
 
-    def observe_collision(context: ExceptionContext) -> None:
-        if isinstance(context.original_exception, LockNotAvailable):
-            collision.set()
+    class PausedTerminalRun(AgentRunRepository):
+        async def get_by_id(
+            self, session: ReadSession, run_id: str
+        ) -> AgentRunState | None:
+            current = await super().get_by_id(session, run_id)
+            if run_id == run.id:
+                # cancel_pending_agent_run has already fenced the exact child
+                # owner before this repository read.
+                child_fenced.set()
+                await release_terminal.wait()
+            return current
 
-    @asynccontextmanager
-    async def stop_manager() -> AsyncIterator[WriteSession]:
-        async with writes() as scope:
-            connection = await scope.write_session.connection()
-            sync_connection = connection.sync_connection
-            assert sync_connection is not None
-            event.listen(sync_connection.engine, "handle_error", observe_collision)
+    def tracked_manager(role: str) -> SessionManager[WriteSession]:
+        @asynccontextmanager
+        async def manager() -> AsyncIterator[WriteSession]:
+            attempts[role] = attempts.get(role, 0) + 1
             try:
-                yield scope
-            finally:
-                event.remove(sync_connection.engine, "handle_error", observe_collision)
+                async with writes() as scope:
+                    pid = await scope.write_session.scalar(
+                        sa.text("SELECT pg_backend_pid()")
+                    )
+                    assert isinstance(pid, int)
+                    pids[role] = pid
+                    # Isolated test detector choice, not a product lock timeout.
+                    # Both participants still execute real SQL and full rollback.
+                    await scope.write_session.execute(
+                        sa.text("SELECT set_config('deadlock_timeout', :value, true)"),
+                        {"value": "500ms" if role == victim else "5s"},
+                    )
+                    yield scope
+            except OperationalError as error:
+                if isinstance(error.orig, DeadlockDetected):
+                    aborts.append(role)
+                raise
+
+        return manager
 
     terminal = worker_repository(writes).terminal_finalization_repository
     stop = chat_write_service(
-        stop_manager, workspace_user_repository=WorkspaceUserRepository()
+        tracked_manager("stop"), workspace_user_repository=WorkspaceUserRepository()
+    )
+    child_worker = dataclasses.replace(
+        worker_repository(tracked_manager("terminal")),
+        agent_run_repository=PausedTerminalRun(),
     )
     task: asyncio.Task[AcceptedStopRequest] | None = None
+    terminal_task: asyncio.Task[AgentRunState] | None = None
     try:
-        async with writes() as child_scope:
-            await fence_owned_session_mutation(
-                child_scope, SessionExecutionOwner(child.agent_session_id, 0)
+        terminal_task = asyncio.create_task(
+            child_worker.cancel_pending_agent_run(
+                child.agent_session_id, owner_generation=0, run_id=run.id
             )
-            await runs.mark_terminal(
-                child_scope,
-                run.id,
-                AgentRunStatus.COMPLETED,
-                ended_at=run.created_at,
-                terminal_result_message="Child result before Stop.",
-            )
-            task = asyncio.create_task(
-                stop.request_session_stop(
-                    agent_id=owned_session.agent_id,
-                    session_id=owned_session.session_id,
-                    user_id=user.id,
-                )
-            )
-            try:
-                async with asyncio.timeout(5):
-                    await collision.wait()
-            except TimeoutError:
-                if task.done():
-                    await task
-                raise
-            async with asyncio.timeout(5):
-                outcome = await terminal.finalize_run_in_session(
-                    child_scope, run_id=run.id
-                )
-            assert outcome.disposition is TerminalDeliveryDisposition.ENQUEUED
+        )
         async with asyncio.timeout(5):
-            accepted = await task
+            await child_fenced.wait()
+        task = asyncio.create_task(
+            stop.request_session_stop(
+                agent_id=owned_session.agent_id,
+                session_id=owned_session.session_id,
+                user_id=user.id,
+            )
+        )
+        async with asyncio.timeout(5):
+            while True:
+                async with reads() as observer:
+                    if "stop" in pids and await observer.read_session.scalar(
+                        sa.text("SELECT :holder = ANY(pg_blocking_pids(:waiting))"),
+                        {"holder": pids["terminal"], "waiting": pids["stop"]},
+                    ):
+                        break
+        # Public Stop owns its root gate and partial Session set. The actual
+        # terminal owner now needs the parent, closing the observed real cycle.
+        release_terminal.set()
+        async with asyncio.timeout(10):
+            accepted, cancelled = await asyncio.gather(task, terminal_task)
+        assert cancelled.id == run.id
+        assert cancelled.status is AgentRunStatus.CANCELLED
+        assert aborts == [victim]
+        assert attempts == {
+            "stop": 2 if victim == "stop" else 1,
+            "terminal": 2 if victim == "terminal" else 1,
+        }
         assert accepted.stopped_session_ids == [
             owned_session.session_id,
             child.agent_session_id,
@@ -647,18 +677,29 @@ async def test_public_stop_releases_all_partial_rows_for_child_terminal_delivery
             assert root is not None and current_child is not None
             assert root.stop_requested_at is not None
             assert current_child.stop_requested_at is not None
+            assert root.stop_request_id == accepted.stop_request_id
+            assert current_child.stop_request_id == accepted.stop_request_id
+            assert root.owner_generation == owned_session.generation
+            assert current_child.owner_generation == 0
             mailbox = await worker_repository(
                 writes
             ).mailbox_item_repository.list_by_session_id(
                 observer, owned_session.session_id
             )
             assert len(mailbox) == 1
+            current_run = await runs.get_by_id(observer, run.id)
+            assert current_run is not None
+            assert current_run.status is AgentRunStatus.CANCELLED
+            assert current_run.session_id == child.agent_session_id
+            assert current_run.parent_result_mailbox_item_id == mailbox[0].id
         repeated = await terminal.finalize_run(run.id)
         assert repeated.disposition is TerminalDeliveryDisposition.ALREADY_FINALIZED
     finally:
-        if task is not None and not task.done():
-            task.cancel()
-        if task is not None:
-            await asyncio.gather(task, return_exceptions=True)
+        release_terminal.set()
+        tasks = [pending for pending in (task, terminal_task) if pending is not None]
+        for pending in tasks:
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         async with writes() as cleanup:
             await users.delete(cleanup, user.id)

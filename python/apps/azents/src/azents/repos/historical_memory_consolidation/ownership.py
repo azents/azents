@@ -219,7 +219,9 @@ class ConsolidationOwnershipRepository:
     @retry_consolidation_operation
     async def renew(self, principal: ConsolidationJobPrincipal) -> datetime.datetime:
         """Extend a still-current lease, never revive an expired owner."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager, principal, participants=None
+        ) as job:
             session, owner = job.session, job.owner
             until = min(owner.database_now + _LEASE, owner.attempt.deadline_at)
             owner.unit.lease_until = until

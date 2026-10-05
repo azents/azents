@@ -31,6 +31,10 @@ from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftConflict,
     check_draft_influence,
 )
+from azents.repos.historical_memory_consolidation.participant_types import (
+    DraftParticipants,
+    WorkPageParticipants,
+)
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
 )
@@ -132,7 +136,9 @@ class ConsolidationWorkRepository:
         self, principal: ConsolidationJobPrincipal
     ) -> int:
         """Supersede unavailable old metadata without acknowledging model coverage."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager, principal, participants=None
+        ) as job:
             current = pending_work_query(
                 principal.unit, job.owner.attempt.membership_grant_id
             ).with_only_columns(RDBConsolidationWork.id)
@@ -165,11 +171,22 @@ class ConsolidationWorkRepository:
     ) -> ConsolidationWorkPage:
         if not 1 <= limit <= 50 or (after_sequence is not None and after_sequence < 0):
             raise ValueError("Consolidation work page bounds are invalid.")
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=WorkPageParticipants(
+                after_sequence=after_sequence, limit=limit
+            ),
+        ) as job:
             session, owner = job.session, job.owner
             query = pending_work_query(
                 principal.unit, owner.attempt.membership_grant_id
             ).where(RDBConsolidationWork.sequence <= owner.attempt.pass_upper_sequence)
+            if job.participants is None:
+                raise RuntimeError("Consolidation work participants are missing.")
+            query = query.where(
+                RDBConsolidationWork.id.in_(job.participants.candidate_ids)
+            )
             if after_sequence is not None:
                 query = query.where(RDBConsolidationWork.sequence > after_sequence)
             rows = list(
@@ -232,7 +249,11 @@ class ConsolidationWorkRepository:
         coverage: ConsolidationCoverage,
     ) -> tuple[str, ...]:
         """Save explicit choices only; publication alone promotes them to coverage."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(

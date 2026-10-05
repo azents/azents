@@ -13,7 +13,6 @@ import sqlalchemy as sa
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-import azents.repos.historical_memory_consolidation.retry as retry_module
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import EventKind
 from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
@@ -425,10 +424,8 @@ async def test_captured_model_output_survives_agent_contention_without_rerunning
         captured = asyncio.Event()
         writer_locked = asyncio.Event()
         release_writer = asyncio.Event()
-        rolled_back = asyncio.Event()
-        resume_retry = asyncio.Event()
         admit = ConsolidationIterationHost.admit_output
-        retries = 0
+        writer_pid: int | None = None
 
         async def paused_admission(
             self: ConsolidationIterationHost,
@@ -440,15 +437,13 @@ async def test_captured_model_output_survives_agent_contention_without_rerunning
                 await writer_locked.wait()
             return await admit(self, prepared, output)
 
-        async def contention_yield() -> None:
-            nonlocal retries
-            retries += 1
-            rolled_back.set()
-            await resume_retry.wait()
-
         async def writer() -> None:
+            nonlocal writer_pid
             await captured.wait()
             async with manager() as session:
+                writer_pid = await session.read_session.scalar(
+                    sa.select(sa.func.pg_backend_pid())
+                )
                 await session.write_session.scalar(
                     sa.select(RDBAgent)
                     .where(RDBAgent.id == host.claim.principal.unit.agent_id)
@@ -460,19 +455,29 @@ async def test_captured_model_output_survives_agent_contention_without_rerunning
         monkeypatch.setattr(
             ConsolidationIterationHost, "admit_output", paused_admission
         )
-        monkeypatch.setattr(retry_module, "wait_for_contention_retry", contention_yield)
         holder = asyncio.create_task(writer())
         execution = asyncio.create_task(host.run())
         try:
             async with asyncio.timeout(5):
-                await rolled_back.wait()
+                await writer_locked.wait()
+                assert writer_pid is not None
+                while True:
+                    async with manager() as observer:
+                        blocked = await observer.read_session.scalar(
+                            sa.text(
+                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                                "WHERE wait_event_type = 'Lock' "
+                                "AND :holder = ANY(pg_blocking_pids(pid)))"
+                            ),
+                            {"holder": writer_pid},
+                        )
+                    if blocked:
+                        break
             assert model.turn == 1 and host.started_turns == 1
             release_writer.set()
             await holder
-            resume_retry.set()
             async with asyncio.timeout(10):
                 outcome = await execution
-            assert retries == 1
             assert model.turn == host.started_turns == 8
             assert model.closed and host.closed
             async with manager() as session:
@@ -520,7 +525,6 @@ async def test_captured_model_output_survives_agent_contention_without_rerunning
             )
         finally:
             release_writer.set()
-            resume_retry.set()
             for task in (holder, execution):
                 if not task.done():
                     task.cancel()

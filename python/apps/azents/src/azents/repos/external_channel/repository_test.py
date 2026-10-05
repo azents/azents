@@ -1,5 +1,6 @@
 """ExternalChannelRepository tests."""
 
+import asyncio
 import dataclasses
 import datetime
 from collections.abc import (
@@ -147,6 +148,9 @@ from azents.repos.chat_write_request import (
 )
 from azents.repos.external_account_link import (
     ExternalAccountLinkRepository,
+)
+from azents.repos.external_account_oauth.configuration_fence_test import (
+    _wait_for_blocked,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrantCreate,
@@ -914,7 +918,7 @@ class TestExternalChannelRepository:
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """The fence conflicts even when there is no block row to lock."""
+        """The fence waits even when there is no block row to lock."""
         del latest_db_schema
         repository = ExternalChannelRepository()
         async with (
@@ -923,31 +927,30 @@ class TestExternalChannelRepository:
         ):
             first = ReadWriteSession(_raw_first)
             second = ReadWriteSession(_raw_second)
-            acquired = await repository.acquire_principal_agent_authorization_fence(
+            await repository.acquire_principal_agent_authorization_fence(
                 first,
                 agent_id="agent-without-row",
                 principal_id="principal-without-row",
-                nowait=False,
             )
-            conflicted = await repository.acquire_principal_agent_authorization_fence(
-                second,
-                agent_id="agent-without-row",
-                principal_id="principal-without-row",
-                nowait=True,
+            holder_pid = await first.write_session.scalar(
+                sa.select(sa.func.pg_backend_pid())
             )
-            assert acquired is True
-            assert conflicted is False
-
-            await first.write_session.commit()
-            acquired_after_release = (
-                await repository.acquire_principal_agent_authorization_fence(
+            assert isinstance(holder_pid, int)
+            pending = asyncio.create_task(
+                repository.acquire_principal_agent_authorization_fence(
                     second,
                     agent_id="agent-without-row",
                     principal_id="principal-without-row",
-                    nowait=True,
                 )
             )
-            assert acquired_after_release is True
+            try:
+                await _wait_for_blocked(rdb_engine, holder_pid)
+                await first.write_session.commit()
+                await asyncio.wait_for(pending, timeout=3)
+            finally:
+                if not pending.done():
+                    pending.cancel()
+                    await asyncio.gather(pending, return_exceptions=True)
 
     async def test_native_model_authorization_uses_committed_disable_state(
         self,
@@ -1160,7 +1163,7 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="aba-draft",
-            now=_at(3),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
@@ -1204,7 +1207,7 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="displayed-selection-draft",
-            now=_at(6),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
@@ -1231,7 +1234,7 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="mutation-before-purge",
-            now=_at(8),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )
@@ -1252,7 +1255,7 @@ class TestExternalChannelRepository:
             actor=actor,
             target=target,
             owner_interaction_key="removed-option-draft",
-            now=_at(8),
+            now=datetime.datetime.now(datetime.UTC),
             offset=0,
             limit=10,
         )

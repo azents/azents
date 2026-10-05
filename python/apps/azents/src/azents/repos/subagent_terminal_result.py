@@ -18,6 +18,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_mailbox import AgentMailboxRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -71,6 +72,7 @@ class SubagentTerminalResultRepository:
                 if descendant.parent_session_agent_id == parent.id
             ]
 
+    @retry_hierarchy_operation
     async def deliver_one(self, run_id: str) -> bool:
         """Complete one repair delivery with its original failure semantics."""
         async with self.session_manager() as session:

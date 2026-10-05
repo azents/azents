@@ -20,6 +20,7 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
@@ -65,6 +66,7 @@ class FailedRunFinalizationOperationRepository:
         Depends(TerminalRunFinalizationRepository),
     ]
 
+    @retry_hierarchy_operation
     async def finalize(
         self,
         input: FailedRunFinalization,

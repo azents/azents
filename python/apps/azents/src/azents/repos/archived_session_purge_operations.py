@@ -37,6 +37,7 @@ from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel_lifecycle_participant import (
     ExternalChannelLifecycleParticipantRepository,
 )
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.scheduled_task_lifecycle_participant import (
     ScheduledTaskLifecycleParticipantRepository,
@@ -123,6 +124,7 @@ class ArchivedSessionPurgeOperations:
                     materialization_error = error
         return PurgeClaim(job=job, materialization_error=materialization_error)
 
+    @retry_hierarchy_operation
     async def prepare_root(
         self, *, job: ArchivedSessionPurgeJob, lease_owner: str, now: datetime.datetime
     ) -> PurgeRootPreparation:
@@ -268,6 +270,7 @@ class ArchivedSessionPurgeOperations:
             exchange_file_count=exchange_file_count,
         )
 
+    @retry_hierarchy_operation
     async def finalize(
         self,
         *,

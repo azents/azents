@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
-from psycopg.errors import LockNotAvailable
+from psycopg.errors import DeadlockDetected
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -43,35 +43,57 @@ from azents.repos.scheduled_task.tool_operations import (
 )
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
-from azents.repos.session_execution.ownership import fence_owned_session_mutation
 from azents.repos.subagent_coordination.repository import SubagentCoordinationRepository
 from azents.repos.subagent_tool_operations import SubagentToolOperationRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.terminal_finalization_data import TerminalDeliveryDisposition
 from azents.repos.toolkit_state import ToolkitStateRepository
+from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.worker.session.idle_continuation_lock_test import (
     _cleanup_workspace_fixture,
     _wait_for_database_blocker,
 )
 
 
-class _ObservedSessions(AgentSessionRepository):
-    """Observe a real partial-admission collision before the retry releases it."""
+class _PausedChildLocks(AgentSessionRepository):
+    """Release one real blocking child acquisition at an observed test boundary."""
 
-    def __init__(self) -> None:
-        self.collision = asyncio.Event()
+    def __init__(self, child_session_id: str) -> None:
+        self.child_session_id = child_session_id
+        self.reached = asyncio.Event()
+        self.release = asyncio.Event()
 
-    async def lock_by_id_nowait(
+    async def lock_by_id(
         self,
         session: WriteSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        try:
-            return await super().lock_by_id_nowait(session, agent_session_id)
-        except OperationalError as error:
-            if isinstance(error.orig, LockNotAvailable):
-                self.collision.set()
-            raise
+        if agent_session_id == self.child_session_id:
+            self.reached.set()
+            await self.release.wait()
+        return await super().lock_by_id(session, agent_session_id)
+
+
+@dataclasses.dataclass(frozen=True)
+class _PausedTerminalOwner(WorkerSessionOperationRepository):
+    """Observe the actual owned terminal method before dependent parent delivery."""
+
+    fenced: asyncio.Event
+    release: asyncio.Event
+
+    async def _lock_owned_session(
+        self,
+        session: WriteSession,
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> AgentSession:
+        current = await super()._lock_owned_session(
+            session, session_id=session_id, owner_generation=owner_generation
+        )
+        self.fenced.set()
+        await self.release.wait()
+        return current
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,7 +104,7 @@ class _HierarchyFixture:
     root_node: SessionAgent
     child: SessionAgent
     manager: SessionManager[WriteSession]
-    sessions: _ObservedSessions
+    sessions: AgentSessionRepository
     backend_pid: asyncio.Future[int]
 
     def subagent_operations(self) -> SubagentToolOperationRepository:
@@ -122,7 +144,7 @@ async def hierarchy(
 ) -> AsyncIterator[_HierarchyFixture]:
     del latest_db_schema
     suffix = uuid4().hex[:8]
-    sessions = _ObservedSessions()
+    sessions = AgentSessionRepository()
     async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
         scope = ReadWriteSession(raw)
         workspace_id = await _create_workspace(scope, f"hierarchy-fences-{suffix}")
@@ -231,11 +253,13 @@ async def test_tool_descriptions_do_not_wait_for_owner_agent_or_root_gate(
             assert set(ids) == {hierarchy.root.id, hierarchy.child.agent_session_id}
 
 
-async def test_parent_tool_collision_releases_partial_rows_for_child_terminal_delivery(
+@pytest.mark.parametrize("victim", ["parent", "terminal"])
+async def test_real_deadlock_retries_whole_parent_or_terminal_operation_once(
     rdb_engine: AsyncEngine,
     hierarchy: _HierarchyFixture,
+    victim: str,
 ) -> None:
-    """A parent tool cannot retain the parent while waiting for an owned child."""
+    """Either real DB victim rolls back its owning method, not external execution."""
     runs = AgentRunRepository()
     async with hierarchy.manager() as scope:
         pending = await runs.create_pending(
@@ -244,52 +268,110 @@ async def test_parent_tool_collision_releases_partial_rows_for_child_terminal_de
             parent_agent_run_id=None,
             scheduled_task_cycle_id=None,
         )
+    pids: dict[str, int] = {}
+    attempts: dict[str, int] = {}
+    aborts: list[str] = []
+
+    @asynccontextmanager
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
+        task = asyncio.current_task()
+        assert task is not None
+        role = task.get_name()
+        assert role in {"parent", "terminal"}
+        attempts[role] = attempts.get(role, 0) + 1
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw:
+            pid = await raw.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(pid, int)
+            pids[role] = pid
+            # Select the detector in this isolated test, not a product lock timeout.
+            # The actual cycle, rollback and both completed operations remain real.
+            detector = "100ms" if role == victim else "5s"
+            await raw.execute(
+                sa.text("SELECT set_config('deadlock_timeout', :value, true)"),
+                {"value": detector},
+            )
+            try:
+                yield ReadWriteSession(raw)
+                await raw.commit()
+            except BaseException as error:
+                await raw.rollback()
+                if isinstance(error, OperationalError) and isinstance(
+                    error.orig, DeadlockDetected
+                ):
+                    aborts.append(role)
+                raise
+
+    sessions = _PausedChildLocks(hierarchy.child.agent_session_id)
+    operations = dataclasses.replace(
+        hierarchy.subagent_operations(),
+        session_manager=tracked_manager,
+        agent_session_repository=sessions,
+    )
     admission = MailboxAdmissionRepository(
-        hierarchy.manager, MailboxRepository(), hierarchy.sessions
+        tracked_manager, MailboxRepository(), sessions
     )
     terminal = TerminalRunFinalizationRepository(
-        hierarchy.manager,
+        tracked_manager,
         runs,
-        hierarchy.sessions,
-        AgentMailboxRepository(admission, hierarchy.sessions),
+        sessions,
+        AgentMailboxRepository(admission, sessions),
     )
-    task: asyncio.Task[object] | None = None
+    child_fenced = asyncio.Event()
+    child_release = asyncio.Event()
+    worker = _PausedTerminalOwner(
+        tracked_manager,
+        sessions,
+        runs,
+        MailboxRepository(),
+        terminal,
+        child_fenced,
+        child_release,
+    )
+    parent_task: asyncio.Task[object] | None = None
+    terminal_task: asyncio.Task[object] | None = None
     try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as raw_child:
-            child_scope = ReadWriteSession(raw_child)
-            await fence_owned_session_mutation(
-                child_scope,
-                SessionExecutionOwner(
-                    hierarchy.child.agent_session_id,
-                    0,
-                ),
-            )
-            await runs.mark_terminal(
-                child_scope,
-                pending.id,
-                AgentRunStatus.COMPLETED,
-                ended_at=datetime.datetime.now(datetime.UTC),
-                terminal_result_message="done",
-            )
-            task = asyncio.create_task(
-                hierarchy.subagent_operations().send_message(
-                    session_id=hierarchy.root.id,
-                    agent_name="child",
-                    content="next message",
-                )
-            )
-            await asyncio.wait_for(hierarchy.sessions.collision.wait(), timeout=5)
-            outcome = await asyncio.wait_for(
-                terminal.finalize_run_in_session(
-                    child_scope,
-                    run_id=pending.id,
+        terminal_task = asyncio.create_task(
+            worker.cancel_pending_agent_run(
+                hierarchy.child.agent_session_id, owner_generation=0, run_id=pending.id
+            ),
+            name="terminal",
+        )
+        await asyncio.wait_for(child_fenced.wait(), timeout=5)
+        parent_task = asyncio.create_task(
+            operations.send_message(
+                session_id=hierarchy.root.id, agent_name="child", content="next message"
+            ),
+            name="parent",
+        )
+        await asyncio.wait_for(sessions.reached.wait(), timeout=5)
+        if victim == "parent":
+            sessions.release.set()
+            await asyncio.wait_for(
+                _wait_for_database_blocker(
+                    rdb_engine, blocked_pid=pids["parent"], blocker_pid=pids["terminal"]
                 ),
                 timeout=5,
             )
-            assert outcome.disposition is TerminalDeliveryDisposition.ENQUEUED
-            await raw_child.commit()
-            result = await asyncio.wait_for(task, timeout=5)
-            assert result.target is not None
+            child_release.set()
+        else:
+            child_release.set()
+            await asyncio.wait_for(
+                _wait_for_database_blocker(
+                    rdb_engine, blocked_pid=pids["terminal"], blocker_pid=pids["parent"]
+                ),
+                timeout=5,
+            )
+            sessions.release.set()
+        results = await asyncio.wait_for(
+            asyncio.gather(parent_task, terminal_task), timeout=10
+        )
+        assert results[0].target is not None
+        assert results[1].status is AgentRunStatus.CANCELLED
+        assert aborts == [victim]
+        assert attempts == {
+            "parent": 2 if victim == "parent" else 1,
+            "terminal": 2 if victim == "terminal" else 1,
+        }
         async with hierarchy.manager() as scope:
             parent_messages = await MailboxRepository().list_by_session_id(
                 scope, hierarchy.root.id
@@ -299,8 +381,76 @@ async def test_parent_tool_collision_releases_partial_rows_for_child_terminal_de
             )
             assert len(parent_messages) == 1
             assert len(child_messages) == 1
+            committed = await runs.get_by_id(scope, pending.id)
+            assert committed is not None
+            assert committed.status is AgentRunStatus.CANCELLED
+            assert committed.session_id == hierarchy.child.agent_session_id
             repeated = await terminal.finalize_run_in_session(scope, run_id=pending.id)
             assert repeated.disposition is TerminalDeliveryDisposition.ALREADY_FINALIZED
+    finally:
+        tasks = [task for task in (parent_task, terminal_task) if task is not None]
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+async def test_waiting_message_commits_once_or_cancel_releases_partial_parent(
+    rdb_engine: AsyncEngine,
+    hierarchy: _HierarchyFixture,
+    cancelled: bool,
+) -> None:
+    """Waiting is ordinary admission; cancellation rolls back earlier parent locks."""
+    task: asyncio.Task[object] | None = None
+    try:
+        async with AsyncSession(rdb_engine) as holder:
+            await holder.execute(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == hierarchy.child.agent_session_id)
+                .with_for_update()
+            )
+            holder_pid = await holder.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(holder_pid, int)
+            task = asyncio.create_task(
+                hierarchy.subagent_operations().send_message(
+                    session_id=hierarchy.root.id,
+                    agent_name="child",
+                    content="waited message",
+                )
+            )
+            pid = await asyncio.wait_for(hierarchy.backend_pid, timeout=5)
+            await asyncio.wait_for(
+                _wait_for_database_blocker(
+                    rdb_engine, blocked_pid=pid, blocker_pid=holder_pid
+                ),
+                timeout=5,
+            )
+            if cancelled:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, timeout=5)
+                # The child remains held; acquiring the earlier parent proves
+                # cancellation released the complete owning transaction.
+                async with AsyncSession(rdb_engine) as verifier:
+                    locked = await asyncio.wait_for(
+                        hierarchy.sessions.lock_by_id(
+                            ReadWriteSession(verifier), hierarchy.root.id
+                        ),
+                        timeout=5,
+                    )
+                    assert locked is not None
+            else:
+                await holder.commit()
+                assert (await asyncio.wait_for(task, timeout=5)).target is not None
+        async with hierarchy.manager() as scope:
+            messages = await MailboxRepository().list_by_session_id(
+                scope, hierarchy.child.agent_session_id
+            )
+            assert len(messages) == (0 if cancelled else 1)
+            root = await hierarchy.sessions.get_by_id(scope, hierarchy.root.id)
+            assert root is not None
+            assert root.owner_generation == hierarchy.root.owner_generation
     finally:
         if task is not None and not task.done():
             task.cancel()
@@ -319,6 +469,8 @@ async def test_obsolete_parent_tool_cannot_commit_after_owner_handover(
                 .where(RDBAgentSession.id == hierarchy.root.id)
                 .values(owner_generation=RDBAgentSession.owner_generation + 1)
             )
+            holder_pid = await holder.scalar(sa.text("SELECT pg_backend_pid()"))
+            assert isinstance(holder_pid, int)
             task = asyncio.create_task(
                 hierarchy.subagent_operations().send_message(
                     session_id=hierarchy.root.id,
@@ -326,7 +478,13 @@ async def test_obsolete_parent_tool_cannot_commit_after_owner_handover(
                     content="obsolete",
                 )
             )
-            await asyncio.wait_for(hierarchy.sessions.collision.wait(), timeout=5)
+            pid = await asyncio.wait_for(hierarchy.backend_pid, timeout=5)
+            await asyncio.wait_for(
+                _wait_for_database_blocker(
+                    rdb_engine, blocked_pid=pid, blocker_pid=holder_pid
+                ),
+                timeout=5,
+            )
             await holder.commit()
             with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
                 await asyncio.wait_for(task, timeout=5)

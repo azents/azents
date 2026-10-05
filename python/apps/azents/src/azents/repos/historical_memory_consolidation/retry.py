@@ -14,6 +14,9 @@ from azents.repos.historical_memory_consolidation.authority import (
     consolidation_session,
     observe_attempt_seconds,
 )
+from azents.repos.historical_memory_consolidation.participant_types import (
+    ConsolidationPlanChangedError,
+)
 
 _CONTENTION_YIELD_SECONDS = 0.05
 
@@ -40,7 +43,7 @@ def retry_rolled_back_operation[**P, R](
         while True:
             try:
                 return await operation(*args, **kwargs)
-            except ConsolidationAuthorityBusyError:
+            except ConsolidationAuthorityBusyError, ConsolidationPlanChangedError:
                 # The owning repository has closed its transaction and rolled back.
                 await wait_for_contention_retry()
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 from sqlalchemy.sql.selectable import Subquery
 from uuid6 import uuid7
 
@@ -31,6 +31,12 @@ from azents.repos.historical_memory_consolidation.authority import (
     LockedConsolidationOwner,
     consolidation_job_session,
     require_commit_owner,
+)
+from azents.repos.historical_memory_consolidation.participant_types import (
+    DraftParticipants,
+)
+from azents.repos.historical_memory_consolidation.participants import (
+    ConsolidationParticipantPlan,
 )
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
@@ -117,11 +123,14 @@ async def check_draft_influence(
         RDBConsolidationEvidence.membership_grant_id,
     ).where(RDBConsolidationEvidence.attempt_id == principal.attempt_id)
     influence = inherited.union_all(exposed).subquery("complete_draft_influence")
+    if owner.participants is None:
+        raise RuntimeError("Consolidation manifest participants are missing.")
     await check_dependency_manifest(
         session,
         key=principal.unit,
         membership_grant_id=owner.attempt.membership_grant_id,
         influence=influence,
+        participants=owner.participants,
     )
 
 
@@ -131,20 +140,26 @@ async def check_dependency_manifest(
     key: ConsolidationUnitKey,
     membership_grant_id: str | None,
     influence: Subquery,
+    participants: ConsolidationParticipantPlan,
 ) -> None:
     """Recheck a complete independent manifest under caller-owned authority."""
     source_ids = sa.select(influence.c.source_session_id).distinct()
     expected = sa.select(sa.func.count()).select_from(source_ids.subquery())
-    # Count server-side locked rows, not an uncapped Python manifest. Each source
-    # is locked once in stable root-then-evidence order across all generations.
+    # Permission/version validation stays server-side. These queries cannot
+    # acquire a new row after unit ownership: all existing identities, including
+    # archived ones, were locked before the unit. Frozen missing identities
+    # cannot become accepted if a row appears between validation and use.
     roots = (
         sa.select(RDBAgentSession.id)
         .where(
             RDBAgentSession.id.in_(source_ids),
+            RDBAgentSession.id
+            == sa.any_(
+                sa.literal(sorted(participants.locked_root_ids), type_=ARRAY(sa.Text()))
+            ),
             source_predicate(key),
         )
         .order_by(RDBAgentSession.id)
-        .with_for_update(read=True, nowait=True)
         .subquery()
     )
     roots_complete = await session.write_session.scalar(
@@ -157,9 +172,16 @@ async def check_dependency_manifest(
         raise ConsolidationAuthorityError("Consolidation source is unavailable.")
     sources = (
         sa.select(RDBHistoricalMemorySource.source_session_id)
-        .where(RDBHistoricalMemorySource.source_session_id.in_(source_ids))
+        .where(
+            RDBHistoricalMemorySource.source_session_id.in_(source_ids),
+            RDBHistoricalMemorySource.source_session_id
+            == sa.any_(
+                sa.literal(
+                    sorted(participants.locked_source_ids), type_=ARRAY(sa.Text())
+                )
+            ),
+        )
         .order_by(RDBHistoricalMemorySource.source_session_id)
-        .with_for_update(read=True, nowait=True)
         .subquery()
     )
     sources_complete = await session.write_session.scalar(
@@ -246,7 +268,11 @@ class ConsolidationDraftRepository:
         self, principal: ConsolidationJobPrincipal
     ) -> tuple[DraftObservedFile, ...]:
         """Read the bounded private set after rechecking its entire influence."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await self._draft(session, owner)
             await check_draft_influence(
@@ -278,7 +304,11 @@ class ConsolidationDraftRepository:
     ) -> DraftFileObservation:
         """Observe current text or confirmed absence with a non-reusable revision."""
         require_draft_path(path)
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await self._draft(session, owner)
             await check_draft_influence(
@@ -306,7 +336,11 @@ class ConsolidationDraftRepository:
         request_digest: str,
     ) -> DraftMutationResult | None:
         """Reauthorize safe replay before evaluating text applicability."""
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await self._draft(session, owner)
             await check_draft_influence(
@@ -348,7 +382,11 @@ class ConsolidationDraftRepository:
             raise ValueError("Private mutation batch repeats a file path.")
         for path in paths:
             require_draft_path(path)
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await self._draft(session, owner)
             await check_draft_influence(

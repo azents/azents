@@ -364,10 +364,6 @@ async def test_failure_retains_prior_result_and_publish_resets_progress(
             inactive_before=_NOW - datetime.timedelta(hours=6),
         )
         assert admission is not None
-        assert await repository.lock_preparation_membership_in_session(
-            session,
-            admission,
-        )
         started = await repository.persist_preparation_operation_in_session(
             session,
             admission,
@@ -511,7 +507,7 @@ async def test_preparation_admission_rechecks_current_source_state_and_membershi
             attempted_at=_NOW,
             inactive_before=_NOW - datetime.timedelta(hours=6),
         )
-        assert disabled_admission is not None
+        assert disabled_admission is None
 
     async with rdb_session_manager() as session:
         private_admission = await repository.lock_preparation_admission_in_session(
@@ -520,11 +516,7 @@ async def test_preparation_admission_rechecks_current_source_state_and_membershi
             attempted_at=_NOW,
             inactive_before=_NOW - datetime.timedelta(hours=6),
         )
-        assert private_admission is not None
-        assert not await repository.lock_preparation_membership_in_session(
-            session,
-            private_admission,
-        )
+        assert private_admission is None
 
 
 async def test_publication_reauthorizes_source_and_session_delete_cascades(

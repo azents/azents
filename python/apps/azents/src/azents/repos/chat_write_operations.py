@@ -57,6 +57,7 @@ from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
     ChatWriteRequestCreate,
 )
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
@@ -491,6 +492,7 @@ class ChatWriteOperationsRepository:
             failed_event_id=record.accepted_id,
         )
 
+    @retry_hierarchy_operation
     async def request_session_stop(
         self,
         *,
