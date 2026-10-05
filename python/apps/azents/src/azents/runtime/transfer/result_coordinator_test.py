@@ -145,9 +145,14 @@ async def test_direct_download_success_uses_the_authoritative_source_manifest(
     assert len(replies) == 1
     assert replies[0].event.final
     assert replies[0].event.payload["success"] is True
+    assert cleanup.records == []
     if source_handle is None:
-        assert len(cleanup.records) == 1
-        assert cleanup.records[0].completed_object_cleanup_required
+        assert settled.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+        assert settled.completed_object_cleanup_required
+        assert settled.cleanup_failure is None
+    else:
+        assert settled.cleanup_status is RuntimeTransferCleanupStatus.NOT_REQUIRED
+        assert not settled.completed_object_cleanup_required
 
 
 @pytest.mark.asyncio
