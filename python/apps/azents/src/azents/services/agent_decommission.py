@@ -5,348 +5,31 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Sequence
-from typing import Annotated, AsyncContextManager, Protocol
+from typing import Annotated, Protocol
 
 from azcommon.infra.s3.service import S3Service
-from azcommon.uuid import uuid7
 from fastapi import Depends
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionStopSignal
 from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
-from azents.core.enums import (
-    AgentDecommissionStatus,
-    AgentSessionRunState,
-    AgentSessionStatus,
-)
+from azents.core.enums import AgentDecommissionStatus, AgentSessionStatus
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.s3.deps import get_s3_service
-from azents.core.session_lifecycle import (
-    SessionLifecycleParticipantDefinition,
-    SessionLifecycleTransitionContext,
-)
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.agent_decommission.data import AgentDecommissionJob
-from azents.repos.agent_decommission_finalizer import (
-    AgentDecommissionFinalizerRepository,
+from azents.repos.agent_decommission_operations import (
+    AgentDecommissionOperationsRepository,
 )
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
-from azents.repos.exchange_file import ExchangeFileRepository
-from azents.repos.external_channel.data import (
-    ExternalChannelAgentDecommissionCleanup,
-    ExternalChannelArchiveTermination,
-)
-from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleCleanup
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
-from azents.services.session_lifecycle.orchestrator import (
-    TransitionOperation,
-    TransitionParticipantOperation,
-)
-from azents.services.session_lifecycle.registry import (
-    get_session_lifecycle_orchestrator,
-)
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import StoredImage
 
 _LEASE_DURATION = datetime.timedelta(minutes=15)
 _MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
 _JOB_LIMIT = 100
 _DEADLINE_SAFETY_MARGIN = datetime.timedelta(seconds=30)
-
 logger = logging.getLogger(__name__)
-
-
-class AgentDecommissionSessionManager(Protocol):
-    """Open a caller-owned database transaction for decommission work."""
-
-    def __call__(self) -> AsyncContextManager[WriteSession]:
-        """Return one asynchronous database-session context."""
-        ...
-
-
-class AgentDecommissionRootSession(Protocol):
-    """Read-only root-tree Session state consumed during retirement."""
-
-    @property
-    def id(self) -> str:
-        """Return the Session ID."""
-        ...
-
-    @property
-    def status(self) -> AgentSessionStatus:
-        """Return the durable Session lifecycle status."""
-        ...
-
-    @property
-    def run_state(self) -> AgentSessionRunState:
-        """Return the current Session execution state."""
-        ...
-
-
-class AgentDecommissionAgent(Protocol):
-    """Read-only Agent state consumed during direct-root cleanup."""
-
-    @property
-    def avatar(self) -> StoredImage | None:
-        """Return the optional Agent avatar projection."""
-        ...
-
-
-class AgentDecommissionRuntime(Protocol):
-    """Read-only Runtime state consumed by terminal deletion fencing."""
-
-    @property
-    def id(self) -> str:
-        """Return the Runtime ID."""
-        ...
-
-    @property
-    def runtime_provider_resource_id(self) -> str | None:
-        """Return the immutable provider resource binding."""
-        ...
-
-
-class AgentDecommissionExchangeFile(Protocol):
-    """Read-only ExchangeFile state consumed by blob cleanup."""
-
-    @property
-    def id(self) -> str:
-        """Return the ExchangeFile ID."""
-        ...
-
-    @property
-    def object_key(self) -> str:
-        """Return the object-store key."""
-        ...
-
-    @property
-    def blob_deleted_at(self) -> datetime.datetime | None:
-        """Return the blob deletion timestamp when already deleted."""
-        ...
-
-
-class AgentDecommissionRetentionSettings(Protocol):
-    """Read-only retention settings consumed while archiving a root tree."""
-
-    @property
-    def archived_session_retention_days(self) -> int | None:
-        """Return the archive retention policy."""
-        ...
-
-    @property
-    def revision(self) -> int:
-        """Return the policy revision."""
-        ...
-
-
-class AgentDecommissionRepositoryProtocol(Protocol):
-    """Persistence operations consumed by the decommission coordinator."""
-
-    async def claim_due(
-        self,
-        session: WriteSession,
-        *,
-        now: datetime.datetime,
-        lease_owner: str,
-        lease_until: datetime.datetime,
-    ) -> AgentDecommissionJob | None:
-        """Claim one due durable decommission job."""
-        ...
-
-    async def set_status(
-        self,
-        session: WriteSession,
-        *,
-        job_id: str,
-        lease_owner: str,
-        expected_attempt: int,
-        status: AgentDecommissionStatus,
-        now: datetime.datetime,
-    ) -> bool:
-        """Persist one owned decommission status."""
-        ...
-
-    async def mark_retry(
-        self,
-        session: WriteSession,
-        *,
-        job_id: str,
-        lease_owner: str,
-        expected_attempt: int,
-        next_attempt_at: datetime.datetime,
-        error_kind: str,
-        error_summary: str,
-        now: datetime.datetime,
-    ) -> bool:
-        """Persist bounded retry state for an owned job."""
-        ...
-
-
-class AgentDecommissionAgentSessionRepositoryProtocol(Protocol):
-    """Session-tree operations consumed by Agent retirement."""
-
-    async def list_root_trees_by_agent_id(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-    ) -> Sequence[AgentDecommissionRootSession]:
-        """List every root tree owned by an Agent."""
-        ...
-
-    async def lock_root_tree_sessions(
-        self,
-        session: WriteSession,
-        *,
-        root_session_id: str,
-    ) -> Sequence[AgentDecommissionRootSession]:
-        """Lock one root tree for retirement."""
-        ...
-
-    async def request_stop(
-        self,
-        session: WriteSession,
-        *,
-        session_id: str,
-        stop_request_id: str,
-        stop_requester_user_id: str | None,
-    ) -> object | None:
-        """Record a best-effort stop request for one Session."""
-        ...
-
-    async def archive_tree(
-        self,
-        session: WriteSession,
-        *,
-        root_session_id: str,
-        session_ids: Sequence[str],
-        archived_at: datetime.datetime,
-        purge_after: datetime.datetime | None,
-        policy_revision: int,
-        retention_days: int | None,
-    ) -> None:
-        """Archive one locked root tree."""
-        ...
-
-
-class AgentDecommissionRunRepositoryProtocol(Protocol):
-    """Execution-state query consumed before root retirement."""
-
-    async def has_active_for_session_ids(
-        self,
-        session: WriteSession,
-        *,
-        session_ids: Sequence[str],
-    ) -> bool:
-        """Report whether any Session still has active execution."""
-        ...
-
-
-class AgentDecommissionRetentionRepositoryProtocol(Protocol):
-    """Retention operations consumed while retiring an idle root tree."""
-
-    async def get_settings(
-        self,
-        session: WriteSession,
-    ) -> AgentDecommissionRetentionSettings:
-        """Lock and return the active retention policy."""
-        ...
-
-    async def schedule_purge_job(
-        self,
-        session: WriteSession,
-        *,
-        root_session_id: str,
-        eligible_at: datetime.datetime,
-        policy_revision: int,
-        now: datetime.datetime,
-    ) -> None:
-        """Schedule durable purge work after root archive."""
-        ...
-
-
-class AgentDecommissionLifecycleOrchestratorProtocol(Protocol):
-    """Lifecycle archive dispatch consumed by root retirement."""
-
-    async def archive(
-        self,
-        *,
-        context: SessionLifecycleTransitionContext,
-        participant_operation: TransitionParticipantOperation,
-        transition: TransitionOperation,
-    ) -> None:
-        """Run archive participants before the root transition."""
-        ...
-
-
-class AgentDecommissionExternalChannelLifecycleProtocol(Protocol):
-    """External Channel lifecycle operations consumed by decommission."""
-
-    async def archive_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecycleTransitionContext,
-    ) -> ExternalChannelArchiveTermination | None:
-        """Terminate one External Channel archive participant."""
-        ...
-
-    async def cleanup_decommissioned_agent(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-        now: datetime.datetime,
-    ) -> ExternalChannelAgentDecommissionCleanup:
-        """Remove direct Agent-owned External Channel state."""
-        ...
-
-    async def purge_decommissioned_provider_state(
-        self,
-        session: WriteSession,
-        connection_ids: Sequence[str],
-    ) -> int:
-        """Purge provider state after cleanup targets are captured."""
-        ...
-
-    async def consume_archive_cleanup(
-        self,
-        plans: Sequence[ProviderEffectPlan],
-    ) -> int:
-        """Execute captured provider cleanup after transaction commit."""
-        ...
-
-
-class AgentDecommissionScheduledTaskLifecycleProtocol(Protocol):
-    """Scheduled Task lifecycle operations consumed during decommission."""
-
-    async def archive_allows_active_runs(
-        self,
-        session: WriteSession,
-        *,
-        session_ids: Sequence[str],
-        running_session_ids: Sequence[str],
-    ) -> bool:
-        """Return whether every active execution is a preserved Scheduled cycle."""
-        ...
-
-    async def archive_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecycleTransitionContext,
-    ) -> ScheduledTaskLifecycleCleanup | None:
-        """Apply Scheduled Task archive participant work."""
-        ...
 
 
 class AgentDecommissionBrokerProtocol(Protocol):
@@ -357,85 +40,19 @@ class AgentDecommissionBrokerProtocol(Protocol):
         ...
 
 
-class AgentDecommissionAgentRepositoryProtocol(Protocol):
-    """Agent lookup consumed by direct-root cleanup."""
-
-    async def get_by_id(
-        self,
-        session: WriteSession,
-        agent_id: str,
-    ) -> AgentDecommissionAgent | None:
-        """Fetch the decommissioning Agent's avatar projection."""
-        ...
-
-
-class AgentDecommissionExchangeFileRepositoryProtocol(Protocol):
-    """Direct Agent-owned ExchangeFile cleanup operations."""
-
-    async def expire_unbound_by_agent_id(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-        expired_at: datetime.datetime,
-    ) -> Sequence[AgentDecommissionExchangeFile]:
-        """Expire direct Agent-owned files before blob cleanup."""
-        ...
-
-    async def list_unbound_by_agent_id(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-    ) -> Sequence[AgentDecommissionExchangeFile]:
-        """List direct Agent-owned files requiring blob cleanup."""
-        ...
-
-    async def mark_blob_deleted(
-        self,
-        session: WriteSession,
-        *,
-        file_id: str,
-        blob_deleted_at: datetime.datetime,
-    ) -> None:
-        """Persist one blob deletion acknowledgement."""
-        ...
-
-    async def delete_unbound_expired_by_agent_id(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-    ) -> int:
-        """Delete externally-cleaned direct Agent-owned metadata."""
-        ...
-
-
-class AgentDecommissionRuntimeRepositoryProtocol(Protocol):
-    """Runtime lookup and acknowledgement operations used by finalization."""
-
-    async def get_by_agent_id(
-        self,
-        session: WriteSession,
-        agent_id: str,
-    ) -> AgentDecommissionRuntime | None:
-        """Fetch the Runtime currently owned by an Agent."""
-        ...
-
-    async def get_terminal_delete_acknowledged(
-        self,
-        session: WriteSession,
-        runtime_id: str,
-    ) -> AgentDecommissionRuntime | None:
-        """Return a Runtime only after terminal deletion acknowledgement."""
-        ...
-
-
 class AgentDecommissionRuntimeServiceProtocol(Protocol):
     """Terminal Runtime deletion request operation."""
 
     async def request_terminal_delete_for_agent(self, agent_id: str) -> object | None:
         """Request idempotent terminal deletion for an Agent Runtime."""
+        ...
+
+
+class AgentDecommissionCleanupProtocol(Protocol):
+    """Post-commit provider effect consumption."""
+
+    async def consume_archive_cleanup(self, plans: Sequence[ProviderEffectPlan]) -> int:
+        """Attempt committed provider cleanup plans."""
         ...
 
 
@@ -463,53 +80,12 @@ class AgentDecommissionSummary:
 class AgentDecommissionService:
     """Retire Agent roots and finalize only after retention purge completion."""
 
-    session_manager: Annotated[
-        AgentDecommissionSessionManager, Depends(get_session_manager)
-    ]
-    agent_repository: Annotated[
-        AgentDecommissionAgentRepositoryProtocol, Depends(AgentRepository)
-    ]
-    decommission_repository: Annotated[
-        AgentDecommissionRepositoryProtocol, Depends(AgentDecommissionRepository)
-    ]
-    finalizer_repository: Annotated[
-        AgentDecommissionFinalizerRepository,
-        Depends(AgentDecommissionFinalizerRepository),
-    ]
-    agent_session_repository: Annotated[
-        AgentDecommissionAgentSessionRepositoryProtocol,
-        Depends(AgentSessionRepository),
-    ]
-    agent_run_repository: Annotated[
-        AgentDecommissionRunRepositoryProtocol, Depends(AgentRunRepository)
-    ]
-    retention_repository: Annotated[
-        AgentDecommissionRetentionRepositoryProtocol,
-        Depends(ArchivedSessionRetentionRepository),
-    ]
-    runtime_repository: Annotated[
-        AgentDecommissionRuntimeRepositoryProtocol,
-        Depends(AgentRuntimeRepository),
-    ]
+    operation_repository: Annotated[AgentDecommissionOperationsRepository, Depends()]
     agent_runtime_service: Annotated[
-        AgentDecommissionRuntimeServiceProtocol,
-        Depends(AgentRuntimeService),
-    ]
-    exchange_file_repository: Annotated[
-        AgentDecommissionExchangeFileRepositoryProtocol,
-        Depends(ExchangeFileRepository),
-    ]
-    lifecycle_orchestrator: Annotated[
-        AgentDecommissionLifecycleOrchestratorProtocol,
-        Depends(get_session_lifecycle_orchestrator),
+        AgentDecommissionRuntimeServiceProtocol, Depends(AgentRuntimeService)
     ]
     external_channel_lifecycle_service: Annotated[
-        AgentDecommissionExternalChannelLifecycleProtocol,
-        Depends(ExternalChannelLifecycleService),
-    ]
-    scheduled_task_lifecycle_service: Annotated[
-        AgentDecommissionScheduledTaskLifecycleProtocol,
-        Depends(ScheduledTaskLifecycleService),
+        AgentDecommissionCleanupProtocol, Depends(ExternalChannelLifecycleService)
     ]
     broker: Annotated[AgentDecommissionBrokerProtocol, Depends(get_broker)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
@@ -534,13 +110,11 @@ class AgentDecommissionService:
             if now + _DEADLINE_SAFETY_MARGIN >= deadline:
                 deadline_reached = True
                 break
-            async with self.session_manager() as session:
-                job = await self.decommission_repository.claim_due(
-                    session,
-                    now=now,
-                    lease_owner=lease_owner,
-                    lease_until=now + _LEASE_DURATION,
-                )
+            job = await self.operation_repository.claim_due(
+                now=now,
+                lease_owner=lease_owner,
+                lease_until=now + _LEASE_DURATION,
+            )
             if job is None:
                 break
             claimed_count += 1
@@ -589,11 +163,7 @@ class AgentDecommissionService:
         lease_owner: str,
     ) -> AgentDecommissionAdvanceResult:
         """Advance one owned decommission job without bypassing session purge."""
-        async with self.session_manager() as session:
-            roots = await self.agent_session_repository.list_root_trees_by_agent_id(
-                session,
-                agent_id=job.agent_id,
-            )
+        roots = await self.operation_repository.list_roots(agent_id=job.agent_id)
 
         if roots:
             await self._set_status(
@@ -637,15 +207,9 @@ class AgentDecommissionService:
             job=job,
             lease_owner=lease_owner,
         )
-        async with self.session_manager() as session:
-            completed = await self.finalizer_repository.finalize(
-                session,
-                job_id=job.id,
-                agent_id=job.agent_id,
-                lease_owner=lease_owner,
-                expected_attempt=job.attempt_count,
-                now=datetime.datetime.now(datetime.UTC),
-            )
+        completed = await self.operation_repository.finalize(
+            job=job, lease_owner=lease_owner
+        )
         if not completed:
             raise RuntimeError("Agent decommission lease was lost before finalization")
         return AgentDecommissionAdvanceResult(
@@ -660,135 +224,19 @@ class AgentDecommissionService:
         lease_owner: str,
         root_session_id: str,
     ) -> bool:
-        """Stop and archive one root tree through the shared lifecycle registry."""
-        stop_session_ids: list[str] = []
-        active = False
-        archived = False
-        archive_cleanup_plans = ()
-        async with self.session_manager() as session:
-            tree = await self.agent_session_repository.lock_root_tree_sessions(
-                session,
-                root_session_id=root_session_id,
-            )
-            if not tree:
-                return True
-            if any(item.status is not AgentSessionStatus.ACTIVE for item in tree):
-                raise RuntimeError("Agent root tree changed during decommission")
-            session_ids = [item.id for item in tree]
-            active = any(
-                item.run_state is AgentSessionRunState.RUNNING for item in tree
-            ) or await self.agent_run_repository.has_active_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            scheduled_lifecycle = self.scheduled_task_lifecycle_service
-            preserve_scheduled = (
-                active
-                and await scheduled_lifecycle.archive_allows_active_runs(
-                    session,
-                    session_ids=session_ids,
-                    running_session_ids=[
-                        item.id
-                        for item in tree
-                        if item.run_state is AgentSessionRunState.RUNNING
-                    ],
-                )
-            )
-            if not preserve_scheduled:
-                for session_id in session_ids:
-                    await self.agent_session_repository.request_stop(
-                        session,
-                        session_id=session_id,
-                        stop_request_id=uuid7().hex,
-                        stop_requester_user_id=None,
-                    )
-                stop_session_ids = session_ids
-
-            if not active or preserve_scheduled:
-                settings = await self.retention_repository.get_settings(session)
-                if settings.archived_session_retention_days is None:
-                    raise RuntimeError(
-                        "Agent decommission cannot retire roots under Unlimited "
-                        "retention"
-                    )
-                archived_at = datetime.datetime.now(datetime.UTC)
-                purge_after = archived_at + datetime.timedelta(
-                    days=settings.archived_session_retention_days
-                )
-
-                async def archive_tree() -> None:
-                    """Archive a system-owned root tree under the decommission fence."""
-                    await self.agent_session_repository.archive_tree(
-                        session,
-                        root_session_id=root_session_id,
-                        session_ids=session_ids,
-                        archived_at=archived_at,
-                        purge_after=purge_after,
-                        policy_revision=settings.revision,
-                        retention_days=settings.archived_session_retention_days,
-                    )
-
-                async def archive_participant(
-                    definition: SessionLifecycleParticipantDefinition,
-                    context: SessionLifecycleTransitionContext,
-                ) -> None:
-                    """Apply lifecycle-owned state before archiving the root tree."""
-                    nonlocal archive_cleanup_plans
-                    scheduled_result = (
-                        await self.scheduled_task_lifecycle_service.archive_participant(
-                            session,
-                            definition,
-                            context,
-                        )
-                    )
-                    if scheduled_result is not None:
-                        archive_cleanup_plans += scheduled_result.cleanup_plans
-                    external_result = await (
-                        self.external_channel_lifecycle_service.archive_participant(
-                            session,
-                            definition,
-                            context,
-                        )
-                    )
-                    if external_result is not None:
-                        archive_cleanup_plans += external_result.cleanup_plans
-
-                await self.lifecycle_orchestrator.archive(
-                    context=SessionLifecycleTransitionContext(
-                        transition_id=f"{job.id}:{root_session_id}:decommission",
-                        root_session_id=root_session_id,
-                        subtree_session_ids=tuple(session_ids),
-                    ),
-                    participant_operation=archive_participant,
-                    transition=archive_tree,
-                )
-                await self.retention_repository.schedule_purge_job(
-                    session,
-                    root_session_id=root_session_id,
-                    eligible_at=purge_after,
-                    policy_revision=settings.revision,
-                    now=archived_at,
-                )
-                owned = await self.decommission_repository.set_status(
-                    session,
-                    job_id=job.id,
-                    lease_owner=lease_owner,
-                    expected_attempt=job.attempt_count,
-                    status=AgentDecommissionStatus.RETIRING_SESSIONS,
-                    now=archived_at,
-                )
-                if not owned:
-                    raise RuntimeError("Agent decommission lease was lost")
-                await session.write_session.commit()
-                archived = True
-
-        if archived:
+        """Consume effects only after atomic root retirement finishes."""
+        result = await self.operation_repository.retire_root_tree(
+            job=job,
+            lease_owner=lease_owner,
+            root_session_id=root_session_id,
+        )
+        if result.archived:
             await self.external_channel_lifecycle_service.consume_archive_cleanup(
-                archive_cleanup_plans
+                result.cleanup_plans
             )
-        for session_id in stop_session_ids:
+        for session_id in result.stop_session_ids:
             await self.broker.send_message(SessionStopSignal(session_id=session_id))
-        return archived
+        return result.retired
 
     async def _cleanup_agent_external_roots(
         self,
@@ -796,98 +244,32 @@ class AgentDecommissionService:
         job: AgentDecommissionJob,
         lease_owner: str,
     ) -> None:
-        """Clean direct Agent-owned blobs and request terminal Runtime deletion."""
-        external_cleanup_plans = ()
-        async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(
-                session,
-                job.agent_id,
-            )
-        if runtime is not None and runtime.runtime_provider_resource_id is not None:
+        """Sequence completed cleanup preparation and external effects."""
+        if await self.operation_repository.runtime_bound(agent_id=job.agent_id):
             await self.agent_runtime_service.request_terminal_delete_for_agent(
                 job.agent_id
             )
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, job.agent_id)
-            if agent is None:
-                raise RuntimeError("Decommissioning Agent is missing")
-            now = datetime.datetime.now(datetime.UTC)
-            cleanup_service = self.external_channel_lifecycle_service
-            external_cleanup = await cleanup_service.cleanup_decommissioned_agent(
-                session,
-                agent_id=job.agent_id,
-                now=now,
-            )
-            external_cleanup_plans = external_cleanup.cleanup_plans
-            await cleanup_service.purge_decommissioned_provider_state(
-                session,
-                external_cleanup.provider_state_purge_connection_ids,
-            )
-            await self.exchange_file_repository.expire_unbound_by_agent_id(
-                session,
-                agent_id=job.agent_id,
-                expired_at=now,
-            )
-            files = await self.exchange_file_repository.list_unbound_by_agent_id(
-                session,
-                agent_id=job.agent_id,
-            )
-            owned = await self.decommission_repository.set_status(
-                session,
-                job_id=job.id,
-                lease_owner=lease_owner,
-                expected_attempt=job.attempt_count,
-                status=AgentDecommissionStatus.FINALIZING,
-                now=now,
-            )
-            if not owned:
-                raise RuntimeError("Agent decommission lease was lost")
-            await session.write_session.commit()
-
-        await self.external_channel_lifecycle_service.consume_archive_cleanup(
-            external_cleanup_plans
+        snapshot = await self.operation_repository.prepare_external_cleanup(
+            job=job, lease_owner=lease_owner
         )
-        for file in files:
+        await self.external_channel_lifecycle_service.consume_archive_cleanup(
+            snapshot.cleanup_plans
+        )
+        for file in snapshot.files:
             if file.blob_deleted_at is not None:
                 continue
             await self.s3_service.delete(
                 bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=file.object_key,
             )
-            async with self.session_manager() as session:
-                await self.exchange_file_repository.mark_blob_deleted(
-                    session,
-                    file_id=file.id,
-                    blob_deleted_at=datetime.datetime.now(datetime.UTC),
-                )
-
-        if agent.avatar is not None:
+            await self.operation_repository.mark_blob_deleted(file_id=file.id)
+        if snapshot.agent.avatar is not None:
             await self.avatar_handler.delete_files(
-                agent.avatar,
+                snapshot.agent.avatar,
                 self.s3_service,
                 require_workspace_s3_bucket(self.config.workspace_s3),
             )
-
-        async with self.session_manager() as session:
-            await self.exchange_file_repository.delete_unbound_expired_by_agent_id(
-                session,
-                agent_id=job.agent_id,
-            )
-            runtime = await self.runtime_repository.get_by_agent_id(
-                session,
-                job.agent_id,
-            )
-            if runtime is not None and runtime.runtime_provider_resource_id is not None:
-                acknowledged = (
-                    await self.runtime_repository.get_terminal_delete_acknowledged(
-                        session,
-                        runtime.id,
-                    )
-                )
-                if acknowledged is None:
-                    raise RuntimeError(
-                        "AgentRuntime terminal deletion acknowledgement is pending"
-                    )
+        await self.operation_repository.finish_external_cleanup(agent_id=job.agent_id)
 
     async def _set_status(
         self,
@@ -898,15 +280,12 @@ class AgentDecommissionService:
         status: AgentDecommissionStatus,
     ) -> None:
         """Persist an owned job phase or surface a lost lease."""
-        async with self.session_manager() as session:
-            updated = await self.decommission_repository.set_status(
-                session,
-                job_id=job_id,
-                lease_owner=lease_owner,
-                expected_attempt=expected_attempt,
-                status=status,
-                now=datetime.datetime.now(datetime.UTC),
-            )
+        updated = await self.operation_repository.set_status(
+            job_id=job_id,
+            lease_owner=lease_owner,
+            expected_attempt=expected_attempt,
+            status=status,
+        )
         if not updated:
             raise RuntimeError("Agent decommission lease was lost")
 
@@ -922,14 +301,11 @@ class AgentDecommissionService:
         now = datetime.datetime.now(datetime.UTC)
         delay_minutes = min(2 ** max(0, job.attempt_count - 1), 30)
         delay = min(datetime.timedelta(minutes=delay_minutes), _MAX_RETRY_DELAY)
-        async with self.session_manager() as session:
-            await self.decommission_repository.mark_retry(
-                session,
-                job_id=job.id,
-                lease_owner=lease_owner,
-                expected_attempt=job.attempt_count,
-                next_attempt_at=now + delay,
-                error_kind=error_kind,
-                error_summary=error_summary,
-                now=now,
-            )
+        await self.operation_repository.mark_retry(
+            job=job,
+            lease_owner=lease_owner,
+            next_attempt_at=now + delay,
+            error_kind=error_kind,
+            error_summary=error_summary,
+            now=now,
+        )

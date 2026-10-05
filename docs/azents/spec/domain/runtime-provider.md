@@ -5,6 +5,15 @@ tags: [backend, frontend, admin, runtime, security, infra]
 spec_type: domain
 domain: runtime-provider
 code_paths:
+  - python/apps/azents/src/azents/core/runtime_profile_workspace.py
+  - python/apps/azents/src/azents/core/runtime_provider_admin.py
+  - python/apps/azents/src/azents/core/runtime_provider_contract_errors.py
+  - python/apps/azents/src/azents/repos/runtime_profile_workspace_operations.py
+  - python/apps/azents/src/azents/repos/runtime_provider_admin_operations.py
+  - python/apps/azents/src/azents/repos/runtime_provider_contract_operations.py
+  - python/apps/azents/src/azents/core/agent_runtime_removal.py
+  - python/apps/azents/src/azents/repos/agent_runtime/lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/agent_runtime_removal/operations.py
   - python/apps/azents/src/azents/core/runtime_provider_data.py
   - python/apps/azents/src/azents/core/runtime_provider_control.py
   - python/apps/azents/src/azents/core/runtime_recreation.py
@@ -68,7 +77,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-05
-spec_version: 39
+spec_version: 42
 ---
 
 # Runtime Provider
@@ -164,6 +173,23 @@ does not replace the admission and mutation checks required by Runtime operation
 
 ## Runtime binding
 
+Infrastructure Profile and authentication-binding administrative services delegate
+their database work to completed repository operations. Independent descriptions
+use native read-only scopes and return detached Profile, binding and compatibility
+evidence. Profile writes retain validation and usage/deletion conflicts; terminal
+policy invalidation runs only after the completed mutation.
+
+Binding creation, rotation and revocation retain the existing expected Admin version,
+bootstrap ownership restrictions and atomic binding/grant/audit/revocation groups.
+Secret preparation precedes the mutation; safe projection and terminal invalidation
+follow completion. Database mutation error translation belongs to the repository
+boundary without changing the service-visible failure contract.
+
+CLI bootstrap enrollment resolves its exact Provider/declaration/source ownership
+in a completed read-only operation before credential authentication, grant issuance
+or exchange orchestration. The preliminary description does not authorize writes
+or replace final enrollment authority checks.
+
 Profile resolution completes source checks, configuration CAS and current-state
 fallback inside one repository operation, returning detached desired/applied state.
 Explicit Runtime addition composes selection preparation and attachment in the
@@ -187,6 +213,7 @@ Session ownership, Profile and applied-state checks finish in one native read-on
 authority operation. Runner coordination, policy projection and working-folder
 resolution consume its detached snapshot after closure, preserving fail-closed
 reason ordering.
+
 
 An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
 addition selects one available Workspace Runtime Profile, creates or rearms the one logical Runtime
@@ -432,9 +459,29 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
-- **38 (2026-10-05):** Completed resolution/reconciliation, atomic explicit
-  Runtime addition, credential verification and read-only Terminal authority
-  operations without moving external effects into database scopes.
+- **42 (2026-10-05):** Completed Workspace Profile/default and Provider
+  policy/availability/contract operations in repository-owned scopes. Existing CAS,
+  error translation and reconcile enqueue remain atomic; terminal invalidation and
+  deletion logging follow completion.
+
+- **41 (2026-10-05):** Completed Agent Runtime lifecycle and irreversible removal
+  database operations before external coordination. Configuration CAS, exact
+  removal idempotency/lease/deletion evidence and cleanup/finalization atomic groups
+  retain their existing acceptance predicates.
+
+- **40 (2026-10-05):** Added completed Provider enrollment, connection acceptance,
+  Runner authentication and recreation operations to the common authority and
+  Admin boundaries, preserving generation/attempt fencing and detached reads.
+
+- **39 (2026-10-05):** Integrated completed resolution/reconciliation, atomic
+  explicit Runtime addition, credential verification and read-only Terminal
+  authority with Profile/binding Admin operations. Retained scoped lifecycle
+  checks, atomic authority groups and external effects after database completion.
+
+- **38 (2026-10-05):** Completed Profile/binding administrative database operations
+  and bootstrap enrollment target reads while preserving atomic authority groups
+  and postcommit terminal invalidation.
+
 
 - **37 (2026-10-05):** Separated ordinary recreation target description from actual
   dispatch fencing and retained the checked target version and item-attempt identity.

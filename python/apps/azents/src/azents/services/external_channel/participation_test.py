@@ -4,7 +4,6 @@ import datetime
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
@@ -32,12 +31,20 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationSessionNavigation,
+    _AuthorizedSettingsActor,
+    _CommittedLocation,
+    _session_navigation,
+    _thread_conversation_scope,
+)
 from azents.core.external_channel_participation_state import (
     ExternalChannelSetupSourceProjection,
     projection_with_setup_source,
 )
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.agent import AgentRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -45,22 +52,33 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
-from azents.services.external_channel.participation import (
-    ExternalChannelParticipationError,
-    ExternalChannelParticipationService,
-    ExternalChannelParticipationSessionNavigation,
-    _AuthorizedSettingsActor,
-    _CommittedLocation,
-    _session_navigation,
-    _thread_conversation_scope,
+from azents.repos.external_channel.management import ExternalChannelManagementRepository
+from azents.repos.external_channel.participation_operations import (
+    ExternalChannelParticipationOperations,
 )
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.workspace import WorkspaceRepository
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+)
+from azents.services.external_channel.participation import (
+    ExternalChannelParticipationService,
+)
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
-    yield ReadWriteSession(cast(AsyncSession, SimpleNamespace()))
+    yield ReadWriteSession(AsyncMock(spec=AsyncSession))
+
+
+class _OwnedLease:
+    """Always-owned lease for participation orchestration tests."""
+
+    async def assert_owned(self) -> None:
+        return None
 
 
 class _Lock:
@@ -74,10 +92,7 @@ class _Lock:
 
         @asynccontextmanager
         async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
-            yield cast(
-                ExternalChannelConversationLockLease,
-                SimpleNamespace(assert_owned=AsyncMock()),
-            )
+            yield _OwnedLease()
 
         return owned()
 
@@ -101,10 +116,7 @@ def _source() -> ExternalChannelSetupSourceProjection:
     )
 
 
-def _claim(
-    *,
-    status: ExternalChannelSetupClaimStatus,
-) -> ExternalChannelSetupClaim:
+def _claim(*, status: ExternalChannelSetupClaimStatus) -> ExternalChannelSetupClaim:
     return ExternalChannelSetupClaim.model_construct(
         id="claim-1",
         connection_id="connection-1",
@@ -117,33 +129,27 @@ def _claim(
         source_revision=2,
         claim_generation=1,
         status=status,
-        selected_setting_id=(
-            "setting-1"
-            if status
-            in {
-                ExternalChannelSetupClaimStatus.SELECTED,
-                ExternalChannelSetupClaimStatus.COMPLETED,
-            }
-            else None
-        ),
-        selected_resource_id=(
-            "parent-resource-1"
-            if status
-            in {
-                ExternalChannelSetupClaimStatus.SELECTED,
-                ExternalChannelSetupClaimStatus.COMPLETED,
-            }
-            else None
-        ),
-        selected_source_revision=(
-            2
-            if status
-            in {
-                ExternalChannelSetupClaimStatus.SELECTED,
-                ExternalChannelSetupClaimStatus.COMPLETED,
-            }
-            else None
-        ),
+        selected_setting_id="setting-1"
+        if status
+        in {
+            ExternalChannelSetupClaimStatus.SELECTED,
+            ExternalChannelSetupClaimStatus.COMPLETED,
+        }
+        else None,
+        selected_resource_id="parent-resource-1"
+        if status
+        in {
+            ExternalChannelSetupClaimStatus.SELECTED,
+            ExternalChannelSetupClaimStatus.COMPLETED,
+        }
+        else None,
+        selected_source_revision=2
+        if status
+        in {
+            ExternalChannelSetupClaimStatus.SELECTED,
+            ExternalChannelSetupClaimStatus.COMPLETED,
+        }
+        else None,
     )
 
 
@@ -163,19 +169,33 @@ def _setting() -> ExternalChannelParticipationSetting:
 
 
 def _service(
-    *,
-    repository: object,
-    replay: object | None = None,
+    *, repository: object, replay: object | None = None
 ) -> ExternalChannelParticipationService:
     return ExternalChannelParticipationService(
-        session_manager=cast(SessionManager[WriteSession], _session_manager),
-        repository=cast(Any, repository),
-        management_repository=cast(Any, MagicMock()),
-        agent_repository=cast(Any, MagicMock()),
-        workspace_repository=cast(Any, MagicMock()),
-        ingestion_replay_service=cast(Any, replay or MagicMock()),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        operations=ExternalChannelParticipationOperations(
+            session_manager=_session_manager,
+            repository=require_instance(
+                MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                ExternalChannelRepository,
+            ),
+            management_repository=require_instance(
+                MagicMock(spec=ExternalChannelManagementRepository),
+                ExternalChannelManagementRepository,
+            ),
+            agent_repository=require_instance(
+                MagicMock(spec=AgentRepository), AgentRepository
+            ),
+            workspace_repository=require_instance(
+                MagicMock(spec=WorkspaceRepository), WorkspaceRepository
+            ),
+            read_session_manager=_session_manager,
+        ),
+        ingestion_replay_service=require_instance(
+            MagicMock(spec=ExternalChannelIngestionReplayService, wraps=replay),
+            ExternalChannelIngestionReplayService,
+        ),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
 
@@ -183,29 +203,22 @@ def test_session_navigation_requires_the_authorized_route_binding() -> None:
     """Project one exact Session target and omit unrelated or absent Bindings."""
     actor = _AuthorizedSettingsActor(
         route=ExternalChannelAgentRoute.model_construct(
-            id="route-1",
-            agent_id="agent-1",
+            id="route-1", agent_id="agent-1"
         ),
         agent_name="Agent One",
         workspace_handle="workspace",
     )
     binding = ExternalChannelBinding.model_construct(
-        id="binding-1",
-        route_id="route-1",
-        agent_session_id="session-1",
+        id="binding-1", route_id="route-1", agent_session_id="session-1"
     )
-
-    assert _session_navigation(actor=actor, binding=binding) == (
-        ExternalChannelParticipationSessionNavigation(
-            workspace_handle="workspace",
-            agent_id="agent-1",
-            session_id="session-1",
-        )
+    assert _session_navigation(
+        actor=actor, binding=binding
+    ) == ExternalChannelParticipationSessionNavigation(
+        workspace_handle="workspace", agent_id="agent-1", session_id="session-1"
     )
     assert (
         _session_navigation(
-            actor=actor,
-            binding=binding.model_copy(update={"route_id": "route-2"}),
+            actor=actor, binding=binding.model_copy(update={"route_id": "route-2"})
         )
         is None
     )
@@ -219,10 +232,9 @@ def test_slack_thread_settings_use_channel_and_thread_timestamp_lock_scope() -> 
         connection_provider=ExternalChannelProvider.SLACK,
         provider_parent_channel_id="channel-1",
         resource=ExternalChannelResource.model_construct(
-            labels={"thread_ts": "1.000000"},
+            labels={"thread_ts": "1.000000"}
         ),
     )
-
     assert scope == ExternalChannelConversationScope(
         connection_id="connection-1",
         kind=ExternalChannelConversationScopeKind.THREAD,
@@ -238,13 +250,9 @@ def test_discord_thread_settings_use_delivery_channel_lock_scope() -> None:
         connection_provider=ExternalChannelProvider.DISCORD,
         provider_parent_channel_id="parent-1",
         resource=ExternalChannelResource.model_construct(
-            labels={
-                "thread_id": "thread-1",
-                "delivery_channel_id": "thread-1",
-            },
+            labels={"thread_id": "thread-1", "delivery_channel_id": "thread-1"}
         ),
     )
-
     assert scope == ExternalChannelConversationScope(
         connection_id="connection-1",
         kind=ExternalChannelConversationScopeKind.THREAD,
@@ -256,8 +264,7 @@ def test_discord_thread_settings_use_delivery_channel_lock_scope() -> None:
 def test_thread_settings_reject_resources_without_provider_lock_identity() -> None:
     """Reject resources that cannot reproduce their canonical ingestion scope."""
     with pytest.raises(
-        ExternalChannelParticipationError,
-        match="thread settings are unavailable",
+        ExternalChannelParticipationError, match="thread settings are unavailable"
     ):
         _thread_conversation_scope(
             connection_id="connection-1",
@@ -282,10 +289,8 @@ async def test_thread_settings_never_fall_back_to_parent_scope() -> None:
     repository.get_resource_by_provider_key = AsyncMock(return_value=None)
     repository.get_active_participation_setting = AsyncMock(return_value=_setting())
     service = _service(repository=repository)
-
     with pytest.raises(
-        ExternalChannelParticipationError,
-        match="thread settings are unavailable",
+        ExternalChannelParticipationError, match="thread settings are unavailable"
     ):
         await service.resolve_settings(
             connection_id="connection-1",
@@ -294,7 +299,6 @@ async def test_thread_settings_never_fall_back_to_parent_scope() -> None:
             expected_binding_id=None,
             principal_id="principal-1",
         )
-
     repository.get_active_participation_setting.assert_not_awaited()
 
 
@@ -313,10 +317,8 @@ async def test_discord_thread_settings_resolve_by_delivery_channel() -> None:
     repository.get_discord_resource_by_delivery_channel = AsyncMock(return_value=None)
     repository.get_resource_by_provider_key = AsyncMock()
     service = _service(repository=repository)
-
     with pytest.raises(
-        ExternalChannelParticipationError,
-        match="thread settings are unavailable",
+        ExternalChannelParticipationError, match="thread settings are unavailable"
     ):
         await service.resolve_settings(
             connection_id="connection-1",
@@ -325,7 +327,6 @@ async def test_discord_thread_settings_resolve_by_delivery_channel() -> None:
             expected_binding_id=None,
             principal_id="principal-1",
         )
-
     repository.get_discord_resource_by_delivery_channel.assert_awaited_once_with(
         ANY,
         connection_id="connection-1",
@@ -347,10 +348,8 @@ async def test_parent_mutation_rejects_replacement_setting_before_any_write() ->
     )
     repository.update_participation_setting = AsyncMock()
     service = _service(repository=repository)
-
     with pytest.raises(
-        ExternalChannelParticipationError,
-        match="settings changed before submission",
+        ExternalChannelParticipationError, match="settings changed before submission"
     ):
         await service.mutate_parent_settings(
             connection_id="connection-1",
@@ -365,7 +364,6 @@ async def test_parent_mutation_rejects_replacement_setting_before_any_write() ->
                 _NOW + datetime.timedelta(seconds=30)
             ),
         )
-
     repository.update_participation_setting.assert_not_awaited()
 
 
@@ -415,14 +413,9 @@ async def test_replay_failure_preserves_committed_location_for_recovery(
             now,
         )
         events.append("commit")
-        return _CommittedLocation(
-            setting=_setting(),
-            claim=selected,
-            created=True,
-        )
+        return _CommittedLocation(setting=_setting(), claim=selected, created=True)
 
-    monkeypatch.setattr(service, "_commit_location", commit_location)
-
+    monkeypatch.setattr(service.operations, "commit_location", commit_location)
     result = await service.select_location(
         setup_claim_id=pending.id,
         expected_claim_generation=1,
@@ -434,7 +427,6 @@ async def test_replay_failure_preserves_committed_location_for_recovery(
             _NOW + datetime.timedelta(seconds=30)
         ),
     )
-
     assert events == ["commit", "replay"]
     assert result.status == "pending_recovery"
     assert result.setting.id == "setting-1"
@@ -483,15 +475,13 @@ async def test_location_selection_resolves_explicit_target_resource(
     repository.lock_resource = AsyncMock(return_value=source_resource)
     repository.create_resource_idempotent = AsyncMock(return_value=parent_resource)
     service = _service(repository=repository)
-
-    resolved = await service._resolve_selected_resource(
-        ReadWriteSession(cast(AsyncSession, SimpleNamespace())),
+    resolved = await service.operations._resolve_selected_resource(
+        ReadWriteSession(AsyncMock(spec=AsyncSession)),
         claim=_claim(status=ExternalChannelSetupClaimStatus.PENDING_LOCATION),
         source=_source(),
         location=location,
         now=_NOW,
     )
-
     assert resolved.resource_type is expected_resource_type
     if location is ExternalChannelConversationLocation.CHANNEL:
         create_args = repository.create_resource_idempotent.await_args

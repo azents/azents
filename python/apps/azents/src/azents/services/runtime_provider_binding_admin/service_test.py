@@ -2,7 +2,7 @@
 
 import datetime
 import json
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from azcommon.datetime import tznow
@@ -26,6 +26,9 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.admin_operations import (
+    RuntimeProviderBindingAdminOperationsRepository,
+)
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingCreate,
 )
@@ -71,12 +74,22 @@ def _service(
 ) -> RuntimeProviderBindingAdminService:
     """Build the binding Admin service with production repositories."""
     return RuntimeProviderBindingAdminService(
-        session_manager=session_manager,
-        provider_repository=RuntimeProviderRepository(),
-        binding_repository=RuntimeProviderAuthBindingRepository(),
-        control_repository=RuntimeProviderControlRepository(),
+        repository=RuntimeProviderBindingAdminOperationsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            provider_repository=RuntimeProviderRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
+            control_repository=RuntimeProviderControlRepository(),
+        ),
         enrollment_service=enrollment_service,
     )
+
+
+class _AdminProvider(NamedTuple):
+    """Persisted actor and provider identifiers."""
+
+    user_id: str
+    provider_id: str
 
 
 async def _create_admin_and_provider(
@@ -86,7 +99,7 @@ async def _create_admin_and_provider(
     lifecycle_state: RuntimeProviderLifecycleState = (
         RuntimeProviderLifecycleState.ACTIVE
     ),
-) -> tuple[str, str]:
+) -> _AdminProvider:
     """Create one Admin actor and one Provider aggregate."""
     async with session_manager() as session:
         user = await UserRepository().create(
@@ -110,7 +123,7 @@ async def _create_admin_and_provider(
                 metadata=None,
             ),
         )
-    return user.id, provider.id
+    return _AdminProvider(user.id, provider.id)
 
 
 class TestRuntimeProviderBindingAdminService:

@@ -97,7 +97,9 @@ class ReceivedInvitationResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "workspace_id": obj.get("workspace_id"),
             "workspace_name": obj.get("workspace_name"),
@@ -106,6 +108,7 @@ class ReceivedInvitationResponse(BaseModel):
             "role": obj.get("role"),
             "status": obj.get("status"),
             "created_at": obj.get("created_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

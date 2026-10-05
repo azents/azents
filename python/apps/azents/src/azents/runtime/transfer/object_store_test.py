@@ -14,6 +14,7 @@ from azcommon.infra.s3.service import (
     S3ObjectSummaryPage,
 )
 
+from azents.runtime.transfer.cleanup import RuntimeTransferCleanupDeferred
 from azents.runtime.transfer.data import (
     DIRECT_INGRESS_CLEANUP_GRACE,
     RuntimeTransferAdmission,
@@ -247,11 +248,12 @@ async def test_direct_get_cleanup_preserves_issued_ticket_grace(
         object_prefix="v1/runtime-transfer",
         clock=lambda: now,
     )
-    with pytest.raises(RuntimeError, match="not yet safe"):
+    with pytest.raises(RuntimeTransferCleanupDeferred) as deferred:
         await cleanup.cleanup(pending)
+    assert deferred.value.safe_at == safe_at
     assert object_store.deleted == []
     now = safe_at - timedelta(microseconds=1)
-    with pytest.raises(RuntimeError, match="not yet safe"):
+    with pytest.raises(RuntimeTransferCleanupDeferred):
         await cleanup.cleanup(pending)
     assert object_store.deleted == []
     now = safe_at

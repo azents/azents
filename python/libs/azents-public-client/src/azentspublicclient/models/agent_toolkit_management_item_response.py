@@ -113,11 +113,14 @@ class AgentToolkitManagementItemResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "ownership_scope": obj.get("ownership_scope"),
             "toolkit": ToolkitConfigResponse.from_dict(obj["toolkit"]) if obj.get("toolkit") is not None else None,
             "agent_toolkit_id": obj.get("agent_toolkit_id"),
             "readiness": obj.get("readiness")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

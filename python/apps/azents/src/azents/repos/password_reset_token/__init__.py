@@ -1,17 +1,16 @@
 """Password reset token repository."""
 
 import datetime
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
 
 from azents.rdb.models.password_reset_token import (
     RDBPasswordResetToken,
     RDBPasswordResetTokenRedemption,
 )
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import (
     PasswordResetToken,
@@ -90,13 +89,12 @@ class PasswordResetTokenRepository:
         revoked_at: datetime.datetime,
     ) -> bool:
         """Revoke Password reset token."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBPasswordResetToken)
                 .where(RDBPasswordResetToken.id == token_id)
                 .values(revoked_at=revoked_at)
-            ),
+            )
         )
         return (result.rowcount or 0) > 0
 
