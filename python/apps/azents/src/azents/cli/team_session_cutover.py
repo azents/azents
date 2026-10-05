@@ -9,11 +9,11 @@ from azcommon.logging import configure_logging_for_runtime
 
 from azents.core.config import Config
 from azents.process_lifecycle import run_with_container
-from azents.services.team_session_cutover_replay import (
+from azents.repos.session_execution.cutover_replay_data import (
     TeamSessionCutoverReplayInvariantFailure,
     TeamSessionCutoverReplayReport,
-    TeamSessionCutoverReplayService,
 )
+from azents.services.team_session_cutover_replay import TeamSessionCutoverReplayService
 
 app = typer.Typer(
     help=(

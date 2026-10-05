@@ -4,7 +4,7 @@ import datetime
 
 from pydantic import BaseModel, Field
 
-from azents.services.uploads.schema import StoredImage
+from azents.core.upload_images import StoredImage
 
 
 class AgentAvatarCleanupJob(BaseModel):

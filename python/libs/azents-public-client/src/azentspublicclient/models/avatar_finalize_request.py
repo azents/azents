@@ -88,9 +88,12 @@ class AvatarFinalizeRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "upload_key": obj.get("upload_key"),
             "filename": obj.get("filename")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

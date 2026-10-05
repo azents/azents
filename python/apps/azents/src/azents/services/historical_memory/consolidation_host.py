@@ -4,11 +4,12 @@ import asyncio
 import dataclasses
 from collections.abc import Sequence
 
-from sqlalchemy.exc import DBAPIError
-
 from azents.core.enums import EventKind
 from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
-from azents.core.historical_memory_publication import validate_consolidation_overview
+from azents.core.historical_memory_publication import (
+    ConsolidationPublicationUncertainError,
+    validate_consolidation_overview,
+)
 from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
 from azents.engine.events.iteration import (
     AdmittedIteration,
@@ -290,7 +291,7 @@ class ConsolidationIterationHost:
                 expected_observation_epoch=frozen.observation_epoch,
                 overview=overview,
             )
-        except DBAPIError:
+        except ConsolidationPublicationUncertainError:
             committed = await self.publication_repository.inspect_outcome(
                 self.claim.principal
             )

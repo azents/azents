@@ -1,6 +1,6 @@
-"""kubernetes_asyncio.config 타입 스텁.
+"""Type stubs for kubernetes_asyncio.config.
 
-kubeconfig 로드 및 in-cluster config 관련 함수를 선언한다.
+Declare kubeconfig loading and in-cluster configuration operations.
 """
 
 from typing import Any

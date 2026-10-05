@@ -17,12 +17,12 @@ from typing import ClassVar
 from azcommon.infra.s3.service import S3Service
 from PIL import Image, UnidentifiedImageError
 
-from azents.services.uploads import UploadValidationError
-from azents.services.uploads.schema import (
+from azents.core.upload_images import (
     StoredImage,
     StoredImageFile,
     StoredImageThumbnails,
 )
+from azents.services.uploads import UploadValidationError
 
 logger = logging.getLogger(__name__)
 

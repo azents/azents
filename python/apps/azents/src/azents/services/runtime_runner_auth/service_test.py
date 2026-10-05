@@ -17,6 +17,9 @@ from azents.core.runtime_runner_credential import (
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.runtime_runner_auth_operations import (
+    RuntimeRunnerAuthenticationOperationRepository,
+)
 from azents.services.runtime_runner_auth.service import (
     RuntimeRunnerAuthenticationService,
 )
@@ -59,9 +62,11 @@ def _service(runtime: AgentRuntime | None) -> RuntimeRunnerAuthenticationService
         )
 
     return RuntimeRunnerAuthenticationService(
-        session_manager=session_manager,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         verifier=RuntimeRunnerCredentialVerifier(Fernet.generate_key().decode()),
+        operations=RuntimeRunnerAuthenticationOperationRepository(
+            session_manager=session_manager,
+            runtime_repository=_FakeRuntimeRepository(runtime),
+        ),
     )
 
 

@@ -153,7 +153,9 @@ class AgentUpdateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "name": obj.get("name"),
             "description": obj.get("description"),
             "selectable_model_options": [SelectableModelOptionInput.from_dict(_item) for _item in obj["selectable_model_options"]] if obj.get("selectable_model_options") is not None else None,
@@ -171,6 +173,7 @@ class AgentUpdateRequest(BaseModel):
             "max_turns": obj.get("max_turns"),
             "auto_archive_ttl_days": obj.get("auto_archive_ttl_days"),
             "subagent_settings": SubagentSettings.from_dict(obj["subagent_settings"]) if obj.get("subagent_settings") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

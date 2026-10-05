@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from azents.core.enums import ExternalChannelAppMode
 from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
 from azents.core.external_channel_provider_effect import ProviderTarget
-from azents.services.uploads.schema import StoredImage
+from azents.core.upload_images import StoredImage
 
 _MAX_AGENT_NAME_LENGTH = 80
 

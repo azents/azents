@@ -104,9 +104,12 @@ class ManagedAccessResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "grants": [ManagedGrant.from_dict(_item) for _item in obj["grants"]] if obj.get("grants") is not None else None,
             "blocks": [ManagedBlock.from_dict(_item) for _item in obj["blocks"]] if obj.get("blocks") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

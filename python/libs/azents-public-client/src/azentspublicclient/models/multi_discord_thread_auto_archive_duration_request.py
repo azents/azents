@@ -90,9 +90,12 @@ class MultiDiscordThreadAutoArchiveDurationRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "thread_auto_archive_duration_minutes": obj.get("thread_auto_archive_duration_minutes"),
             "expected_generation": obj.get("expected_generation")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

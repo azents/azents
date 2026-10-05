@@ -27,10 +27,6 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
 )
 from azents.core.s3.deps import get_s3_service
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
 from azents.repos.agent_workspace_access import (
@@ -38,7 +34,6 @@ from azents.repos.agent_workspace_access import (
     AgentWorkspaceAgentNotFound,
     AgentWorkspaceMembershipNotFound,
 )
-from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileBulkDeleteResult,
     RuntimeFileBulkMoveResult,
@@ -88,11 +83,8 @@ _S3_SERVICE_DEP = Depends(get_s3_service)
 _API_RUNTIME_TRANSFER_COORDINATOR_DEP = Depends(
     get_api_runtime_transfer_coordinator_client
 )
-_AGENT_REPOSITORY_DEP = Depends(AgentRepository)
-_WORKSPACE_USER_REPOSITORY_DEP = Depends(WorkspaceUserRepository)
 _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
 _RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
-_SESSION_MANAGER_DEP = Depends(get_session_manager)
 _DEFAULT_RUNNER_FILE_OPERATION_TIMEOUT = timedelta(seconds=120)
 _WORKSPACE_DOWNLOAD_DEADLINE = timedelta(minutes=5)
 _WORKSPACE_DOWNLOAD_STATUS_POLL_INTERVAL = timedelta(milliseconds=250)
@@ -635,27 +627,23 @@ class AgentWorkspaceFileService:
 
     def __init__(
         self,
-        agent_repository: AgentRepository = _AGENT_REPOSITORY_DEP,
-        workspace_user_repository: WorkspaceUserRepository = (
-            _WORKSPACE_USER_REPOSITORY_DEP
-        ),
         runner_operations: WorkspaceRunnerOperations = _RUNNER_OPERATION_CLIENT_DEP,
         runtime_target_resolver: RuntimeOperationTargetResolver = (
             _RUNTIME_TARGET_RESOLVER_DEP
         ),
-        session_manager: SessionManager[WriteSession] = _SESSION_MANAGER_DEP,
         runner_file_operation_timeout: timedelta = (_RUNNER_FILE_OPERATION_TIMEOUT_DEP),
         runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
             _RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP
         ),
         *,
+        access_repository: Annotated[
+            AgentWorkspaceAccessRepository, Depends(AgentWorkspaceAccessRepository)
+        ],
         config: Annotated[Config, Depends(get_config)],
     ) -> None:
-        self.agent_repository = agent_repository
-        self.workspace_user_repository = workspace_user_repository
+        self.access_repository = access_repository
         self.runner_operations = runner_operations
         self.runtime_target_resolver = runtime_target_resolver
-        self.session_manager = session_manager
         self._runner_file_operation_timeout = runner_file_operation_timeout
         self.runtime_workspace_download_service = runtime_workspace_download_service
         self.config = config
@@ -689,11 +677,7 @@ class AgentWorkspaceFileService:
         user_id: str,
     ) -> Result[Agent, AgentWorkspaceError]:
         """Fetch Agent and check workspace membership."""
-        result = await AgentWorkspaceAccessRepository(
-            session_manager=self.session_manager,
-            agent_repository=self.agent_repository,
-            workspace_user_repository=self.workspace_user_repository,
-        ).get_agent_for_user(
+        result = await self.access_repository.get_agent_for_user(
             agent_id,
             user_id=user_id,
         )

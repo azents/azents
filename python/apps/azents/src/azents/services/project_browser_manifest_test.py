@@ -29,6 +29,9 @@ from azents.repos.agent_project_catalog.operations import (
 )
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.project_browser_manifest_read import (
+    ProjectBrowserManifestReadRepository,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_working_folder_binding.data import (
@@ -227,12 +230,15 @@ def _service(session: WriteSession) -> ProjectBrowserManifestService:
         )
     )
     return ProjectBrowserManifestService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        project_repository=SessionWorkspaceProjectRepository(),
-        worktree_repository=SessionGitWorktreeRepository(),
-        catalog_repository=catalog_repository,
-        workspace_user_repository=WorkspaceUserRepository(),
+        repository=ProjectBrowserManifestReadRepository(
+            agent_repository=AgentRepository(),
+            session_repository=AgentSessionRepository(),
+            project_repository=SessionWorkspaceProjectRepository(),
+            worktree_repository=SessionGitWorktreeRepository(),
+            catalog_repository=catalog_repository,
+            workspace_user_repository=WorkspaceUserRepository(),
+            read_session_manager=session_manager,
+        ),
         catalog_service=AgentProjectCatalogService(
             repository=AgentProjectCatalogOperationsRepository(
                 catalog_repository=catalog_repository,
@@ -244,7 +250,6 @@ def _service(session: WriteSession) -> ProjectBrowserManifestService:
         ),
         runtime_target_resolver=runtime_target_resolver,
         session_working_folder_binding_service=binding_service,
-        session_manager=session_manager,
     )
 
 

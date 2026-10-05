@@ -114,12 +114,15 @@ class DockerContainerProfileSpecV1(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "profile_kind": obj.get("profile_kind"),
             "contract_family": obj.get("contract_family"),
             "schema_version": obj.get("schema_version"),
             "runner_resources": DockerContainerResources.from_dict(obj["runner_resources"]) if obj.get("runner_resources") is not None else None,
             "network_name": obj.get("network_name")
+            }.items() if _key in obj
         })
         return _obj
 

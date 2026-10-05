@@ -61,6 +61,7 @@ from azents.runtime.control_protocol.grpc.runtime_stream_session_server import (
     RuntimeWebCapacityConfig,
     RuntimeWebCapacityRegistry,
     _BoundedEnvelopeQueue,
+    _read_runner,
     _register_joined_runner,
     _renew_owner_session,
     _RunnerConnection,
@@ -180,6 +181,52 @@ class _FailingRegistrationDataPlane(RuntimeStreamControlDataPlane):
     ) -> _RunnerConnection:
         del accepted
         raise asyncio.CancelledError
+
+
+class _FailingRunnerMessages:
+    """An async Runner reader with an explicit failure or cancellation."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+    def __aiter__(self) -> _FailingRunnerMessages:
+        """Return the owned iterator."""
+        return self
+
+    async def __anext__(
+        self,
+    ) -> runtime_stream_session_pb2.RuntimeStreamSessionEnvelope:
+        """Raise the selected reader failure."""
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("reader failed"), asyncio.CancelledError()]
+)
+async def test_runner_reader_propagates_and_closes_without_duplicate_log(
+    error: BaseException,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reader failure and cancellation close the queue and reach the boundary."""
+    connection = _RunnerConnection(
+        accepted=RuntimeStreamAcceptedRunnerSession(
+            owner=_owner(),
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        ),
+        control_boot_id="control-boot",
+    )
+    with pytest.raises(type(error)) as raised:
+        await _read_runner(
+            _local_data_plane().data_plane,
+            connection,
+            _FailingRunnerMessages(error),
+        )
+    assert raised.value is error
+    assert connection.queue.closed
+    assert not connection.queue.items
+    assert not caplog.records
 
 
 class _RecordingOwnerRegistry(RuntimeStreamOwnerSessionRegistry):

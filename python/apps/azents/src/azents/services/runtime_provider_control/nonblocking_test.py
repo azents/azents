@@ -14,6 +14,10 @@ from azents.core.enums import (
     RuntimeProviderBindingOwner,
     RuntimeProviderBindingState,
 )
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.runtime_provider_binding import RDBRuntimeProviderAuthBinding
@@ -27,15 +31,11 @@ from azents.repos.runtime_provider_binding.data import RuntimeProviderAuthBindin
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
+from azents.repos.runtime_provider_control.operations import (
+    RuntimeProviderControlOperationRepository,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
-)
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialUnavailable,
-)
-from azents.services.runtime_provider_control.service import (
-    RuntimeProviderEnrollmentService,
 )
 
 
@@ -84,14 +84,12 @@ async def test_provider_observation_nonblocking_but_revoked_binding_cannot_publi
             auth_subject=binding.subject,
             evidence_expires_at=now + datetime.timedelta(minutes=5),
         )
-        service = RuntimeProviderEnrollmentService(
+        operations = RuntimeProviderControlOperationRepository(
             session_manager=writes,
             repository=RuntimeProviderControlRepository(),
             provider_repository=providers,
             binding_repository=bindings,
             verifier=RuntimeProviderCredentialVerifier(Fernet.generate_key().decode()),
-            kubernetes_token_reviewer=None,
-            auth_registry=None,
         )
 
         async def hold() -> None:
@@ -114,7 +112,7 @@ async def test_provider_observation_nonblocking_but_revoked_binding_cannot_publi
 
         async def observe() -> None:
             async with reads() as session:
-                await service.validate_connection_authority_in_transaction(
+                await operations.validate_connection_authority_in_transaction(
                     session, authentication=authentication, validated_at=now
                 )
 
@@ -132,7 +130,7 @@ async def test_provider_observation_nonblocking_but_revoked_binding_cannot_publi
             RuntimeProviderCredentialUnavailable, match="binding_unavailable"
         ):
             async with writes() as session:
-                await service.create_connection_in_transaction(
+                await operations.create_connection_in_transaction(
                     session,
                     authentication=authentication,
                     connection_id=uuid4().hex,

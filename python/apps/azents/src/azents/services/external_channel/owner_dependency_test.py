@@ -13,9 +13,16 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.engine.tools.deps import get_external_channel_toolkit_provider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
-from azents.rdb.deps import get_session_manager
+from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadOnlySession,
+    ReadWriteSession,
+    WriteSession,
+)
+from azents.repos.external_channel.action_operations import (
+    ExternalChannelActionOperations,
+)
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task_cycle.progress import ScheduledTaskProgressRepository
 from azents.services.exchange_file import ExchangeFileService
@@ -48,6 +55,16 @@ async def _sessions() -> AsyncIterator[WriteSession]:
 
 def _session_manager() -> SessionManager[WriteSession]:
     return _sessions
+
+
+@asynccontextmanager
+async def _read_only_sessions() -> AsyncIterator[ReadOnlySession]:
+    async with AsyncSession() as session:
+        yield ReadOnlySession(session)
+
+
+def _read_only_session_manager() -> SessionManager[ReadOnlySession]:
+    return _read_only_sessions
 
 
 def _config() -> Config:
@@ -94,6 +111,7 @@ async def test_channel_owner_dependency_is_not_a_request_parameter(
     assert all(node.call != ExternalChannelActionService for node in _walk(graph))
     overrides: DependencyOverrides = {
         get_session_manager: _session_manager,
+        get_read_only_session_manager: _read_only_session_manager,
         get_config: _config,
         get_external_channel_credentials_codec: _unused_external_dependency,
         get_slack_delivery_client: _unused_external_dependency,
@@ -114,6 +132,8 @@ async def test_channel_owner_dependency_is_not_a_request_parameter(
         assert isinstance(resolved, ScheduledTaskChannelService)
         service = resolved.action_service
     assert isinstance(service, ExternalChannelActionService)
-    assert isinstance(service.repository, ExternalChannelWorkRepository)
-    assert service.execution_owner is None
-    assert service.session_manager is _sessions
+    assert isinstance(service.operations, ExternalChannelActionOperations)
+    assert isinstance(service.operations.repository, ExternalChannelWorkRepository)
+    assert service.operations.execution_owner is None
+    assert service.operations.session_manager is _sessions
+    assert service.operations.read_only_session_manager is _read_only_sessions

@@ -120,23 +120,24 @@ class SessionModelProfileRepository:
                         profile=profile,
                         captured=captured_admission,
                     )
-                    (
-                        record,
-                        created,
-                    ) = await self.chat_write_request_repository.create_idempotent(
-                        session,
-                        ChatWriteRequestCreate(
-                            session_id=session_id,
-                            requester_user_id=user_id,
-                            creation_agent_id=None,
-                            client_request_id=client_request_id,
-                            write_type=ChatWriteRequestType.MODEL_PROFILE,
-                            accepted_type=ChatWriteRequestType.MODEL_PROFILE,
-                            accepted_id=session_id,
-                            history_reload_required=False,
-                            payload=payload,
-                        ),
+                    request_result = (
+                        await self.chat_write_request_repository.create_idempotent(
+                            session,
+                            ChatWriteRequestCreate(
+                                session_id=session_id,
+                                requester_user_id=user_id,
+                                creation_agent_id=None,
+                                client_request_id=client_request_id,
+                                write_type=ChatWriteRequestType.MODEL_PROFILE,
+                                accepted_type=ChatWriteRequestType.MODEL_PROFILE,
+                                accepted_id=session_id,
+                                history_reload_required=False,
+                                payload=payload,
+                            ),
+                        )
                     )
+                    record = request_result.record
+                    created = request_result.created
                     self._validate_record(
                         record_type=record.write_type,
                         record_payload=record.payload,
