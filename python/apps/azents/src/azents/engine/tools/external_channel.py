@@ -16,6 +16,9 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelFileLocator,
 )
+from azents.core.external_channel_limits import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.core.external_channel_progress import (
     MAX_EXTERNAL_CHANNEL_TASK_SOURCES,
     MAX_EXTERNAL_CHANNEL_TASK_TEXT_LENGTH,
@@ -68,9 +71,6 @@ from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
     ExternalChannelFileTransferExecutionError,
     ExternalChannelFileTransferService,
-)
-from azents.services.external_channel.slack_events import (
-    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService

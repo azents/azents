@@ -124,7 +124,9 @@ class ChatLiveRunStateResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "run_id": obj.get("run_id"),
             "phase": obj.get("phase"),
             "status": obj.get("status"),
@@ -133,6 +135,7 @@ class ChatLiveRunStateResponse(BaseModel):
             "model_call_started_at": obj.get("model_call_started_at"),
             "operation": ChatLiveRunOperationResponse.from_dict(obj["operation"]) if obj.get("operation") is not None else None,
             "retry": ChatLiveRunRetryStateResponse.from_dict(obj["retry"]) if obj.get("retry") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

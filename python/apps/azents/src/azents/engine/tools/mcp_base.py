@@ -702,7 +702,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
         started = time.monotonic()
 
         try:
-            mcp_tools, use_streamable_http = await mcp_list_tools(
+            discovery = await mcp_list_tools(
                 config.server_url, headers, config.timeout, proxy_url=self._proxy_url
             )
         except (
@@ -742,11 +742,10 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
                 self._bg_error = f"MCP server connection failed: {exc}"
             return
 
-        mcp_tools = sorted(mcp_tools, key=lambda item: item.name)
         snapshot = _build_mcp_tool_snapshot(
             server_url=config.server_url,
-            mcp_tools=mcp_tools,
-            use_streamable_http=use_streamable_http,
+            mcp_tools=discovery.tools,
+            use_streamable_http=discovery.use_streamable_http,
         )
         try:
             await self._save_tool_snapshot(snapshot)
@@ -758,10 +757,12 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             "MCP tool snapshot refreshed",
             extra={
                 "server_url": config.server_url,
-                "tool_count": len(mcp_tools),
-                "tool_names": [t.name for t in mcp_tools],
+                "tool_count": len(discovery.tools),
+                "tool_names": [t.name for t in discovery.tools],
                 "tool_hash": snapshot.tool_hash,
-                "transport": "streamable_http" if use_streamable_http else "sse",
+                "transport": "streamable_http"
+                if discovery.use_streamable_http
+                else "sse",
                 "duration_seconds": round(time.monotonic() - started, 3),
             },
         )

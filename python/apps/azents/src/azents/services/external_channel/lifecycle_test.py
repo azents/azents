@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import Sequence
-from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -33,10 +33,14 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.lifecycle import (
     ExternalChannelLifecycleRepository,
 )
+from azents.repos.external_channel_lifecycle_participant import (
+    ExternalChannelLifecycleParticipantRepository,
+)
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.testing.types import require_instance
 
 
 def _definition(key: str) -> SessionLifecycleParticipantDefinition:
@@ -170,17 +174,10 @@ class _ActionServiceDouble:
         self.plans.append(plan)
 
 
-def _service(
+def _participant(
     repository: _RepositoryDouble,
-    action_service: _ActionServiceDouble | None = None,
-) -> ExternalChannelLifecycleService:
-    return ExternalChannelLifecycleService(
-        repository=repository,
-        action_service=cast(
-            ExternalChannelActionService,
-            action_service or _ActionServiceDouble(),
-        ),
-    )
+) -> ExternalChannelLifecycleParticipantRepository:
+    return ExternalChannelLifecycleParticipantRepository(repository=repository)
 
 
 @pytest.mark.asyncio
@@ -188,7 +185,7 @@ async def test_external_channel_dispatches_only_its_participant(
     rdb_session: WriteSession,
 ) -> None:
     repository = _RepositoryDouble()
-    service = _service(repository)
+    service = _participant(repository)
 
     assert (
         await service.archive_participant(
@@ -223,7 +220,7 @@ async def test_purge_has_no_provider_delivery_preparation(
     rdb_session: WriteSession,
 ) -> None:
     repository = _RepositoryDouble()
-    service = _service(repository)
+    service = _participant(repository)
     definition = _definition("session.external-channel")
     context = _purge_context()
 
@@ -248,9 +245,13 @@ async def test_purge_has_no_provider_delivery_preparation(
 
 @pytest.mark.asyncio
 async def test_archive_cleanup_executes_each_captured_plan_once() -> None:
-    repository = _RepositoryDouble()
     action_service = _ActionServiceDouble()
-    service = _service(repository, action_service)
+    service = ExternalChannelLifecycleService(
+        action_service=require_instance(
+            MagicMock(spec=ExternalChannelActionService, wraps=action_service),
+            ExternalChannelActionService,
+        )
+    )
     plans = (_plan(), _plan())
 
     consumed = await service.consume_archive_cleanup(plans)

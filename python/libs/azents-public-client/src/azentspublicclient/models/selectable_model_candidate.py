@@ -88,9 +88,12 @@ class SelectableModelCandidate(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "model_selection": AgentModelSelection.from_dict(obj["model_selection"]) if obj.get("model_selection") is not None else None,
             "settings": SelectableModelSettings.from_dict(obj["settings"]) if obj.get("settings") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

@@ -147,7 +147,9 @@ class FileOutputPart(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type") if obj.get("type") is not None else 'file',
             "model_file_id": obj.get("model_file_id"),
             "media_type": obj.get("media_type"),
@@ -158,6 +160,7 @@ class FileOutputPart(BaseModel):
             "caption": obj.get("caption"),
             "alt_text": obj.get("alt_text"),
             "metadata": obj.get("metadata")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

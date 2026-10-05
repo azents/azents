@@ -113,13 +113,16 @@ class SystemModelCatalogResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider"),
             "catalog_id": obj.get("catalog_id"),
             "last_success_at": obj.get("last_success_at"),
             "visible_count": obj.get("visible_count"),
             "hidden_count": obj.get("hidden_count"),
             "latest_sync": SystemModelCatalogSyncStatusResponse.from_dict(obj["latest_sync"]) if obj.get("latest_sync") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

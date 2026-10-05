@@ -34,6 +34,7 @@ from azents.core.external_channel_provider import (
 )
 from azents.core.external_model_settings import ExternalModelActorContext
 from azents.core.scheduled_task import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
+from azents.core.scheduled_task_control import ScheduledTaskEditInput
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionCreate,
@@ -46,7 +47,6 @@ from azents.services.external_channel.slack_native_protocol import (
     SlackNativeControl,
     decode_native_control,
 )
-from azents.services.scheduled_task.control import ScheduledTaskEditInput
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
 MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024

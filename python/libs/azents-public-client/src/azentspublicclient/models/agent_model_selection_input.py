@@ -80,9 +80,12 @@ class AgentModelSelectionInput(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "llm_provider_integration_id": obj.get("llm_provider_integration_id"),
             "model_identifier": obj.get("model_identifier")
+            }.items() if _key in obj
         })
         return _obj
 

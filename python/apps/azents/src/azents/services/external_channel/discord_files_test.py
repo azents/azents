@@ -3,7 +3,7 @@
 import contextlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import cast
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -45,7 +45,7 @@ class _SDKFactory:
     @contextlib.asynccontextmanager
     async def open(self, *, bot_token: str) -> AsyncIterator[DiscordSDKSession]:
         assert bot_token == "discord-secret"
-        yield cast(DiscordSDKSession, self.session)
+        yield AsyncMock(spec=DiscordSDKSession, wraps=self.session)
 
 
 def _client(

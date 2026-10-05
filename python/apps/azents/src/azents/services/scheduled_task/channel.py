@@ -25,12 +25,11 @@ from azents.core.session_resource_authority import (
     SessionExecutionOwner,
     SessionResourceAuthority,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import ChannelActionResult
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task_channel_operations import (
+    ScheduledTaskChannelOperations,
+)
 from azents.repos.scheduled_task_cycle.progress import (
     ScheduledTaskProgressRepository,
 )
@@ -71,15 +70,13 @@ class ScheduledTaskChannelService:
     def __init__(
         self,
         *,
-        session_manager: SessionManager[WriteSession],
+        operations: ScheduledTaskChannelOperations,
         progress_repository: ScheduledTaskProgressRepository,
-        provider_repository: ExternalChannelWorkRepository,
         action_service: ExternalChannelActionService,
         config: Config,
     ) -> None:
-        self.session_manager = session_manager
+        self.operations = operations
         self.progress_repository = progress_repository
-        self.provider_repository = provider_repository
         self.action_service = action_service
         self.config = config
 
@@ -87,11 +84,10 @@ class ScheduledTaskChannelService:
         self,
         owner: SessionExecutionOwner,
     ) -> "ScheduledTaskChannelService":
-        """Bind Scheduled channel persistence to one durable Session owner."""
+        """Bind provider admission while retaining native Scheduled CAS operations."""
         return ScheduledTaskChannelService(
-            session_manager=self.session_manager,
+            operations=self.operations,
             progress_repository=self.progress_repository,
-            provider_repository=self.provider_repository,
             action_service=self.action_service.for_execution_owner(owner),
             config=self.config,
         )
@@ -122,27 +118,25 @@ class ScheduledTaskChannelService:
             delete_locator=delete_locator,
         )
         discord_render = render_scheduled_task_discord_registration(task=task)
-        async with self.session_manager() as session:
-            plan = await self.provider_repository.prepare_binding_effect(
-                session,
-                agent_id=task.agent_id,
-                session_id=task.session_id,
-                binding_id=binding_id,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                slack_payload={
-                    "control_kind": "scheduled_task_registration",
-                    "text": slack_render.text,
-                    "blocks": slack_render.payload,
-                },
-                discord_payload={
-                    "control_kind": "scheduled_task_registration",
-                    "text": discord_render.text,
-                    "embeds": discord_render.payload,
-                    "task_id": task.id,
-                    "delete_locator": delete_locator,
-                },
-                operation_seed=f"scheduled-registration:{task.id}",
-            )
+        plan = await self.operations.prepare_binding_effect(
+            agent_id=task.agent_id,
+            session_id=task.session_id,
+            binding_id=binding_id,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            slack_payload={
+                "control_kind": "scheduled_task_registration",
+                "text": slack_render.text,
+                "blocks": slack_render.payload,
+            },
+            discord_payload={
+                "control_kind": "scheduled_task_registration",
+                "text": discord_render.text,
+                "embeds": discord_render.payload,
+                "task_id": task.id,
+                "delete_locator": delete_locator,
+            },
+            operation_seed=f"scheduled-registration:{task.id}",
+        )
         if plan is None:
             return _unavailable_outcome(
                 operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
@@ -181,25 +175,23 @@ class ScheduledTaskChannelService:
             return None
         slack_render = render_scheduled_task_slack_deletion(task=task)
         discord_render = render_scheduled_task_discord_deletion(task=task)
-        async with self.session_manager() as session:
-            return await self.provider_repository.prepare_binding_effect(
-                session,
-                agent_id=task.agent_id,
-                session_id=task.session_id,
-                binding_id=binding_id,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                slack_payload={
-                    "control_kind": "scheduled_task_deletion",
-                    "text": slack_render.text,
-                    "blocks": slack_render.payload,
-                },
-                discord_payload={
-                    "control_kind": "scheduled_task_deletion",
-                    "text": discord_render.text,
-                    "embeds": discord_render.payload,
-                },
-                operation_seed=f"scheduled-deletion:{task.id}",
-            )
+        return await self.operations.prepare_binding_effect(
+            agent_id=task.agent_id,
+            session_id=task.session_id,
+            binding_id=binding_id,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            slack_payload={
+                "control_kind": "scheduled_task_deletion",
+                "text": slack_render.text,
+                "blocks": slack_render.payload,
+            },
+            discord_payload={
+                "control_kind": "scheduled_task_deletion",
+                "text": discord_render.text,
+                "embeds": discord_render.payload,
+            },
+            operation_seed=f"scheduled-deletion:{task.id}",
+        )
 
     async def execute_deletion_plan(
         self,
@@ -392,41 +384,9 @@ class ScheduledTaskChannelService:
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> tuple[ProviderEffectOutcome, ...]:
         """Publish terminal parts then attempt every captured Tracker cleanup."""
-        async with self.session_manager() as session:
-            reply_plans = await self.provider_repository.prepare_binding_reply_effects(
-                session,
-                agent_id=snapshot.agent_id,
-                session_id=snapshot.session_id,
-                binding_id=snapshot.binding_id,
-                text=snapshot.result,
-                files=files,
-                operation_seed=f"scheduled-terminal:{snapshot.cycle_id}",
-                slack_reply_broadcast=True,
-                discord_forward_to_parent=True,
-            )
-            cleanup_plans: list[tuple[int, ProviderEffectPlan]] = []
-            for part in snapshot.tracker_projection_parts:
-                if part.provider_message_key is None:
-                    continue
-                plan = await self.provider_repository.prepare_binding_effect(
-                    session,
-                    agent_id=snapshot.agent_id,
-                    session_id=snapshot.session_id,
-                    binding_id=snapshot.binding_id,
-                    operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                    slack_payload={
-                        "provider_message_key": part.provider_message_key,
-                    },
-                    discord_payload={
-                        "provider_message_key": part.provider_message_key,
-                    },
-                    operation_seed=(
-                        f"scheduled-tracker-delete:{snapshot.cycle_id}:"
-                        f"{part.part_ordinal}"
-                    ),
-                )
-                if plan is not None:
-                    cleanup_plans.append((part.part_ordinal, plan))
+        preparation = await self.operations.prepare_terminal(snapshot, files=files)
+        reply_plans = preparation.reply_plans
+        cleanup_plans = preparation.cleanup_plans
 
         outcomes: list[ProviderEffectOutcome] = []
         if not reply_plans:
@@ -478,15 +438,11 @@ class ScheduledTaskChannelService:
 
 
 def get_scheduled_task_channel_service(
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
+    operations: Annotated[
+        ScheduledTaskChannelOperations, Depends(ScheduledTaskChannelOperations)
     ],
     progress_repository: Annotated[
         ScheduledTaskProgressRepository, Depends(ScheduledTaskProgressRepository)
-    ],
-    provider_repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
     ],
     action_service: Annotated[
         ExternalChannelActionService, Depends(ExternalChannelActionService.create)
@@ -495,9 +451,8 @@ def get_scheduled_task_channel_service(
 ) -> ScheduledTaskChannelService:
     """Create the Scheduled-owned External Channel effect service."""
     return ScheduledTaskChannelService(
-        session_manager=session_manager,
+        operations=operations,
         progress_repository=progress_repository,
-        provider_repository=provider_repository,
         action_service=action_service,
         config=config,
     )

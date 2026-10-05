@@ -17,6 +17,7 @@ from azents.core.enums import (
     AgentType,
     ExternalChannelResponseMode,
 )
+from azents.core.upload_images import StoredImage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -30,7 +31,6 @@ from azents.repos.historical_memory_consolidation.lifecycle import (
 from azents.repos.model_candidate_chain_cutover import (
     mark_model_candidate_chain_write,
 )
-from azents.services.uploads.schema import StoredImage
 
 from .data import (
     Agent,

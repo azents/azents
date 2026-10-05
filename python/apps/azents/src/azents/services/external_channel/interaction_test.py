@@ -6,10 +6,12 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Literal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -27,14 +29,24 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationSettings,
+)
 from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selection import (
+    ExternalChannelSelectorCandidate,
+    ExternalChannelSelectorCatalog,
+    ExternalChannelSelectorSelection,
+)
 from azents.core.external_channel_selector_state import (
     ExternalChannelSelectorState,
     projection_with_selector_state,
 )
 from azents.core.external_model_settings import ExternalModelActorContext
-from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.core.scheduled_task_control import ScheduledTaskProviderControlResult
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -42,7 +54,15 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
+from azents.repos.external_channel.interaction_operations import (
+    ExternalChannelInteractionOperations,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -52,24 +72,61 @@ from azents.services.external_channel.interaction import (
     verify_selector_metadata,
 )
 from azents.services.external_channel.participation import (
-    ExternalChannelParticipationError,
-    ExternalChannelParticipationSettings,
+    ExternalChannelParticipationService,
 )
-from azents.services.external_channel.selector import (
-    ExternalChannelSelectorCandidate,
-    ExternalChannelSelectorCatalog,
-    ExternalChannelSelectorSelection,
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
 )
+from azents.services.external_channel.selector import ExternalChannelSelectorService
 from azents.services.external_channel.slack_events import (
+    SlackConversationClient,
     SlackInteractionView,
     SlackInteractionViewResult,
 )
 from azents.services.external_channel.slack_native_protocol import SlackNativeControl
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.control import (
-    ScheduledTaskProviderControlResult,
+    ScheduledTaskProviderControlService,
     build_scheduled_task_control_locator,
 )
 from azents.testing.external_channel import make_provider_effect_plan
+
+
+class _InteractionOperations(ExternalChannelInteractionOperations):
+    def bind_fake(self, fake: _Repository) -> None:
+        self.fake = fake
+
+    async def _read_interaction(
+        self, session: ReadSession, *, interaction_id: str
+    ) -> ExternalChannelInteraction | None:
+        return await self.fake.lock_interaction(session, interaction_id=interaction_id)
+
+    async def validate_settings_origin(
+        self,
+        *,
+        origin_interaction_id: str,
+        interaction: ExternalChannelInteraction,
+        configuration: ExternalChannelConnectionConfiguration,
+    ) -> None:
+        async with self.read_session_manager() as session:
+            origin = await self.fake.lock_interaction(
+                session, interaction_id=origin_interaction_id
+            )
+        if (
+            origin is None
+            or origin.id == interaction.id
+            or origin.connection_id != configuration.id
+            or (origin.principal_id != interaction.principal_id)
+            or (
+                origin.status
+                not in {
+                    ExternalChannelInteractionStatus.PROCESSING,
+                    ExternalChannelInteractionStatus.COMPLETED,
+                }
+            )
+        ):
+            raise ValueError("Slack settings submission scope is unavailable.")
+
 
 _VALID_EXPIRY = datetime.datetime.max.replace(tzinfo=datetime.UTC)
 _EXPIRED_AT = datetime.datetime.min.replace(tzinfo=datetime.UTC)
@@ -167,19 +224,13 @@ class _Repository:
         return self.interactions.get(interaction_id)
 
     async def lock_interaction(
-        self,
-        session: ReadSession,
-        *,
-        interaction_id: str,
+        self, session: ReadSession, *, interaction_id: str
     ) -> ExternalChannelInteraction | None:
         del session
         return self.interactions.get(interaction_id)
 
     async def get_connection_configuration(
-        self,
-        session: ReadSession,
-        *,
-        connection_id: str,
+        self, session: ReadSession, *, connection_id: str
     ) -> ExternalChannelConnectionConfiguration | None:
         del session
         return self.configuration if connection_id == self.configuration.id else None
@@ -195,19 +246,14 @@ class _Repository:
         del session
         return (
             self.resource
-            if (
-                connection_id == self.resource.connection_id
-                and resource_type is self.resource.resource_type
-                and provider_resource_key == self.resource.provider_resource_key
-            )
+            if connection_id == self.resource.connection_id
+            and resource_type is self.resource.resource_type
+            and (provider_resource_key == self.resource.provider_resource_key)
             else None
         )
 
     async def get_resource(
-        self,
-        session: ReadSession,
-        *,
-        resource_id: str,
+        self, session: ReadSession, *, resource_id: str
     ) -> ExternalChannelResource | None:
         del session
         return self.resource if resource_id == self.resource.id else None
@@ -224,10 +270,7 @@ class _Selector:
         self.calls.append(kwargs)
         return self.catalog
 
-    async def select_route(
-        self,
-        **kwargs: object,
-    ) -> ExternalChannelSelectorSelection:
+    async def select_route(self, **kwargs: object) -> ExternalChannelSelectorSelection:
         self.selection_calls.append(kwargs)
         assert self.selection is not None
         return self.selection
@@ -237,9 +280,7 @@ class _Credentials:
     def decrypt(self, value: str) -> SlackConnectionCredentials:
         assert value == "ciphertext"
         return SlackConnectionCredentials(
-            bot_token="xoxb-secret",
-            signing_secret="signing-secret",
-            app_token=None,
+            bot_token="xoxb-secret", signing_secret="signing-secret", app_token=None
         )
 
 
@@ -251,11 +292,7 @@ class _Slack:
         self.update_calls: list[dict[str, object]] = []
 
     async def open_interaction_view(
-        self,
-        *,
-        bot_token: str,
-        trigger_id: str,
-        view: SlackInteractionView,
+        self, *, bot_token: str, trigger_id: str, view: SlackInteractionView
     ) -> SlackInteractionViewResult:
         assert bot_token == "xoxb-secret"
         self.views.append(view)
@@ -272,12 +309,7 @@ class _Slack:
     ) -> SlackInteractionViewResult:
         assert bot_token == "xoxb-secret"
         self.views.append(view)
-        self.update_calls.append(
-            {
-                "view_id": view_id,
-                "view_hash": view_hash,
-            }
-        )
+        self.update_calls.append({"view_id": view_id, "view_hash": view_hash})
         return self.result
 
 
@@ -290,10 +322,7 @@ class _ProviderControl:
 
 
 class _Replay:
-    def __init__(
-        self,
-        outcome: ExternalChannelIngestionOutcome | None = None,
-    ) -> None:
+    def __init__(self, outcome: ExternalChannelIngestionOutcome | None = None) -> None:
         self.outcome = outcome or ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
@@ -304,8 +333,7 @@ class _Replay:
         self.calls: list[dict[str, object]] = []
 
     async def replay_selected_interaction(
-        self,
-        **kwargs: object,
+        self, **kwargs: object
     ) -> ExternalChannelIngestionOutcome:
         self.calls.append(kwargs)
         return self.outcome
@@ -321,9 +349,10 @@ def _processor(
     provider_control: _ProviderControl | None = None,
     participation: object | None = None,
 ) -> ExternalChannelInteractionProcessor:
+
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield _Session()  # ty: ignore[invalid-yield] # Focused session double implements only execute().
+        yield ReadWriteSession(AsyncSession())
 
     async def decorate(
         *, view: SlackInteractionView, **kwargs: object
@@ -332,41 +361,54 @@ def _processor(
 
     native_settings = AsyncMock()
     native_settings.decorate.side_effect = decorate
-    return ExternalChannelInteractionProcessor(
-        native_settings=native_settings,
+    operations = _InteractionOperations(
         session_manager=session_manager,
-        repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements exercised operations.
-        selector_service=selector,  # ty: ignore[invalid-argument-type] # Focused selector double implements exercised operations.
-        credentials_codec=_Credentials(),  # ty: ignore[invalid-argument-type] # Focused codec implements only decrypt().
-        slack_client=slack,  # ty: ignore[invalid-argument-type] # Focused Slack double implements exercised provider calls.
-        provider_control=provider_control or _ProviderControl(),  # ty: ignore[invalid-argument-type] # Focused provider double implements exercised controls.
-        ingestion_replay_service=replay or _Replay(),  # ty: ignore[invalid-argument-type] # Focused replay double implements one replay operation.
-        participation_service=participation or SimpleNamespace(),  # ty: ignore[invalid-argument-type] # Focused participation double is unused in these cases.
-        scheduled_task_control=scheduled_task_control,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
-        scheduled_task_channel=scheduled_task_channel,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
-        config=SimpleNamespace(
-            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key=_SECRET))
-        ),  # ty: ignore[invalid-argument-type] # Focused config exposes only the signing secret.
+        repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+        read_session_manager=session_manager,
+    )
+    operations.bind_fake(repository)
+    config = MagicMock(spec=Config)
+    config.auth = SimpleNamespace(jwt=SimpleNamespace(secret_key=_SECRET))
+    return ExternalChannelInteractionProcessor(
+        operations=operations,
+        native_settings=native_settings,
+        selector_service=MagicMock(spec=ExternalChannelSelectorService, wraps=selector),
+        credentials_codec=MagicMock(
+            spec=ExternalChannelCredentialsCodec, wraps=_Credentials()
+        ),
+        slack_client=MagicMock(spec=SlackConversationClient, wraps=slack),
+        provider_control=MagicMock(
+            spec=ExternalChannelProviderControlService,
+            wraps=provider_control or _ProviderControl(),
+        ),
+        ingestion_replay_service=MagicMock(
+            spec=ExternalChannelIngestionReplayService, wraps=replay or _Replay()
+        ),
+        participation_service=MagicMock(
+            spec=ExternalChannelParticipationService,
+            wraps=participation or SimpleNamespace(),
+        ),
+        scheduled_task_control=MagicMock(
+            spec=ScheduledTaskProviderControlService, wraps=scheduled_task_control
+        ),
+        scheduled_task_channel=MagicMock(
+            spec=ScheduledTaskChannelService, wraps=scheduled_task_channel
+        ),
+        config=config,
     )
 
 
 def _catalog(*, empty: bool = False) -> ExternalChannelSelectorCatalog:
     return ExternalChannelSelectorCatalog(
-        candidates=(
-            ()
-            if empty
-            else (
-                ExternalChannelSelectorCandidate(
-                    route_id="route-alpha",
-                    agent_name="Alpha",
-                    access="available",
-                ),
-                ExternalChannelSelectorCandidate(
-                    route_id="route-zed",
-                    agent_name="Zed",
-                    access="access_required",
-                ),
-            )
+        candidates=()
+        if empty
+        else (
+            ExternalChannelSelectorCandidate(
+                route_id="route-alpha", agent_name="Alpha", access="available"
+            ),
+            ExternalChannelSelectorCandidate(
+                route_id="route-zed", agent_name="Zed", access="access_required"
+            ),
         ),
         next_offset=20 if not empty else None,
     )
@@ -407,19 +449,12 @@ async def test_scheduled_task_delete_notifies_bound_slack_channel() -> None:
     """Slack provider cancellation publishes the committed deleted Task snapshot."""
     repository = _Repository()
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
     task = _scheduled_task()
     scheduled_task_control = SimpleNamespace(
         mutate=AsyncMock(
-            return_value=ScheduledTaskProviderControlResult(
-                action="delete",
-                task=task,
-            )
+            return_value=ScheduledTaskProviderControlResult(action="delete", task=task)
         )
     )
     scheduled_task_channel = SimpleNamespace(execute_deletion=AsyncMock())
@@ -435,13 +470,9 @@ async def test_scheduled_task_delete_notifies_bound_slack_channel() -> None:
         settings_response_mode=None,
         trigger_id="trigger-secret-must-not-persist",
         scheduled_task_locator=build_scheduled_task_control_locator(
-            secret=_SECRET,
-            action="delete",
-            task_id="task-1",
-            binding_id="binding-1",
+            secret=_SECRET, action="delete", task_id="task-1", binding_id="binding-1"
         ),
     )
-
     await _processor(
         repository,
         _Selector(_catalog()),
@@ -449,7 +480,6 @@ async def test_scheduled_task_delete_notifies_bound_slack_channel() -> None:
         scheduled_task_control=scheduled_task_control,
         scheduled_task_channel=scheduled_task_channel,
     ).process(handoff)
-
     scheduled_task_channel.execute_deletion.assert_awaited_once_with(task)
     assert len(slack.views) == 1
     assert "Scheduled Task cancelled." in str(slack.views[0])
@@ -468,14 +498,9 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
             "interaction_type": ExternalChannelInteractionType.VIEW_SUBMISSION,
         }
     )
-    repository.interactions = {
-        origin.id: origin,
-        submission.id: submission,
-    }
+    repository.interactions = {origin.id: origin, submission.id: submission}
     claim = ExternalChannelSetupClaim.model_construct(
-        id="claim-1",
-        claim_generation=1,
-        source_revision=1,
+        id="claim-1", claim_generation=1, source_revision=1
     )
     setup_settings = ExternalChannelParticipationSettings(
         target="setup",
@@ -511,15 +536,12 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
         principal_id="principal-1",
         interaction_id=origin.id,
     )
-
     await _processor(
         repository,
         _Selector(_catalog()),
         _Slack(
             SlackInteractionViewResult(
-                status="opened",
-                error_kind=None,
-                error_summary=None,
+                status="opened", error_kind=None, error_summary=None
             )
         ),
         participation=participation,
@@ -539,7 +561,6 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
             trigger_id=None,
         )
     )
-
     participation.select_location.assert_awaited_once()
     assert (
         participation.select_location.await_args.kwargs["configured_by_principal_id"]
@@ -552,14 +573,9 @@ async def test_shortcut_modal_is_deterministic_and_secret_free() -> None:
     repository = _Repository()
     selector = _Selector(_catalog())
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
     handoff = _handoff()
-
     await _processor(
         repository,
         selector,
@@ -567,7 +583,6 @@ async def test_shortcut_modal_is_deterministic_and_secret_free() -> None:
         scheduled_task_control=SimpleNamespace(),
         scheduled_task_channel=SimpleNamespace(),
     ).process(handoff)
-
     assert len(selector.calls) == 1
     assert selector.calls[0]["selector_interaction_id"] == "interaction-1"
     assert selector.calls[0]["principal_id"] == "principal-1"
@@ -579,15 +594,9 @@ async def test_shortcut_modal_is_deterministic_and_secret_free() -> None:
     element = route_block["element"]
     assert isinstance(element, dict)
     assert element["options"] == [
+        {"text": {"type": "plain_text", "text": "Alpha"}, "value": "route-alpha"},
         {
-            "text": {"type": "plain_text", "text": "Alpha"},
-            "value": "route-alpha",
-        },
-        {
-            "text": {
-                "type": "plain_text",
-                "text": "Zed — Access required",
-            },
+            "text": {"type": "plain_text", "text": "Zed — Access required"},
             "value": "route-zed",
         },
     ]
@@ -602,11 +611,7 @@ async def test_block_action_rejects_cross_scope_admission_before_provider_io() -
     repository = _Repository()
     selector = _Selector(_catalog())
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
     foreign_state = ExternalChannelSelectorState(
         connection_id="connection-1",
@@ -622,7 +627,6 @@ async def test_block_action_rejects_cross_scope_admission_before_provider_io() -
         update={"projection": projection_with_selector_state({}, foreign_state)}
     )
     repository.interactions[repository.selector.id] = repository.selector
-
     with pytest.raises(ValueError, match="interaction is unavailable"):
         await _processor(
             repository,
@@ -631,7 +635,6 @@ async def test_block_action_rejects_cross_scope_admission_before_provider_io() -
             scheduled_task_control=SimpleNamespace(),
             scheduled_task_channel=SimpleNamespace(),
         ).process(_handoff(selector_interaction_id="admission-1"))
-
     assert selector.calls == []
     assert slack.views == []
 
@@ -641,13 +644,8 @@ async def test_empty_catalog_opens_explicit_safe_state() -> None:
     repository = _Repository()
     selector = _Selector(_catalog(empty=True))
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
-
     await _processor(
         repository,
         selector,
@@ -655,7 +653,6 @@ async def test_empty_catalog_opens_explicit_safe_state() -> None:
         scheduled_task_control=SimpleNamespace(),
         scheduled_task_channel=SimpleNamespace(),
     ).process(_handoff())
-
     view = slack.views[0]
     assert view.submit_title is None
     assert view.blocks[0]["block_id"] == "azents_agent_selector_search"
@@ -679,8 +676,7 @@ async def test_empty_catalog_opens_explicit_safe_state() -> None:
     ],
 )
 async def test_provider_modal_outcomes_are_safe(
-    status: Literal["expired", "rejected", "unknown"],
-    exception: type[Exception],
+    status: Literal["expired", "rejected", "unknown"], exception: type[Exception]
 ) -> None:
     repository = _Repository()
     selector = _Selector(_catalog())
@@ -691,7 +687,6 @@ async def test_provider_modal_outcomes_are_safe(
             error_summary="provider detail must not escape",
         )
     )
-
     with pytest.raises(exception):
         await _processor(
             repository,
@@ -700,7 +695,6 @@ async def test_provider_modal_outcomes_are_safe(
             scheduled_task_control=SimpleNamespace(),
             scheduled_task_channel=SimpleNamespace(),
         ).process(_handoff())
-
     assert slack.triggers == ["trigger-secret-must-not-persist"]
 
 
@@ -714,7 +708,6 @@ def test_selector_metadata_rejects_tampering_and_cross_scope() -> None:
         principal_id="principal-1",
         offset=20,
     )
-
     assert (
         verify_selector_metadata(
             metadata=metadata,
@@ -765,9 +758,7 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
     selector = _Selector(_catalog())
     slack = _Slack(
         SlackInteractionViewResult(
-            status="updated",
-            error_kind=None,
-            error_summary=None,
+            status="updated", error_kind=None, error_summary=None
         )
     )
     metadata = build_selector_metadata(
@@ -779,7 +770,6 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
         principal_id="principal-1",
         offset=0,
     )
-
     await _processor(
         repository,
         selector,
@@ -804,7 +794,6 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
             selector_view_hash="hash-1",
         )
     )
-
     assert len(selector.calls) == 1
     assert selector.calls[0]["selector_interaction_id"] == "admission-1"
     assert selector.calls[0]["principal_id"] == "principal-1"
@@ -838,16 +827,12 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
         selector_interaction=ExternalChannelInteraction.model_construct(
-            id="admission-1",
+            id="admission-1"
         ),
         binding=None,
     )
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
     metadata = build_selector_metadata(
         secret=_SECRET,
@@ -858,7 +843,6 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
         principal_id="principal-1",
         offset=0,
     )
-
     replay = _Replay()
     await _processor(
         repository,
@@ -882,7 +866,6 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
             selected_route_id="route-alpha",
         )
     )
-
     assert len(selector.selection_calls) == 1
     call = selector.selection_calls[0]
     assert call["selector_interaction_id"] == "admission-1"
@@ -913,16 +896,12 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
         selector_interaction=ExternalChannelInteraction.model_construct(
-            id="admission-1",
+            id="admission-1"
         ),
         binding=None,
     )
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
     metadata = build_selector_metadata(
         secret=_SECRET,
@@ -944,7 +923,6 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
             connection_id="connection-1",
         )
     )
-
     await _processor(
         repository,
         selector,
@@ -968,7 +946,6 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
             selected_route_id="route-alpha",
         )
     )
-
     assert len(replay.calls) == 1
     assert replay.calls[0]["selector_interaction_id"] == "admission-1"
     assert provider_control.calls == [plan]
@@ -989,11 +966,7 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
     )
     selector = _Selector(_catalog())
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
     metadata = build_selector_metadata(
         secret=_SECRET,
@@ -1004,7 +977,6 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
         principal_id="principal-1",
         offset=0,
     )
-
     with pytest.raises(ValueError, match="metadata"):
         await _processor(
             repository,
@@ -1027,7 +999,6 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
                 selected_route_id="route-alpha",
             )
         )
-
     assert selector.selection_calls == []
 
 
@@ -1050,11 +1021,7 @@ async def test_denied_settings_never_exposes_participation_error_details() -> No
         participation=participation,
     )
     await processor.process(
-        replace(
-            _handoff(),
-            handler="settings_open",
-            provider_parent_channel_id="C-1",
-        )
+        replace(_handoff(), handler="settings_open", provider_parent_channel_id="C-1")
     )
     assert len(slack.views) == 1
     assert "Secret Agent" not in repr(slack.views)
@@ -1138,13 +1105,8 @@ async def test_expired_selector_interaction_blocks_modal_before_provider_io() ->
     repository.interactions[repository.interaction.id] = repository.interaction
     selector = _Selector(_catalog())
     slack = _Slack(
-        SlackInteractionViewResult(
-            status="opened",
-            error_kind=None,
-            error_summary=None,
-        )
+        SlackInteractionViewResult(status="opened", error_kind=None, error_summary=None)
     )
-
     with pytest.raises(ValueError, match="interaction is unavailable"):
         await _processor(
             repository,
@@ -1153,6 +1115,5 @@ async def test_expired_selector_interaction_blocks_modal_before_provider_io() ->
             scheduled_task_control=SimpleNamespace(),
             scheduled_task_channel=SimpleNamespace(),
         ).process(_handoff())
-
     assert selector.calls == []
     assert slack.views == []
