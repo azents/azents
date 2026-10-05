@@ -1,6 +1,7 @@
 """write tool tests."""
 
 import json
+from typing import NamedTuple
 
 import pytest
 
@@ -13,18 +14,25 @@ from azents.engine.tools.write import make_write_tool
 # ---------------------------------------------------------------------------
 
 
+class _WriteFixture(NamedTuple):
+    """Write tool paired with its recording storage fixture."""
+
+    tool: FunctionTool
+    storage: FakeSharedStorage
+
+
 def _make_tool(
     *,
     raise_permission: bool = False,
     agent_id: str = "agent-1",
-) -> tuple[FunctionTool, FakeSharedStorage]:
+) -> _WriteFixture:
     """Create write tool and fake storage for tests."""
     storage = FakeSharedStorage(raise_permission_on_put=raise_permission)
     tool = make_write_tool(
         session_storage=storage,
         agent_id=agent_id,
     )
-    return tool, storage
+    return _WriteFixture(tool=tool, storage=storage)
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +46,9 @@ class TestWriteFile:
     async def test_write_agent_file(self) -> None:
         """Write file to agent path."""
         # Given
-        tool, storage = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        storage = fixture.storage
 
         # When
         result = await tool.handler(
@@ -62,7 +72,9 @@ class TestWriteFile:
     async def test_write_agent_subdirectory_file(self) -> None:
         """Write file to an Agent workspace subdirectory."""
         # Given
-        tool, storage = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        storage = fixture.storage
 
         # When
         result = await tool.handler(
@@ -83,7 +95,9 @@ class TestWriteFile:
     async def test_write_nested_path(self) -> None:
         """Write file to nested path."""
         # Given
-        tool, storage = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        storage = fixture.storage
 
         # When
         await tool.handler(
@@ -110,7 +124,7 @@ class TestWriteErrors:
 
     async def test_permission_error(self) -> None:
         """Writing read-only path maps PermissionError to FunctionToolError."""
-        tool, _ = _make_tool(raise_permission=True)
+        tool = _make_tool(raise_permission=True).tool
         with pytest.raises(FunctionToolError, match="read-only scope"):
             await tool.handler(
                 json.dumps(
@@ -133,7 +147,9 @@ class TestOverwrite:
     async def test_default_overwrite_false_blocks_existing(self) -> None:
         """Fail writing existing file when overwrite default is false."""
         # Given: existing file
-        tool, storage = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        storage = fixture.storage
         storage.add_file("/workspace/agent/existing.txt", b"old content")
 
         # When/Then: try writing without overwrite -> failure
@@ -150,7 +166,9 @@ class TestOverwrite:
     async def test_overwrite_true_replaces_existing(self) -> None:
         """overwrite=true overwrites existing file."""
         # Given: existing file
-        tool, storage = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        storage = fixture.storage
         storage.add_file("/workspace/agent/existing.txt", b"old content")
 
         # When: write with overwrite=true
@@ -172,7 +190,9 @@ class TestOverwrite:
     async def test_overwrite_false_allows_new_file(self) -> None:
         """New file is created normally even when overwrite=false."""
         # Given: empty storage
-        tool, storage = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        storage = fixture.storage
 
         # When: write new file
         result = await tool.handler(

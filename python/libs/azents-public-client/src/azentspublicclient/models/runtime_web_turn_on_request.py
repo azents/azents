@@ -97,10 +97,13 @@ class RuntimeWebTurnOnRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_revision": obj.get("expected_revision"),
             "operation_key": obj.get("operation_key"),
             "selected_duration_seconds": obj.get("selected_duration_seconds")
+            }.items() if _key in obj
         })
         return _obj
 

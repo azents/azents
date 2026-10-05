@@ -47,6 +47,11 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/services/session_storage.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
+  - python/apps/azents/src/azents/core/archived_session_purge_data.py
+  - python/apps/azents/src/azents/core/file_lifecycle_cleanup_data.py
   - python/apps/azents/src/azents/services/uploads/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/core/file_transfer.py
@@ -85,7 +90,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-10-05
-spec_version: 59
+spec_version: 60
 ---
 
 # File Exchange Storage
@@ -379,6 +384,13 @@ tree. After purge fencing and run shutdown, the purge workflow:
 3. verifies that every selected resource reached its terminal metadata and blob state; and
 4. deletes file metadata before the root Session cascade.
 
+The purge repository captures terminal file metadata after atomic owner fencing and
+expiration, closes the preparation scope before blob deletion, and verifies the
+selected terminal metadata again inside restrictive finalization. Ordinary cleanup
+likewise reads pending metadata through completed native read-only operations, then
+records each successful external delete in a completed mutation operation. Services
+receive detached records rather than live database handles.
+
 Any required blob cleanup failure aborts database subtree deletion and leaves ownership, terminal
 metadata, durable purge progress, and retry information available for a later pass. Git worktree
 state is not a file-storage purge prerequisite: the database-only compatibility participant advances
@@ -516,6 +528,10 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-10-05** (spec_version 60) — Made file cleanup and archived-root purge
+  metadata preparation/settlement repository-owned, retaining exact lease/cursor
+  predicates and object deletion strictly between completed database operations.
 
 - **2026-10-05** (spec_version 59) — Recorded completed read-only Exchange
   publication recovery and its narrow database-error boundary, retaining
