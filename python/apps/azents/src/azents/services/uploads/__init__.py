@@ -200,18 +200,7 @@ class UploadService:
             },
         )
         try:
-            try:
-                await handler.validate(body)
-            except UploadValidationError:
-                logger.warning(
-                    "Finalize validation failed",
-                    extra={
-                        "category": category,
-                        "owner_id": owner_id,
-                        "upload_key": upload_key,
-                    },
-                )
-                raise
+            await handler.validate(body)
             result = await handler.process_and_publish(
                 body=body,
                 owner_id=owner_id,

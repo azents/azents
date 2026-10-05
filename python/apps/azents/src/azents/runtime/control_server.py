@@ -86,6 +86,9 @@ from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
 )
+from azents.repos.runtime_provider_contract_operations import (
+    RuntimeProviderContractOperationsRepository,
+)
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
 )
@@ -925,10 +928,12 @@ async def runtime_control_server_lifespan(
         auth_registry=None,
     )
     contract_service = RuntimeProviderContractService(
-        session_manager=session_manager,
-        provider_repository=provider_repository,
-        policy_repository=policy_repository,
-        profile_repository=profile_repository,
+        operations=RuntimeProviderContractOperationsRepository(
+            session_manager=session_manager,
+            provider_repository=provider_repository,
+            policy_repository=policy_repository,
+            profile_repository=profile_repository,
+        )
     )
     report_operations = RuntimeReportOperationRepository(
         runtime_repository=runtime_repository,

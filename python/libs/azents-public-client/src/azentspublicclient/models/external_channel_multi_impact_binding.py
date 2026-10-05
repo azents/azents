@@ -97,13 +97,16 @@ class ExternalChannelMultiImpactBinding(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "route_id": obj.get("route_id"),
             "agent_session_id": obj.get("agent_session_id"),
             "resource_id": obj.get("resource_id"),
             "channel_label": obj.get("channel_label"),
             "thread_label": obj.get("thread_label")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -275,6 +275,10 @@ class _GenerationObserver:
 class _Clock:
     now: datetime
 
+    def advance_to(self, now: datetime) -> None:
+        """Advance authoritative test time after the promotion boundary."""
+        self.now = now
+
     def __call__(self) -> datetime:
         return self.now
 
@@ -347,9 +351,7 @@ async def test_provider_final_acceptance_rechecks_current_evidence_time() -> Non
     clock = _Clock(started_at)
     store = _PromotionHookStore(
         sessions,
-        after_promotion=lambda: setattr(
-            clock, "now", started_at + timedelta(seconds=2)
-        ),
+        after_promotion=lambda: clock.advance_to(started_at + timedelta(seconds=2)),
     )
     service = RuntimeProviderConnectionRegistrationService(
         coordination_store=store,

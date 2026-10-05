@@ -91,12 +91,15 @@ class ExternalChannelFilesDetailResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "section": obj.get("section"),
             "schema_version": obj.get("schema_version"),
             "admin_version": obj.get("admin_version"),
             "outbound_max_file_bytes": obj.get("outbound_max_file_bytes"),
             "outbound_max_action_bytes": obj.get("outbound_max_action_bytes")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

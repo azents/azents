@@ -98,11 +98,14 @@ class SubagentTreeResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "root_session_agent_id": obj.get("root_session_agent_id"),
             "root_agent_session_id": obj.get("root_agent_session_id"),
             "current_session_agent_id": obj.get("current_session_agent_id"),
             "nodes": [SubagentTreeNodeResponse.from_dict(_item) for _item in obj["nodes"]] if obj.get("nodes") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

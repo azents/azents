@@ -110,11 +110,14 @@ class ExternalAccountOAuthPatchRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_version": obj.get("expected_version"),
             "client_id": obj.get("client_id"),
             "application_id": obj.get("application_id"),
             "client_secret": ExternalAccountOAuthSecretActionRequest.from_dict(obj["client_secret"]) if obj.get("client_secret") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

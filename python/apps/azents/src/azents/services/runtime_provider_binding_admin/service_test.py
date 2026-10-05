@@ -2,7 +2,7 @@
 
 import datetime
 import json
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 from azcommon.datetime import tznow
@@ -85,6 +85,13 @@ def _service(
     )
 
 
+class _AdminProvider(NamedTuple):
+    """Persisted actor and provider identifiers."""
+
+    user_id: str
+    provider_id: str
+
+
 async def _create_admin_and_provider(
     session_manager: SessionManager[WriteSession],
     *,
@@ -92,7 +99,7 @@ async def _create_admin_and_provider(
     lifecycle_state: RuntimeProviderLifecycleState = (
         RuntimeProviderLifecycleState.ACTIVE
     ),
-) -> tuple[str, str]:
+) -> _AdminProvider:
     """Create one Admin actor and one Provider aggregate."""
     async with session_manager() as session:
         user = await UserRepository().create(
@@ -116,7 +123,7 @@ async def _create_admin_and_provider(
                 metadata=None,
             ),
         )
-    return user.id, provider.id
+    return _AdminProvider(user.id, provider.id)
 
 
 class TestRuntimeProviderBindingAdminService:

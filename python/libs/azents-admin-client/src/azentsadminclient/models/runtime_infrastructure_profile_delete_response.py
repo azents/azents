@@ -90,10 +90,13 @@ class RuntimeInfrastructureProfileDeleteResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "profile_id": obj.get("profile_id"),
             "superseded_recreation_operation_count": obj.get("superseded_recreation_operation_count"),
             "skipped_recreation_item_count": obj.get("skipped_recreation_item_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

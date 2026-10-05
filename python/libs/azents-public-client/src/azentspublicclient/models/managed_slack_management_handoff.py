@@ -105,7 +105,9 @@ class ManagedSlackManagementHandoff(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "interaction_id": obj.get("interaction_id"),
             "connection_id": obj.get("connection_id"),
             "provider": obj.get("provider"),
@@ -113,6 +115,7 @@ class ManagedSlackManagementHandoff(BaseModel):
             "provider_channel_id": obj.get("provider_channel_id"),
             "provider_thread_id": obj.get("provider_thread_id"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -107,7 +107,9 @@ class OpenRouterSubscriptionFinancialDetailsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "credit_limit": obj.get("credit_limit"),
             "credit_remaining": obj.get("credit_remaining"),
@@ -117,6 +119,7 @@ class OpenRouterSubscriptionFinancialDetailsResponse(BaseModel):
             "usage_monthly": obj.get("usage_monthly"),
             "limit_reset": obj.get("limit_reset"),
             "include_byok_in_limit": obj.get("include_byok_in_limit")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

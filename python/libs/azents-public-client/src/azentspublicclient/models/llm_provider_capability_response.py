@@ -91,11 +91,14 @@ class LLMProviderCapabilityResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider"),
             "display_name": obj.get("display_name"),
             "credential_type": obj.get("credential_type"),
             "experimental": obj.get("experimental") if obj.get("experimental") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

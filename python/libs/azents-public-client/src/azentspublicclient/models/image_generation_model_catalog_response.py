@@ -130,7 +130,9 @@ class ImageGenerationModelCatalogResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "default_available": obj.get("default_available"),
             "explicit_selection_supported": obj.get("explicit_selection_supported"),
             "catalog_id": obj.get("catalog_id"),
@@ -142,6 +144,7 @@ class ImageGenerationModelCatalogResponse(BaseModel):
             "automatic_retry_blocked": obj.get("automatic_retry_blocked"),
             "entries": [ImageGenerationCatalogEntryResponse.from_dict(_item) for _item in obj["entries"]] if obj.get("entries") is not None else None,
             "total": obj.get("total")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
