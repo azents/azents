@@ -14,6 +14,10 @@ from azents_runtime_control.grpc_workspace_upload_client import (
 )
 
 from azents.core.enums import RuntimeProviderAuthMethod
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 from azents.core.runtime_runner_credential import (
     RuntimeRunnerCredential,
     RuntimeRunnerCredentialInvalid,
@@ -22,10 +26,6 @@ from azents.core.runtime_transfer_coordinator_credential import (
     RuntimeTransferCoordinatorCredentialClaims,
     RuntimeTransferCoordinatorCredentialInvalid,
     RuntimeTransferCoordinatorCredentialVerifier,
-)
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialUnavailable,
 )
 
 _AUTHORIZATION_HEADER = "authorization"

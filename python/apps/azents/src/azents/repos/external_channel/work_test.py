@@ -26,6 +26,9 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_limits import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     checking_progress,
@@ -55,9 +58,6 @@ from azents.repos.external_channel.work_state import (
     ExternalChannelWorkStateStore,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.services.external_channel.slack_events import (
-    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-)
 from azents.testing.external_channel import make_provider_effect_plan
 
 

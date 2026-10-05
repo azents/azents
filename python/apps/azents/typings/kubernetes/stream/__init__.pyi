@@ -1,4 +1,4 @@
-"""kubernetes.stream — exec/attach/portforward 스트리밍 API 타입 보강."""
+"""kubernetes.stream — exec/attach/portforward streaming API type extensions."""
 
 from collections.abc import Callable
 from typing import Any

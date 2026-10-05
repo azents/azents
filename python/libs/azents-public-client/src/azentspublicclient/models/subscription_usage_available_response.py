@@ -131,7 +131,9 @@ class SubscriptionUsageAvailableResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "integration_id": obj.get("integration_id"),
             "provider": obj.get("provider"),
@@ -139,6 +141,7 @@ class SubscriptionUsageAvailableResponse(BaseModel):
             "plan_label": obj.get("plan_label"),
             "limits": [SubscriptionUsageLimitResponse.from_dict(_item) for _item in obj["limits"]] if obj.get("limits") is not None else None,
             "financial_details": SubscriptionUsageAvailableResponseFinancialDetails.from_dict(obj["financial_details"]) if obj.get("financial_details") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

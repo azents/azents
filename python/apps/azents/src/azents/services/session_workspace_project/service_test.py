@@ -444,27 +444,6 @@ def _service(
 
     binding_service.resolve_authority_for_target.side_effect = resolve_binding
 
-    async def resolve_binding_in_transaction(
-        transaction: WriteSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        runtime_target: RuntimeOperationTarget,
-    ) -> SessionWorkingFolderAuthority:
-        del transaction
-        return await resolve_binding(
-            agent_id=agent_id,
-            session_id=session_id,
-            runtime_target=runtime_target,
-        )
-
-    binding_service.resolve_authority_in_transaction.side_effect = (
-        resolve_binding_in_transaction
-    )
-    binding_service.resolve_bound_authority_in_transaction.side_effect = (
-        resolve_binding_in_transaction
-    )
-
     async def resolve_repository_binding(
         transaction: WriteSession,
         *,
@@ -509,10 +488,6 @@ def _service(
         binding_service.require_bindable_context.side_effect = binding_error
         binding_service.require_bound_context.side_effect = binding_error
         binding_service.resolve_authority_for_target.side_effect = binding_error
-        binding_service.resolve_authority_in_transaction.side_effect = binding_error
-        binding_service.resolve_bound_authority_in_transaction.side_effect = (
-            binding_error
-        )
         binding_repository.resolve_authority_in_session.side_effect = binding_error
         binding_repository.resolve_locked_authority_in_session.side_effect = (
             binding_error

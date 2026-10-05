@@ -6,6 +6,16 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
+  - python/apps/azents/src/azents/core/external_channel_interaction.py
+  - python/apps/azents/src/azents/core/external_channel_selection.py
+  - python/apps/azents/src/azents/core/external_channel_participation.py
+  - python/apps/azents/src/azents/core/external_channel_shortcut_source.py
+  - python/apps/azents/src/azents/repos/external_channel/interaction_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/selector_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/participation_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/shortcut_source_operations.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/external_channel_access.py
   - python/apps/azents/src/azents/core/external_channel_conversation_data.py
@@ -87,7 +97,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
@@ -105,7 +115,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-05
-spec_version: 68
+spec_version: 70
 ---
 
 # External Channel Provider Ingress
@@ -233,7 +243,30 @@ identity, and unsupported interaction types fail before durable interaction stat
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
 
+HTTP interaction/principal admission and durable processing/terminal claims are
+completed repository operations with the existing connection lock order and
+lease/status predicates. Discord callback configuration capture and bounded
+recoverable-owner scans use completed native read-only operations. Signature
+verification, provider callbacks and Local Job Runtime submissions occur only
+after these operations close.
+
 ## Interactive Admission and Selection
+
+Interaction processing reloads processing status, principal and exact
+selector/origin/connection/resource ownership through completed native
+PostgreSQL read-only operations before credential decoding or provider
+modal/control calls. These descriptive reads acquire no interaction row locks;
+later admission and mutation predicates remain authoritative. Signed metadata
+parsing and signature verification stay outside database transactions, while
+the repository joins the retained identities using detached typed metadata.
+Shortcut normalization likewise follows a completed connection read. Its
+final writable selector/setup materialization locks and revalidates the
+connection configuration generation, provider and bot identity before writing
+content-free position, resource, claim and interaction state. Duplicate retry
+compatibility, immutable selected routes and first-location selection are
+preserved. The four services expose no live read/write sessions or transaction
+callbacks; defining core contracts connect their completed operations, and
+provider effects and external coordination remain service-owned.
 
 Signed Slack selector and settings metadata preserves compact wire names,
 versions, HMAC authentication, scope bindings and target-generation fences.
@@ -676,9 +709,21 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-05** (spec_version 70) — Completed residual interaction admission/claim ownership and native read-only Discord callback/recovery observations before authentication, provider mutation and job wake.
 
-- **2026-10-05** (spec_version 68) — Combined completed admission/replay
-  ownership with the current scoped ingress fences and nonblocking observations.
+
+- **2026-10-05** (spec_version 69) — Moved interaction/selector scope observations
+  and shortcut materialization into completed repository operations, with native
+  read-only descriptive reads and configuration-fenced atomic writes; kept signed
+  metadata authority and provider effects outside transaction lifetimes.
+
+- **2026-10-05** (spec_version 68) — Integrated completed admission/replay
+  repository ownership with the existing scoped owner fences and nonblocking
+  provenance observations.
+
+
+- **2026-10-05** (spec_version 68) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
 - **2026-10-05** — v67. Completed provider ingress configuration/replay reads

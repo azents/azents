@@ -1,7 +1,6 @@
 """Event runtime client tool catalog."""
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -48,6 +47,7 @@ from azents.engine.tooling.tool_search import (
     ToolExposure,
     classify_tool_exposure,
 )
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -743,8 +743,18 @@ async def _call_cancel_handler(
     """Isolate cancellation hook failures so they do not block run stop."""
     if tool.cancel_handler is None:
         return
-    with contextlib.suppress(Exception):
+    try:
         await tool.cancel_handler(request)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.warning(
+            "Tool cancellation handler failed",
+            extra={"tool_name": tool.spec.name, "failure_kind": type(error).__name__},
+            exc_info=sanitized_exception_info(
+                error, message="Tool cancellation handler failed"
+            ),
+        )
 
 
 def _tool_result_payload(

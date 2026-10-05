@@ -28,6 +28,9 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
+from azents.repos.agent_automatic_project_operations import (
+    AgentAutomaticProjectOperationsRepository,
+)
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.user import UserRepository
@@ -325,11 +328,14 @@ def _service(
 ) -> AgentAutomaticProjectService:
     """Create the management service with real repositories."""
     return AgentAutomaticProjectService(
-        agent_repository=AgentRepository(),
-        agent_admin_repository=AgentAdminRepository(),
-        policy_repository=AgentAutomaticProjectRepository(),
-        catalog_repository=AgentProjectCatalogRepository(),
-        session_manager=session_manager,
+        repository=AgentAutomaticProjectOperationsRepository(
+            agent_repository=AgentRepository(),
+            admin_repository=AgentAdminRepository(),
+            policy_repository=AgentAutomaticProjectRepository(),
+            catalog_repository=AgentProjectCatalogRepository(),
+            read_session_manager=session_manager,
+            session_manager=session_manager,
+        ),
         runtime_target_resolver=_FakeRuntimeTargetResolver(),
         runner_operations=runner_operations,
     )

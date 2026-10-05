@@ -108,7 +108,9 @@ class SelectableInfrastructureProfileResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "provider_id": obj.get("provider_id"),
             "provider_display_name": obj.get("provider_display_name"),
@@ -123,6 +125,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             "version": obj.get("version"),
             "digest": obj.get("digest"),
             "capability_revision_id": obj.get("capability_revision_id")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

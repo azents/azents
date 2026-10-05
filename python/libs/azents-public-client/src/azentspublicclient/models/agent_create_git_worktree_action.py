@@ -117,7 +117,9 @@ class AgentCreateGitWorktreeAction(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type") if obj.get("type") is not None else 'agent_create_git_worktree',
             "bridge_identity": obj.get("bridge_identity"),
             "originating_run_id": obj.get("originating_run_id"),
@@ -128,6 +130,7 @@ class AgentCreateGitWorktreeAction(BaseModel):
             "source_project_path": obj.get("source_project_path"),
             "starting_ref": obj.get("starting_ref"),
             "branch_name": obj.get("branch_name")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
