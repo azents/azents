@@ -9,7 +9,7 @@ import secrets
 from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn, TypeGuard
+from typing import NamedTuple, NoReturn, TypeGuard
 
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorCredentialRequest,
@@ -142,19 +142,19 @@ class RuntimeTransferCoordinatorCredentialVerifier:
             or not _is_sha256(expected_request_sha256)
         ):
             _invalid_credential()
-        prefix, encoded_payload, signature = _split_credential(credential)
-        if prefix != _CREDENTIAL_PREFIX:
+        parts = _split_credential(credential)
+        if parts.prefix != _CREDENTIAL_PREFIX:
             _invalid_credential()
         expected_signature = _encode(
             hmac.new(
                 self._key,
-                encoded_payload.encode("ascii"),
+                parts.encoded_payload.encode("ascii"),
                 hashlib.sha256,
             ).digest()
         )
-        if not hmac.compare_digest(signature, expected_signature):
+        if not hmac.compare_digest(parts.signature, expected_signature):
             _invalid_credential()
-        claims = _claims_from_encoded_payload(encoded_payload)
+        claims = _claims_from_encoded_payload(parts.encoded_payload)
         self._validate_claims(claims, now=self._now(), validate_time=True)
         if (
             claims.operation != expected_operation
@@ -399,11 +399,21 @@ def _has_exact_fields(
     )
 
 
-def _split_credential(credential: str) -> tuple[str, str, str]:
+class _CredentialParts(NamedTuple):
+    """Named wire components of one coordinator credential."""
+
+    prefix: str
+    encoded_payload: str
+    signature: str
+
+
+def _split_credential(credential: str) -> _CredentialParts:
     parts = credential.split(".")
     if len(parts) != 3 or not all(parts):
         _invalid_credential()
-    return parts[0], parts[1], parts[2]
+    return _CredentialParts(
+        prefix=parts[0], encoded_payload=parts[1], signature=parts[2]
+    )
 
 
 def _encode(value: bytes) -> str:

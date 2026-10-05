@@ -25,10 +25,20 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngressAuthority,
 )
 from azents.core.external_channel_provider import SlackConnectionCredentials
-from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadOnlySession,
+    ReadSession,
+    ReadWriteSession,
+    WriteSession,
+)
 from azents.repos.external_channel.data import (
+    ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
     ExternalChannelTrigger,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.slack_socket_operations import (
+    SlackSocketOperationRepository,
 )
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.credentials import (
@@ -56,13 +66,14 @@ class _SessionDouble(AsyncSession):
 
     def __init__(self) -> None:
         self.committed = False
+        self.open_scopes = 0
 
     async def commit(self) -> None:
         """Record one committed lifecycle transition."""
         self.committed = True
 
 
-class _RepositoryDouble:
+class _RepositoryDouble(ExternalChannelRepository):
     """Record connection health changes and recoverable lease release."""
 
     def __init__(self) -> None:
@@ -71,7 +82,7 @@ class _RepositoryDouble:
 
     async def mark_connection_reconnect_required(
         self,
-        session: ReadSession,
+        session: WriteSession,
         *,
         connection_id: str,
         reason: str,
@@ -96,7 +107,7 @@ class _RepositoryDouble:
 
     async def release_socket_connection_lease(
         self,
-        session: ReadSession,
+        session: WriteSession,
         *,
         connection_id: str,
         lease_owner: str,
@@ -119,10 +130,14 @@ class _RepositoryDouble:
 
     async def socket_connection_owned_active(
         self,
-        _session: WriteSession,
-        **_kwargs: object,
-    ) -> object:
-        return object()
+        session: ReadSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelConnection | None:
+        del session, lease_owner, now
+        return ExternalChannelConnection.model_construct(id=connection_id)
 
 
 def _event(
@@ -162,11 +177,27 @@ def _service(
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield ReadWriteSession(session)
+        session.open_scopes += 1
+        try:
+            yield ReadWriteSession(session)
+            await session.commit()
+        finally:
+            session.open_scopes -= 1
+
+    @asynccontextmanager
+    async def read_session_manager() -> AsyncGenerator[ReadSession, None]:
+        session.open_scopes += 1
+        try:
+            yield ReadOnlySession(session)
+        finally:
+            session.open_scopes -= 1
 
     return SlackSocketManagerService(
-        session_manager=session_manager,
-        repository=repository,  # ty: ignore[invalid-argument-type] — the lifecycle fake implements only the repository methods exercised by this manager.
+        operations=SlackSocketOperationRepository(
+            read_session_manager=read_session_manager,
+            write_session_manager=session_manager,
+            repository=repository,
+        ),
         credentials_codec=MagicMock(spec=ExternalChannelCredentialsCodec),
         admission_service=MagicMock(spec=ExternalChannelAdmissionService),
         interaction_processor=MagicMock(spec=ExternalChannelInteractionProcessor),
@@ -227,11 +258,12 @@ async def test_owned_socket_event_uses_lease_authority_without_legacy_admission(
 ):
     session = _SessionDouble()
     repository = _RepositoryDouble()
-    transport = SimpleNamespace(
-        ingest_slack_event=AsyncMock(
-            return_value=_outcome(ExternalChannelIngestionOutcomeKind.ACCEPTED)
-        )
-    )
+
+    async def ingest(**_kwargs: object) -> ExternalChannelIngestionOutcome:
+        assert session.open_scopes == 0
+        return _outcome(ExternalChannelIngestionOutcomeKind.ACCEPTED)
+
+    transport = SimpleNamespace(ingest_slack_event=AsyncMock(side_effect=ingest))
     service = _service(
         session,
         repository,
@@ -252,6 +284,7 @@ async def test_owned_socket_event_uses_lease_authority_without_legacy_admission(
     assert authority.ingress_profile is ExternalChannelIngressProfile.SLACK_SOCKET
     assert authority.lease_owner == "manager-1"
     assert authority.lease_generation is None
+    assert session.open_scopes == 0
 
 
 @pytest.mark.asyncio

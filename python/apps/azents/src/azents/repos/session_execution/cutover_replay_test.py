@@ -1,6 +1,7 @@
 """Bounded Team Session cutover replay repository tests."""
 
-from typing import Any, cast
+from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -33,10 +34,15 @@ class _Session:
     def __init__(self, rows: list[CutoverReplayCandidateProjection]) -> None:
         self.rows = rows
         self.statement: sa.Select[Any] | None = None
+        mock = AsyncMock(spec=AsyncSession)
+        mock.execute.side_effect = self.execute
+        assert isinstance(mock, AsyncSession)
+        self.session = mock
 
     async def execute(self, statement: object) -> _Result:
         """Record the content-free candidate projection query."""
-        self.statement = cast(sa.Select[Any], statement)
+        assert isinstance(statement, sa.Select)
+        self.statement = statement
         return _Result(self.rows)
 
 
@@ -67,7 +73,7 @@ async def test_candidate_batch_uses_cursor_and_limit_without_content_tables() ->
     repository = SessionCutoverReplayRepository()
 
     batch = await repository.read_candidate_batch(
-        ReadWriteSession(cast(AsyncSession, session)),
+        ReadWriteSession(session.session),
         batch_size=1,
         after_session_id="session-0",
     )

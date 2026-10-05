@@ -105,11 +105,14 @@ class SlackConnectionCredentials(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider") if obj.get("provider") is not None else 'slack',
             "bot_token": obj.get("bot_token"),
             "signing_secret": obj.get("signing_secret"),
             "app_token": obj.get("app_token")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

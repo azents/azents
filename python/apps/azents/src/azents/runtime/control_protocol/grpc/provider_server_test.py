@@ -36,6 +36,10 @@ from azents.core.enums import (
     RuntimeProviderKind,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 from azents.core.runtime_runner_credential import RuntimeRunnerIssuedCredential
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -53,10 +57,6 @@ from azents.runtime.coordination.data import (
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
-)
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialUnavailable,
 )
 from azents.testing.grpc import FakeGrpcContext as BaseFakeGrpcContext
 from azents.testing.runtime_coordination import (

@@ -8,6 +8,10 @@ import pytest
 import sqlalchemy as sa
 
 from azents.broker.types import SessionStopSignal
+from azents.core.agent_runtime_removal import (
+    AgentRuntimeRemovalConfirmationRequest,
+    AgentRuntimeRemovalUnavailable,
+)
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
@@ -46,6 +50,9 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime_removal.operations import (
+    AgentRuntimeRemovalOperationsRepository,
+)
 from azents.repos.agent_runtime_removal_finalizer import (
     AgentRuntimeRemovalFinalizerRepository,
 )
@@ -58,10 +65,6 @@ from azents.testing.model_selection import (
 )
 
 from . import AgentRuntimeRemovalService
-from .data import (
-    AgentRuntimeRemovalConfirmationRequest,
-    AgentRuntimeRemovalUnavailable,
-)
 
 
 class _ManagedAgentFixture(NamedTuple):
@@ -123,13 +126,15 @@ def _service(
     """Build the concrete internal removal service."""
     scope_repository = AgentRuntimeRemovalScopeRepository()
     return AgentRuntimeRemovalService(
-        session_manager=session_manager,
-        agent_repository=AgentRepository(),
-        runtime_repository=AgentRuntimeRepository(),
-        removal_repository=removal_repository or AgentRuntimeRemovalRepository(),
-        scope_repository=scope_repository,
-        finalizer_repository=AgentRuntimeRemovalFinalizerRepository(
-            scope_repository=scope_repository
+        operations=AgentRuntimeRemovalOperationsRepository(
+            session_manager=session_manager,
+            agent_repository=AgentRepository(),
+            runtime_repository=AgentRuntimeRepository(),
+            removal_repository=removal_repository or AgentRuntimeRemovalRepository(),
+            scope_repository=scope_repository,
+            finalizer_repository=AgentRuntimeRemovalFinalizerRepository(
+                scope_repository=scope_repository
+            ),
         ),
         broker=_Broker(),
     )

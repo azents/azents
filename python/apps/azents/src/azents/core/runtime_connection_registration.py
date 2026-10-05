@@ -11,6 +11,5 @@ class RuntimeConnectionRegistrationUnavailable(Exception):
 
     def __post_init__(self) -> None:
         Exception.__init__(
-            self,
-            f"Runtime connection registration unavailable: {self.code}",
+            self, f"Runtime connection registration unavailable: {self.code}"
         )

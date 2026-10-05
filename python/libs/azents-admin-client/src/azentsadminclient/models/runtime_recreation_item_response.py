@@ -110,7 +110,9 @@ class RuntimeRecreationItemResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "runtime_id": obj.get("runtime_id"),
             "status": obj.get("status"),
             "attempt": obj.get("attempt"),
@@ -118,6 +120,7 @@ class RuntimeRecreationItemResponse(BaseModel):
             "failure_code": obj.get("failure_code"),
             "failure_message": obj.get("failure_message"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

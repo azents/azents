@@ -103,11 +103,14 @@ class DockerContainerResources(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "cpu_reservation_millicores": obj.get("cpu_reservation_millicores"),
             "cpu_limit_millicores": obj.get("cpu_limit_millicores"),
             "memory_reservation_bytes": obj.get("memory_reservation_bytes"),
             "memory_limit_bytes": obj.get("memory_limit_bytes")
+            }.items() if _key in obj
         })
         return _obj
 

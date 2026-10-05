@@ -27,6 +27,11 @@ from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, Write
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.definition import (
+    RDBScheduledTaskAuthorityValidator,
+    ScheduledTaskDefinitionRepository,
+)
+from azents.repos.scheduled_task.dispatch import ScheduledTaskDispatchRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -36,11 +41,7 @@ from azents.repos.scheduled_task_cycle.data import (
 )
 from azents.services.chat.live_events import mailbox_item_to_live_event
 
-from .service import (
-    RDBScheduledTaskAuthorityValidator,
-    ScheduledTaskDispatcher,
-    ScheduledTaskService,
-)
+from .service import ScheduledTaskDispatcher
 
 _NOW = datetime.datetime(2026, 8, 16, 0, 0, tzinfo=datetime.UTC)
 
@@ -518,16 +519,20 @@ def _dispatcher(
 ) -> ScheduledTaskDispatcher:
     """Compose a dispatcher from deterministic fakes."""
     return ScheduledTaskDispatcher(
-        session_manager=manager,
-        agent_session_repository=agent_session_repository or _AgentSessionRepository(),
-        cycle_repository=cycle_repository,
-        mailbox_repository=mailbox_repository,
+        operations=ScheduledTaskDispatchRepository(
+            session_manager=manager,
+            agent_session_repository=agent_session_repository
+            or _AgentSessionRepository(),
+            cycle_repository=cycle_repository,
+            mailbox_repository=mailbox_repository,
+            authority_validator=authority_validator,
+            task_repository=repository,
+            clock=clock,
+            lease_duration=datetime.timedelta(minutes=1),
+        ),
         broker=broker,
-        authority_validator=authority_validator,
-        task_repository=repository,
         clock=clock,
         batch_size=batch_size,
-        lease_duration=datetime.timedelta(minutes=1),
     )
 
 
@@ -546,7 +551,7 @@ async def test_provider_mutation_uses_shared_lock_order_and_fences_binding() -> 
         candidate=candidate,
         locked=locked,
     )
-    service = ScheduledTaskService(
+    service = ScheduledTaskDefinitionRepository(
         repository=repository,
         cycle_repository=_CycleRepository(),
         mailbox_repository=_MailboxRepository(),
@@ -732,7 +737,7 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
     assert summary.admitted == 1
     assert summary.wake_failed == 1
     assert manager.committed == ["cycle", "mailbox", "running"]
-    agent_session_repository = dispatcher.agent_session_repository
+    agent_session_repository = dispatcher.operations.agent_session_repository
     assert isinstance(agent_session_repository, _AgentSessionRepository)
     assert agent_session_repository.running_session_ids == [task.session_id]
     assert len(cycle_repository.snapshots) == 1

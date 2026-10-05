@@ -7,15 +7,8 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.enums import (
-    ExternalChannelAccessRequestStatus,
-    ExternalChannelConnectionStatus,
     ExternalChannelIngressAuthorityKind,
-    ExternalChannelInteractionStatus,
-    ExternalChannelParticipationSettingStatus,
-    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
-    ExternalChannelResourceStatus,
-    ExternalChannelSetupClaimStatus,
 )
 from azents.core.external_channel_conversation_data import (
     ExternalChannelConversationScope,
@@ -35,18 +28,17 @@ from azents.core.external_channel_participation_state import (
     build_setup_continuation_request,
     setup_source_from_projection,
 )
-from azents.core.external_channel_selector_state import selector_state_from_interaction
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.core.external_channel_replay import (
+    ExternalChannelIngestionReplayUnavailable,
+    ExternalChannelReplaySource,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequest,
-    ExternalChannelConnectionConfiguration,
     ExternalChannelConversationPosition,
-    ExternalChannelPrincipal,
-    ExternalChannelResource,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.ingestion_replay_operations import (
+    ExternalChannelReplayOperations,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
 )
@@ -55,10 +47,6 @@ from azents.services.external_channel.ingestion_deps import (
 )
 
 _REPLAY_OPERATION_BUDGET = datetime.timedelta(seconds=30)
-
-
-class ExternalChannelIngestionReplayUnavailable(ValueError):
-    """A retained selector or access boundary cannot be replayed safely."""
 
 
 def external_channel_replay_deadline(
@@ -79,32 +67,12 @@ def access_request_uses_typed_replay(
     )
 
 
-@dataclasses.dataclass(frozen=True)
-class _ReplaySource:
-    """Content-free durable owners needed to reconstruct one replay."""
-
-    configuration: ExternalChannelConnectionConfiguration
-    position: ExternalChannelConversationPosition
-    resource: ExternalChannelResource
-    target_resource_id: str
-    principal: ExternalChannelPrincipal
-    route_id: str
-    trigger_provider_message_key: str
-    range_start_position: str | None
-    trigger_position: str
-
-
 @dataclasses.dataclass
 class ExternalChannelIngestionReplayService:
     """Reconstruct immutable access, selector, and setup replay."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    operations: Annotated[
+        ExternalChannelReplayOperations, Depends(ExternalChannelReplayOperations)
     ]
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,
@@ -119,33 +87,9 @@ class ExternalChannelIngestionReplayService:
         initial_title_eligible: bool,
     ) -> ExternalChannelIngestionOutcome:
         """Replay one committed Allow through its retained original boundary."""
-        async with self.session_manager() as session:
-            request = await self.repository.get_access_request(
-                session,
-                access_request_id=access_request_id,
-            )
-            if (
-                request is None
-                or request.status is not ExternalChannelAccessRequestStatus.ALLOWED
-                or request.connection_id is None
-                or request.conversation_position_id is None
-                or request.trigger_position is None
-            ):
-                raise ExternalChannelIngestionReplayUnavailable(
-                    "External Channel access replay boundary is unavailable."
-                )
-            source = await self._load_source(
-                session,
-                connection_id=request.connection_id,
-                conversation_position_id=request.conversation_position_id,
-                resource_id=request.source_resource_id,
-                target_resource_id=request.resource_id,
-                principal_id=request.principal_id,
-                route_id=request.route_id,
-                trigger_provider_message_key=(request.trigger_provider_message_key),
-                range_start_position=request.range_start_position,
-                trigger_position=request.trigger_position,
-            )
+        source = await self.operations.read_access_allow(
+            access_request_id=access_request_id
+        )
         return await self._ingest_source(
             source,
             operation=ExternalChannelIngestionOperation.ACCESS_ALLOW,
@@ -162,41 +106,9 @@ class ExternalChannelIngestionReplayService:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelIngestionOutcome:
         """Replay one immutable selected route through interaction-owned state."""
-        async with self.session_manager() as session:
-            interaction = await self.repository.lock_interaction(
-                session,
-                interaction_id=selector_interaction_id,
-            )
-            if (
-                interaction is None
-                or interaction.principal_id != principal_id
-                or interaction.status
-                in {
-                    ExternalChannelInteractionStatus.EXPIRED,
-                    ExternalChannelInteractionStatus.REJECTED,
-                    ExternalChannelInteractionStatus.FAILED,
-                }
-            ):
-                raise ExternalChannelIngestionReplayUnavailable(
-                    "External Channel selector replay boundary is unavailable."
-                )
-            state = selector_state_from_interaction(interaction)
-            if state.principal_id != principal_id or state.selected_route_id is None:
-                raise ExternalChannelIngestionReplayUnavailable(
-                    "External Channel selector replay boundary is unavailable."
-                )
-            source = await self._load_source(
-                session,
-                connection_id=state.connection_id,
-                conversation_position_id=state.conversation_position_id,
-                resource_id=state.resource_id,
-                target_resource_id=state.resource_id,
-                principal_id=state.principal_id,
-                route_id=state.selected_route_id,
-                trigger_provider_message_key=state.trigger_provider_message_key,
-                range_start_position=state.range_start_position,
-                trigger_position=state.trigger_position,
-            )
+        source = await self.operations.read_selected_interaction(
+            selector_interaction_id=selector_interaction_id, principal_id=principal_id
+        )
         return await self._ingest_source(
             source,
             operation=ExternalChannelIngestionOperation.SELECTOR_CONTINUATION,
@@ -212,12 +124,16 @@ class ExternalChannelIngestionReplayService:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelIngestionOutcome:
         """Replay one selected setup claim through its frozen source."""
-        async with self.session_manager() as session:
-            request = await self._load_setup_request(
-                session,
-                setup_claim_id=setup_claim_id,
-                deadline=deadline,
-            )
+        source = await self.operations.read_setup_claim(setup_claim_id=setup_claim_id)
+        request = build_setup_continuation_request(
+            configuration=source.configuration,
+            claim=source.claim,
+            setting=source.setting,
+            source_resource=source.source_resource,
+            principal=source.principal,
+            source=setup_source_from_projection(source.claim.source_projection),
+            deadline=deadline,
+        )
         return await self.ingestion_service.ingest(request)
 
     async def recover_selected_setup_claims(
@@ -227,104 +143,20 @@ class ExternalChannelIngestionReplayService:
         now: datetime.datetime,
     ) -> tuple[ExternalChannelIngestionOutcome, ...]:
         """Attempt a bounded oldest-first selected-setup recovery pass."""
-        async with self.session_manager() as session:
-            claims = await self.repository.list_selected_setup_claims(
-                session,
-                limit=limit,
-            )
+        claim_ids = await self.operations.list_selected_setup_claim_ids(limit=limit)
         outcomes: list[ExternalChannelIngestionOutcome] = []
-        for claim in claims:
+        for claim_id in claim_ids:
             outcomes.append(
                 await self.replay_setup_claim(
-                    setup_claim_id=claim.id,
+                    setup_claim_id=claim_id,
                     deadline=external_channel_replay_deadline(now=now),
                 )
             )
         return tuple(outcomes)
 
-    async def _load_setup_request(
-        self,
-        session: WriteSession,
-        *,
-        setup_claim_id: str,
-        deadline: ExternalChannelOperationDeadline,
-    ) -> ExternalChannelIngestionRequest:
-        claim = await self.repository.get_setup_claim(
-            session,
-            claim_id=setup_claim_id,
-        )
-        if (
-            claim is None
-            or claim.status is not ExternalChannelSetupClaimStatus.SELECTED
-            or claim.route_id is None
-            or claim.selected_setting_id is None
-            or claim.selected_resource_id is None
-            or claim.selected_source_revision is None
-        ):
-            raise ExternalChannelIngestionReplayUnavailable(
-                "External Channel setup replay boundary is unavailable."
-            )
-        configuration = await self.repository.get_connection_configuration(
-            session,
-            connection_id=claim.connection_id,
-        )
-        setting = await self.repository.get_active_participation_setting(
-            session,
-            connection_id=claim.connection_id,
-            provider_parent_channel_id=claim.provider_parent_channel_id,
-        )
-        source_resource = await self.repository.get_resource(
-            session,
-            resource_id=claim.source_resource_id,
-        )
-        target_resource = await self.repository.get_resource(
-            session,
-            resource_id=claim.selected_resource_id,
-        )
-        principal = await self.repository.get_principal(
-            session,
-            principal_id=claim.principal_id,
-        )
-        if (
-            configuration is None
-            or configuration.provider_tenant_id is None
-            or configuration.status
-            not in {
-                ExternalChannelConnectionStatus.ACTIVE,
-                ExternalChannelConnectionStatus.DEGRADED,
-                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-            }
-            or setting is None
-            or setting.id != claim.selected_setting_id
-            or setting.route_id != claim.route_id
-            or setting.status is not ExternalChannelParticipationSettingStatus.ACTIVE
-            or source_resource is None
-            or source_resource.connection_id != claim.connection_id
-            or source_resource.status is not ExternalChannelResourceStatus.ACTIVE
-            or target_resource is None
-            or target_resource.connection_id != claim.connection_id
-            or target_resource.status is not ExternalChannelResourceStatus.ACTIVE
-            or principal is None
-            or principal.provider is not configuration.provider
-            or principal.provider_tenant_id != configuration.provider_tenant_id
-            or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
-        ):
-            raise ExternalChannelIngestionReplayUnavailable(
-                "External Channel setup replay owners are unavailable."
-            )
-        return build_setup_continuation_request(
-            configuration=configuration,
-            claim=claim,
-            setting=setting,
-            source_resource=source_resource,
-            principal=principal,
-            source=setup_source_from_projection(claim.source_projection),
-            deadline=deadline,
-        )
-
     async def _ingest_source(
         self,
-        source: _ReplaySource,
+        source: ExternalChannelReplaySource,
         *,
         operation: ExternalChannelIngestionOperation,
         deadline: ExternalChannelOperationDeadline,
@@ -353,7 +185,7 @@ class ExternalChannelIngestionReplayService:
 
     async def _resolve_delivery_thread_key(
         self,
-        source: _ReplaySource,
+        source: ExternalChannelReplaySource,
         *,
         deadline: ExternalChannelOperationDeadline,
     ) -> str | None:
@@ -385,76 +217,9 @@ class ExternalChannelIngestionReplayService:
             return None
         return root_message_id
 
-    async def _load_source(
-        self,
-        session: WriteSession,
-        *,
-        connection_id: str,
-        conversation_position_id: str,
-        resource_id: str,
-        target_resource_id: str,
-        principal_id: str,
-        route_id: str,
-        trigger_provider_message_key: str,
-        range_start_position: str | None,
-        trigger_position: str,
-    ) -> _ReplaySource:
-        configuration = await self.repository.get_connection_configuration(
-            session,
-            connection_id=connection_id,
-        )
-        position = await self.repository.get_conversation_position(
-            session,
-            position_id=conversation_position_id,
-        )
-        resource = await self.repository.get_resource(
-            session,
-            resource_id=resource_id,
-        )
-        principal = await self.repository.get_principal(
-            session,
-            principal_id=principal_id,
-        )
-        route = await self.repository.get_agent_route(session, route_id=route_id)
-        if (
-            configuration is None
-            or configuration.provider_tenant_id is None
-            or configuration.status
-            not in {
-                ExternalChannelConnectionStatus.ACTIVE,
-                ExternalChannelConnectionStatus.DEGRADED,
-                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-            }
-            or position is None
-            or position.connection_id != connection_id
-            or resource is None
-            or resource.connection_id != connection_id
-            or resource.status is not ExternalChannelResourceStatus.ACTIVE
-            or principal is None
-            or principal.provider is not configuration.provider
-            or principal.provider_tenant_id != configuration.provider_tenant_id
-            or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
-            or route is None
-            or route.connection_id != connection_id
-        ):
-            raise ExternalChannelIngestionReplayUnavailable(
-                "External Channel replay owners are unavailable."
-            )
-        return _ReplaySource(
-            configuration=configuration,
-            position=position,
-            resource=resource,
-            target_resource_id=target_resource_id,
-            principal=principal,
-            route_id=route_id,
-            trigger_provider_message_key=trigger_provider_message_key,
-            range_start_position=range_start_position,
-            trigger_position=trigger_position,
-        )
-
 
 def _build_request(
-    source: _ReplaySource,
+    source: ExternalChannelReplaySource,
     *,
     operation: ExternalChannelIngestionOperation,
     deadline: ExternalChannelOperationDeadline,

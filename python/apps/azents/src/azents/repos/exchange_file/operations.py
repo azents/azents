@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
+from sqlalchemy.exc import SQLAlchemyError
 
 from azents.core.enums import (
     ExchangeFileOrigin,
@@ -34,6 +35,10 @@ from azents.repos.file_metadata_authority import (
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 logger = logging.getLogger(__name__)
+
+
+class ExchangeFilePublicationRecoveryError(RuntimeError):
+    """The persisted publication could not be disproven after a database failure."""
 
 
 class ExchangeFileMetadataFailure(StrEnum):
@@ -97,7 +102,6 @@ class ExchangeFileOperationRepository:
     session_manager: Annotated[
         SessionManager[WriteSession], Depends(get_session_manager)
     ]
-
     read_session_manager: Annotated[
         SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
@@ -507,8 +511,13 @@ class ExchangeFileOperationRepository:
         file_id: str,
     ) -> ExchangeFile | None:
         """Read publication identity for post-failure object compensation."""
-        async with self.session_manager() as session:
-            return await self.exchange_file_repository.get_by_id(session, file_id)
+        try:
+            async with self.read_session_manager() as session:
+                return await self.exchange_file_repository.get_by_id(session, file_id)
+        except SQLAlchemyError as error:
+            raise ExchangeFilePublicationRecoveryError(
+                "Exchange publication verification failed"
+            ) from error
 
     async def finalize_authority_create(
         self,

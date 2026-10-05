@@ -108,13 +108,16 @@ class SubscriptionUsageExternalResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "integration_id": obj.get("integration_id"),
             "provider": obj.get("provider"),
             "fetched_at": obj.get("fetched_at"),
             "url": obj.get("url"),
             "message": obj.get("message")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

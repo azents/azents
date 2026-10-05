@@ -33,6 +33,21 @@ from azents.engine.hooks.types import (
     TurnStartResult,
 )
 
+type _DeterministicHookContext = (
+    SessionStartHookContext
+    | SessionClearHookContext
+    | SessionCompactHookContext
+    | CompactionSummaryHookContext
+    | RunStartHookContext
+    | RunEndHookContext
+    | TurnStartHookContext
+    | TurnEndHookContext
+    | BeforeToolCallHookContext
+    | AfterToolCallHookContext
+    | RuntimeHibernateHookContext
+    | RuntimeRestoreHookContext
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class DeterministicHookAction:
@@ -160,7 +175,9 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
     async def _on_runtime_restore(self, context: RuntimeRestoreHookContext) -> None:
         await self._run("on_runtime_restore", context)
 
-    async def _run(self, lifecycle: RuntimeHookName, context: object) -> object | None:
+    async def _run(
+        self, lifecycle: RuntimeHookName, context: _DeterministicHookContext
+    ) -> object | None:
         """Record call and execute next action."""
         self.calls.append(
             DeterministicHookCall(
@@ -184,23 +201,37 @@ class DeterministicRuntimeHookProvider(Toolkit[BaseModel]):
         return actions.pop(0)
 
 
-def _summarize_context(context: object) -> dict[str, str | int | None]:
+def _summarize_context(
+    context: _DeterministicHookContext,
+) -> dict[str, str | int | None]:
     """Summarize only context identifiers without sensitive payload."""
-    summary: dict[str, str | int | None] = {}
-    for field_name in (
-        "workspace_id",
-        "agent_id",
-        "session_id",
-        "run_id",
-        "tool_name",
-        "toolkit_slug",
-        "turn_index",
-        "reason",
-        "agent_runtime_id",
-        "compaction_id",
-        "covered_until_event_id",
+    summary: dict[str, str | int | None] = {
+        "workspace_id": context.workspace_id,
+        "agent_id": context.agent_id,
+        "session_id": context.session_id,
+        "run_id": None,
+        "tool_name": None,
+        "toolkit_slug": None,
+        "turn_index": None,
+        "reason": None,
+        "agent_runtime_id": None,
+        "compaction_id": None,
+        "covered_until_event_id": None,
+    }
+    if isinstance(context, RuntimeHibernateHookContext | RuntimeRestoreHookContext):
+        summary["agent_runtime_id"] = context.agent_runtime_id
+    else:
+        summary["run_id"] = context.run_id
+    if isinstance(context, BeforeToolCallHookContext | AfterToolCallHookContext):
+        summary["tool_name"] = context.tool_name
+        summary["toolkit_slug"] = context.toolkit_slug
+    if isinstance(context, TurnStartHookContext | TurnEndHookContext):
+        summary["turn_index"] = context.turn_index
+    if isinstance(
+        context, CompactionSummaryHookContext | RunEndHookContext | TurnEndHookContext
     ):
-        value = getattr(context, field_name, None)
-        if isinstance(value, str | int) or value is None:
-            summary[field_name] = value
+        summary["reason"] = context.reason
+    if isinstance(context, CompactionSummaryHookContext):
+        summary["compaction_id"] = context.compaction_id
+        summary["covered_until_event_id"] = context.covered_until_event_id
     return summary
