@@ -18,6 +18,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     ScheduledTaskScheduleType,
 )
+from azents.core.scheduled_task_management import ScheduledTaskManagementUnavailable
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
@@ -28,6 +29,10 @@ from azents.repos.external_channel.management import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.definition import ScheduledTaskAuthorityValidator
+from azents.repos.scheduled_task.management_operations import (
+    ScheduledTaskManagementRepository,
+)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
@@ -36,12 +41,8 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleState,
 )
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
-from azents.services.scheduled_task.service import ScheduledTaskAuthorityValidator
 
-from .management import (
-    ScheduledTaskManagementService,
-    ScheduledTaskManagementUnavailable,
-)
+from .management import ScheduledTaskManagementService
 
 _NOW = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
 _WORKSPACE_ID = "w" * 32
@@ -67,10 +68,15 @@ class _SessionManager:
 
     def __init__(self) -> None:
         self.session = _Session()
+        self.active = False
 
     @asynccontextmanager
     async def __call__(self) -> AsyncIterator[WriteSession]:
-        yield ReadWriteSession(cast(AsyncSession, self.session))
+        self.active = True
+        try:
+            yield ReadWriteSession(cast(AsyncSession, self.session))
+        finally:
+            self.active = False
 
 
 class _AgentRepository:
@@ -390,34 +396,37 @@ def _service(
     cycle_repository: _CycleRepository | None = None,
 ) -> ScheduledTaskManagementService:
     return ScheduledTaskManagementService(
-        session_manager=cast(SessionManager[WriteSession], _SessionManager()),
-        agent_repository=cast(
-            AgentRepository,
-            agent_repository or _AgentRepository(events),
-        ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository or _AgentSessionRepository(events),
-        ),
-        task_repository=cast(ScheduledTaskRepository, task_repository),
-        cycle_repository=cast(
-            ScheduledTaskCycleRepository,
-            cycle_repository or _CycleRepository(events),
-        ),
-        mailbox_repository=cast(MailboxRepository, _MailboxRepository(events)),
-        external_channel_repository=cast(
-            ExternalChannelRepository,
-            _ExternalChannelRepository(events),
-        ),
-        external_channel_management_repository=cast(
-            ExternalChannelManagementRepository,
-            AsyncMock(spec=ExternalChannelManagementRepository),
+        operations=ScheduledTaskManagementRepository(
+            session_manager=cast(SessionManager[WriteSession], _SessionManager()),
+            agent_repository=cast(
+                AgentRepository,
+                agent_repository or _AgentRepository(events),
+            ),
+            agent_session_repository=cast(
+                AgentSessionRepository,
+                agent_session_repository or _AgentSessionRepository(events),
+            ),
+            task_repository=cast(ScheduledTaskRepository, task_repository),
+            cycle_repository=cast(
+                ScheduledTaskCycleRepository,
+                cycle_repository or _CycleRepository(events),
+            ),
+            mailbox_repository=cast(MailboxRepository, _MailboxRepository(events)),
+            external_channel_repository=cast(
+                ExternalChannelRepository,
+                _ExternalChannelRepository(events),
+            ),
+            external_channel_management_repository=cast(
+                ExternalChannelManagementRepository,
+                AsyncMock(spec=ExternalChannelManagementRepository),
+            ),
+            authority_validator=cast(
+                ScheduledTaskAuthorityValidator,
+                authority_validator,
+            ),
+            read_session_manager=cast(SessionManager[WriteSession], _SessionManager()),
         ),
         channel_service=channel_service,
-        authority_validator=cast(
-            ScheduledTaskAuthorityValidator,
-            authority_validator,
-        ),
     )
 
 
@@ -680,6 +689,15 @@ async def test_delete_notifies_bound_channel_after_commit() -> None:
         channel_service=channel_service,
     )
 
+    manager = service.operations.session_manager
+    assert isinstance(manager, _SessionManager)
+
+    async def observe_deletion(deleted: ScheduledTask) -> None:
+        assert not manager.active
+        assert manager.session.committed
+        assert deleted is task
+
+    channel_service.execute_deletion.side_effect = observe_deletion
     await service.delete(
         workspace_id=_WORKSPACE_ID,
         agent_id=_AGENT_ID,
@@ -739,3 +757,38 @@ async def test_started_one_time_edit_is_conflict_after_canonical_lock_order() ->
         < task_lock_index
     )
     assert not repository.replaced
+
+
+async def test_replace_preserves_no_registration_effect() -> None:
+    """Editing future definition fields preserves the no-provider-effect path."""
+    events: list[str] = []
+    task = _task(binding_id=_CURRENT_BINDING_ID)
+    channel = AsyncMock(spec=ScheduledTaskChannelService)
+
+    class ReplacementRepository(_TaskRepository):
+        async def replace(
+            self, session: ReadSession, **kwargs: object
+        ) -> ScheduledTask:
+            del session, kwargs
+            return task
+
+    service = _service(
+        events=events,
+        task_repository=ReplacementRepository(events, task=task),
+        authority_validator=_AuthorityValidator(events),
+        channel_service=channel,
+    )
+    await service.replace(
+        workspace_id=_WORKSPACE_ID,
+        agent_id=_AGENT_ID,
+        user_id="user-1",
+        task_id=_TASK_ID,
+        title="Updated report",
+        objective="Preserve existing registration.",
+        at="2099-08-17T00:00:00Z",
+        cron=None,
+        timezone=None,
+        channel_id=_CURRENT_BINDING_ID,
+    )
+    channel.execute_registration.assert_not_awaited()
+    channel.execute_deletion.assert_not_awaited()

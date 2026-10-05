@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.scheduled_task_control import ScheduledTaskProviderControlError
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -66,7 +67,6 @@ from azents.services.scheduled_task.channel import (
     get_scheduled_task_channel_service,
 )
 from azents.services.scheduled_task.control import (
-    ScheduledTaskProviderControlError,
     ScheduledTaskProviderControlService,
     build_scheduled_task_control_locator,
     parse_scheduled_task_control_locator,

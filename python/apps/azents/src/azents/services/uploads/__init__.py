@@ -34,7 +34,7 @@ from typing import ClassVar, Protocol
 
 from azcommon.infra.s3.service import S3Service
 
-from azents.services.uploads.schema import StoredImage
+from azents.core.upload_images import StoredImage
 
 logger = logging.getLogger(__name__)
 

@@ -6,9 +6,17 @@ spec_type: domain
 domain: runtime-provider
 code_paths:
   - python/apps/azents/src/azents/core/runtime_provider_data.py
+  - python/apps/azents/src/azents/core/runtime_provider_control.py
+  - python/apps/azents/src/azents/core/runtime_recreation.py
+  - python/apps/azents/src/azents/repos/runtime_recreation_operations.py
   - python/apps/azents/src/azents/core/runtime_profile_deletion.py
   - python/apps/azents/src/azents/core/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/repos/runtime_provider_bootstrap_operations.py
+  - python/apps/azents/src/azents/repos/runtime_profile_resolution_operations.py
+  - python/apps/azents/src/azents/repos/runtime_profile_reconciliation_operations.py
+  - python/apps/azents/src/azents/repos/runtime_provider_auth_operations.py
+  - python/apps/azents/src/azents/repos/runtime_terminal_authority_read.py
+  - python/apps/azents/src/azents/repos/agent_runtime_transition_operations.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_bootstrap.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_policy.py
@@ -60,7 +68,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/conftest.py
   - testenv/azents/e2e/src/tests/required/public/test_workspace_upload.py
 last_verified_at: 2026-10-05
-spec_version: 37
+spec_version: 40
 ---
 
 # Runtime Provider
@@ -73,6 +81,17 @@ declaration; both origins reconcile into the same Provider aggregate and managem
 controller connections do not create or discover Provider resources.
 
 Provider authentication is a separate durable binding domain. A connection selects one explicit authentication method, verifies its evidence, resolves exactly one active binding, and derives the Provider identity from that binding. Registration payload fields are consistency checks only and cannot select a Provider or grant authority.
+
+Enrollment issuance, grant exchange, credential revocation, connection acceptance,
+heartbeat and disconnect delegate to completed repository operations. Grant
+consumption, credential creation and audit remain atomic. Cryptography and explicit
+authentication-registry composition stay separate from persistence ownership.
+Kubernetes TokenReview precedes the completed workload-binding operation; issued-token
+and workload authentication return detached evidence only after their database owner
+exits. Ordinary connection observation uses native read-only scopes without acceptance
+locks; final acceptance revalidates Provider and binding authority under its write
+transaction, including generation acceptance, credential usage, binding connection,
+connection creation and audit.
 
 Providers are optional. A Provider must be enabled, active, Workspace-eligible, and currently
 advertise a valid capability contract that satisfies the exact selected infrastructure Profile
@@ -144,6 +163,48 @@ The service neither owns a database scope nor exposes binding state; descriptive
 does not replace the admission and mutation checks required by Runtime operations.
 
 ## Runtime binding
+
+Infrastructure Profile and authentication-binding administrative services delegate
+their database work to completed repository operations. Independent descriptions
+use native read-only scopes and return detached Profile, binding and compatibility
+evidence. Profile writes retain validation and usage/deletion conflicts; terminal
+policy invalidation runs only after the completed mutation.
+
+Binding creation, rotation and revocation retain the existing expected Admin version,
+bootstrap ownership restrictions and atomic binding/grant/audit/revocation groups.
+Secret preparation precedes the mutation; safe projection and terminal invalidation
+follow completion. Database mutation error translation belongs to the repository
+boundary without changing the service-visible failure contract.
+
+CLI bootstrap enrollment resolves its exact Provider/declaration/source ownership
+in a completed read-only operation before credential authentication, grant issuance
+or exchange orchestration. The preliminary description does not authorize writes
+or replace final enrollment authority checks.
+
+Profile resolution completes source checks, configuration CAS and current-state
+fallback inside one repository operation, returning detached desired/applied state.
+Explicit Runtime addition composes selection preparation and attachment in the
+same repository transaction as Agent capability/version updates, logical Runtime
+create/rearm and the idempotent addition receipt. No service passes a live session
+or separately commits those preparation helpers.
+
+Durable Profile reconciliation completes claim, source-version page checks,
+retry and attempt-fenced continue/complete inside repositories. Per-Agent resolution
+commits before task finalization; existing timeout, attempt/cursor, page-bound
+and handled-failure behavior remains unchanged.
+
+Issued-token authentication completes credential, binding and Provider checks with
+credential-used and binding-authenticated writes in one database-only operation.
+Kubernetes TokenReview and audience/subject/expiry validation precede that operation.
+Services return detached identity after durable authority checks and conditional
+authenticated timestamps finish.
+
+Runtime Terminal identity, Workspace membership, private Agent administration,
+Session ownership, Profile and applied-state checks finish in one native read-only
+authority operation. Runner coordination, policy projection and working-folder
+resolution consume its detached snapshot after closure, preserving fail-closed
+reason ordering.
+
 
 An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
 addition selects one available Workspace Runtime Profile, creates or rearms the one logical Runtime
@@ -389,10 +450,25 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **40 (2026-10-05):** Added completed Provider enrollment, connection acceptance,
+  Runner authentication and recreation operations to the common authority and
+  Admin boundaries, preserving generation/attempt fencing and detached reads.
+
+- **39 (2026-10-05):** Integrated completed resolution/reconciliation, atomic
+  explicit Runtime addition, credential verification and read-only Terminal
+  authority with Profile/binding Admin operations. Retained scoped lifecycle
+  checks, atomic authority groups and external effects after database completion.
+
+- **38 (2026-10-05):** Completed Profile/binding administrative database operations
+  and bootstrap enrollment target reads while preserving atomic authority groups
+  and postcommit terminal invalidation.
+
+
 - **37 (2026-10-05):** Separated ordinary recreation target description from actual
   dispatch fencing and retained the checked target version and item-attempt identity.
   Moved public Workspace Provider discovery into a completed read-only repository
   operation without changing eligibility or safe output.
+
 - **35 (2026-10-04):** Removed row-lock modes from independent revision, Profile
   and retained configuration-state getters while preserving mutation fencing.
 

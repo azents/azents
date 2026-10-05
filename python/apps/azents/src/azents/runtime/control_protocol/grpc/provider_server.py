@@ -41,6 +41,13 @@ from azents_runtime_control.runtime_configuration import (
 from google.protobuf import timestamp_pb2
 
 from azents.core.enums import RuntimeProviderKind
+from azents.core.runtime_connection_registration import (
+    RuntimeConnectionRegistrationUnavailable,
+)
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialAuthentication,
+    RuntimeProviderCredentialUnavailable,
+)
 from azents.core.runtime_runner_credential import RuntimeRunnerIssuedCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -60,18 +67,11 @@ from azents.runtime.coordination.data import (
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
 )
-from azents.services.runtime_connection_registration.data import (
-    RuntimeConnectionRegistrationUnavailable,
-)
 from azents.services.runtime_connection_registration.service import (
     RuntimeProviderConnectionRegistrar,
 )
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractUnavailable,
-)
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-    RuntimeProviderCredentialUnavailable,
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500

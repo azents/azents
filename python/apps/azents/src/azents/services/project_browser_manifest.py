@@ -3,14 +3,13 @@
 import dataclasses
 import datetime
 import posixpath
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
 from azents.core.enums import (
     AgentProjectCatalogStatus,
-    AgentSessionStatus,
     SessionGitWorktreeStatus,
 )
 from azents.core.session_workspace_paths import (
@@ -18,16 +17,11 @@ from azents.core.session_workspace_paths import (
     normalize_agent_workspace_root,
     normalize_session_workspace_project_paths,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.session_git_worktree import SessionGitWorktreeRepository
-from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.project_browser_manifest_read import (
+    ManifestReadDenial,
+    ProjectBrowserManifestReadRepository,
+)
 from azents.services.agent_project_catalog import AgentProjectCatalogService
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.agent_runtime.service import AgentRuntimeService
@@ -156,26 +150,9 @@ class ProjectBrowserManifestBuildResult:
 class ProjectBrowserManifestService:
     """Build backend-owned Workspace Project browser manifests."""
 
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
-    project_repository: Annotated[
-        SessionWorkspaceProjectRepository,
-        Depends(SessionWorkspaceProjectRepository),
-    ]
-    worktree_repository: Annotated[
-        SessionGitWorktreeRepository,
-        Depends(SessionGitWorktreeRepository),
-    ]
-    catalog_repository: Annotated[
-        AgentProjectCatalogRepository,
-        Depends(AgentProjectCatalogRepository),
-    ]
-    workspace_user_repository: Annotated[
-        WorkspaceUserRepository,
-        Depends(WorkspaceUserRepository),
+    repository: Annotated[
+        ProjectBrowserManifestReadRepository,
+        Depends(ProjectBrowserManifestReadRepository),
     ]
     catalog_service: Annotated[
         AgentProjectCatalogService,
@@ -189,9 +166,6 @@ class ProjectBrowserManifestService:
         SessionWorkingFolderBindingService,
         Depends(),
     ]
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
-    ]
 
     async def get_session_manifest(
         self,
@@ -201,26 +175,18 @@ class ProjectBrowserManifestService:
         user_id: str,
     ) -> Result[ProjectBrowserManifestBuildResult, ProjectBrowserManifestError]:
         """Build a Project browser manifest for an existing AgentSession."""
-        async with self.session_manager() as session:
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if (
-                agent_session is None
-                or agent_session.agent_id != agent_id
-                or agent_session.status != AgentSessionStatus.ACTIVE
-            ):
-                return Failure(ProjectBrowserSessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
-            )
-            if workspace_user is None:
-                return Failure(ProjectBrowserAccessDenied())
+        admission = await self.repository.authorize_session(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+        )
+        match admission:
+            case Failure(error):
+                return Failure(_read_error(error))
+            case Success():
+                pass
+            case _:
+                assert_never(admission)
         try:
             binding_service = self.session_working_folder_binding_service
             await binding_service.require_bound_context(
@@ -239,24 +205,22 @@ class ProjectBrowserManifestService:
         except (RuntimeStorageError, SessionWorkingFolderBindingError) as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
         working_folder_path = binding.working_folder_path
-        async with self.session_manager() as session:
-            projects = await self.project_repository.list_projects(
-                session,
-                session_id=session_id,
-            )
-            worktrees = await self.worktree_repository.list_by_session_id(
-                session,
-                session_id=session_id,
-            )
-            paths = [
-                working_folder_path,
-                *(project.path for project in projects),
-            ]
-            catalog_entries = await self.catalog_repository.list_entries_by_paths(
-                session,
-                agent_id=agent_id,
-                paths=paths,
-            )
+        prepared = await self.repository.read_session(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            working_folder_path=working_folder_path,
+        )
+        match prepared:
+            case Failure(error):
+                return Failure(_read_error(error))
+            case Success(snapshot):
+                projects = snapshot.projects
+                worktrees = snapshot.worktrees
+                catalog_entries = snapshot.catalog_entries
+            case _:
+                assert_never(prepared)
+        paths = [working_folder_path, *(project.path for project in projects)]
         try:
             workspace_root = normalize_agent_workspace_root(
                 runtime.workspace_path
@@ -334,19 +298,16 @@ class ProjectBrowserManifestService:
         project_paths: list[str],
     ) -> Result[ProjectBrowserManifestBuildResult, ProjectBrowserManifestError]:
         """Build a Project browser manifest from explicit pre-session paths."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if agent is None:
-                return Failure(ProjectBrowserAgentNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent.workspace_id,
-                    user_id=user_id,
-                )
-            )
-            if workspace_user is None:
-                return Failure(ProjectBrowserAccessDenied())
+        admission = await self.repository.authorize_preview(
+            agent_id=agent_id, user_id=user_id
+        )
+        match admission:
+            case Failure(error):
+                return Failure(_read_error(error))
+            case Success():
+                pass
+            case _:
+                assert_never(admission)
         try:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
@@ -360,12 +321,18 @@ class ProjectBrowserManifestService:
             )
         except (RuntimeStorageError, ValueError) as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
-        async with self.session_manager() as session:
-            catalog_entries = await self.catalog_repository.list_entries_by_paths(
-                session,
-                agent_id=agent_id,
-                paths=normalized_paths,
-            )
+        prepared = await self.repository.read_preview(
+            agent_id=agent_id,
+            user_id=user_id,
+            paths=normalized_paths,
+        )
+        match prepared:
+            case Failure(error):
+                return Failure(_read_error(error))
+            case Success(catalog_entries):
+                pass
+            case _:
+                assert_never(prepared)
         catalog_by_path = {entry.path: entry for entry in catalog_entries}
         entries = [
             _entry_from_path(
@@ -404,6 +371,24 @@ class ProjectBrowserManifestService:
             agent_id=agent_id,
             paths=paths,
         )
+
+
+def _read_error(
+    denial: ManifestReadDenial,
+) -> (
+    ProjectBrowserAgentNotFound
+    | ProjectBrowserSessionNotFound
+    | ProjectBrowserAccessDenied
+):
+    match denial:
+        case ManifestReadDenial.AGENT_MISSING:
+            return ProjectBrowserAgentNotFound()
+        case ManifestReadDenial.SESSION_MISSING:
+            return ProjectBrowserSessionNotFound()
+        case ManifestReadDenial.ACCESS_DENIED:
+            return ProjectBrowserAccessDenied()
+        case _:
+            assert_never(denial)
 
 
 _PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(

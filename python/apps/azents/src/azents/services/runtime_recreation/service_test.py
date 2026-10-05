@@ -24,6 +24,7 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_recreation import RuntimeRecreationUnavailable
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
@@ -38,15 +39,15 @@ from azents.repos.runtime_profile.data import (
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_recreation_operations import (
+    RuntimeRecreationOperationRepository,
+    RuntimeRecreationReconcileOperationRepository,
+)
 from azents.services.runtime_terminal.invalidation import (
     NoopRuntimeTerminalInvalidationPublisher,
 )
 
-from .service import (
-    RuntimeRecreationReconciler,
-    RuntimeRecreationService,
-    RuntimeRecreationUnavailable,
-)
+from .service import RuntimeRecreationReconciler, RuntimeRecreationService
 
 
 class _SessionManager:
@@ -254,14 +255,16 @@ def _reconciler() -> _ReconcilerFixture:
     agent_repository = AsyncMock(spec=AgentRepository)
     agent_repository.lock_by_id.return_value = _agent()
     reconciler = RuntimeRecreationReconciler(
-        session_manager=_SessionManager(),
-        profile_repository=profile_repository,
-        runtime_repository=runtime_repository,
-        agent_repository=agent_repository,
-        terminal_invalidation_publisher=(NoopRuntimeTerminalInvalidationPublisher()),
+        terminal_invalidation_publisher=NoopRuntimeTerminalInvalidationPublisher(),
         operation_limit=1,
         item_limit=1,
-        maximum_attempts=3,
+        operations=RuntimeRecreationReconcileOperationRepository(
+            session_manager=_SessionManager(),
+            profile_repository=profile_repository,
+            runtime_repository=runtime_repository,
+            agent_repository=agent_repository,
+            maximum_attempts=3,
+        ),
     )
     return _ReconcilerFixture(
         reconciler=reconciler,
@@ -275,9 +278,11 @@ def _authority_service() -> _AuthorityFixture:
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
     provider_repository = AsyncMock(spec=RuntimeProviderRepository)
     service = RuntimeRecreationService(
-        session_manager=_SessionManager(),
-        profile_repository=profile_repository,
-        provider_repository=provider_repository,
+        operations=RuntimeRecreationOperationRepository(
+            session_manager=_SessionManager(),
+            profile_repository=profile_repository,
+            provider_repository=provider_repository,
+        )
     )
     return _AuthorityFixture(
         service=service, profiles=profile_repository, providers=provider_repository
@@ -391,7 +396,7 @@ async def test_workspace_recreation_create_persists_captured_target_version() ->
     )
 
     assert operation.status is RuntimeRecreationOperationStatus.COMPLETED
-    profiles.get_recreation_target_version.assert_not_awaited()
+    profiles.lock_recreation_target_for_dispatch.assert_not_awaited()
     profiles.lock_recreation_target_for_dispatch.assert_not_awaited()
     create = profiles.create_recreation_operation.await_args.kwargs
     assert create["target_version"] == "2"
@@ -694,3 +699,41 @@ async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None
         failure_message="Provider restart failed.",
     )
     runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
+
+
+async def test_recreation_invalidation_follows_database_operation_completion() -> None:
+    """A successful dispatch publishes only after its transaction owner exits."""
+    reconciler, profiles, runtimes, _agents = _reconciler()
+    item = _item()
+    active: list[bool] = []
+    published: list[str] = []
+
+    @asynccontextmanager
+    async def sessions() -> AsyncIterator[WriteSession]:
+        active.append(True)
+        try:
+            yield AsyncMock(spec=AsyncSession)
+        finally:
+            active.pop()
+
+    class _Publisher(NoopRuntimeTerminalInvalidationPublisher):
+        async def publish_runtime_terminal_invalidation(self, runtime_id: str) -> None:
+            assert not active
+            published.append(runtime_id)
+
+    reconciler.operations.session_manager = sessions
+    reconciler.terminal_invalidation_publisher = _Publisher()
+    profiles.lock_recreation_item.return_value = item
+    profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state()
+    profiles.update_recreation_item_dispatch.return_value = True
+    runtimes.get_by_id.return_value = _runtime()
+    command = MagicMock()
+    command.desired_generation = 1
+    runtimes.set_desired_state_if_configuration_current.return_value = command
+
+    result = await reconciler._process_item(item)
+
+    assert result.dispatched
+    assert published == ["runtime-1"]
+    assert not active

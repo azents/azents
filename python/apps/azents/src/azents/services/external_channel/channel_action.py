@@ -34,6 +34,9 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
+from azents.core.external_channel_progress import (
+    ExternalChannelWorkTask as ChannelWorkTask,
+)
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_provider_effect import (
     ProviderEffectOutcome,
@@ -56,17 +59,14 @@ from azents.core.slack_external_channel_progress import (
     render_slack_session_presence,
     render_slack_setup_required,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.action_operations import (
+    ExternalChannelActionOperations,
+)
 from azents.repos.external_channel.work_data import (
     ChannelActionEffectPlan,
     ChannelActionResult,
     ChannelWorkSnapshot,
-    ChannelWorkTask,
 )
-from azents.repos.session_execution.ownership import validate_session_execution_owner
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatch,
     RuntimeToProviderCleanupError,
@@ -240,13 +240,9 @@ class _SlackSelectorControlPresentation:
 class ExternalChannelActionService:
     """Commit Channel Work before attempting provider operations once."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
+    operations: Annotated[
+        ExternalChannelActionOperations,
+        Depends(ExternalChannelActionOperations.create),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -265,7 +261,6 @@ class ExternalChannelActionService:
         Depends(ExchangeFileService),
     ]
     config: Annotated[Config, Depends(get_config)]
-    execution_owner: SessionExecutionOwner | None
     binding_locks: dict[str, asyncio.Lock] = dataclass_field(
         default_factory=dict,
         init=False,
@@ -275,11 +270,9 @@ class ExternalChannelActionService:
     @classmethod
     def create(
         cls,
-        session_manager: Annotated[
-            SessionManager[WriteSession], Depends(get_session_manager)
-        ],
-        repository: Annotated[
-            ExternalChannelWorkRepository, Depends(ExternalChannelWorkRepository.create)
+        operations: Annotated[
+            ExternalChannelActionOperations,
+            Depends(ExternalChannelActionOperations.create),
         ],
         credentials_codec: Annotated[
             ExternalChannelCredentialsCodec,
@@ -296,16 +289,14 @@ class ExternalChannelActionService:
         ],
         config: Annotated[Config, Depends(get_config)],
     ) -> "ExternalChannelActionService":
-        """Construct the non-execution service with explicit absent owner authority."""
+        """Construct the provider orchestrator from completed repository operations."""
         return cls(
-            session_manager=session_manager,
-            repository=repository,
+            operations=operations,
             credentials_codec=credentials_codec,
             slack_client=slack_client,
             discord_client=discord_client,
             exchange_file_service=exchange_file_service,
             config=config,
-            execution_owner=None,
         )
 
     def for_execution_owner(
@@ -313,11 +304,9 @@ class ExternalChannelActionService:
         owner: SessionExecutionOwner,
     ) -> "ExternalChannelActionService":
         """Return a request-local service bound to one durable execution owner."""
-        if self.execution_owner is not None and self.execution_owner != owner:
-            raise ValueError("External Channel service cannot change execution owner")
         bound = dataclass_replace(
             self,
-            execution_owner=owner,
+            operations=self.operations.for_execution(owner),
         )
         bound.binding_locks = self.binding_locks
         return bound
@@ -329,27 +318,21 @@ class ExternalChannelActionService:
         """Bind direct Channel Work operations to complete execution authority."""
         return self.for_execution_owner(authority.execution_owner)
 
-    def _owner_for_authority(
-        self, authority: SessionResourceAuthority | None
-    ) -> SessionExecutionOwner | None:
-        """Resolve actual effect admission identity without wrapping DB descriptions."""
+    def _operations_for_authority(
+        self,
+        authority: SessionResourceAuthority | None,
+    ) -> ExternalChannelActionOperations:
+        """Select completed persistence operations for the execution authority."""
         if authority is None:
-            return self.execution_owner
-        owner = authority.execution_owner
-        if self.execution_owner is not None and self.execution_owner != owner:
-            raise ValueError(
-                "External Channel execution authority does not match service"
-            )
-        return owner
+            return self.operations
+        return self.operations.for_execution(authority.execution_owner)
 
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         """Return whether the tool should be exposed for this root Session."""
-        async with self.session_manager() as session:
-            return await self.repository.has_active_binding(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-            )
+        return await self.operations.has_active_binding(
+            session_id=session_id,
+            agent_id=agent_id,
+        )
 
     async def snapshot(
         self,
@@ -358,12 +341,10 @@ class ExternalChannelActionService:
         agent_id: str,
     ) -> list[ChannelWorkSnapshot]:
         """Load the canonical active-work snapshot."""
-        async with self.session_manager() as session:
-            return await self.repository.list_active_work(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-            )
+        return await self.operations.list_active_work(
+            session_id=session_id,
+            agent_id=agent_id,
+        )
 
     async def execute(
         self,
@@ -430,25 +411,20 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ChannelActionResult:
         """Commit canonical state, then execute ordered provider effects once."""
-        async with self.session_manager() as session:
-            owner = self._owner_for_authority(authority)
-            if owner is not None:
-                await validate_session_execution_owner(session, owner)
-            transition = await self.repository.commit_direct_action(
-                session,
-                session_id=session_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                client_tool_call_id=client_tool_call_id,
-                binding_id=binding_id,
-                mode=mode,
-                message=message,
-                title=title,
-                tasks=tasks,
-                files=files,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.write_session.commit()
+        operations = self._operations_for_authority(authority)
+        transition = await operations.commit_direct_action(
+            session_id=session_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            client_tool_call_id=client_tool_call_id,
+            binding_id=binding_id,
+            mode=mode,
+            message=message,
+            title=title,
+            tasks=tasks,
+            files=files,
+            now=datetime.datetime.now(datetime.UTC),
+        )
         reply_requested = any(
             effect.provider.target.operation is ExternalChannelDeliveryOperation.REPLY
             for effect in transition.effects
@@ -510,17 +486,14 @@ class ExternalChannelActionService:
             and reply_requested
             and reply_delivered
         ):
-            async with self.session_manager() as session:
-                settlement = await self.repository.settle_awaiting_input(
-                    session,
-                    session_id=session_id,
-                    agent_id=agent_id,
-                    binding_id=binding_id,
-                    run_id=run_id,
-                    work_cycle_id=transition.work_id,
-                    expected_state_revision=transition.state_revision,
-                )
-                await session.write_session.commit()
+            settlement = await operations.settle_awaiting_input(
+                session_id=session_id,
+                agent_id=agent_id,
+                binding_id=binding_id,
+                run_id=run_id,
+                work_cycle_id=transition.work_id,
+                expected_state_revision=transition.state_revision,
+            )
             awaiting_input = settlement.established
             state_revision = settlement.state_revision
         return ChannelActionResult(
@@ -571,14 +544,10 @@ class ExternalChannelActionService:
             agent_id=agent_id,
             session_id=session_id,
         )
-        async with self.session_manager() as session:
-            owner = self._owner_for_authority(authority)
-            if owner is not None:
-                await validate_session_execution_owner(session, owner)
-            current = await self.repository.revalidate_direct_effect(
-                session,
-                effect=effect,
-            )
+        operations = self._operations_for_authority(authority)
+        current = await operations.revalidate_direct_effect(
+            effect=effect,
+        )
         if current is None:
             return ProviderEffectOutcome(
                 operation=effect.provider.target.operation,
@@ -596,13 +565,10 @@ class ExternalChannelActionService:
             provider_delivery_service=provider_delivery_service,
             resolve_runtime_target=resolve_runtime_target,
         )
-        async with self.session_manager() as session:
-            await self.repository.apply_direct_effect_outcome(
-                session,
-                effect=effect,
-                outcome=result,
-            )
-            await session.write_session.commit()
+        await operations.apply_direct_effect_outcome(
+            effect=effect,
+            outcome=result,
+        )
         return ProviderEffectOutcome(
             operation=current.target.operation,
             part=effect.part,
@@ -616,11 +582,9 @@ class ExternalChannelActionService:
         plan: ProviderEffectPlan,
     ) -> ProviderMutationOutcome | None:
         """Execute one post-commit provider control without durable work state."""
-        async with self.session_manager() as session:
-            current = await self.repository.revalidate_direct_control(
-                session,
-                plan=plan,
-            )
+        current = await self.operations.revalidate_direct_control(
+            plan=plan,
+        )
         if current is None:
             return None
         outcome = await self._deliver(
@@ -642,33 +606,27 @@ class ExternalChannelActionService:
             and isinstance(desired_revision, int)
             and isinstance(part, int)
         ):
-            async with self.session_manager() as session:
-                await self.repository.apply_direct_effect_outcome(
-                    session,
-                    effect=ChannelActionEffectPlan(
-                        provider=current,
-                        part=part,
-                        work_cycle_id=work_id,
-                        expected_desired_progress_revision=desired_revision,
-                        dependencies=(),
-                        projection_host_kind=_tracker_host_kind(
-                            current.target.request_payload
-                        ),
+            await self.operations.apply_direct_effect_outcome(
+                effect=ChannelActionEffectPlan(
+                    provider=current,
+                    part=part,
+                    work_cycle_id=work_id,
+                    expected_desired_progress_revision=desired_revision,
+                    dependencies=(),
+                    projection_host_kind=_tracker_host_kind(
+                        current.target.request_payload
                     ),
-                    outcome=outcome,
-                )
-                await session.write_session.commit()
+                ),
+                outcome=outcome,
+            )
         elif isinstance(
             current.target.request_payload.get("access_request_id"),
             str,
         ):
-            async with self.session_manager() as session:
-                await self.repository.apply_access_control_outcome(
-                    session,
-                    plan=current,
-                    outcome=outcome,
-                )
-                await session.write_session.commit()
+            await self.operations.apply_access_control_outcome(
+                plan=current,
+                outcome=outcome,
+            )
         return outcome
 
     async def execute_binding_effect(
@@ -689,14 +647,10 @@ class ExternalChannelActionService:
             agent_id=agent_id,
             session_id=session_id,
         )
-        async with self.session_manager() as session:
-            owner = self._owner_for_authority(authority)
-            if owner is not None:
-                await validate_session_execution_owner(session, owner)
-            current = await self.repository.revalidate_binding_effect(
-                session,
-                plan=plan,
-            )
+        operations = self._operations_for_authority(authority)
+        current = await operations.revalidate_binding_effect(
+            plan=plan,
+        )
         if current is None:
             return None
         return await self._deliver(
@@ -714,11 +668,9 @@ class ExternalChannelActionService:
         plan: ProviderEffectPlan,
     ) -> ProviderMutationOutcome | None:
         """Execute one captured cleanup after canonical terminal commit."""
-        async with self.session_manager() as session:
-            current = await self.repository.revalidate_terminal_control(
-                session,
-                plan=plan,
-            )
+        current = await self.operations.revalidate_terminal_control(
+            plan=plan,
+        )
         if current is None:
             return None
         outcome = await self._deliver(
@@ -740,22 +692,19 @@ class ExternalChannelActionService:
             and isinstance(desired_revision, int)
             and isinstance(part, int)
         ):
-            async with self.session_manager() as session:
-                await self.repository.apply_direct_effect_outcome(
-                    session,
-                    effect=ChannelActionEffectPlan(
-                        provider=current,
-                        part=part,
-                        work_cycle_id=work_id,
-                        expected_desired_progress_revision=desired_revision,
-                        dependencies=(),
-                        projection_host_kind=_tracker_host_kind(
-                            current.target.request_payload
-                        ),
+            await self.operations.apply_direct_effect_outcome(
+                effect=ChannelActionEffectPlan(
+                    provider=current,
+                    part=part,
+                    work_cycle_id=work_id,
+                    expected_desired_progress_revision=desired_revision,
+                    dependencies=(),
+                    projection_host_kind=_tracker_host_kind(
+                        current.target.request_payload
                     ),
-                    outcome=outcome,
-                )
-                await session.write_session.commit()
+                ),
+                outcome=outcome,
+            )
         return outcome
 
     async def _deliver(
@@ -1293,14 +1242,12 @@ class ExternalChannelActionService:
         authority: SessionResourceAuthority | None,
     ) -> None:
         """Persist a provisioned Discord thread outside the provider mutation."""
-        async with self.session_manager() as session:
-            await self.repository.record_discord_delivery_channel(
-                session,
-                resource_id=resource_id,
-                delivery_channel_id=delivery_channel_id,
-                initial_thread_title=initial_thread_title,
-            )
-            await session.write_session.commit()
+        operations = self._operations_for_authority(authority)
+        await operations.record_discord_delivery_channel(
+            resource_id=resource_id,
+            delivery_channel_id=delivery_channel_id,
+            initial_thread_title=initial_thread_title,
+        )
 
     async def _deliver_slack(
         self,

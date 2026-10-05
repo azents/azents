@@ -27,6 +27,11 @@ from azents.core.enums import (
     ExternalChannelWorkTaskStatus,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_limits import (
+    DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
+    DISCORD_DEFAULT_MAX_FILE_BYTES,
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.core.external_channel_progress import ExternalChannelDesiredProgress
 from azents.core.external_channel_provider import (
     decode_provider_connection_configuration,
@@ -72,13 +77,6 @@ from azents.repos.external_channel.work_state import (
 )
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleRepository,
-)
-from azents.services.external_channel.discord_delivery import (
-    DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
-    DISCORD_DEFAULT_MAX_FILE_BYTES,
-)
-from azents.services.external_channel.slack_events import (
-    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 
 INITIAL_PROGRESS_CLAIM_ATTEMPTS = 3

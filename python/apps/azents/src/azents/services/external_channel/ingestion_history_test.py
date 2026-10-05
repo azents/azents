@@ -5,7 +5,7 @@ import datetime
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,11 +28,24 @@ from azents.core.external_channel_provider import (
 )
 from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.external_channel.ingestion_history_read import (
+    ExternalChannelHistoryReadRepository,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.discord_events import DiscordNormalizedMessage
 from azents.services.external_channel.ingestion_history import (
     ExternalChannelProviderHistoryReader,
 )
 from azents.services.external_channel.slack_events import SlackNormalizedMessage
+from azents.testing.types import require_instance
+
+
+def _typed_repository(repository: object) -> ExternalChannelRepository:
+    """Expose only the declared repository read surface around existing fixtures."""
+    return require_instance(
+        MagicMock(spec=ExternalChannelRepository, wraps=repository),
+        ExternalChannelRepository,
+    )
 
 
 class _SessionContext(AbstractAsyncContextManager[WriteSession]):
@@ -162,8 +175,9 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         )
     )
     reader = ExternalChannelProviderHistoryReader(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
+        read_operations=ExternalChannelHistoryReadRepository(
+            session_manager=_SessionManager(), repository=_typed_repository(repository)
+        ),
         credentials_codec=cast(Any, codec),
         slack_client=cast(Any, slack_client),
         discord_client=cast(Any, SimpleNamespace()),
@@ -285,8 +299,9 @@ async def test_slack_history_resolves_visible_bot_author_display_name() -> None:
         )
     )
     reader = ExternalChannelProviderHistoryReader(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
+        read_operations=ExternalChannelHistoryReadRepository(
+            session_manager=_SessionManager(), repository=_typed_repository(repository)
+        ),
         credentials_codec=cast(
             Any,
             SimpleNamespace(
@@ -370,8 +385,9 @@ async def test_slack_history_skips_optional_enrichment_inside_required_reserve()
         )
     )
     reader = ExternalChannelProviderHistoryReader(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
+        read_operations=ExternalChannelHistoryReadRepository(
+            session_manager=_SessionManager(), repository=_typed_repository(repository)
+        ),
         credentials_codec=cast(
             Any,
             SimpleNamespace(
@@ -447,8 +463,9 @@ async def test_discord_history_preserves_reference_mappings() -> None:
         )
     )
     reader = ExternalChannelProviderHistoryReader(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
+        read_operations=ExternalChannelHistoryReadRepository(
+            session_manager=_SessionManager(), repository=_typed_repository(repository)
+        ),
         credentials_codec=cast(
             Any,
             SimpleNamespace(
@@ -516,17 +533,18 @@ async def test_slack_history_retries_when_callback_file_is_not_visible() -> None
         fetch_channel_display_name=AsyncMock(return_value=None),
     )
     reader = ExternalChannelProviderHistoryReader(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(
-            Any,
-            SimpleNamespace(
-                get_connection_configuration=AsyncMock(
-                    return_value=SimpleNamespace(
-                        provider=ExternalChannelProvider.SLACK,
-                        provider_tenant_id="tenant-1",
-                        provider_bot_user_id="connected-bot",
-                        provider_app_id="connected-app",
-                        encrypted_credentials="ciphertext",
+        read_operations=ExternalChannelHistoryReadRepository(
+            session_manager=_SessionManager(),
+            repository=_typed_repository(
+                SimpleNamespace(
+                    get_connection_configuration=AsyncMock(
+                        return_value=SimpleNamespace(
+                            provider=ExternalChannelProvider.SLACK,
+                            provider_tenant_id="tenant-1",
+                            provider_bot_user_id="connected-bot",
+                            provider_app_id="connected-app",
+                            encrypted_credentials="ciphertext",
+                        )
                     )
                 )
             ),
@@ -591,17 +609,18 @@ async def test_discord_history_retries_when_callback_file_is_not_visible() -> No
         )
     )
     reader = ExternalChannelProviderHistoryReader(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(
-            Any,
-            SimpleNamespace(
-                get_connection_configuration=AsyncMock(
-                    return_value=SimpleNamespace(
-                        provider=ExternalChannelProvider.DISCORD,
-                        provider_tenant_id="100",
-                        provider_bot_user_id="connected-bot",
-                        provider_app_id="connected-app",
-                        encrypted_credentials="ciphertext",
+        read_operations=ExternalChannelHistoryReadRepository(
+            session_manager=_SessionManager(),
+            repository=_typed_repository(
+                SimpleNamespace(
+                    get_connection_configuration=AsyncMock(
+                        return_value=SimpleNamespace(
+                            provider=ExternalChannelProvider.DISCORD,
+                            provider_tenant_id="100",
+                            provider_bot_user_id="connected-bot",
+                            provider_app_id="connected-app",
+                            encrypted_credentials="ciphertext",
+                        )
                     )
                 )
             ),

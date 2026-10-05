@@ -20,11 +20,15 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_control import RuntimeProviderCredentialUnavailable
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_binding.admin_operations import (
+    RuntimeProviderBindingAdminOperationsRepository,
+)
 from azents.repos.runtime_provider_binding.data import (
     RuntimeProviderAuthBindingCreate,
 )
@@ -36,8 +40,8 @@ from azents.repos.runtime_provider_control.repository import (
 )
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
+from azents.services.runtime_provider_control.deps import (
+    create_runtime_provider_enrollment_service,
 )
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
@@ -53,7 +57,7 @@ def _enrollment_service(
     session_manager: SessionManager[WriteSession],
 ) -> RuntimeProviderEnrollmentService:
     """Build the issued-token enrollment service used by Admin rotation."""
-    return RuntimeProviderEnrollmentService(
+    return create_runtime_provider_enrollment_service(
         session_manager=session_manager,
         repository=RuntimeProviderControlRepository(),
         provider_repository=RuntimeProviderRepository(),
@@ -70,10 +74,13 @@ def _service(
 ) -> RuntimeProviderBindingAdminService:
     """Build the binding Admin service with production repositories."""
     return RuntimeProviderBindingAdminService(
-        session_manager=session_manager,
-        provider_repository=RuntimeProviderRepository(),
-        binding_repository=RuntimeProviderAuthBindingRepository(),
-        control_repository=RuntimeProviderControlRepository(),
+        repository=RuntimeProviderBindingAdminOperationsRepository(
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            provider_repository=RuntimeProviderRepository(),
+            binding_repository=RuntimeProviderAuthBindingRepository(),
+            control_repository=RuntimeProviderControlRepository(),
+        ),
         enrollment_service=enrollment_service,
     )
 

@@ -1,7 +1,7 @@
 """Owner lifecycle coordinator tests."""
 
 import datetime
-from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import cast
@@ -10,6 +10,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionStopSignal
+from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
@@ -17,12 +18,14 @@ from azents.core.enums import (
     OwnerLifecycleKind,
     OwnerLifecycleStatus,
 )
+from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
 )
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
+from azents.repos.owner_lifecycle_operations import OwnerLifecycleOperationsRepository
 from azents.services.owner_lifecycle import OwnerLifecycleService
 
 
@@ -382,22 +385,6 @@ class _RetainedReferenceRepositoryDouble:
         self.external_channel_users.append(user_id)
 
 
-class _OrchestratorDouble:
-    """Lifecycle orchestrator double."""
-
-    async def archive(
-        self,
-        *,
-        context: SessionLifecycleTransitionContext,
-        participant_operation: object,
-        transition: object,
-    ) -> None:
-        """Run transition directly."""
-        del context, participant_operation
-        operation = cast(Callable[[], Awaitable[None]], transition)
-        await operation()
-
-
 class _ExternalChannelDouble:
     """External channel lifecycle double."""
 
@@ -468,8 +455,10 @@ def _service(
     user_repo = users or _UserRepositoryDouble()
     retained_repo = retained_references or _RetainedReferenceRepositoryDouble()
     broker = _BrokerDouble()
-    service = OwnerLifecycleService(
+    operations = _OwnerOperationsDouble(
         session_manager=_session_manager,
+        read_session_manager=_session_manager,
+        observation_repository=sessions,
         owner_lifecycle_repository=lifecycle_repo,
         agent_session_repository=sessions,
         agent_run_repository=runs or _RunRepositoryDouble(),
@@ -480,11 +469,18 @@ def _service(
         mailbox_repository=retained_repo,
         exchange_file_repository=retained_repo,
         external_channel_repository=retained_repo,
-        lifecycle_orchestrator=_OrchestratorDouble(),
-        external_channel_lifecycle_service=_ExternalChannelDouble(),
-        scheduled_task_lifecycle_service=(
-            scheduled_lifecycle or _ExternalChannelDouble()
+        lifecycle_repository=_RetirementLifecycleDouble(
+            sessions=sessions,
+            allows_active_runs=(
+                scheduled_lifecycle.allows_active_runs
+                if scheduled_lifecycle is not None
+                else False
+            ),
         ),
+    )
+    service = OwnerLifecycleService(
+        operation_repository=operations,
+        external_channel_lifecycle_service=_ExternalChannelDouble(),
         broker=broker,
     )
     return service, lifecycle_repo, retention_repo, memory_repo, user_repo, broker
@@ -720,3 +716,48 @@ async def test_active_run_defers_archive_with_retry() -> None:
     assert sessions.stops == ["root-run"]
     assert broker.signals == ["root-run"]
     assert lifecycle_repo.retries
+
+
+class _RetirementLifecycleDouble:
+    """Database-only root archive with explicit Scheduled preservation evidence."""
+
+    def __init__(
+        self, *, sessions: _SessionRepositoryDouble, allows_active_runs: bool
+    ) -> None:
+        self.sessions = sessions
+        self.allows_active_runs = allows_active_runs
+
+    async def archive_allows_active_runs(
+        self,
+        session: ReadSession,
+        *,
+        session_ids: Sequence[str],
+        running_session_ids: Sequence[str],
+    ) -> bool:
+        del session, session_ids, running_session_ids
+        return self.allows_active_runs
+
+    async def archive(
+        self, session: WriteSession, command: ChatArchiveMutation
+    ) -> tuple[ProviderEffectPlan, ...]:
+        await self.sessions.archive_tree(
+            session,
+            root_session_id=command.context.root_session_id,
+            session_ids=command.context.subtree_session_ids,
+            archived_at=command.archived_at,
+            purge_after=command.purge_after,
+            policy_revision=command.policy_revision,
+            retention_days=command.retention_days,
+        )
+        return ()
+
+
+@dataclass
+class _OwnerOperationsDouble(OwnerLifecycleOperationsRepository):
+    """Provide explicit completed observation evidence for service-only tests."""
+
+    observation_repository: _SessionRepositoryDouble
+
+    async def remaining_user_sessions(self, *, user_id: str) -> bool:
+        del user_id
+        return self.observation_repository.remaining
