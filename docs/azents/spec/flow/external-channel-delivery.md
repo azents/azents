@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/thread_title_read.py
   - python/apps/azents/src/azents/core/exchange_file_errors.py
   - python/apps/azents/src/azents/core/external_channel_conversation_data.py
   - python/apps/azents/src/azents/core/external_channel_ingestion.py
@@ -14,6 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/scheduled_task_channel_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/action_operations.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/src/azents/repos/vfs_projection_operations.py
   - python/apps/azents/src/azents/repos/vfs_read_authority.py
@@ -21,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_provider.py
   - python/apps/azents/src/azents/core/external_channel_provider_effect.py
+  - python/apps/azents/src/azents/core/external_channel_effect_intent.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
@@ -60,7 +64,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 66
+spec_version: 67
 ---
 
 # External Channel Delivery and Channel Work
@@ -166,11 +170,28 @@ for Discord multipart file-message create, Discord CDN attachment bytes, Slack
 private-file bytes, and Slack external-upload bytes; each retains its exact origin,
 length, chunk, authority, and one-attempt contract.
 
-`ExternalChannelActionService.execute` commits the canonical Channel Work transition
-before provider I/O and returns an ordered tuple of process-local effect plans. It then
-revalidates the current Agent, Session, binding, resource, route, connection,
-credentials, capability, and effect-specific authority before attempting each effect
-without an open database transaction.
+The action service sequences completed Channel Action repository operations.
+Independent active-Binding availability and Work snapshot reads use native
+PostgreSQL read-only scopes. The action repository commits the canonical Channel
+Work transition and returns ordered process-local effect plans before provider I/O.
+Separate completed operations revalidate the current Agent, Session, binding,
+resource, route, connection, credentials, capability, and effect-specific authority
+before each effect, then settle its outcome through native projection CAS.
+Awaiting-input settlement and Discord delivery-channel retention also complete
+inside repository-owned scopes. Provider, Runtime, and file I/O begin only after
+each scope closes; the service receives no live database handles.
+
+Effect operations decode the current payload's consumed application metadata into
+an immutable intent before authority, settlement, and presentation decisions. The
+intent carries Work identity/revision/part, access/setup identity, retained message
+identity, Tracker kind/host, and presence state; opaque provider extensions remain
+available only to the provider adapter. Decoding occurs at the operation boundary,
+not target construction, so permitted payload assembly cannot leave cached stale
+metadata. An omitted part keeps the historical zero default; explicit null or a
+non-integer part remains ineligible for settlement, and existing integer/boolean
+and string predicates are preserved. Reply planning carries validated conversation
+scope alongside each provider payload, and Discord target retention decodes its
+consumed provider/delivery identity before a reuse or mutation decision.
 
 For an Agent execution, effect admission observes the exact PostgreSQL Session
 owner generation without a root-tree lock. An observed stale Worker cannot begin
@@ -344,6 +365,12 @@ the remaining match sends one adjacent name-only PATCH. Missing state, provider
 failure, cancellation, ambiguity, or process interruption ends the operation without
 retry, reconciliation, backfill, durable attempt state, or impact on the committed
 Session title and Agent execution.
+
+Thread-title authority is captured by one completed native read-only repository
+operation joining the exact Resource, Binding, Session, route, connection and
+Agent identities. Credential decoding follows scope closure; the existing
+provisional-title check, one GET/at-most-one PATCH and no-retry behavior remain
+unchanged.
 
 ## Activity Tracker Lifecycle
 
@@ -613,6 +640,14 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 Scheduled Task provider effects use the same immediate process-local execution
 boundary as other External Channel effects but have Scheduled-owned state.
 
+The Scheduled Channel repository completes exact-Binding registration and deletion
+preparation before provider execution. Terminal reply parts and captured Tracker
+cleanup plans are prepared in one database-only operation; a preparation failure
+rolls back that entire group and publishes no provider effect. Existing completed
+Scheduled progress operations retain their exact Task/cycle and revision CAS.
+Execution-bound clones bind provider admission without imposing a generic Session
+owner fence on Scheduled descriptions or already-admitted result settlement.
+
 - Task creation commits before one registration message is attempted. Slack uses
   native Edit and confirmed Cancel controls. Discord resolves an exact
   authorization-derived Session and Task Web edit URL at delivery time and pairs
@@ -642,6 +677,12 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+- **2026-10-05** (spec_version 67) — Completed exact thread-title authority in a native read-only repository before credential decoding and the one-shot Discord effect.
+
+
+- **2026-10-05** (spec_version 66) — Moved Channel Action and Scheduled Channel
+  presentation transaction ownership into completed repository operations, retaining
+  native read-only descriptions, atomic terminal preparation, and post-scope provider I/O.
 
 - **2026-10-05** (spec_version 66) — Reconciled code-path discovery with current
   defining modules; system behavior is unchanged.

@@ -9,6 +9,9 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialAuthentication,
+)
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProviderRegistration,
@@ -28,9 +31,6 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionRecord,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-)
 
 _TEST_CONNECTION_TTL_SECONDS = 60
 _TEST_CANDIDATE_TTL_SECONDS = 15

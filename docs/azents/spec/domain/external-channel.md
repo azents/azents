@@ -25,6 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/slack_presence_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/slack_socket_operations.py
   - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
@@ -243,6 +245,17 @@ inherit a Session mutation fence.
 | Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, nullable Slack presence anchor and initiator, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, nullable awaiting-input Run identity, finish timestamp, and ordered current provider projection parts. Slack and Discord cycles begin visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding. A later eligible invocation or canonical `continue` or `request_input` progress update with unfinished tasks promotes hidden to visible monotonically. Projection parts retain the ordered part identity, desired revision, provider identity, projection status, and `standalone | reply` Tracker host kind required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
+
+Slack Work presence discovery and owned target projection finish in completed
+read-only repository operations. Claim, configuration-fenced renewal and
+owner-conditional release finish in completed read-write operations. Slack presence
+mutation uses detached evidence after those scopes end.
+
+Slack Socket discovery and owned-active lookup likewise use completed read-only
+operations. Claim, renewal, active/gap bookkeeping and recoverable release or
+reconnect-required invalidation finish in read-write operations, retaining the
+existing eligibility, owner and expiry predicates. SDK connection management,
+provider effects and durable-ingestion orchestration run after completion.
 
 - Connection status owns provider ingress and credential health: it may be `configuring`, `active`, `degraded`, `reconnect_required`, `disconnecting`, or `disconnected`; disconnect is terminal and does not silently fall back to another transport.
 - App mode is immutable. Existing dedicated connections are Single Apps. Single Apps
@@ -697,6 +710,10 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 85) — Completed Slack presence/Socket lease
+  repository operations, preserving lease fencing, CAS and health bookkeeping
+  before SDK and ingestion effects.
 
 - **2026-10-05** (spec_version 85) — Reconciled code-path discovery with current
   defining modules; system behavior is unchanged.

@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import logging
 from pathlib import Path
-from typing import cast
 
 from azcommon import di
 from azcommon.logging import configure_logging_for_runtime
@@ -20,7 +19,6 @@ from azents.services.runtime_provider_bootstrap.helm_file import (
     HelmFileRuntimeProviderBootstrapAdapter,
 )
 from azents.services.runtime_provider_bootstrap.kubernetes_secret import (
-    KubernetesSecretApi,
     read_runtime_provider_credential,
     write_runtime_provider_credential,
 )
@@ -53,7 +51,7 @@ async def _run(
     load_incluster_config()
     api_client = ApiClient()
     try:
-        api = cast(KubernetesSecretApi, CoreV1Api(api_client))
+        api = CoreV1Api(api_client)
         existing = await read_runtime_provider_credential(
             api,
             namespace=args.secret_namespace,

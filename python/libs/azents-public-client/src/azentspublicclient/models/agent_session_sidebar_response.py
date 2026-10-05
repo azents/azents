@@ -103,9 +103,12 @@ class AgentSessionSidebarResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "pinned": [AgentSessionResponse.from_dict(_item) for _item in obj["pinned"]] if obj.get("pinned") is not None else None,
             "recent": [AgentSessionResponse.from_dict(_item) for _item in obj["recent"]] if obj.get("recent") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

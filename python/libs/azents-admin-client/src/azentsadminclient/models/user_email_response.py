@@ -98,13 +98,16 @@ class UserEmailResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "user_id": obj.get("user_id"),
             "email": obj.get("email"),
             "verified_at": obj.get("verified_at"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

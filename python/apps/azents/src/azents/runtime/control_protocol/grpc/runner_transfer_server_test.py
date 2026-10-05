@@ -28,6 +28,12 @@ from azents_runtime_control.transfer import (
     MAX_TRANSFER_CHUNK_BYTES,
     MULTIPART_PART_BYTES,
 )
+from botocore.exceptions import (
+    ClientError,
+    EndpointConnectionError,
+    ParamValidationError,
+    ReadTimeoutError,
+)
 
 import azents.runtime.control_protocol.grpc.runner_transfer_server as transfer_server_module
 from azents.core.runtime_runner_credential import (
@@ -1283,11 +1289,170 @@ async def test_direct_owned_claim_fences_wrong_dispatch_and_failed_verification(
 
     request.dispatch_id = "dispatch-1"
     harness.object_store.verify_error = True
-    with pytest.raises(_Abort) as error:
+    with pytest.raises(RuntimeError, match="verify failed"):
         await harness.servicer.ClaimDirectObjectDownload(request, _Context())
-    assert error.value.code is grpc.StatusCode.FAILED_PRECONDITION
     assert harness.object_store.verify_calls == 1
     assert harness.object_store.download_requests == []
+
+
+class _FailingDirectObjectStore(_ObjectStore):
+    """Exercise each direct storage boundary through typed injected operations."""
+
+    def __init__(
+        self,
+        operation: Literal["download", "put", "head", "copy"],
+        error: Exception,
+    ) -> None:
+        super().__init__([b"abc"])
+        self.operation = operation
+        self.error = error
+
+    async def get_download_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expires_in: timedelta,
+        inline: bool,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        """Raise the direct download capability failure."""
+        raise self.error
+
+    async def get_upload_request(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        content_type: str | None,
+        content_length: int,
+        checksum_sha256: str,
+        expires_in: timedelta,
+        now: datetime | None = None,
+    ) -> S3PresignedRequest:
+        """Issue a fake capability or raise the selected PUT failure."""
+        if self.operation == "put":
+            raise self.error
+        assert now is not None
+        return S3PresignedRequest(
+            method="PUT",
+            url="https://objects.test/ingress",
+            expires_at=now + expires_in,
+            headers={},
+        )
+
+    async def head_with_checksum(
+        self,
+        identity: S3ObjectIdentity,
+    ) -> S3ObjectMetadata | None:
+        """Return valid ingress evidence or raise the selected HEAD failure."""
+        if self.operation == "head":
+            raise self.error
+        return replace(
+            _verified_object(identity, size=3, sha256=_DIGEST).metadata,
+            checksum_sha256=base64.b64encode(bytes.fromhex(_DIGEST)).decode(),
+        )
+
+    async def copy_immutable(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        transfer_metadata: S3TransferObjectMetadata,
+        multipart_copy_threshold: int,
+        multipart_part_size: int,
+    ) -> S3VerifiedObject:
+        """Raise the selected immutable copy failure."""
+        raise self.error
+
+
+@pytest.mark.parametrize("operation", ["download", "put", "head", "copy"])
+@pytest.mark.parametrize(
+    "error,expected_storage_failure",
+    [
+        (ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject"), True),
+        (EndpointConnectionError(endpoint_url="https://objects.test"), True),
+        (ReadTimeoutError(endpoint_url="https://objects.test"), True),
+        (RuntimeError("storage programming bug"), False),
+        (TypeError("invalid storage collaborator"), False),
+        (ParamValidationError(report="invalid SDK request"), False),
+    ],
+)
+async def test_direct_object_boundaries_only_classify_storage_failures(
+    operation: Literal["download", "put", "head", "copy"],
+    error: Exception,
+    expected_storage_failure: bool,
+) -> None:
+    """Only SDK transport/service failures map to ordinary unavailability."""
+    download = operation == "download"
+    harness = await _harness(
+        chunks=[b"abc"] if download else [],
+        direction=(
+            RuntimeTransferDirection.DOWNLOAD
+            if download
+            else RuntimeTransferDirection.UPLOAD
+        ),
+        source_transport=(
+            RuntimeTransferSourceTransport.DIRECT_OBJECT
+            if download
+            else RuntimeTransferSourceTransport.TRANSFER_OBJECT
+        ),
+        upload_transport=(
+            RuntimeTransferUploadTransport.CONTROL_STREAM
+            if download
+            else RuntimeTransferUploadTransport.DIRECT_OBJECT
+        ),
+        late_digest=download,
+    )
+    harness.object_store = _FailingDirectObjectStore(operation, error)
+    harness.servicer.object_store = harness.object_store
+
+    async def invoke() -> None:
+        """Invoke the selected direct RPC without a network connection."""
+        if download:
+            await harness.servicer.ClaimDirectObjectDownload(
+                pb.DirectObjectDownloadClaimRequest(
+                    identity=_request().identity,
+                    dispatch_id="dispatch-1",
+                    claim_id="claim-1",
+                ),
+                _Context(),
+            )
+            return
+        await harness.servicer.ClaimDirectObjectUpload(
+            pb.DirectObjectUploadClaimRequest(
+                identity=_upload_identity(),
+                dispatch_id="dispatch-1",
+                claim_id="claim-1",
+                expected_size=3,
+                expected_sha256=_DIGEST,
+            ),
+            _Context(),
+        )
+        await harness.servicer.CompleteDirectObjectUpload(
+            pb.DirectObjectUploadCompleteRequest(
+                identity=_upload_identity(),
+                dispatch_id="dispatch-1",
+                claim_id="claim-1",
+                actual_size=3,
+                sha256=_DIGEST,
+            ),
+            _Context(),
+        )
+
+    if expected_storage_failure:
+        with pytest.raises(_Abort) as raised:
+            await invoke()
+        assert raised.value.code is grpc.StatusCode.FAILED_PRECONDITION
+    else:
+        with pytest.raises(type(error)) as unexpected:
+            await invoke()
+        assert unexpected.value is error
+    record = await harness.state.get("transfer-1")
+    assert record is not None
+    assert record.phase is not RuntimeTransferPhase.AVAILABLE
+    if operation == "copy":
+        assert record.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+        assert record.completed_object_cleanup_required
 
 
 @pytest.mark.asyncio

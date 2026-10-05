@@ -46,9 +46,11 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
+  - python/apps/azents/src/azents/repos/session_execution/cutover_replay_operations.py
+  - python/apps/azents/src/azents/repos/session_execution/cutover_replay_data.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
 last_verified_at: 2026-10-05
-spec_version: 40
+spec_version: 41
 ---
 
 # Run Resume
@@ -428,6 +430,10 @@ run to observe `check_stop()` as true.
 
 
 ## Changelog
+
+- **2026-10-05** (spec_version 41) — Moved cutover preflight and exact batch
+  fencing into completed repository operations, preserving candidate checks,
+  whole-batch rollback and commit before broker purge or wake-up.
 
 - **2026-10-05** (spec_version 40) — Scoped durable owner exclusion to critical
   commit groups while retaining stale-output rejection and independent

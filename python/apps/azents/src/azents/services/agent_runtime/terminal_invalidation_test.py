@@ -25,6 +25,9 @@ from azents.repos.agent_runtime.data import (
     AgentRuntime,
     AgentRuntimeLifecycleCommand,
 )
+from azents.repos.agent_runtime.lifecycle_operations import (
+    AgentRuntimeLifecycleOperationsRepository,
+)
 from azents.repos.runtime_profile.data import RuntimeConfigurationSlot
 from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeConfigurationStatus,
@@ -43,6 +46,7 @@ _NOW = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.UTC)
 async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     """RESET publishes Runtime invalidation only after its transaction commits."""
     service = object.__new__(_ResetLifecycleService)
+    service.operations = object.__new__(AgentRuntimeLifecycleOperationsRepository)
     before = _runtime(desired_generation=2)
     after = _runtime(
         desired_generation=3,
@@ -80,8 +84,8 @@ async def test_reset_invalidates_terminal_after_lifecycle_commit() -> None:
     runtime_repository = MagicMock(spec=AgentRuntimeRepository)
     runtime_repository.set_desired_state_if_configuration_current = set_desired_state
     typed_session_manager: SessionManager[WriteSession] = session_manager
-    service.session_manager = typed_session_manager
-    service.runtime_repository = require_instance(
+    service.operations.session_manager = typed_session_manager
+    service.operations.runtime_repository = require_instance(
         runtime_repository,
         AgentRuntimeRepository,
     )

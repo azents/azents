@@ -99,7 +99,9 @@ class WorkspaceUploadIdentityResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "upload_id": obj.get("upload_id"),
             "requester_user_id": obj.get("requester_user_id"),
             "workspace_id": obj.get("workspace_id"),
@@ -107,6 +109,7 @@ class WorkspaceUploadIdentityResponse(BaseModel):
             "runtime_id": obj.get("runtime_id"),
             "desired_generation": obj.get("desired_generation"),
             "session_id": obj.get("session_id")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

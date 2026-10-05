@@ -1490,6 +1490,12 @@ transaction commits without gating or changing the Agent Run.
 Production dependency injection returns `AgentEngineAdapter`. Worker and service
 entrypoints depend on `AgentEngineProtocol`, not SDK concrete adapters.
 
+Existing-session Human input admission locks Agent before Session, matching the
+worker profile-commit prefix. Session identity, status and root-kind rejection
+precedence remains unchanged, followed by Agent lifecycle/Workspace validation.
+This prevents admission from holding Session while waiting for a worker-held
+Agent; it does not relax authority fences or retry hidden database failures.
+
 Web chat user writes enter through REST commit endpoints. Message writes create or reuse an
 `AgentSession`, materialize user input attachments, record the accepted write under
 `client_request_id`, commit an input buffer, then send a broker wake-up signal. New-session writes may

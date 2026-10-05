@@ -35,6 +35,11 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.core.upload_images import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent.data import Agent, AgentCreate
 from azents.repos.agent_operations import (
@@ -57,11 +62,6 @@ from azents.services.terminal_policy.invalidation import (
 from azents.services.terminal_policy.invalidation_contracts import (
     TerminalPolicySourceInvalidation,
     TerminalPolicySourceScope,
-)
-from azents.services.uploads.schema import (
-    StoredImage,
-    StoredImageFile,
-    StoredImageThumbnails,
 )
 from azents.testing.model_metadata import (
     make_test_model_metadata_service,

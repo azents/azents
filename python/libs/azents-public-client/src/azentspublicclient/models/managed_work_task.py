@@ -111,13 +111,16 @@ class ManagedWorkTask(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "title": obj.get("title"),
             "status": obj.get("status"),
             "details": obj.get("details"),
             "output": obj.get("output"),
             "sources": [ManagedWorkSource.from_dict(_item) for _item in obj["sources"]] if obj.get("sources") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

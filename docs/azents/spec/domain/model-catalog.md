@@ -5,6 +5,7 @@ tags: [backend, frontend, engine]
 spec_type: domain
 domain: model-catalog
 code_paths:
+  - python/apps/azents/src/azents/repos/llm_provider_integration/operations.py
   - python/apps/azents/src/azents/core/active_model_capabilities.py
   - python/apps/azents/src/azents/core/_legacy_model_capability_contract.py
   - python/apps/azents/src/azents/core/model_provider_declarations.py
@@ -703,6 +704,7 @@ Only Workspace Owners receive the explicit image sync action.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-05 | 48 | Moved integration CRUD and atomic account-catalog materialization into completed repository operations; kept provider validation in services. |
 | 2026-10-05 | 48 | Reconciled code-path discovery with current defining modules; system behavior is unchanged. |
 | 2026-10-05 | 47 | Removed redundant source/conversation/image key-enumeration locks while retaining exact publisher claims, credential/work-token guards and final accepted-input exclusion. |
 | 2026-10-03 | 42 | Replaced catalog/source revisions with current exact rows and sync state, embedded normalized saved prices, exact context reads, image usability, and destructive history-free transition. |
@@ -743,6 +745,15 @@ Only Workspace Owners receive the explicit image sync action.
 | 2026-07-10 | 3 | Added the separate xAI API-key system catalog projected from the shared LiteLLM xAI family |
 | 2026-07-09 | 2 | Documented selectable model option submit normalization through stored catalog projection |
 | 2026-06-21 | 1 | Initial model catalog domain spec |
+
+## Integration Management Database Ownership
+
+Integration management services validate workspace ownership and provider-specific
+secret/configuration types before calling completed database operations. Native
+read-only operations finish before service validation/presentation. Integration
+creation and update retain atomic account-catalog materialization in one writable
+operation; deletion preserves its existing workspace predicate. No provider
+requests or catalog sync calls run inside these database operations.
 
 ## Current implementation notes
 
