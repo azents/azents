@@ -88,9 +88,12 @@ class KubernetesSchedulingModule(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "node_selector": obj.get("node_selector"),
             "tolerations": [KubernetesToleration.from_dict(_item) for _item in obj["tolerations"]] if obj.get("tolerations") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

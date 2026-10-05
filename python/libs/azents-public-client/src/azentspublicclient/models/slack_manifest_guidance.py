@@ -116,7 +116,9 @@ class SlackManifestGuidance(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider") if obj.get("provider") is not None else 'slack',
             "transport": obj.get("transport"),
             "bot_scopes": obj.get("bot_scopes"),
@@ -126,6 +128,7 @@ class SlackManifestGuidance(BaseModel):
             "callback_url": obj.get("callback_url"),
             "manifest": obj.get("manifest"),
             "manifest_json": obj.get("manifest_json")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

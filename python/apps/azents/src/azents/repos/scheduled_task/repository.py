@@ -1,14 +1,13 @@
 """Scheduled Task repository."""
 
 import datetime
-from typing import Any, cast
 
 import sqlalchemy as sa
-from sqlalchemy.engine import CursorResult
 
 from azents.core.enums import ScheduledTaskScheduleType
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import ScheduledTask, ScheduledTaskCreate, ScheduledTaskReplace
 
@@ -212,8 +211,7 @@ class ScheduledTaskRepository:
         pending_scheduled_for: datetime.datetime | None,
     ) -> bool:
         """Persist one dispatch cursor transition and release its lease."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBScheduledTask)
                 .where(
@@ -231,7 +229,7 @@ class ScheduledTaskRepository:
                     lease_until=None,
                     updated_at=sa.func.now(),
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return bool(result.rowcount)
@@ -242,11 +240,10 @@ class ScheduledTaskRepository:
         task_id: str,
     ) -> bool:
         """Delete one Scheduled Task by exact ID."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBScheduledTask).where(RDBScheduledTask.id == task_id)
-            ),
+            )
         )
         await session.write_session.flush()
         return bool(result.rowcount)
@@ -259,14 +256,13 @@ class ScheduledTaskRepository:
         task_id: str,
     ) -> bool:
         """Delete one Task only when its Session ownership matches exactly."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBScheduledTask).where(
                     RDBScheduledTask.session_id == session_id,
                     RDBScheduledTask.id == task_id,
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return bool(result.rowcount)
@@ -279,15 +275,14 @@ class ScheduledTaskRepository:
         cycle_id: str,
     ) -> bool:
         """Delete a one-time Task only while it owns the completed cycle."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBScheduledTask).where(
                     RDBScheduledTask.id == task_id,
                     RDBScheduledTask.schedule_type == ScheduledTaskScheduleType.ONCE,
                     RDBScheduledTask.active_cycle_id == cycle_id,
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return bool(result.rowcount)
@@ -300,8 +295,7 @@ class ScheduledTaskRepository:
         cycle_id: str,
     ) -> bool:
         """Release a recurring Task fence and expose pending or future work."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBScheduledTask)
                 .where(
@@ -321,7 +315,7 @@ class ScheduledTaskRepository:
                     lease_until=None,
                     updated_at=sa.func.now(),
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return bool(result.rowcount)

@@ -1,0 +1,438 @@
+"""Commit explicit Agent Runtime addition and rearm transitions."""
+
+import dataclasses
+from typing import Annotated, NamedTuple
+
+from fastapi import Depends
+
+from azents.core.enums import (
+    AgentRuntimeCapability,
+    AgentRuntimeRemovalStatus,
+    RuntimeProviderBindingOrigin,
+    RuntimeTerminalDeleteAcknowledgementKind,
+)
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
+from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeCreate
+from azents.repos.agent_runtime_add.data import (
+    AgentRuntimeAddReceipt,
+    AgentRuntimeAddReceiptCreate,
+)
+from azents.repos.agent_runtime_add.repository import (
+    AgentRuntimeAddReceiptRepository,
+)
+from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
+from azents.repos.runtime_profile.data import RuntimeConfigurationSlot
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_profile_resolution_operations import (
+    PreparedRuntimeProfileSelection,
+    RuntimeProfileResolutionOperationRepository,
+    RuntimeProfileResolutionRejected,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentRuntimeAdditionCommand:
+    """Validated application input for one atomic addition operation."""
+
+    agent_id: str
+    workspace_runtime_profile_id: str
+    expected_capability_version: int
+    expected_runtime_profile_selection_version: int
+    idempotency_key: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentRuntimeAdditionRecord:
+    """Committed addition or exact replay evidence."""
+
+    agent: Agent
+    runtime: AgentRuntime
+    desired: RuntimeConfigurationSlot
+    receipt: AgentRuntimeAddReceipt
+    replayed: bool
+
+
+class AgentRuntimeAdditionRejected(Exception):
+    """Existing bounded addition failure after the atomic owner rolls back."""
+
+    def __init__(self, *, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class _RuntimePreparation(NamedTuple):
+    """Prepared Runtime and whether it was newly created."""
+
+    runtime: AgentRuntime
+    created: bool
+
+
+@dataclasses.dataclass
+class AgentRuntimeTransitionOperationRepository:
+    """Own explicit `none` to `managed` Runtime transitions."""
+
+    session_manager: Annotated[
+        SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    runtime_repository: Annotated[
+        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    ]
+    removal_repository: Annotated[
+        AgentRuntimeRemovalRepository,
+        Depends(AgentRuntimeRemovalRepository),
+    ]
+    add_receipt_repository: Annotated[
+        AgentRuntimeAddReceiptRepository,
+        Depends(AgentRuntimeAddReceiptRepository),
+    ]
+    profile_repository: Annotated[
+        RuntimeProfileRepository,
+        Depends(RuntimeProfileRepository),
+    ]
+    resolution_operations: Annotated[
+        RuntimeProfileResolutionOperationRepository,
+        Depends(RuntimeProfileResolutionOperationRepository),
+    ]
+
+    async def add_runtime(
+        self,
+        request: AgentRuntimeAdditionCommand,
+    ) -> AgentRuntimeAdditionRecord:
+        """Commit or replay one explicit stopped Runtime addition."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_runtime_selection_input_for_update(
+                session,
+                request.agent_id,
+            )
+            if agent is None:
+                raise AgentRuntimeAdditionRejected(
+                    code="agent_not_found",
+                    message="Agent was not found.",
+                )
+            existing_receipt = (
+                await self.add_receipt_repository.get_by_agent_idempotency_key(
+                    session,
+                    agent_id=agent.id,
+                    idempotency_key=request.idempotency_key,
+                )
+            )
+            if existing_receipt is not None:
+                return await self._replay(
+                    session,
+                    request=request,
+                    agent=agent,
+                    receipt=existing_receipt,
+                )
+            self._require_addable_agent(agent, request)
+            active_removal = await self.removal_repository.get_active_by_agent_id(
+                session,
+                agent.id,
+            )
+            if active_removal is not None:
+                raise AgentRuntimeAdditionRejected(
+                    code="runtime_removal_in_progress",
+                    message="Runtime removal is still in progress.",
+                )
+            try:
+                prepared = (
+                    await self.resolution_operations.prepare_selection_in_transaction(
+                        session,
+                        workspace_id=agent.workspace_id,
+                        profile_id=request.workspace_runtime_profile_id,
+                        agent_selection_version=(
+                            agent.runtime_profile_selection_version + 1
+                        ),
+                    )
+                )
+            except RuntimeProfileResolutionRejected as error:
+                raise AgentRuntimeAdditionRejected(
+                    code=error.code,
+                    message=str(error),
+                ) from error
+            if (
+                prepared.resolution.status
+                is not RuntimeConfigurationResolutionStatus.READY
+            ):
+                raise AgentRuntimeAdditionRejected(
+                    code=(
+                        prepared.resolution.reason_code or "runtime_profile_unavailable"
+                    ),
+                    message="The selected Runtime Profile is unavailable.",
+                )
+
+            runtime, runtime_created = await self._prepare_runtime(
+                session,
+                agent=agent,
+                prepared=prepared,
+            )
+            updated_agent = (
+                await self.agent_repository.compare_and_set_runtime_capability(
+                    session,
+                    agent_id=agent.id,
+                    expected_capability=AgentRuntimeCapability.NONE,
+                    expected_capability_version=request.expected_capability_version,
+                    expected_runtime_profile_selection_version=(
+                        request.expected_runtime_profile_selection_version
+                    ),
+                    capability=AgentRuntimeCapability.MANAGED,
+                    runtime_profile_id=prepared.profile.id,
+                )
+            )
+            if updated_agent is None:
+                raise AgentRuntimeAdditionRejected(
+                    code="runtime_capability_version_conflict",
+                    message="Agent Runtime capability changed concurrently.",
+                )
+            resolution = (
+                await self.resolution_operations.attach_selection_in_transaction(
+                    session,
+                    agent=updated_agent,
+                    runtime=runtime,
+                    prepared=prepared,
+                    runtime_created=runtime_created,
+                )
+            )
+            if resolution is None:
+                raise AgentRuntimeAdditionRejected(
+                    code="runtime_profile_source_changed",
+                    message="Runtime Profile sources changed during the addition.",
+                )
+            create_result = await self.add_receipt_repository.create_or_get(
+                session,
+                AgentRuntimeAddReceiptCreate(
+                    agent_id=updated_agent.id,
+                    workspace_id=updated_agent.workspace_id,
+                    idempotency_key=request.idempotency_key,
+                    workspace_runtime_profile_id=prepared.profile.id,
+                    expected_capability_version=request.expected_capability_version,
+                    committed_capability_version=(
+                        updated_agent.runtime_capability_version
+                    ),
+                    committed_runtime_profile_selection_version=(
+                        updated_agent.runtime_profile_selection_version
+                    ),
+                    agent_runtime_id=resolution.runtime.id,
+                    runtime_configuration_sequence=resolution.desired.sequence,
+                    runtime_configuration_digest=resolution.desired.digest or "",
+                    runtime_desired_generation=(resolution.runtime.desired_generation),
+                ),
+            )
+            if not create_result.created:
+                self._require_matching_receipt(
+                    request=request,
+                    receipt=create_result.receipt,
+                )
+            return AgentRuntimeAdditionRecord(
+                agent=updated_agent,
+                runtime=resolution.runtime,
+                desired=resolution.desired,
+                receipt=create_result.receipt,
+                replayed=not create_result.created,
+            )
+
+    async def _prepare_runtime(
+        self,
+        session: WriteSession,
+        *,
+        agent: Agent,
+        prepared: PreparedRuntimeProfileSelection,
+    ) -> _RuntimePreparation:
+        """Create the first logical Runtime or rearm exact deleted history."""
+        existing = await self.runtime_repository.get_by_agent_id_for_update(
+            session,
+            agent.id,
+        )
+        if existing is None:
+            ensured = await self.runtime_repository.ensure_with_create(
+                session,
+                create=AgentRuntimeCreate(
+                    workspace_id=agent.workspace_id,
+                    agent_id=agent.id,
+                    runtime_provider_id=prepared.provider.provider_id,
+                    runtime_provider_resource_id=prepared.provider.id,
+                    provider_binding_origin=(
+                        RuntimeProviderBindingOrigin.AGENT_EXPLICIT
+                    ),
+                    provider_binding_evidence={
+                        "workspace_id": agent.workspace_id,
+                        "workspace_runtime_profile_id": prepared.profile.id,
+                    },
+                    configuration_sequence=0,
+                ),
+            )
+            return _RuntimePreparation(
+                runtime=ensured.runtime,
+                created=ensured.created,
+            )
+
+        completed_removal = (
+            await self.removal_repository.get_latest_completed_by_agent_id(
+                session,
+                agent.id,
+            )
+        )
+        if not self.completed_removal_authorizes_rearm(
+            completed_removal,
+            existing,
+        ):
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_rearm_not_ready",
+                message="The historical Runtime is not ready for re-addition.",
+            )
+        rearmed = await self.runtime_repository.rearm_terminally_deleted(
+            session,
+            runtime_id=existing.id,
+            expected_terminal_generation=existing.desired_generation,
+            provider_logical_id=prepared.provider.provider_id,
+            provider_resource_id=prepared.provider.id,
+        )
+        if rearmed is None:
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_rearm_conflict",
+                message="The historical Runtime changed during re-addition.",
+            )
+        return _RuntimePreparation(runtime=rearmed, created=False)
+
+    async def _replay(
+        self,
+        session: WriteSession,
+        *,
+        request: AgentRuntimeAdditionCommand,
+        agent: Agent,
+        receipt: AgentRuntimeAddReceipt,
+    ) -> AgentRuntimeAdditionRecord:
+        """Return a durable addition result only while its capability remains."""
+        self._require_matching_receipt(request=request, receipt=receipt)
+        if (
+            agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            or agent.runtime_capability_version != receipt.committed_capability_version
+            or agent.runtime_profile_id != receipt.workspace_runtime_profile_id
+            or agent.runtime_profile_selection_version
+            != receipt.committed_runtime_profile_selection_version
+        ):
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_add_idempotency_stale",
+                message="The prior Runtime addition is no longer current.",
+            )
+        runtime = await self.runtime_repository.get_by_id(
+            session,
+            receipt.agent_runtime_id,
+        )
+        state = await self.profile_repository.get_configuration_state(
+            session, runtime_id=receipt.agent_runtime_id
+        )
+        desired = state.desired if state is not None else None
+        document = desired.document if desired is not None else None
+        if (
+            runtime is None
+            or runtime.agent_id != agent.id
+            or runtime.workspace_id != agent.workspace_id
+            or runtime.configuration_sequence != receipt.runtime_configuration_sequence
+            or runtime.desired_generation != receipt.runtime_desired_generation
+            or desired is None
+            or desired.sequence != receipt.runtime_configuration_sequence
+            or desired.digest != receipt.runtime_configuration_digest
+            or desired.target_generation != receipt.runtime_desired_generation
+            or document is None
+            or document.workspace_runtime_profile_id
+            != receipt.workspace_runtime_profile_id
+            or document.agent_selection_version
+            != receipt.committed_runtime_profile_selection_version
+        ):
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_add_idempotency_evidence_missing",
+                message="The prior Runtime addition evidence is unavailable.",
+            )
+        return AgentRuntimeAdditionRecord(
+            agent=agent,
+            runtime=runtime,
+            desired=desired,
+            receipt=receipt,
+            replayed=True,
+        )
+
+    def _require_addable_agent(
+        self,
+        agent: Agent,
+        request: AgentRuntimeAdditionCommand,
+    ) -> None:
+        """Reject non-current or already capable Agent state."""
+        if (
+            agent.runtime_capability_version != request.expected_capability_version
+            or agent.runtime_profile_selection_version
+            != request.expected_runtime_profile_selection_version
+        ):
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_capability_version_conflict",
+                message="Agent Runtime capability changed concurrently.",
+            )
+        if agent.runtime_capability is not AgentRuntimeCapability.NONE:
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_add_not_available",
+                message="Runtime addition is available only for Runtime-free Agents.",
+            )
+
+    def _require_matching_receipt(
+        self,
+        *,
+        request: AgentRuntimeAdditionCommand,
+        receipt: AgentRuntimeAddReceipt,
+    ) -> None:
+        """Reject reuse of an idempotency key for a different transition."""
+        if (
+            receipt.agent_id != request.agent_id
+            or receipt.expected_capability_version
+            != request.expected_capability_version
+            or receipt.workspace_runtime_profile_id
+            != request.workspace_runtime_profile_id
+            or receipt.committed_runtime_profile_selection_version
+            != request.expected_runtime_profile_selection_version + 1
+        ):
+            raise AgentRuntimeAdditionRejected(
+                code="runtime_add_idempotency_conflict",
+                message="Runtime addition idempotency key was reused.",
+            )
+
+    def completed_removal_authorizes_rearm(
+        self,
+        operation: AgentRuntimeRemovalOperation | None,
+        runtime: AgentRuntime,
+    ) -> bool:
+        """Return whether completed operation evidence matches current deletion."""
+        if (
+            operation is None
+            or operation.status is not AgentRuntimeRemovalStatus.COMPLETED
+            or operation.agent_runtime_id != runtime.id
+            or operation.completed_at is None
+            or runtime.terminal_delete_requested_generation
+            != runtime.desired_generation
+            or runtime.terminal_delete_acknowledged_generation
+            != runtime.desired_generation
+            or runtime.terminal_delete_acknowledgement_kind is None
+        ):
+            return False
+        if operation.physical_deletion_required is True:
+            return (
+                operation.target_terminal_delete_generation
+                == runtime.desired_generation
+                and operation.physical_delete_acknowledgement_kind
+                is runtime.terminal_delete_acknowledgement_kind
+                and operation.physical_delete_acknowledged_at is not None
+            )
+        if operation.physical_deletion_required is False:
+            return (
+                runtime.terminal_delete_acknowledgement_kind
+                is RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
+                and operation.target_terminal_delete_generation is None
+                and operation.physical_delete_acknowledgement_kind is None
+                and operation.physical_delete_acknowledged_at is None
+            )
+        return False

@@ -10,16 +10,16 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider import ExternalChannelCapabilitySnapshot
 from azents.core.external_channel_provider_effect import ProviderTarget
+from azents.core.upload_images import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.services.external_channel.presentation import (
     prepend_agent_blocks,
     prepend_agent_fallback,
     prepend_agent_markdown,
     resolve_slack_agent_presentation,
-)
-from azents.services.uploads.schema import (
-    StoredImage,
-    StoredImageFile,
-    StoredImageThumbnails,
 )
 
 

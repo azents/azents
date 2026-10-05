@@ -34,6 +34,8 @@ from azents_runtime_control.transfer import (
     MULTIPART_PART_BYTES,
     STREAM_OWNER_RENEWAL_SECONDS,
 )
+from botocore.exceptions import ClientError, HTTPClientError
+from botocore.exceptions import ConnectionError as BotoConnectionError
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -609,7 +611,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 "Direct object verification failed",
             )
             raise AssertionError("unreachable")
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
                 "Direct object capability is unavailable",
@@ -783,7 +785,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT unavailable")
             raise AssertionError("unreachable")
         current = await self.state_store.get(claimed.admission.transfer_id)
@@ -980,7 +982,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             metadata = await self.object_store.head_with_checksum(ingress)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT HEAD failed")
             raise AssertionError("unreachable")
         if (
@@ -1021,7 +1023,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except BotoConnectionError, ClientError, HTTPClientError:
             await context.abort(grpc.StatusCode.FAILED_PRECONDITION, "PUT copy failed")
             raise AssertionError("unreachable")
 

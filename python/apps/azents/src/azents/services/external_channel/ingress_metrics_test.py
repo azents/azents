@@ -1,12 +1,22 @@
 """Tests for bounded External Channel ingress metrics."""
 
-from types import SimpleNamespace
-from typing import cast
+from dataclasses import dataclass
 
-from azents.job_runtime.types import JobRuntime
+from azents.job_runtime.types import JobHandle, JobRequest
 from azents.services.external_channel.ingress_metrics import (
     ExternalChannelIngressMetrics,
 )
+
+
+@dataclass
+class _Runtime:
+    """Runtime counters independent of actual job admission."""
+
+    active_count: int
+    shutdown_drain_seconds: float | None
+
+    async def submit(self, request: JobRequest) -> JobHandle:
+        raise AssertionError("Metrics must not submit jobs.")
 
 
 def test_metrics_record_only_bounded_counters_and_runtime_state() -> None:
@@ -21,10 +31,7 @@ def test_metrics_record_only_bounded_counters_and_runtime_state() -> None:
         mailbox_rows=4,
     )
     metrics.record_wake_attempt(failed=True)
-    runtime = cast(
-        JobRuntime,
-        SimpleNamespace(active_count=2, shutdown_drain_seconds=0.75),
-    )
+    runtime = _Runtime(active_count=2, shutdown_drain_seconds=0.75)
 
     snapshot = metrics.snapshot(
         runtime,

@@ -26,10 +26,9 @@ from azents.core.external_channel_provider import (
     SlackConnectionCredentials,
 )
 from azents.core.external_channel_reference import provider_reference_mappings_size
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.ingestion_history_read import (
+    ExternalChannelHistoryReadRepository,
+)
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
@@ -92,13 +91,9 @@ def get_ingestion_discord_conversation_client(
 class ExternalChannelProviderHistoryReader:
     """Read provider history and return one provider-neutral canonical range."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    read_operations: Annotated[
+        ExternalChannelHistoryReadRepository,
+        Depends(ExternalChannelHistoryReadRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -121,11 +116,9 @@ class ExternalChannelProviderHistoryReader:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
         """Read one exact-trigger range without retaining credentials or raw pages."""
-        async with self.session_manager() as session:
-            configuration = await self.repository.get_connection_configuration(
-                session,
-                connection_id=locator.connection_id,
-            )
+        configuration = await self.read_operations.get_configuration(
+            connection_id=locator.connection_id
+        )
         if (
             configuration is None
             or configuration.provider is not locator.provider

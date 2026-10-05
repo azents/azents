@@ -1,11 +1,12 @@
 """Scheduled Task repository tests."""
 
 import datetime
-from types import SimpleNamespace
-from typing import cast
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ScheduledTaskScheduleType
@@ -56,6 +57,15 @@ class _CreateSession:
         self.row.updated_at = _dt(0)
 
 
+def _create_session(double: _CreateSession) -> AsyncSession:
+    """Bind the fake observations to a declared native session mock."""
+    mock = AsyncMock(spec=AsyncSession)
+    mock.add.side_effect = double.add
+    mock.flush.side_effect = double.flush
+    assert isinstance(mock, AsyncSession)
+    return mock
+
+
 class _ScalarSession:
     """Small async session double for exact lookup."""
 
@@ -66,6 +76,14 @@ class _ScalarSession:
     async def scalar(self, query: object) -> RDBScheduledTask | None:
         self.query = query
         return self.row
+
+
+def _scalar_session(double: _ScalarSession) -> AsyncSession:
+    """Bind the fake observations to a declared native session mock."""
+    mock = AsyncMock(spec=AsyncSession)
+    mock.scalar.side_effect = double.scalar
+    assert isinstance(mock, AsyncSession)
+    return mock
 
 
 class _ScalarResult:
@@ -90,11 +108,12 @@ class _ListSession:
         return _ScalarResult(self.rows)
 
 
-class _DeleteResult:
-    """Delete result with a row count."""
-
-    def __init__(self, rowcount: int) -> None:
-        self.rowcount = rowcount
+def _list_session(double: _ListSession) -> AsyncSession:
+    """Bind the fake observations to a declared native session mock."""
+    mock = AsyncMock(spec=AsyncSession)
+    mock.execute.side_effect = double.execute
+    assert isinstance(mock, AsyncSession)
+    return mock
 
 
 class _DeleteSession:
@@ -105,15 +124,27 @@ class _DeleteSession:
         self.query: object | None = None
         self.flushed = False
 
-    async def execute(self, query: object) -> _DeleteResult:
+    async def execute(self, query: object) -> CursorResult[Any]:
         self.query = query
-        return _DeleteResult(self.rowcount)
+        result = MagicMock(spec=CursorResult)
+        result.rowcount = self.rowcount
+        assert isinstance(result, CursorResult)
+        return result
 
     async def flush(self) -> None:
         self.flushed = True
 
 
-class _ExpiredUpdatedAtTask(SimpleNamespace):
+def _delete_session(double: _DeleteSession) -> AsyncSession:
+    """Bind the fake observations to a declared native session mock."""
+    mock = AsyncMock(spec=AsyncSession)
+    mock.execute.side_effect = double.execute
+    mock.flush.side_effect = double.flush
+    assert isinstance(mock, AsyncSession)
+    return mock
+
+
+class _ExpiredUpdatedAtTask(RDBScheduledTask):
     """Raise when conversion reads updated_at before an explicit refresh."""
 
     updated_at_loaded: bool = True
@@ -134,7 +165,7 @@ class _ClaimSession:
 
     async def execute(self, query: object) -> _ScalarResult:
         self.query = query
-        return _ScalarResult([cast(RDBScheduledTask, self.row)])
+        return _ScalarResult([self.row])
 
     async def flush(self) -> None:
         self.row.updated_at_loaded = False
@@ -149,10 +180,21 @@ class _ClaimSession:
         self.row.updated_at_loaded = True
 
 
+def _claim_session(double: _ClaimSession) -> AsyncSession:
+    """Bind the fake observations to a declared native session mock."""
+    mock = AsyncMock(spec=AsyncSession)
+    mock.execute.side_effect = double.execute
+    mock.flush.side_effect = double.flush
+    mock.refresh.side_effect = double.refresh
+    assert isinstance(mock, AsyncSession)
+    return mock
+
+
 def _sql(statement: object) -> str:
     """Compile one captured SQL statement with literal fixture values."""
+    assert isinstance(statement, sa.ClauseElement)
     return str(
-        cast(sa.ClauseElement, statement).compile(
+        statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         )
@@ -166,7 +208,7 @@ class TestScheduledTaskRepository:
         """Create persists the complete M1 definition shape."""
         session = _CreateSession()
         task = await ScheduledTaskRepository().create(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_create_session(session)),
             ScheduledTaskCreate(
                 workspace_id="w" * 32,
                 agent_id="a" * 32,
@@ -197,7 +239,7 @@ class TestScheduledTaskRepository:
         task = _rdb_task()
         session = _ScalarSession(task)
         result = await ScheduledTaskRepository().get_by_id(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_scalar_session(session)),
             task.id,
         )
 
@@ -211,7 +253,7 @@ class TestScheduledTaskRepository:
         task = _rdb_task()
         session = _ScalarSession(task)
         result = await ScheduledTaskRepository().lock_by_id(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_scalar_session(session)),
             task.id,
         )
 
@@ -228,7 +270,7 @@ class TestScheduledTaskRepository:
         task.lease_until = _dt(5)
         session = _ScalarSession(task)
         result = await ScheduledTaskRepository().lock_claimed_by_id(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_scalar_session(session)),
             task_id=task.id,
             lease_owner="scheduler-1",
             lease_token=_dt(5),
@@ -247,7 +289,7 @@ class TestScheduledTaskRepository:
         rows = [_rdb_task("a" * 32), _rdb_task("b" * 32)]
         session = _ListSession(rows)
         result = await ScheduledTaskRepository().list_by_session_id(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_list_session(session)),
             "s" * 32,
         )
 
@@ -264,7 +306,6 @@ class TestScheduledTaskRepository:
     async def test_claim_due_refreshes_updated_at_before_conversion(self) -> None:
         """Claim refreshes the server-updated timestamp before DTO conversion."""
         row = _ExpiredUpdatedAtTask(
-            id="a" * 32,
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
@@ -281,13 +322,14 @@ class TestScheduledTaskRepository:
             pending_scheduled_for=None,
             lease_owner=None,
             lease_until=None,
-            created_at=_dt(0),
-            updated_at=_dt(0),
         )
+        row.id = "a" * 32
+        row.created_at = _dt(0)
+        row.updated_at = _dt(0)
         session = _ClaimSession(row)
 
         claimed = await ScheduledTaskRepository().claim_due(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_claim_session(session)),
             now=_dt(1),
             lease_owner="scheduler-1",
             lease_until=_dt(5),
@@ -303,7 +345,7 @@ class TestScheduledTaskRepository:
         """Exact deletion reports whether one row was removed."""
         session = _DeleteSession(rowcount=1)
         assert await ScheduledTaskRepository().delete_by_id(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_delete_session(session)),
             "a" * 32,
         )
         assert "WHERE scheduled_tasks.id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'" in _sql(
@@ -315,7 +357,7 @@ class TestScheduledTaskRepository:
         """Exact deletion reports a missing row without treating it as success."""
         session = _DeleteSession(rowcount=0)
         assert not await ScheduledTaskRepository().delete_by_id(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_delete_session(session)),
             "a" * 32,
         )
         assert session.flushed is True
@@ -327,7 +369,7 @@ class TestScheduledTaskRepository:
         session = _DeleteSession(rowcount=1)
 
         assert await ScheduledTaskRepository().delete_completed_once(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_delete_session(session)),
             task_id="t" * 32,
             cycle_id="c" * 32,
         )
@@ -347,7 +389,7 @@ class TestScheduledTaskRepository:
         session = _DeleteSession(rowcount=1)
 
         assert await ScheduledTaskRepository().release_completed_recurring(
-            ReadWriteSession(cast(AsyncSession, session)),
+            ReadWriteSession(_delete_session(session)),
             task_id="t" * 32,
             cycle_id="c" * 32,
         )

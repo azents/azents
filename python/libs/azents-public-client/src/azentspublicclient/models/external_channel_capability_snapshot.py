@@ -97,7 +97,9 @@ class ExternalChannelCapabilitySnapshot(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider"),
             "transport": obj.get("transport"),
             "inbound_events": obj.get("inbound_events"),
@@ -107,6 +109,7 @@ class ExternalChannelCapabilitySnapshot(BaseModel):
             "delete_messages": obj.get("delete_messages"),
             "download_files": obj.get("download_files"),
             "upload_files": obj.get("upload_files")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -166,7 +166,9 @@ class XaiOAuthConfig(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type") if obj.get("type") is not None else 'xai_oauth',
             "account_id": obj.get("account_id"),
             "email": obj.get("email"),
@@ -177,6 +179,7 @@ class XaiOAuthConfig(BaseModel):
             "last_refreshed_at": obj.get("last_refreshed_at"),
             "last_failed_at": obj.get("last_failed_at"),
             "last_failure_reason": obj.get("last_failure_reason")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -20,6 +20,7 @@ from azents.core.kimi_oauth import (
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.kimi_oauth_session.data import KimiOAuthSessionWithSecrets
+from azents.repos.kimi_oauth_session.operations import KimiOAuthOperations
 from azents.repos.kimi_oauth_session.repository import KimiOAuthSessionRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import (
@@ -107,14 +108,25 @@ async def test_reconnect_replaces_existing_integration_credentials() -> None:
         )
     )
     service = KimiOAuthService(
-        _SessionManager(
-            ReadWriteSession(
-                require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
-            )
+        operations=KimiOAuthOperations(
+            session_manager=_SessionManager(
+                ReadWriteSession(
+                    require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+                )
+            ),
+            session_repository=require_instance(
+                session_repo, KimiOAuthSessionRepository
+            ),
+            integration_repository=require_instance(
+                integration_repo, LLMProviderIntegrationRepository
+            ),
+            read_session_manager=_SessionManager(
+                ReadWriteSession(
+                    require_instance(AsyncMock(spec=AsyncSession), AsyncSession)
+                )
+            ),
         ),
-        require_instance(session_repo, KimiOAuthSessionRepository),
-        require_instance(integration_repo, LLMProviderIntegrationRepository),
-        require_instance(client, KimiOAuthClient),
+        client=require_instance(client, KimiOAuthClient),
     )
 
     result = await service.poll_device(
@@ -185,10 +197,13 @@ async def test_slow_down_increases_and_returns_poll_interval(
     cipher = CredentialCipher(_TEST_KEY)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
         service = KimiOAuthService(
-            _SessionManager(rdb_session),
-            KimiOAuthSessionRepository(cipher),
-            LLMProviderIntegrationRepository(cipher),
-            KimiOAuthClient(http_client),
+            operations=KimiOAuthOperations(
+                session_manager=_SessionManager(rdb_session),
+                session_repository=KimiOAuthSessionRepository(cipher),
+                integration_repository=LLMProviderIntegrationRepository(cipher),
+                read_session_manager=_SessionManager(rdb_session),
+            ),
+            client=KimiOAuthClient(http_client),
         )
         start = await service.start_device(
             workspace_id=workspace_id,
@@ -268,10 +283,13 @@ async def test_reconnect_updates_existing_integration(
     integration_repo = LLMProviderIntegrationRepository(cipher)
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         service = KimiOAuthService(
-            _SessionManager(rdb_session),
-            KimiOAuthSessionRepository(cipher),
-            integration_repo,
-            KimiOAuthClient(client),
+            operations=KimiOAuthOperations(
+                session_manager=_SessionManager(rdb_session),
+                session_repository=KimiOAuthSessionRepository(cipher),
+                integration_repository=integration_repo,
+                read_session_manager=_SessionManager(rdb_session),
+            ),
+            client=KimiOAuthClient(client),
         )
 
         first_start = await service.start_device(

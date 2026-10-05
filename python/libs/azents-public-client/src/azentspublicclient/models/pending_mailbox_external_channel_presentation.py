@@ -126,7 +126,9 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "provider": obj.get("provider"),
             "resource_label": obj.get("resource_label"),
@@ -138,6 +140,7 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
             "body": obj.get("body"),
             "reference_mappings": obj.get("reference_mappings"),
             "original_url": obj.get("original_url")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

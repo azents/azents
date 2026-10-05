@@ -104,10 +104,13 @@ class WorkspaceModelSettingsUpdateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "default_selectable_model_options": [SelectableModelOptionInput.from_dict(_item) for _item in obj["default_selectable_model_options"]] if obj.get("default_selectable_model_options") is not None else None,
             "default_main_model_label": obj.get("default_main_model_label"),
             "default_lightweight_model_label": obj.get("default_lightweight_model_label")
+            }.items() if _key in obj
         })
         return _obj
 
