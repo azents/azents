@@ -14,12 +14,12 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
     WorkspaceUserRole,
 )
-from azents.services.scheduled_task.management import (
+from azents.core.scheduled_task_management import (
     ScheduledTaskManagementProjection,
-    ScheduledTaskManagementService,
     ScheduledTaskManagementUnavailable,
     ScheduledTaskSessionProjection,
 )
+from azents.services.scheduled_task.management import ScheduledTaskManagementService
 
 from . import get_scheduled_task_management_service
 

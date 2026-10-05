@@ -32,7 +32,6 @@ code_paths:
   - python/apps/azents/src/azents/broker/broadcast.py
   - python/apps/azents/src/azents/broker/websocket_deps.py
   - python/apps/azents/src/azents/core/config.py
-  - python/apps/azents/src/azents/core/settings.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
@@ -599,6 +598,9 @@ presentation-only and does not change canonical content or model lowering.
 Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
+
+- **2026-10-05** — v56. Reconciled code-path discovery with current defining
+  modules; system behavior is unchanged.
 
 - **2026-10-05** — v56. Decode durable and live action execution projections
   against the complete wire shape, preserving omitted/nullable fields and

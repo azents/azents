@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/goal/store.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
-  - python/apps/azents/src/azents/repos/worker_user_stop.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/engine/tools/goal.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/system_reminders.py
@@ -31,7 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
 last_verified_at: 2026-10-05
-spec_version: 17
+spec_version: 18
 ---
 
 # Goal Domain Spec
@@ -295,6 +295,9 @@ Primary checks:
 
 
 ## Changelog
+
+- **2026-10-05** (spec_version 18) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 17) — Made private Goal payload operations independent of root-tree owner gates while retaining exact owner Session fencing for durable Goal briefing Events.
 

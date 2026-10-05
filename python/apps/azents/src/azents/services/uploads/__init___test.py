@@ -7,15 +7,15 @@ from unittest.mock import AsyncMock
 import pytest
 from azcommon.infra.s3.service import S3Service
 
+from azents.core.upload_images import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.services.uploads import (
     UploadService,
     UploadTicket,
     UploadValidationError,
-)
-from azents.services.uploads.schema import (
-    StoredImage,
-    StoredImageFile,
-    StoredImageThumbnails,
 )
 
 

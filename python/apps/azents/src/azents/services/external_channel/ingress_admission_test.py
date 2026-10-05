@@ -3,8 +3,8 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,10 +22,16 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
 )
+from azents.core.external_channel_conversation_data import (
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+)
 from azents.core.external_channel_ingestion import (
+    ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
+    ExternalChannelIngressAuthority,
     ExternalChannelTriggerLocator,
 )
 from azents.job_runtime.types import JobRuntime
@@ -39,13 +45,13 @@ from azents.repos.external_channel.data import (
     ExternalChannelParticipationSetting,
     ExternalChannelResource,
 )
-from azents.repos.external_channel.ingress_queue import (
-    ExternalChannelIngressQueueRepository,
+from azents.repos.external_channel.ingress_admission_operations import (
+    ExternalChannelIngressAdmissionOperations,
+    _EffectiveTarget,
+    _response_mode_triggered,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.ingress_admission import (
     ExternalChannelIngressAdmissionService,
-    _response_mode_triggered,
 )
 
 
@@ -55,7 +61,7 @@ def _session_manager(
     @asynccontextmanager
     async def manager() -> AsyncIterator[WriteSession]:
         yield ReadWriteSession(
-            cast(AsyncSession, object()) if session is None else session
+            AsyncMock(spec=AsyncSession) if session is None else session
         )
 
     return manager
@@ -68,14 +74,13 @@ def _service(
     queue_repository: MagicMock | None = None,
 ) -> ExternalChannelIngressAdmissionService:
     return ExternalChannelIngressAdmissionService(
-        session_manager=session_manager or _session_manager(),
-        repository=cast(ExternalChannelRepository, repository),
-        queue_repository=cast(
-            ExternalChannelIngressQueueRepository,
-            queue_repository or MagicMock(),
+        operations=ExternalChannelIngressAdmissionOperations(
+            session_manager=session_manager or _session_manager(),
+            repository=repository,
+            queue_repository=queue_repository or MagicMock(),
+            agent_session_repository=MagicMock(spec=AgentSessionRepository),
         ),
-        agent_session_repository=cast(AgentSessionRepository, MagicMock()),
-        job_runtime=cast(JobRuntime, MagicMock()),
+        job_runtime=AsyncMock(spec=JobRuntime),
     )
 
 
@@ -114,45 +119,48 @@ def _request(
     invocation: bool = True,
     provider: ExternalChannelProvider = ExternalChannelProvider.DISCORD,
 ) -> ExternalChannelIngestionRequest:
-    return cast(
-        ExternalChannelIngestionRequest,
-        SimpleNamespace(
-            locator=ExternalChannelTriggerLocator(
-                connection_id="connection-1",
-                provider=provider,
-                provider_event_type=(
-                    "discord_message_create"
-                    if provider is ExternalChannelProvider.DISCORD
-                    else "message"
-                ),
-                provider_tenant_id="guild-1",
-                provider_channel_id="thread-1",
-                provider_parent_channel_id="parent-1",
-                provider_thread_key="thread-1",
-                delivery_thread_key="thread-1",
-                provider_resource_key="discord:guild-1:thread-1",
-                trigger_provider_message_key="discord:message-1",
-                trigger_provider_message_id="message-1",
-                trigger_position="0001",
-                provider_user_id="user-1",
-                invocation=invocation,
-                expected_file_count=None,
+    return ExternalChannelIngestionRequest(
+        locator=ExternalChannelTriggerLocator(
+            connection_id="connection-1",
+            provider=provider,
+            provider_event_type=(
+                "discord_message_create"
+                if provider is ExternalChannelProvider.DISCORD
+                else "message"
             ),
-            scope=SimpleNamespace(
-                connection_id="connection-1",
-                kind=ExternalChannelConversationScopeKind.THREAD,
-                provider_channel_id="thread-1",
-                provider_thread_key="thread-1",
-            ),
-            authority=SimpleNamespace(
-                ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
-                configuration_generation=1,
-                kind=ExternalChannelIngressAuthorityKind.LEASE,
-                lease_owner="lease-owner-1",
-                lease_generation=1,
-            ),
-            initial_title_eligible=False,
+            provider_tenant_id="guild-1",
+            provider_channel_id="thread-1",
+            provider_parent_channel_id="parent-1",
+            provider_thread_key="thread-1",
+            delivery_thread_key="thread-1",
+            provider_resource_key="discord:guild-1:thread-1",
+            trigger_provider_message_key="discord:message-1",
+            trigger_provider_message_id="message-1",
+            trigger_position="0001",
+            provider_user_id="user-1",
+            invocation=invocation,
+            expected_file_count=None,
         ),
+        scope=ExternalChannelConversationScope(
+            connection_id="connection-1",
+            kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="thread-1",
+            provider_thread_key="thread-1",
+        ),
+        authority=ExternalChannelIngressAuthority(
+            ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+            configuration_generation=1,
+            kind=ExternalChannelIngressAuthorityKind.LEASE,
+            lease_owner="lease-owner-1",
+            lease_generation=1,
+        ),
+        deadline=ExternalChannelOperationDeadline(
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+        ),
+        operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
+        selected_route_id=None,
+        replay_boundary=None,
+        initial_title_eligible=False,
     )
 
 
@@ -239,7 +247,7 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
 ) -> None:
     """Parent configuration cannot join an unbound conversation automatically."""
     commit = AsyncMock()
-    session = cast(AsyncSession, SimpleNamespace(commit=commit))
+    session = AsyncMock(spec=AsyncSession, commit=commit)
     repository = MagicMock()
     repository.create_principal_idempotent = AsyncMock()
     queue_repository = MagicMock()
@@ -258,7 +266,7 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
         if location is ExternalChannelConversationLocation.CHANNEL
         else source
     )
-    target = SimpleNamespace(
+    target = _EffectiveTarget(
         resource=target_resource,
         route=_route(),
         setting=ExternalChannelParticipationSetting.model_construct(
@@ -274,19 +282,19 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
 
     with (
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_lock_authority",
             new=AsyncMock(return_value=_connection()),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_ensure_source_resource",
             new=AsyncMock(return_value=source),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_resolve_target",
-            new=AsyncMock(return_value=cast(Any, target)),
+            new=AsyncMock(return_value=target),
         ),
     ):
         outcome = await service.admit_current_trigger(
@@ -308,7 +316,7 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
 async def test_bound_trigger_checks_session_without_row_lock() -> None:
     """Queue admission reads Session availability without serializing the row."""
     commit = AsyncMock()
-    session = cast(AsyncSession, SimpleNamespace(commit=commit))
+    session = AsyncMock(spec=AsyncSession, commit=commit)
     repository = MagicMock()
     repository.create_principal_idempotent = AsyncMock(
         return_value=SimpleNamespace(id="principal-1")
@@ -334,18 +342,20 @@ async def test_bound_trigger_checks_session_without_row_lock() -> None:
         session_manager=_session_manager(session),
         queue_repository=queue_repository,
     )
-    service.agent_session_repository = MagicMock()
-    service.agent_session_repository.get_by_id = AsyncMock(
+    service.operations = replace(
+        service.operations, agent_session_repository=MagicMock()
+    )
+    service.operations.agent_session_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
             status=AgentSessionStatus.ACTIVE,
             stop_requested_at=None,
         )
     )
-    service.agent_session_repository.lock_by_id = AsyncMock()
+    service.operations.agent_session_repository.lock_by_id = AsyncMock()
     service._submit = AsyncMock()  # noqa: SLF001
     source = _resource("source-1", ExternalChannelResourceType.THREAD)
     route = _route().model_copy(update={"open_access_enabled": False})
-    target = SimpleNamespace(
+    target = _EffectiveTarget(
         resource=source,
         route=route,
         setting=None,
@@ -355,19 +365,19 @@ async def test_bound_trigger_checks_session_without_row_lock() -> None:
 
     with (
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_lock_authority",
             new=AsyncMock(return_value=_connection()),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_ensure_source_resource",
             new=AsyncMock(return_value=source),
         ),
         patch.object(
-            ExternalChannelIngressAdmissionService,
+            ExternalChannelIngressAdmissionOperations,
             "_resolve_target",
-            new=AsyncMock(return_value=cast(Any, target)),
+            new=AsyncMock(return_value=target),
         ),
     ):
         outcome = await service.admit_current_trigger(
@@ -377,11 +387,11 @@ async def test_bound_trigger_checks_session_without_row_lock() -> None:
 
     assert outcome is not None
     assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
-    get_call = service.agent_session_repository.get_by_id.await_args
+    get_call = service.operations.agent_session_repository.get_by_id.await_args
     assert get_call is not None
     assert get_call.args[0].read_session is session
     assert get_call.args[1] == "session-1"
-    service.agent_session_repository.lock_by_id.assert_not_awaited()
+    service.operations.agent_session_repository.lock_by_id.assert_not_awaited()
     queue_repository.admit.assert_awaited_once()
     commit.assert_awaited_once()
 
@@ -404,9 +414,9 @@ async def test_discord_channel_location_keeps_thread_as_owner_target() -> None:
     repository.lock_resource_by_provider_key = AsyncMock()
     repository.create_resource_idempotent = AsyncMock()
     service = _service(repository)
-    session = cast(AsyncSession, object())
+    session = AsyncMock(spec=AsyncSession)
 
-    target = await service._resolve_target(  # noqa: SLF001
+    target = await service.operations._resolve_target(  # noqa: SLF001
         ReadWriteSession(session),
         request=_request(),
         connection=_connection(),
@@ -441,8 +451,8 @@ async def test_threads_location_keeps_source_thread_as_owner_target() -> None:
     repository.lock_resource_by_provider_key = AsyncMock()
     service = _service(repository)
 
-    target = await service._resolve_target(  # noqa: SLF001
-        ReadWriteSession(cast(AsyncSession, object())),
+    target = await service.operations._resolve_target(  # noqa: SLF001
+        ReadWriteSession(AsyncMock(spec=AsyncSession)),
         request=_request(),
         connection=_connection(),
         source_resource=source,
@@ -470,8 +480,8 @@ async def test_source_resource_create_race_rejects_inactive_result() -> None:
     repository.create_resource_idempotent = AsyncMock(return_value=inactive)
     service = _service(repository)
 
-    resource = await service._ensure_source_resource(  # noqa: SLF001
-        ReadWriteSession(cast(AsyncSession, object())),
+    resource = await service.operations._ensure_source_resource(  # noqa: SLF001
+        ReadWriteSession(AsyncMock(spec=AsyncSession)),
         request=_request(),
         now=MagicMock(),
     )

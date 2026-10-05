@@ -134,12 +134,15 @@ class CatalogPriceRate(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "metric": obj.get("metric"),
             "tier": obj.get("tier"),
             "above_input_tokens": obj.get("above_input_tokens"),
             "usd_per_unit": obj.get("usd_per_unit"),
             "search_context_size": obj.get("search_context_size")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

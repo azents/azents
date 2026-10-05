@@ -1,7 +1,6 @@
 """Typed mailbox payload contract tests."""
 
 import datetime
-from typing import cast
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -250,17 +249,15 @@ def test_external_payload_rejects_more_than_one_message() -> None:
                 MailboxPresentationItem(
                     item_key="external_channel_message:0",
                     presentation_kind="external_channel_message",
-                    metadata=cast(
-                        dict[str, JSONValue],
-                        {"external_channel_message": _external_message_data()},
+                    metadata=TypeAdapter(dict[str, JSONValue]).validate_python(
+                        {"external_channel_message": _external_message_data()}
                     ),
                 ),
                 MailboxPresentationItem(
                     item_key="external_channel_message:1",
                     presentation_kind="external_channel_message",
-                    metadata=cast(
-                        dict[str, JSONValue],
-                        {"external_channel_message": _external_message_data()},
+                    metadata=TypeAdapter(dict[str, JSONValue]).validate_python(
+                        {"external_channel_message": _external_message_data()}
                     ),
                 ),
             ],

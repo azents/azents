@@ -7,7 +7,6 @@ from fastapi import Depends
 
 from azents.core.enums import AgentRuntimeCapability
 from azents.core.runtime_capabilities import RuntimeCapabilitySnapshot
-from azents.rdb.session_capabilities import WriteSession
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )
@@ -130,40 +129,6 @@ class SessionWorkingFolderBindingService:
             session_id=session_id,
             capability_snapshot=self._capability_snapshot(runtime_target),
             runtime_target=runtime_target,
-        )
-
-    async def resolve_authority_in_transaction(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        runtime_target: RuntimeOperationTarget,
-    ) -> SessionWorkingFolderAuthority:
-        """Delegate DB-only composition for domains not migrated in this slice."""
-        return await self.repository.resolve_authority_in_session(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            target=self.target_evidence(runtime_target),
-            bind_pending=True,
-        )
-
-    async def resolve_bound_authority_in_transaction(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-        session_id: str,
-        runtime_target: RuntimeOperationTarget,
-    ) -> SessionWorkingFolderAuthority:
-        """Delegate DB-only composition for domains not migrated in this slice."""
-        return await self.repository.resolve_authority_in_session(
-            session,
-            agent_id=agent_id,
-            session_id=session_id,
-            target=self.target_evidence(runtime_target),
-            bind_pending=False,
         )
 
     @staticmethod

@@ -93,11 +93,14 @@ class WorkspaceRuntimeNetworkRestrictionProxyRequired(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "mode": obj.get("mode"),
             "allowed_cidrs": obj.get("allowed_cidrs"),
             "denied_cidrs": obj.get("denied_cidrs"),
             "domain_policy": RuntimeProxyDomainPolicy.from_dict(obj["domain_policy"]) if obj.get("domain_policy") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

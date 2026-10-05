@@ -87,10 +87,13 @@ class HistoricalMemoryExecutionPatchRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_version": obj.get("expected_version"),
             "max_turns": obj.get("max_turns"),
             "timeout_seconds": obj.get("timeout_seconds")
+            }.items() if _key in obj
         })
         return _obj
 
