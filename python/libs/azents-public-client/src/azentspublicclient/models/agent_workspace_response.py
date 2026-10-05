@@ -111,11 +111,14 @@ class AgentWorkspaceResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "lifecycle": AgentRuntimeLifecyclePresentationResponse.from_dict(obj["lifecycle"]) if obj.get("lifecycle") is not None else None,
             "runtime": AgentWorkspaceRuntimeResponse.from_dict(obj["runtime"]) if obj.get("runtime") is not None else None,
             "workspace": Workspace.from_dict(obj["workspace"]) if obj.get("workspace") is not None else None,
             "actions": AgentWorkspaceActionsResponse.from_dict(obj["actions"]) if obj.get("actions") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

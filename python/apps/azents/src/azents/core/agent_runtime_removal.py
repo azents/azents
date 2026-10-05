@@ -1,4 +1,4 @@
-"""Agent Runtime removal service data models."""
+"""Agent Runtime removal admission contracts."""
 
 from pydantic import BaseModel, Field
 

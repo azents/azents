@@ -99,7 +99,9 @@ class SessionContextStatsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "total_events": obj.get("total_events"),
             "user_messages": obj.get("user_messages"),
             "assistant_messages": obj.get("assistant_messages"),
@@ -108,6 +110,7 @@ class SessionContextStatsResponse(BaseModel):
             "tool_results": obj.get("tool_results"),
             "turn_markers": obj.get("turn_markers"),
             "total_cost_usd": obj.get("total_cost_usd")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

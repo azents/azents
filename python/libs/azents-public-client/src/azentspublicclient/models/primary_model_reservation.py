@@ -102,7 +102,9 @@ class PrimaryModelReservation(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "schema_version": obj.get("schema_version") if obj.get("schema_version") is not None else 1,
             "semantic_label": obj.get("semantic_label"),
             "candidate": ModelCandidateIdentity.from_dict(obj["candidate"]) if obj.get("candidate") is not None else None,
@@ -111,6 +113,7 @@ class PrimaryModelReservation(BaseModel):
             "claim_token": obj.get("claim_token"),
             "created_at": obj.get("created_at"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         return _obj
 

@@ -26,6 +26,10 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
+from azents.core.external_channel_effect_intent import (
+    ProviderReplyPart,
+    RetainedDiscordDeliveryIdentity,
+)
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_limits import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
@@ -288,13 +292,14 @@ class ExternalChannelWorkRepository:
     ) -> ProviderEffectPlan | None:
         """Refresh one process-local control against current provider authority."""
         target = plan.target
+        intent = target.decode_intent()
         route_id: str | None = None
         if (
             target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-            and target.request_payload.get("control_kind") == "setup_required"
+            and intent.control_kind == "setup_required"
         ):
-            setup_claim_id = target.request_payload.get("setup_claim_id")
-            if not isinstance(setup_claim_id, str):
+            setup_claim_id = intent.setup_claim_id
+            if setup_claim_id is None:
                 return None
             claim = await session.read_session.get(
                 RDBExternalChannelSetupClaim,
@@ -303,10 +308,10 @@ class ExternalChannelWorkRepository:
             if claim is None or claim.route_id is None:
                 return None
             route_id = claim.route_id
-        access_request_id = target.request_payload.get("access_request_id")
+        access_request_id = intent.access_request_id
         if (
             target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-            and isinstance(access_request_id, str)
+            and access_request_id is not None
         ):
             request = await session.read_session.scalar(
                 sa.select(RDBExternalChannelAccessRequest).where(
@@ -523,17 +528,16 @@ class ExternalChannelWorkRepository:
             slack_text_limit=SLACK_MARKDOWN_TEXT_MAX_LENGTH - 512,
         )
         plans: list[ProviderEffectPlan] = []
-        for ordinal, raw_payload in enumerate(payloads):
-            payload = dict(raw_payload)
+        for ordinal, reply_part in enumerate(payloads):
+            payload = dict(reply_part.payload)
             if connection.provider is ExternalChannelProvider.SLACK:
                 payload["reply_broadcast"] = (
-                    slack_reply_broadcast
-                    and payload.get("conversation_scope") == "thread"
+                    slack_reply_broadcast and reply_part.conversation_scope == "thread"
                 )
             else:
                 payload["forward_to_parent"] = (
                     discord_forward_to_parent
-                    and payload.get("conversation_scope") == "thread"
+                    and reply_part.conversation_scope == "thread"
                 )
             plan = await self.prepare_direct_control(
                 session,
@@ -839,8 +843,9 @@ class ExternalChannelWorkRepository:
         outcome: ProviderMutationOutcome,
     ) -> bool:
         """Compare-and-set current access-control provider projection state."""
-        access_request_id = plan.target.request_payload.get("access_request_id")
-        if not isinstance(access_request_id, str):
+        intent = plan.target.decode_intent()
+        access_request_id = intent.access_request_id
+        if access_request_id is None:
             return False
         request = await session.write_session.scalar(
             sa.select(RDBExternalChannelAccessRequest)
@@ -850,9 +855,9 @@ class ExternalChannelWorkRepository:
         if request is None:
             return False
         if plan.target.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-            expected_key = plan.target.request_payload.get("provider_message_key")
+            expected_key = intent.provider_message_key
             if (
-                not isinstance(expected_key, str)
+                expected_key is None
                 or request.control_provider_message_key != expected_key
             ):
                 return False
@@ -1376,10 +1381,10 @@ class ExternalChannelWorkRepository:
             )
 
             def append_reply_effects() -> None:
-                for part, payload in enumerate(reply_parts):
+                for part, reply_part in enumerate(reply_parts):
                     append_effect(
                         ExternalChannelDeliveryOperation.REPLY,
-                        payload,
+                        reply_part.payload,
                         part=part,
                         expected_desired_progress_revision=None,
                         dependencies=(),
@@ -1830,6 +1835,7 @@ class ExternalChannelWorkRepository:
         if expected_revision is None:
             return True
         target = effect.provider.target
+        intent = target.decode_intent()
         if (
             target.agent_id is None
             or target.agent_session_id is None
@@ -1861,9 +1867,7 @@ class ExternalChannelWorkRepository:
             host_kind = effect.projection_host_kind
             if host_kind is None:
                 raise AssertionError("Progress effects require a Tracker host kind.")
-            target_message_key = target.request_payload.get("provider_message_key")
-            if not isinstance(target_message_key, str):
-                target_message_key = None
+            target_message_key = intent.provider_message_key
             if part is None:
                 part = ChannelWorkProjectionPartState(
                     part_ordinal=effect.part,
@@ -1944,11 +1948,11 @@ class ExternalChannelWorkRepository:
         if resource is None:
             return None
         labels = dict(resource.labels or {})
-        if labels.get("provider") != ExternalChannelProvider.DISCORD.value:
+        retained = RetainedDiscordDeliveryIdentity.decode(labels)
+        if not retained.discord:
             return None
-        existing = labels.get("delivery_channel_id")
-        if isinstance(existing, str) and existing:
-            return existing
+        if retained.delivery_channel_id is not None:
+            return retained.delivery_channel_id
         labels["thread_channel_id"] = delivery_channel_id
         labels["delivery_channel_id"] = delivery_channel_id
         labels["thread_id"] = delivery_channel_id
@@ -2062,6 +2066,27 @@ def _slack_resource_thread_ts(
 
 
 def _reply_parts(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object] | None,
+    text: str,
+    files: Sequence[ExternalChannelOutboundFileManifest],
+    slack_text_limit: int | None = None,
+) -> tuple[ProviderReplyPart, ...]:
+    """Decode internally produced reply scopes before application decisions."""
+    return tuple(
+        ProviderReplyPart.decode(payload)
+        for payload in _raw_reply_parts(
+            provider=provider,
+            labels=labels,
+            text=text,
+            files=files,
+            slack_text_limit=slack_text_limit,
+        )
+    )
+
+
+def _raw_reply_parts(
     *,
     provider: ExternalChannelProvider,
     labels: dict[str, object] | None,

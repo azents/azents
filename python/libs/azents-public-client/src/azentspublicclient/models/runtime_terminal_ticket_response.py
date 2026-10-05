@@ -107,12 +107,15 @@ class RuntimeTerminalTicketResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "status": obj.get("status"),
             "reason_code": obj.get("reason_code"),
             "denied_scope": obj.get("denied_scope"),
             "ticket": obj.get("ticket"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         return _obj
 

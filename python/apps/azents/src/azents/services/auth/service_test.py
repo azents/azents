@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -435,12 +436,27 @@ class TestAuthServiceVerifyCode:
         assert isinstance(duplicate.error, InvalidVerificationCode)
 
 
+class _SessionTokens(NamedTuple):
+    """Issued access and refresh credentials."""
+
+    access_token: str
+    refresh_token: str
+
+
+class _LogoutFixture(NamedTuple):
+    """Service and credentials for a revocable authentication session."""
+
+    service: AuthService
+    session_id: str
+    refresh_token: str
+
+
 class TestAuthServiceRefreshToken:
     """refresh_token tests."""
 
     async def _create_session(
         self, service: AuthService, session_manager: SessionManager[WriteSession]
-    ) -> tuple[str, str]:
+    ) -> _SessionTokens:
         """Create session for tests and return (access_token, refresh_token)."""
         email = f"refresh-{id(self)}@example.com"
         async with session_manager() as session:
@@ -461,7 +477,7 @@ class TestAuthServiceRefreshToken:
             )
         )
         assert isinstance(result, Success)
-        return result.value.access_token, result.value.refresh_token
+        return _SessionTokens(result.value.access_token, result.value.refresh_token)
 
     async def test_refresh_token(
         self,
@@ -528,7 +544,7 @@ class TestAuthServiceLogout:
     @pytest.fixture
     async def session_with_tokens(
         self, rdb_session_manager: SessionManager[WriteSession]
-    ) -> tuple[AuthService, str, str]:
+    ) -> _LogoutFixture:
         """Return AuthService with created session + session_id + refresh_token."""
         service = _make_auth_service(rdb_session_manager)
         email = "logout-test@example.com"
@@ -556,11 +572,11 @@ class TestAuthServiceLogout:
             config=_TEST_AUTH_CONFIG.jwt,
             token=result.value.access_token,
         )
-        return service, payload.session_id, result.value.refresh_token
+        return _LogoutFixture(service, payload.session_id, result.value.refresh_token)
 
     async def test_logout(
         self,
-        session_with_tokens: tuple[AuthService, str, str],
+        session_with_tokens: _LogoutFixture,
         rdb_session_manager: SessionManager[WriteSession],
     ) -> None:
         """Revoke session."""

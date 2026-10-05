@@ -110,13 +110,16 @@ class ChatSessionCreateMessageWriteRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "client_request_id": obj.get("client_request_id"),
             "message": obj.get("message"),
             "inference_profile": RequestedInferenceProfile.from_dict(obj["inference_profile"]) if obj.get("inference_profile") is not None else None,
             "existing_project_paths": obj.get("existing_project_paths"),
             "setup_actions": [CreateGitWorktreeAction.from_dict(_item) for _item in obj["setup_actions"]] if obj.get("setup_actions") is not None else None,
             "attachments": obj.get("attachments")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

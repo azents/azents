@@ -2161,3 +2161,70 @@ async def test_native_direct_action_commits_before_provider_effect(
     assert deliveries
     assert all(outcome.status == "delivered" for outcome in result.outcomes)
     assert not active_sessions
+
+
+@pytest.mark.parametrize(
+    ("terminal", "part_fields", "expected_part"),
+    [
+        (False, {}, 0),
+        (True, {}, 0),
+        (False, {"part_ordinal": None}, None),
+        (True, {"part_ordinal": None}, None),
+        (False, {"part_ordinal": True}, True),
+        (True, {"part_ordinal": "0"}, None),
+    ],
+)
+async def test_control_settlement_decodes_current_metadata_once(
+    terminal: bool, part_fields: dict[str, object], expected_part: int | None
+) -> None:
+    """Post-construction payload assembly preserves absent/null/bool predicates."""
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(
+        {
+            "work_id": "work",
+            "desired_progress_revision": True,
+            "tracker_host_kind": "reply",
+            **part_fields,
+        }
+    )
+    plan = ProviderEffectPlan(
+        target=target, operation_key=ProviderOperationKey.from_seed("current-intent")
+    )
+    outcome = ProviderMutationOutcome(
+        status="delivered",
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+    )
+    operations = AsyncMock(spec=ExternalChannelActionOperations)
+    operations.revalidate_direct_control.return_value = plan
+    operations.revalidate_terminal_control.return_value = plan
+    service = require_instance(
+        MagicMock(
+            spec=ExternalChannelActionService,
+            operations=operations,
+            _deliver=AsyncMock(return_value=outcome),
+        ),
+        ExternalChannelActionService,
+    )
+    if terminal:
+        result = await ExternalChannelActionService.execute_terminal_control(
+            service, plan
+        )
+    else:
+        result = await ExternalChannelActionService.execute_direct_control(
+            service, plan
+        )
+    assert result == outcome
+    if expected_part is None:
+        operations.apply_direct_effect_outcome.assert_not_awaited()
+    else:
+        operations.apply_direct_effect_outcome.assert_awaited_once()
+        effect = operations.apply_direct_effect_outcome.await_args.kwargs["effect"]
+        assert isinstance(effect, ChannelActionEffectPlan)
+        assert effect.part is expected_part
+        assert effect.expected_desired_progress_revision is True
+        assert effect.projection_host_kind == "reply"

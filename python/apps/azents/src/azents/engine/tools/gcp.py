@@ -475,7 +475,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
             "Authorization": f"Bearer {access_token}",
             "x-goog-user-project": self._project_id,
         }
-        mcp_tools, use_streamable_http = await mcp_list_tools(
+        discovery = await mcp_list_tools(
             server.endpoint,
             headers,
             server.timeout,
@@ -483,7 +483,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
         )
         writable = server.service in self._writable_services
         items: list[McpToolSnapshotItem] = []
-        for tool in sorted(mcp_tools, key=lambda item: item.name):
+        for tool in sorted(discovery.tools, key=lambda item: item.name):
             if not writable and not _is_read_only_tool(tool):
                 continue
             items.append(
@@ -493,7 +493,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                     description=tool.description or "",
                     input_schema=tool.input_schema,
                     server_url=server.endpoint,
-                    use_streamable_http=use_streamable_http,
+                    use_streamable_http=discovery.use_streamable_http,
                 )
             )
         return items
@@ -861,10 +861,10 @@ class GcpToolkitProvider(ToolkitProvider[GcpToolkitConfig]):
         for svc in config.services:
             meta = GCP_SERVICE_CONFIG[svc]
             try:
-                tools, _ = await mcp_list_tools(
+                discovery = await mcp_list_tools(
                     meta.endpoint, headers, 10.0, proxy_url=proxy_url
                 )
-                results.append(f"{svc.value}: {len(tools)} tools")
+                results.append(f"{svc.value}: {len(discovery.tools)} tools")
             except Exception as exc:
                 net_msg = extract_network_error(exc)
                 if net_msg is None:

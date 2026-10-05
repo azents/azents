@@ -4,7 +4,6 @@ import datetime
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
 from unittest.mock import ANY, AsyncMock, MagicMock
 
 import pytest
@@ -44,8 +43,8 @@ from azents.core.external_channel_participation_state import (
     ExternalChannelSetupSourceProjection,
     projection_with_setup_source,
 )
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.agent import AgentRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -53,19 +52,33 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
+from azents.repos.external_channel.management import ExternalChannelManagementRepository
 from azents.repos.external_channel.participation_operations import (
     ExternalChannelParticipationOperations,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.workspace import WorkspaceRepository
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
 )
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationService,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
-    yield ReadWriteSession(cast(AsyncSession, SimpleNamespace()))
+    yield ReadWriteSession(AsyncMock(spec=AsyncSession))
+
+
+class _OwnedLease:
+    """Always-owned lease for participation orchestration tests."""
+
+    async def assert_owned(self) -> None:
+        return None
 
 
 class _Lock:
@@ -79,10 +92,7 @@ class _Lock:
 
         @asynccontextmanager
         async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
-            yield cast(
-                ExternalChannelConversationLockLease,
-                SimpleNamespace(assert_owned=AsyncMock()),
-            )
+            yield _OwnedLease()
 
         return owned()
 
@@ -163,16 +173,29 @@ def _service(
 ) -> ExternalChannelParticipationService:
     return ExternalChannelParticipationService(
         operations=ExternalChannelParticipationOperations(
-            session_manager=cast(SessionManager[WriteSession], _session_manager),
-            repository=cast(Any, repository),
-            management_repository=cast(Any, MagicMock()),
-            agent_repository=cast(Any, MagicMock()),
-            workspace_repository=cast(Any, MagicMock()),
-            read_session_manager=cast(SessionManager[WriteSession], _session_manager),
+            session_manager=_session_manager,
+            repository=require_instance(
+                MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                ExternalChannelRepository,
+            ),
+            management_repository=require_instance(
+                MagicMock(spec=ExternalChannelManagementRepository),
+                ExternalChannelManagementRepository,
+            ),
+            agent_repository=require_instance(
+                MagicMock(spec=AgentRepository), AgentRepository
+            ),
+            workspace_repository=require_instance(
+                MagicMock(spec=WorkspaceRepository), WorkspaceRepository
+            ),
+            read_session_manager=_session_manager,
         ),
-        ingestion_replay_service=cast(Any, replay or MagicMock()),
-        conversation_lock=cast(Any, _Lock()),
-        participation_lock=cast(Any, _Lock()),
+        ingestion_replay_service=require_instance(
+            MagicMock(spec=ExternalChannelIngestionReplayService, wraps=replay),
+            ExternalChannelIngestionReplayService,
+        ),
+        conversation_lock=_Lock(),
+        participation_lock=_Lock(),
     )
 
 
@@ -453,7 +476,7 @@ async def test_location_selection_resolves_explicit_target_resource(
     repository.create_resource_idempotent = AsyncMock(return_value=parent_resource)
     service = _service(repository=repository)
     resolved = await service.operations._resolve_selected_resource(
-        ReadWriteSession(cast(AsyncSession, SimpleNamespace())),
+        ReadWriteSession(AsyncMock(spec=AsyncSession)),
         claim=_claim(status=ExternalChannelSetupClaimStatus.PENDING_LOCATION),
         source=_source(),
         location=location,

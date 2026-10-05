@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
   - python/apps/azents/src/azents/core/external_channel_interaction.py
   - python/apps/azents/src/azents/core/external_channel_selection.py
   - python/apps/azents/src/azents/core/external_channel_participation.py
@@ -95,7 +97,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
@@ -113,7 +115,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-05
-spec_version: 69
+spec_version: 70
 ---
 
 # External Channel Provider Ingress
@@ -240,6 +242,13 @@ Unknown selectors, malformed bodies, invalid signatures, mismatched Application/
 identity, and unsupported interaction types fail before durable interaction state. Discord
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
+
+HTTP interaction/principal admission and durable processing/terminal claims are
+completed repository operations with the existing connection lock order and
+lease/status predicates. Discord callback configuration capture and bounded
+recoverable-owner scans use completed native read-only operations. Signature
+verification, provider callbacks and Local Job Runtime submissions occur only
+after these operations close.
 
 ## Interactive Admission and Selection
 
@@ -700,6 +709,8 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-05** (spec_version 70) — Completed residual interaction admission/claim ownership and native read-only Discord callback/recovery observations before authentication, provider mutation and job wake.
+
 
 - **2026-10-05** (spec_version 69) — Moved interaction/selector scope observations
   and shortcut materialization into completed repository operations, with native
@@ -710,6 +721,9 @@ persistent provider connections.
   repository ownership with the existing scoped owner fences and nonblocking
   provenance observations.
 
+
+- **2026-10-05** (spec_version 68) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
 - **2026-10-05** — v67. Completed provider ingress configuration/replay reads
