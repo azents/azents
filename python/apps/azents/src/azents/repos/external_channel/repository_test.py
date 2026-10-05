@@ -90,6 +90,7 @@ from azents.rdb.models.agent_runtime import (
 from azents.rdb.models.agent_session import (
     RDBAgentSession,
 )
+from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_account_link import (
     RDBExternalAccountLink,
 )
@@ -116,6 +117,7 @@ from azents.rdb.models.toolkit_state import (
 from azents.rdb.models.user import (
     RDBUser,
 )
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import (
     SessionManager,
@@ -192,6 +194,7 @@ from azents.repos.workspace_user import (
 from azents.repos.workspace_user.data import (
     WorkspaceUserCreate,
 )
+from azents.testing.committed_fixture_cleanup import committed_fixture_graph
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
@@ -953,6 +956,27 @@ class TestExternalChannelRepository:
     ) -> None:
         """Ordinary authorization observes committed rows without holding User locks."""
         del latest_db_schema
+        # Repeat the committed scenario to prove cleanup, without waiting for its
+        # leaked running Session to become eligible for the global recovery scan.
+        for _ in range(2):
+            async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
+                fixture = await self._native_model_authorization_scenario(rdb_engine)
+                async with AsyncSession(rdb_engine) as observation:
+                    agent = await observation.get(RDBAgent, fixture.agent_id)
+                    assert agent is not None
+                    workspace_id = agent.workspace_id
+            async with AsyncSession(rdb_engine) as verification:
+                assert (
+                    await verification.get(RDBAgentSession, fixture.agent_session_id)
+                    is None
+                )
+                assert await verification.get(RDBAgent, fixture.agent_id) is None
+                assert await verification.get(RDBWorkspace, workspace_id) is None
+
+    async def _native_model_authorization_scenario(
+        self, rdb_engine: AsyncEngine
+    ) -> _DiscordGatewayTypingFixture:
+        """Run the complete authorization and purge assertions under owned cleanup."""
         async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_setup:
             setup = ReadWriteSession(_raw_setup)
             fixture = await _create_discord_gateway_typing_fixture(
@@ -1355,6 +1379,7 @@ class TestExternalChannelRepository:
                     RDBExternalChannelConnection.id == fixture.connection_id
                 )
             )
+        return fixture
 
     async def test_connection_lookup_is_redacted_and_provider_scoped(
         self,
