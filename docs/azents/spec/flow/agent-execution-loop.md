@@ -70,6 +70,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/mailbox_ingestion.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/terminal_finalization.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
+  - python/apps/azents/src/azents/repos/subagent_tool_operations.py
   - python/apps/azents/src/azents/repos/terminal_finalization_data.py
   - python/apps/azents/src/azents/core/terminal_result.py
   - python/apps/azents/src/azents/services/turn_action.py
@@ -183,8 +185,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-05
-spec_version: 216
+last_verified_at: 2026-10-06
+spec_version: 217
 ---
 
 # Agent Execution Loop
@@ -1718,8 +1720,18 @@ loss rather than a failed tool result or model error.
 
 Hierarchy-changing operations retain mutation-only ancestor ordering where
 needed. Multi-Session tool operations acquire their exact Session set in stable
-order inside one NOWAIT savepoint; contention releases every partially acquired
-row before retry. Terminal delivery atomically fences its Run disposition and
+order with ordinary waiting locks. Complete tree admission retains its root
+membership gate and never accepts a partial subtree. Database-confirmed deadlock
+or serialization aborts recover only after the complete owning operation closes
+and releases every partial row set. This finite recovery boundary covers four
+Subagent mutations, seven tree lifecycle operations, twelve owned terminal
+operations and two standalone terminal-repair operations, including either
+possible deadlock victim. Original owner generation, Run/task identity and
+detached inputs are retained; current authority and lifecycle are rechecked.
+Cancellation, stale authority and uncertain commit do not retry. No model, tool,
+provider, broker notification or cleanup service is replayed, and no new retry
+count or timeout is added. Composing in-session helpers do not retry outer live
+transactions. Terminal delivery atomically fences its Run disposition and
 active parent mailbox target; an archived target is suppressed by coordinator
 finalization. Standalone completed-Run repair does not require a source Worker
 owner. PostgreSQL foreign-key and unique constraints remain authoritative and
@@ -1950,6 +1962,11 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-06** (spec_version 217) — Replaced hierarchy partial NOWAIT admission
+  with exact waiting locks and finite whole-DB-operation recovery covering both
+  hierarchy/terminal deadlock victims, while preserving original authority and
+  post-commit external effects.
 
 - **2026-10-05** (spec_version 215) — Reconciled code-path discovery with current
   defining modules; system behavior is unchanged.

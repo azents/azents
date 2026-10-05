@@ -46,7 +46,7 @@ from azents.rdb.models.external_model_settings import (
     RDBExternalModelDraft,
     RDBExternalModelMutation,
 )
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
@@ -82,6 +82,12 @@ _ACTOR = ExternalModelActorContext(
 
 class _ProjectionRepository(ExternalModelSettingsRepository):
     """Keep projection unit tests isolated from DB authority-fence integration."""
+
+    @staticmethod
+    async def _current_time(
+        session: ReadSession, *, now: datetime.datetime
+    ) -> datetime.datetime:
+        return now
 
     async def _authorize_for_apply(
         self,

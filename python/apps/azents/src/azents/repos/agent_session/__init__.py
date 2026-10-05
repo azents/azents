@@ -1,6 +1,5 @@
 """AgentSession repository."""
 
-import asyncio
 import datetime
 import re
 from collections.abc import Sequence
@@ -9,10 +8,8 @@ from typing import Any
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
-from psycopg.errors import LockNotAvailable
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import aliased
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
@@ -72,7 +69,6 @@ _ROOT_SESSION_AGENT_NAME = "root"
 _ROOT_SESSION_AGENT_PATH = "/root"
 _DEFAULT_SESSION_AGENT_TYPE = "default"
 _CHILD_SESSION_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-_OWNER_GENERATION_LOCK_RETRY_SECONDS = 0.01
 
 
 def validate_session_agent_child_name(name: str) -> None:
@@ -1228,21 +1224,6 @@ class AgentSessionRepository:
             return None
         return self._build(rdb)
 
-    async def lock_by_id_nowait(
-        self,
-        session: WriteSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Try to fence the exact Session mutation without waiting."""
-        result = await session.write_session.execute(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == agent_session_id)
-            .with_for_update(key_share=True, nowait=True)
-            .execution_options(populate_existing=True)
-        )
-        rdb = result.scalar_one_or_none()
-        return None if rdb is None else self._build(rdb)
-
     async def set_pinned(
         self,
         session: WriteSession,
@@ -1617,42 +1598,34 @@ class AgentSessionRepository:
         *,
         root_session_id: str,
     ) -> list[AgentSession]:
-        """Admit a hierarchy mutation without waiting on a partial row set.
+        """Lock complete tree membership inside the owning lifecycle operation.
 
-        Child creation shares the root gate. Execution mutations may already
-        own a child and then admit a parent result, so a failed subtree attempt
-        releases every newly acquired row before retrying.
+        Child creation shares the root gate. Confirmed database aborts are
+        recovered by the complete operation owner, not a partial row-set retry.
         """
-        while True:
-            try:
-                async with session.write_session.begin_nested():
-                    root_agent = await session.write_session.scalar(
-                        sa.select(RDBSessionAgent)
-                        .where(
-                            RDBSessionAgent.agent_session_id == root_session_id,
-                            RDBSessionAgent.kind == SessionAgentKind.ROOT,
-                        )
-                        .with_for_update(nowait=True)
-                    )
-                    if root_agent is None:
-                        return []
-                    session_ids = sa.select(RDBSessionAgent.agent_session_id).where(
-                        RDBSessionAgent.root_session_agent_id == root_agent.id
-                    )
-                    rows = (
-                        await session.write_session.execute(
-                            sa.select(RDBAgentSession)
-                            .where(RDBAgentSession.id.in_(session_ids))
-                            .order_by(RDBAgentSession.id)
-                            .with_for_update(key_share=True, nowait=True)
-                            .execution_options(populate_existing=True)
-                        )
-                    ).scalars()
-                    return [self._build(row) for row in rows]
-            except OperationalError as exc:
-                if not isinstance(exc.orig, LockNotAvailable):
-                    raise
-                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
+        root_agent = await session.write_session.scalar(
+            sa.select(RDBSessionAgent)
+            .where(
+                RDBSessionAgent.agent_session_id == root_session_id,
+                RDBSessionAgent.kind == SessionAgentKind.ROOT,
+            )
+            .with_for_update()
+        )
+        if root_agent is None:
+            return []
+        session_ids = sa.select(RDBSessionAgent.agent_session_id).where(
+            RDBSessionAgent.root_session_agent_id == root_agent.id
+        )
+        rows = (
+            await session.write_session.execute(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id.in_(session_ids))
+                .order_by(RDBAgentSession.id)
+                .with_for_update(key_share=True)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars()
+        return [self._build(row) for row in rows]
 
     async def archive_tree(
         self,

@@ -92,19 +92,14 @@ class HistoricalMemoryPreparationRepository:
             if admission is None:
                 return None
             source = admission.source
-            agent = await self.agent_repository.lock_by_id(session, source.agent_id)
+            # Admission already owns the Agent gate; read its refreshed settings.
+            agent = await self.agent_repository.get_by_id(session, source.agent_id)
             if (
                 agent is None
                 or agent.id != agent_id
                 or agent.workspace_id != source.workspace_id
                 or not agent.memory_enabled
             ):
-                return None
-            lock_membership = (
-                self.historical_repository.lock_preparation_membership_in_session
-            )
-            membership_current = await lock_membership(session, admission)
-            if not membership_current:
                 return None
             option = next(
                 (
@@ -233,18 +228,13 @@ class HistoricalMemoryPreparationRepository:
             operation = source.model_operation_state
             if operation is None:
                 return None
-            agent = await self.agent_repository.lock_by_id(session, source.agent_id)
+            # Admission already owns the Agent gate; read its refreshed settings.
+            agent = await self.agent_repository.get_by_id(session, source.agent_id)
             if (
                 agent is None
                 or agent.workspace_id != source.workspace_id
                 or not agent.memory_enabled
             ):
-                return None
-            lock_membership = (
-                self.historical_repository.lock_preparation_membership_in_session
-            )
-            membership_current = await lock_membership(session, admission)
-            if not membership_current:
                 return None
             outcome = operation.outcomes[operation.cursor]
             if outcome.status is not ModelOperationCandidateOutcomeStatus.ACTIVE:

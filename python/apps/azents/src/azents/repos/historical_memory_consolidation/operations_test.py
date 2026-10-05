@@ -10,7 +10,6 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-import azents.repos.historical_memory_consolidation.retry as retry_module
 from azents.core.active_model_capabilities import (
     CapturedStoredChoice,
     ConfiguredModelIdentity,
@@ -156,9 +155,9 @@ def _failure(
 
 
 async def test_begin_retries_agent_contention_without_new_attempt_or_model_request(
-    rdb_engine: AsyncEngine, latest_db_schema: None, monkeypatch: pytest.MonkeyPatch
+    rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> None:
-    """Initial provider preparation repeats only its rollback-confirmed DB work."""
+    """Initial provider preparation waits with its original attempt and inputs."""
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
     @asynccontextmanager
@@ -175,24 +174,33 @@ async def test_begin_retries_agent_contention_without_new_attempt_or_model_reque
             ModelCandidateHealthRepository(manager),
             metadata,
         )
-        rolled_back = asyncio.Event()
-        resume = asyncio.Event()
-
-        async def contention_yield() -> None:
-            rolled_back.set()
-            await resume.wait()
-
-        monkeypatch.setattr(retry_module, "wait_for_contention_retry", contention_yield)
         async with manager() as holder:
             await holder.write_session.scalar(
                 sa.select(RDBAgent)
                 .where(RDBAgent.id == principal.unit.agent_id)
                 .with_for_update()
             )
+            holder_pid = await holder.read_session.scalar(
+                sa.select(sa.func.pg_backend_pid())
+            )
+            assert isinstance(holder_pid, int)
+            waiting = asyncio.Event()
             task = asyncio.create_task(repository.begin(principal))
             async with asyncio.timeout(3):
-                await rolled_back.wait()
-        resume.set()
+                while not waiting.is_set():
+                    async with manager() as observer:
+                        blocked = await observer.read_session.scalar(
+                            sa.text(
+                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                                "WHERE datname = current_database() "
+                                "AND wait_event_type = 'Lock' "
+                                "AND :holder_pid = ANY(pg_blocking_pids(pid)))"
+                            ),
+                            {"holder_pid": holder_pid},
+                        )
+                    if blocked:
+                        waiting.set()
+            assert not task.done()
         async with asyncio.timeout(3):
             operation = await task
         assert operation.kind is ModelOperationKind.HISTORICAL_MEMORY
@@ -429,7 +437,9 @@ async def test_success_settles_operation_inside_owner_fenced_database_boundary(
     principal = await _principal(rdb_session_manager)
     repository = _repository(rdb_session_manager)
     operation = await repository.begin(principal)
-    async with consolidation_job_session(rdb_session_manager, principal) as job:
+    async with consolidation_job_session(
+        rdb_session_manager, principal, participants=None
+    ) as job:
         await finish_consolidation_model_operation(
             job.session, owner=job.owner, health_repository=repository.health_repository
         )

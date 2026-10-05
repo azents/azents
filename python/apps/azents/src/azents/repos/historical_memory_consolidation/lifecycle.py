@@ -30,7 +30,8 @@ async def source_availability_in_session(
     source = await session.write_session.scalar(
         sa.select(RDBHistoricalMemorySource)
         .where(RDBHistoricalMemorySource.source_session_id == source_session_id)
-        .with_for_update(nowait=True)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if source is None:
         return

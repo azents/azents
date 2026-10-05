@@ -125,7 +125,8 @@ class ExternalAccountOAuthAttemptRepository:
             user = await session.write_session.scalar(
                 sa.select(RDBUser)
                 .where(RDBUser.id == user_id)
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             auth_session = await session.write_session.scalar(
                 sa.select(RDBSession)
@@ -133,7 +134,8 @@ class ExternalAccountOAuthAttemptRepository:
                     RDBSession.id == auth_session_id,
                     RDBSession.user_id == user_id,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if (
                 user is None
@@ -158,12 +160,25 @@ class ExternalAccountOAuthAttemptRepository:
                     == ExternalAccountOAuthAttemptStatus.OPEN,
                     RDBExternalAccountOAuthAttempt.expires_at > now,
                 )
-                .with_for_update(nowait=True)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
             if row is None:
                 return None
+            current_time = await session.write_session.scalar(
+                sa.select(sa.func.clock_timestamp())
+            )
+            if not isinstance(current_time, datetime.datetime):
+                raise TypeError("Database clock did not return a datetime.")
+            current_time = max(now, current_time)
+            if (
+                auth_session.expires_at <= current_time
+                or row.expires_at <= current_time
+                or row.status is not ExternalAccountOAuthAttemptStatus.OPEN
+            ):
+                return None
             row.status = ExternalAccountOAuthAttemptStatus.CLAIMED
-            row.claimed_at = now
+            row.claimed_at = current_time
             await session.write_session.flush()
             return _build(row)
 

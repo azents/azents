@@ -5,7 +5,7 @@ import datetime
 import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import sqlalchemy as sa
 from psycopg.errors import (
@@ -30,6 +30,14 @@ from azents.rdb.models.historical_memory_consolidation import (
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.historical_memory_consolidation.participant_types import (
+    ConsolidationParticipantRequest,
+)
+from azents.repos.historical_memory_consolidation.participants import (
+    ConsolidationParticipantPlan,
+    prelock_participants,
+    validate_participant_plan,
+)
 
 
 class ConsolidationAuthorityError(PermissionError):
@@ -48,7 +56,7 @@ class ConsolidationDeadlineError(ConsolidationAuthorityError):
 async def consolidation_session(
     manager: SessionManager[WriteSession],
 ) -> AsyncIterator[WriteSession]:
-    """Complete rollback before normalizing only expected NOWAIT contention."""
+    """Complete rollback before normalizing only expected transaction contention."""
     try:
         async with manager() as session:
             yield session
@@ -89,6 +97,7 @@ class LockedConsolidationOwner:
     unit: RDBConsolidationUnit
     attempt: RDBConsolidationAttempt
     database_now: datetime.datetime
+    participants: ConsolidationParticipantPlan | None
 
 
 @dataclass(frozen=True)
@@ -97,6 +106,7 @@ class ConsolidationJobSession:
 
     session: WriteSession
     owner: LockedConsolidationOwner
+    participants: ConsolidationParticipantPlan | None
 
 
 @dataclass(frozen=True)
@@ -183,16 +193,23 @@ async def install_statement_deadline(session: WriteSession, seconds: float) -> N
 
 @asynccontextmanager
 async def consolidation_job_session(
-    manager: SessionManager[WriteSession], principal: ConsolidationJobPrincipal
+    manager: SessionManager[WriteSession],
+    principal: ConsolidationJobPrincipal,
+    *,
+    participants: ConsolidationParticipantRequest | None,
 ) -> AsyncIterator[ConsolidationJobSession]:
     """Bound admission and all DB work by the approved lease and attempt deadline."""
     timeout = asyncio.timeout(None)
     try:
         async with timeout:
             async with consolidation_session(manager) as session:
-                remaining = await observe_operation_seconds(session, principal)
+                remaining = await observe_attempt_seconds(session, principal)
                 timeout.reschedule(asyncio.get_running_loop().time() + remaining)
                 await install_statement_deadline(session, remaining)
+                plan = None
+                if participants is not None:
+                    await lock_unit_authority(session, principal.unit)
+                    plan = await prelock_participants(session, principal, participants)
                 owner = await lock_job_owner(session, principal)
                 if owner.unit.lease_until is None:
                     raise ConsolidationAuthorityError(
@@ -216,7 +233,10 @@ async def consolidation_job_session(
                     )
                 )
                 await install_statement_deadline(session, remaining)
-                yield ConsolidationJobSession(session, owner)
+                if plan is not None:
+                    await validate_participant_plan(session, principal, plan)
+                    owner = replace(owner, participants=plan)
+                yield ConsolidationJobSession(session, owner, plan)
     except asyncio.CancelledError:
         raise
     except TimeoutError:
@@ -244,9 +264,9 @@ async def lock_unit_authority(
 ) -> str | None:
     """Protect current Agent eligibility and personal grant from concurrent loss.
 
-    Short nonwaiting shared locks avoid inversion with existing source lifecycle
-    writers. Lock contention is an ordinary retryable database failure, never a
-    reason to assume authority. No foreground identity is created or consulted.
+    Shared locks wait under the admitted attempt cutoff. Complete source
+    participants are acquired before the unit, keeping heartbeat renewal
+    independent. No foreground identity is created or consulted.
     """
     agent = await session.write_session.scalar(
         sa.select(RDBAgent)
@@ -256,7 +276,7 @@ async def lock_unit_authority(
             RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             RDBAgent.memory_enabled.is_(True),
         )
-        .with_for_update(read=True, nowait=True)
+        .with_for_update(read=True)
     )
     if agent is None:
         raise ConsolidationAuthorityError("Consolidation scope is unavailable.")
@@ -268,7 +288,7 @@ async def lock_unit_authority(
             RDBWorkspaceUser.workspace_id == key.workspace_id,
             RDBWorkspaceUser.user_id == key.associated_user_id,
         )
-        .with_for_update(read=True, nowait=True)
+        .with_for_update(read=True)
     )
     if grant is None:
         raise ConsolidationAuthorityError("Consolidation scope is unavailable.")
@@ -305,6 +325,7 @@ async def lock_job_owner(
         sa.select(RDBConsolidationUnit)
         .where(unit_predicate(principal.unit))
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     now = await database_now(session)
     if (
@@ -317,7 +338,7 @@ async def lock_job_owner(
     ):
         raise ConsolidationAuthorityError("Consolidation owner is no longer current.")
     attempt = await session.write_session.get(
-        RDBConsolidationAttempt, principal.attempt_id
+        RDBConsolidationAttempt, principal.attempt_id, populate_existing=True
     )
     if (
         attempt is None
@@ -329,4 +350,4 @@ async def lock_job_owner(
         or attempt.membership_grant_id != grant
     ):
         raise ConsolidationAuthorityError("Consolidation attempt is unavailable.")
-    return LockedConsolidationOwner(unit, attempt, now)
+    return LockedConsolidationOwner(unit, attempt, now, None)

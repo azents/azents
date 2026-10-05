@@ -34,6 +34,7 @@ from azents.repos.archived_session_retention import ArchivedSessionRetentionRepo
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.data import ExternalChannelAgentDecommissionCleanup
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.session_lifecycle_operations import (
     SessionLifecycleOperationsRepository,
 )
@@ -580,6 +581,7 @@ class AgentDecommissionOperationsRepository:
                 now=now,
             )
 
+    @retry_hierarchy_operation
     async def retire_root_tree(
         self,
         *,

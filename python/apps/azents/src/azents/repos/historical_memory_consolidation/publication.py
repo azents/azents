@@ -54,6 +54,9 @@ from azents.repos.historical_memory_consolidation.drafts import (
 from azents.repos.historical_memory_consolidation.operations import (
     finish_consolidation_model_operation,
 )
+from azents.repos.historical_memory_consolidation.participant_types import (
+    DraftParticipants,
+)
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
 )
@@ -152,7 +155,11 @@ class ConsolidationPublicationRepository:
     async def freeze(
         self, principal: ConsolidationJobPrincipal
     ) -> FrozenConsolidationDraft:
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(
@@ -283,7 +290,11 @@ class ConsolidationPublicationRepository:
         expected_observation_epoch: int,
         overview: ValidatedConsolidationOverview,
     ) -> ConsolidationPublicationOutcome:
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=DraftParticipants(recovery=False),
+        ) as job:
             session, owner = job.session, job.owner
             draft = await session.write_session.scalar(
                 sa.select(RDBConsolidationDraft).where(

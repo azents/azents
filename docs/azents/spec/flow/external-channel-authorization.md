@@ -61,8 +61,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-10-05
-spec_version: 31
+last_verified_at: 2026-10-06
+spec_version: 32
 ---
 
 # External Channel Authorization
@@ -302,9 +302,25 @@ under its exact final mutation guards. The existing Agent/principal authorizatio
 key protects absent-row block creation and grant deletion through final acceptance;
 it is not inherited by ordinary participation descriptions. Relevant revoke,
 account, unlink, archive and configuration writes remain ordered with actual Apply.
-The final native mutation lock acquisition is nonblocking and its DB-only bounded
-retry returns a retryable busy result on exhaustion without mutation or provider
-I/O. An observed applied-profile generation rejects stale and ABA drafts.
+Final native mutation fences use ordinary waiting acquisition, including the
+same-key authorization advisory fence. Routing rows precede the advisory fence,
+which precedes Principal/Agent exclusion; linked User precedes Link and Agent
+precedes root Session. Locked identities, complete authorization and DB-current
+draft expiry are revalidated after waiting. The existing 250ms per-acquisition
+lock timeout and three DB-only attempts return the existing retryable busy result
+on exhaustion without mutation or provider I/O; they are not a total-operation
+deadline. Draft reopen also refreshes authorization and expiry after its write
+wait. An observed applied-profile generation rejects stale and ABA drafts.
+
+Authenticated OAuth claim and finalization remain separate DB operations around
+one provider exchange. Claim waits in Section -> User -> auth Session -> exact
+OPEN Attempt order, then checks current expiry and exact context before consuming
+state. Finalization uses the same authority order followed by the active identity
+Link, rechecking current User/auth Session authority after the final wait. A
+temporary holder is not a reason to exchange the code again. No new local claim
+timeout or post-exchange Attempt-expiry contract is added; cancellation and genuine
+authorization loss remain failures. Finalization keeps its existing DB-only
+retry/uniqueness reconciliation and provider work remains outside it.
 
 Owner unlink uses exact-owner conditional revocation DML with ordinary row
 waiting and the existing bounded database retry/busy contract. Already-revoked
@@ -347,6 +363,10 @@ Binding before Edit or Delete. A valid provider principal for another Binding or
 Session cannot mutate the Task.
 
 ## Changelog
+
+- **2026-10-06** (spec_version 32) — Replaced nonwaiting model/OAuth fences with
+  ordinary acquisition and post-wait authority/expiry checks, preserving existing
+  bounded model recovery and single-use exchange/generation/audit/notice effects.
 
 - **2026-10-05** (spec_version 30) — Completed selector and participation repository
   ownership with native read-only descriptive operations, writable atomic

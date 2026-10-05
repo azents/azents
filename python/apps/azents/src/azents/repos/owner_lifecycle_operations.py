@@ -30,6 +30,7 @@ from azents.repos.archived_session_retention import ArchivedSessionRetentionRepo
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
@@ -481,6 +482,7 @@ class OwnerLifecycleOperationsRepository:
                 now=now,
             )
 
+    @retry_hierarchy_operation
     async def retire_root_tree(
         self,
         *,

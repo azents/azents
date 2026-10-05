@@ -52,6 +52,27 @@ from azents.testing.consolidation import (
 )
 
 
+async def _observe_holder_wait(
+    manager: SessionManager[WriteSession], holder_pid: int, observed: asyncio.Event
+) -> None:
+    """Signal only when PostgreSQL reports this holder blocking another backend."""
+    async with asyncio.timeout(3):
+        while True:
+            async with manager() as session:
+                waiting = await session.read_session.scalar(
+                    sa.text(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE datname = current_database() "
+                        "AND wait_event_type = 'Lock' "
+                        "AND :holder_pid = ANY(pg_blocking_pids(pid)))"
+                    ),
+                    {"holder_pid": holder_pid},
+                )
+            if waiting:
+                observed.set()
+                return
+
+
 @pytest.mark.parametrize("source_count", [1, 64])
 async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
     rdb_engine: AsyncEngine,
@@ -124,11 +145,33 @@ async def test_complete_manifest_has_constant_queries_and_deduplicated_locks(
         event.remove(rdb_engine.sync_engine, "before_cursor_execute", capture)
     checks = [query for query in statements if "complete_draft_influence" in query]
     assert len(checks) == 3
-    assert sum("FOR SHARE NOWAIT" in query for query in checks) == 2
+    assert all("FOR SHARE" not in query for query in checks)
     assert all("SELECT DISTINCT" in query for query in checks[:2])
-    # Retry-cutoff observation and pre-lock SQL timeout add constant queries,
-    # independent of manifest size; complete-manifest checks remain exactly three.
-    assert len(statements) <= 25
+    roots = [
+        index
+        for index, query in enumerate(statements)
+        if "FOR SHARE" in query and "FROM agent_sessions" in query
+    ]
+    sources = [
+        index
+        for index, query in enumerate(statements)
+        if "FOR SHARE" in query and "FROM historical_memory_sources" in query
+    ]
+    units = [
+        index
+        for index, query in enumerate(statements)
+        if "FOR UPDATE" in query and "FROM historical_consolidation_units" in query
+    ]
+    assert len(roots) == len(sources) == len(units) == 1
+    assert roots[0] < sources[0] < units[0]
+    assert "ORDER BY agent_sessions.id" in statements[roots[0]]
+    assert (
+        "ORDER BY historical_memory_sources.source_session_id" in statements[sources[0]]
+    )
+    assert all("NOWAIT" not in query for query in statements)
+    # Calibrated against both one and 64 sources: planning and full validation
+    # remain exactly 32 statements, not a source/member admission cap.
+    assert len(statements) == 32
     statements.clear()
     event.listen(rdb_engine.sync_engine, "before_cursor_execute", capture)
     try:
@@ -177,7 +220,6 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
     deadline: str,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
 
@@ -218,25 +260,19 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                 )
                 .with_for_update()
             )
-            rolled_back = asyncio.Event()
-            resume = asyncio.Event()
-
-            async def contention_yield() -> None:
-                rolled_back.set()
-                await resume.wait()
-
-            monkeypatch.setattr(
-                "azents.repos.historical_memory_consolidation.retry.wait_for_contention_retry",
-                contention_yield,
+            holder_pid = await holder.read_session.scalar(
+                sa.select(sa.func.pg_backend_pid())
             )
+            assert isinstance(holder_pid, int)
+            waiting = asyncio.Event()
             observation = asyncio.create_task(
                 drafts.observe(claim.principal, path="summary.md")
             )
-            async with asyncio.timeout(3):
-                await rolled_back.wait()
-        resume.set()
+            await _observe_holder_wait(manager, holder_pid, waiting)
+            assert waiting.is_set() and not observation.done()
         assert (await observation).draft_revision_id == created.draft_revision_id
-        # Rejected nonwaiting manifest checks release the owner fence for renewal.
+        # Participant waits occur before unit ownership; completed observation
+        # leaves its ordinary fence available for a subsequent renewal.
         assert await ConsolidationOwnershipRepository(manager).renew(claim.principal)
         async with manager() as session:
             await session.write_session.execute(
@@ -248,7 +284,9 @@ async def test_deadline_rolls_back_files_receipts_and_releases_fence(
                 )
             )
         with pytest.raises(ConsolidationDeadlineError, match="deadline"):
-            async with consolidation_job_session(manager, claim.principal) as job:
+            async with consolidation_job_session(
+                manager, claim.principal, participants=None
+            ) as job:
                 file = await job.session.write_session.scalar(
                     sa.select(RDBConsolidationDraftFile).where(
                         RDBConsolidationDraftFile.draft_id.in_(

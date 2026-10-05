@@ -1,13 +1,9 @@
 """Completed database operations for Engine Subagent collaboration tools."""
 
-import asyncio
 import dataclasses
 from collections.abc import Sequence
 from textwrap import dedent
 from typing import NamedTuple
-
-from psycopg.errors import LockNotAvailable
-from sqlalchemy.exc import OperationalError
 
 from azents.core.agent import SubagentSettings
 from azents.core.agent_session_data import AgentSession, SessionAgent
@@ -31,6 +27,7 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.model_metadata_source import ModelMetadataSourceRepository
 from azents.repos.model_metadata_source_data import (
@@ -117,37 +114,22 @@ class SubagentToolOperationRepository:
         session_ids = {source.agent_session_id}
         if target is not None:
             session_ids.add(target.agent_session_id)
-        while True:
-            try:
-                async with session.write_session.begin_nested():
-                    if hierarchy_root_session_agent_id is not None:
-                        lock_root = (
-                            self.agent_session_repository.lock_session_agent_by_id
-                        )
-                        root = await lock_root(session, hierarchy_root_session_agent_id)
-                        if root is None:
-                            raise SubagentToolOperationError(
-                                "Root SessionAgent was not found"
-                            )
-                    for session_id in sorted(session_ids):
-                        current = await self.agent_session_repository.lock_by_id_nowait(
-                            session, session_id
-                        )
-                        if current is None:
-                            raise SubagentToolOperationError(
-                                "AgentSession was not found"
-                            )
-                    if self.owner is not None:
-                        if self.owner.session_id != source.agent_session_id:
-                            raise SubagentToolOperationError(
-                                "Session execution owner mismatch"
-                            )
-                        await fence_owned_session_mutation(session, self.owner)
-                return
-            except OperationalError as exc:
-                if not isinstance(exc.orig, LockNotAvailable):
-                    raise
-                await asyncio.sleep(0.01)
+        if hierarchy_root_session_agent_id is not None:
+            root = await self.agent_session_repository.lock_session_agent_by_id(
+                session, hierarchy_root_session_agent_id
+            )
+            if root is None:
+                raise SubagentToolOperationError("Root SessionAgent was not found")
+        for session_id in sorted(session_ids):
+            current = await self.agent_session_repository.lock_by_id(
+                session, session_id
+            )
+            if current is None:
+                raise SubagentToolOperationError("AgentSession was not found")
+        if self.owner is not None:
+            if self.owner.session_id != source.agent_session_id:
+                raise SubagentToolOperationError("Session execution owner mismatch")
+            await fence_owned_session_mutation(session, self.owner)
 
     async def get_agent(self, agent_id: str) -> Agent | None:
         """Return one current Agent policy snapshot."""
@@ -238,6 +220,7 @@ class SubagentToolOperationRepository:
                 events=events,
             )
 
+    @retry_hierarchy_operation
     async def spawn(
         self,
         *,
@@ -370,6 +353,7 @@ class SubagentToolOperationRepository:
                 child_session=child_session,
             )
 
+    @retry_hierarchy_operation
     async def send_message(
         self,
         *,
@@ -407,6 +391,7 @@ class SubagentToolOperationRepository:
             )
             return SubagentTargetResult(target=target)
 
+    @retry_hierarchy_operation
     async def followup_task(
         self,
         *,
@@ -467,6 +452,7 @@ class SubagentToolOperationRepository:
                 target_session=target_session,
             )
 
+    @retry_hierarchy_operation
     async def interrupt(
         self,
         *,

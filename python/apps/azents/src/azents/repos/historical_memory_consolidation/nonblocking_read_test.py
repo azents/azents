@@ -1,4 +1,4 @@
-"""Committed Memory reads remain permitted while independent writers hold rows."""
+"""Read-only Memory views stay nonblocking; receipt producers prelock influence."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -217,7 +217,7 @@ async def test_exact_selected_revision_reads_with_held_writer(
                     assert source.source_session_id == corpus.personal_source
 
 
-async def test_receipt_producer_reads_source_without_source_read_lock(
+async def test_receipt_producer_waits_before_unit_and_allows_lease_renewal(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
 ) -> None:
@@ -236,17 +236,47 @@ async def test_receipt_producer_reads_source_without_source_read_lock(
                 .with_for_update()
             )
             assert source is not None
-            result = await asyncio.wait_for(
+            expected_generation = source.summary_generation
+            expected_hash = source.evidence_hash
+            holder_pid = await writer.scalar(sa.select(sa.func.pg_backend_pid()))
+            assert isinstance(holder_pid, int)
+            producer = asyncio.create_task(
                 ConsolidationSourceRepository(writes).read(
                     claim.principal,
                     source_session_id=corpus.team_source,
                     offset=0,
                     max_bytes=1000,
-                ),
-                timeout=2,
+                )
             )
-            assert result.version.summary_generation == source.summary_generation
-            assert result.version.evidence_hash == source.evidence_hash
+            try:
+                async with asyncio.timeout(5):
+                    while True:
+                        async with writes() as observer:
+                            waiting = await observer.read_session.scalar(
+                                sa.text(
+                                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                                    "WHERE datname = current_database() "
+                                    "AND state = 'active' "
+                                    "AND :holder = ANY(pg_blocking_pids(pid)))"
+                                ),
+                                {"holder": holder_pid},
+                            )
+                        if waiting:
+                            break
+                assert not producer.done()
+                # Source waiting happens before unit serialization, so the
+                # current lease remains renewable by the same exact owner.
+                await asyncio.wait_for(
+                    ConsolidationOwnershipRepository(writes).renew(claim.principal),
+                    timeout=2,
+                )
+                await writer.rollback()
+                result = await asyncio.wait_for(producer, timeout=5)
+            finally:
+                producer.cancel()
+                await asyncio.gather(producer, return_exceptions=True)
+            assert result.version.summary_generation == expected_generation
+            assert result.version.evidence_hash == expected_hash
             assert result.observation_epoch > 0
             assert "sentinel" in result.text
 

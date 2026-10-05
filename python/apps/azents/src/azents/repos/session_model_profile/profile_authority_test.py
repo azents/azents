@@ -83,7 +83,6 @@ async def test_writable_root_retains_blocking_locks_and_authority(
                     scope, agent_id="agent", session_id="session", user_id="user"
                 )
         sessions.lock_by_id.assert_awaited_once_with(scope, "session")
-        sessions.lock_by_id_nowait.assert_not_awaited()
         if denied in {"subagent", "private"}:
             agents.lock_by_id.assert_not_awaited()
         else:

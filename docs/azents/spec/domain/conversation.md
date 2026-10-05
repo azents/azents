@@ -7,6 +7,7 @@ domain: conversation
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/repos/subagent_tool_operations.py
+  - python/apps/azents/src/azents/repos/hierarchy_contention.py
   - python/apps/azents/src/azents/repos/idle_continuation.py
   - python/apps/azents/src/azents/repos/hierarchy_operation_fences_test.py
   - python/apps/azents/src/azents/worker/session/idle_continuation_lock_test.py
@@ -184,8 +185,8 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-05
-spec_version: 184
+last_verified_at: 2026-10-06
+spec_version: 185
 ---
 
 # Conversation & Events
@@ -647,10 +648,13 @@ Tree/path/coordination descriptions are ordinary reads, including validation of
 captured owner identity. Spawn and follow-up capacity are actual root-hierarchy
 claims; send and interrupt admit only the exact source/target Session rows.
 Mutation admission acquires the required Session rows in stable order with
-NOWAIT inside one savepoint, releases every partial admission on collision, and
-then fences the captured source owner generation through the dependent write
-commit. This prevents a parent tool retaining its parent row while waiting for a
-child whose terminal delivery needs that same parent.
+ordinary waiting locks, then fences the captured source owner generation through
+the dependent write commit. A database-confirmed deadlock or serialization abort
+releases the complete owning DB operation before reopening and revalidating its
+original owner and inputs. The finite recovery closure covers both a parent
+mutation and child terminal delivery as possible victims, retaining one atomic
+terminal disposition/mailbox winner without replaying execution or notification.
+Cancellation, stale authority and uncertain commit propagate without replay.
 
 Actual Stop/archive/restore/purge admission shares the hierarchy boundary with
 child creation and admits the complete current tree before applying the
@@ -1553,6 +1557,10 @@ identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
 ## 13. Changelog
+
+- **2026-10-06** (spec_version 185) — Replaced partial NOWAIT hierarchy admission
+  with complete waiting/recovery operations and both-victim terminal closure;
+  original ownership, atomic mailbox disposition and external effects remain.
 
 - **2026-10-05** — v183. Reconciled code-path discovery with current defining
   modules; system behavior is unchanged.

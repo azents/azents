@@ -79,8 +79,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-05
-spec_version: 33
+last_verified_at: 2026-10-06
+spec_version: 34
 ---
 
 # Periodic Execution Flow Spec
@@ -426,9 +426,13 @@ periodic cleanup sweep to win a race against the next claim.
 Temporary rollback-confirmed database contention is recovered in the same
 claim's database operation rather than immediately counting as a failed/no-progress
 attempt. Heartbeat shares this recovery policy; actual expired/replaced ownership
-remains terminal. The existing absolute deadline/lease and cancellation cover
-initial owner lock acquisition and operation retry without another call/count
-budget, model replay or execution loop.
+remains terminal. The original immutable attempt deadline and cancellation bound
+pre-unit acquisition and same-operation retry. Exact manifest/source participants
+are prelocked before the unit so their waits do not block independent heartbeat
+renewal. After exact unit/attempt acquisition, the current renewable lease and
+same attempt cutoff bound acceptance; a valid extension is not frozen to the
+initially observed lease. No new call/count budget, model replay or execution
+loop is introduced.
 Elapsed cutoff settlement compares the exact active attempt/generation/token
 and writes terminal/retry metadata without restoring expired execution or
 publication authority. Internal faults/cutoffs store no user-facing failure code.
@@ -576,6 +580,10 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-06** (spec_version 34) — Distinguished immutable attempt-bounded
+  pre-unit waiting from current renewable-lease admission after acquisition;
+  participant waits preserve independent heartbeat and same-claim DB recovery.
 
 - **2026-10-05** (spec_version 31) — Moved archive retention, purge participant
   checkpoints/finalization, and file cleanup database lifetimes into completed

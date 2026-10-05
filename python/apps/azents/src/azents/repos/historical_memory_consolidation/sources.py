@@ -28,6 +28,10 @@ from azents.repos.historical_memory_consolidation.authority import (
     consolidation_job_session,
     require_commit_owner,
 )
+from azents.repos.historical_memory_consolidation.participant_types import (
+    SourceInventoryParticipants,
+    SourceReadParticipants,
+)
 from azents.repos.historical_memory_consolidation.retry import (
     retry_consolidation_operation,
 )
@@ -61,8 +65,8 @@ class ConsolidationSourceInventoryPage:
     observation_epoch: int
 
 
-def source_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
-    """Require the source's exact corpus, never the foreground combined view."""
+def source_identity_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
+    """Match exact owned identity including presently denied/archived rows."""
     mode = (
         AgentSessionProductMode.TEAM
         if key.scope is ConsolidationScope.TEAM
@@ -74,6 +78,13 @@ def source_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
         RDBAgentSession.product_mode == mode,
         RDBAgentSession.associated_user_id.is_not_distinct_from(key.associated_user_id),
         RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+    )
+
+
+def source_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[bool]:
+    """Authorize current availability separately from participant identity."""
+    return sa.and_(
+        source_identity_predicate(key),
         RDBAgentSession.status == AgentSessionStatus.ACTIVE,
     )
 
@@ -145,34 +156,17 @@ class ConsolidationSourceRepository:
             )
         ):
             raise ValueError("Consolidation source prefix is invalid.")
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=SourceInventoryParticipants(
+                after=after, limit=limit, source_id_prefix=source_id_prefix
+            ),
+        ) as job:
             session, owner = job.session, job.owner
-            query = (
-                sa.select(RDBHistoricalMemorySource.source_session_id)
-                .join(
-                    RDBAgentSession,
-                    RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
-                )
-                .where(
-                    source_predicate(principal.unit),
-                    RDBHistoricalMemorySource.prepared_at.is_not(None),
-                    RDBHistoricalMemorySource.summary_generation > 0,
-                    RDBHistoricalMemorySource.evidence_hash.is_not(None),
-                )
-                .order_by(RDBHistoricalMemorySource.source_session_id)
-                .limit(limit + 1)
-            )
-            if after is not None:
-                query = query.where(RDBHistoricalMemorySource.source_session_id > after)
-            if source_id_prefix is not None:
-                query = query.where(
-                    RDBHistoricalMemorySource.source_session_id == source_id_prefix
-                    if len(source_id_prefix) == 32
-                    else RDBHistoricalMemorySource.source_session_id.startswith(
-                        source_id_prefix
-                    )
-                )
-            ids = list(await session.write_session.scalars(query))
+            if job.participants is None:
+                raise RuntimeError("Consolidation source participants are missing.")
+            ids = job.participants.candidate_ids
             entries: list[ConsolidationSourceInventoryEntry] = []
             for source_id in ids[:limit]:
                 source = await read_source(
@@ -223,8 +217,20 @@ class ConsolidationSourceRepository:
         """Read bounded exact current evidence, including meaningful empty summaries."""
         if offset < 0 or max_bytes < 4:
             raise ValueError("Consolidation source read bounds are invalid.")
-        async with consolidation_job_session(self.session_manager, principal) as job:
+        async with consolidation_job_session(
+            self.session_manager,
+            principal,
+            participants=SourceReadParticipants(source_session_id=source_session_id),
+        ) as job:
             session, owner = job.session, job.owner
+            if (
+                job.participants is None
+                or source_session_id not in job.participants.locked_root_ids
+                or source_session_id not in job.participants.locked_source_ids
+            ):
+                raise ConsolidationAuthorityError(
+                    "Consolidation source is unavailable."
+                )
             source = await read_source(
                 session, key=principal.unit, source_session_id=source_session_id
             )

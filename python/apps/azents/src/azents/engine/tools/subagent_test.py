@@ -542,14 +542,6 @@ class _AgentSessionRepository:
         """Return one locked AgentSession fixture."""
         return await self.get_by_id(session, agent_session_id)
 
-    async def lock_by_id_nowait(
-        self,
-        session: ReadSession,
-        agent_session_id: str,
-    ) -> AgentSession | None:
-        """Return the exact Session admitted by the collaboration mutation."""
-        return await self.get_by_id(session, agent_session_id)
-
     async def request_stop(
         self,
         session: ReadSession,

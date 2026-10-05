@@ -486,7 +486,7 @@ async def test_membership_repository_restores_fresh_enrollment(
 
 
 async def test_two_real_transactions_admit_exactly_one_owner(
-    rdb_engine: AsyncEngine, latest_db_schema: None, monkeypatch: pytest.MonkeyPatch
+    rdb_engine: AsyncEngine, latest_db_schema: None
 ) -> None:
     """Two released contenders use independent connections and committed state."""
     factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
@@ -563,21 +563,27 @@ async def test_two_real_transactions_admit_exactly_one_owner(
             await holder.write_session.scalar(
                 sa.select(RDBAgent).where(RDBAgent.id == key.agent_id).with_for_update()
             )
-            rolled_back = asyncio.Event()
-            resume = asyncio.Event()
-
-            async def contention_yield() -> None:
-                rolled_back.set()
-                await resume.wait()
-
-            monkeypatch.setattr(
-                "azents.repos.historical_memory_consolidation.retry.wait_for_contention_retry",
-                contention_yield,
+            holder_pid = await holder.read_session.scalar(
+                sa.select(sa.func.pg_backend_pid())
             )
+            assert isinstance(holder_pid, int)
+            waiting = asyncio.Event()
             renewal = asyncio.create_task(repository.renew(principal))
             async with asyncio.timeout(3):
-                await rolled_back.wait()
-        resume.set()
+                while not waiting.is_set():
+                    async with manager() as observer:
+                        blocked = await observer.read_session.scalar(
+                            sa.text(
+                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                                "WHERE datname = current_database() "
+                                "AND wait_event_type = 'Lock' "
+                                "AND :holder_pid = ANY(pg_blocking_pids(pid)))"
+                            ),
+                            {"holder_pid": holder_pid},
+                        )
+                    if blocked:
+                        waiting.set()
+            assert not renewal.done()
         assert await renewal is not None
         assert await repository.renew(principal) is not None
     finally:

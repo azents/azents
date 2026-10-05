@@ -12,7 +12,6 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from uuid6 import uuid7
 
-import azents.repos.historical_memory_consolidation.retry as retry_module
 from azents.core.historical_memory_consolidation import (
     ConsolidationAttemptState,
     ConsolidationDisposition,
@@ -79,22 +78,34 @@ class _Case:
 
 
 @dataclass
-class _ContentionBarrier:
-    rolled_back: asyncio.Event
-    resume: asyncio.Event
-    retries: int = 0
+class _LockWaitBarrier:
+    observations: int = 0
 
-    async def wait(self) -> None:
-        self.retries += 1
-        self.rolled_back.set()
-        await self.resume.wait()
+    async def observe(
+        self, manager: SessionManager[WriteSession], holder: WriteSession
+    ) -> None:
+        """Observe the exact held backend as a PostgreSQL lock blocker."""
+        pid = await holder.read_session.scalar(sa.select(sa.func.pg_backend_pid()))
+        assert isinstance(pid, int)
+        async with asyncio.timeout(3):
+            while True:
+                async with manager() as observer:
+                    blocked = await observer.read_session.scalar(
+                        sa.text(
+                            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                            "WHERE datname = current_database() AND state = 'active' "
+                            "AND :holder = ANY(pg_blocking_pids(pid)))"
+                        ),
+                        {"holder": pid},
+                    )
+                if blocked:
+                    self.observations += 1
+                    return
 
 
 @pytest.fixture
-def contention(monkeypatch: pytest.MonkeyPatch) -> _ContentionBarrier:
-    barrier = _ContentionBarrier(asyncio.Event(), asyncio.Event())
-    monkeypatch.setattr(retry_module, "wait_for_contention_retry", barrier.wait)
-    return barrier
+def contention() -> _LockWaitBarrier:
+    return _LockWaitBarrier()
 
 
 @pytest_asyncio.fixture
@@ -167,7 +178,7 @@ async def _assert_running(case: _Case) -> None:
     ],
 )
 async def test_writer_release_continues_same_claim_without_failure_or_backoff(
-    case: _Case, contention: _ContentionBarrier, operation: str
+    case: _Case, contention: _LockWaitBarrier, operation: str
 ) -> None:
     principal = case.claim.principal
     drafts = ConsolidationDraftRepository(case.manager)
@@ -229,17 +240,16 @@ async def test_writer_release_continues_same_claim_without_failure_or_backoff(
         )
         task = asyncio.create_task(invoke())
         async with asyncio.timeout(3):
-            await contention.rolled_back.wait()
+            await contention.observe(case.manager, holder)
         assert not task.done()
-    contention.resume.set()
     async with asyncio.timeout(3):
         await task
-    assert contention.retries == 1
+    assert contention.observations == 1
     await _assert_running(case)
 
 
 async def test_mutation_receipt_and_model_observation_commit_once_after_manifest_retry(
-    case: _Case, contention: _ContentionBarrier
+    case: _Case, contention: _LockWaitBarrier
 ) -> None:
     drafts = ConsolidationDraftRepository(case.manager)
     observation = await drafts.observe(case.claim.principal, path="summary.md")
@@ -282,8 +292,7 @@ async def test_mutation_receipt_and_model_observation_commit_once_after_manifest
         )
         task = asyncio.create_task(invoke_once())
         async with asyncio.timeout(3):
-            await contention.rolled_back.wait()
-    contention.resume.set()
+            await contention.observe(case.manager, holder)
     async with asyncio.timeout(3):
         await task
     assert physical_calls == 1
@@ -315,7 +324,7 @@ async def test_mutation_receipt_and_model_observation_commit_once_after_manifest
 
 @pytest.mark.parametrize("change", ["cancel", "replace_owner", "disable", "expired"])
 async def test_retry_cannot_continue_after_cancellation_revocation_or_expiry(
-    case: _Case, contention: _ContentionBarrier, change: str
+    case: _Case, contention: _LockWaitBarrier, change: str
 ) -> None:
     async with case.manager() as holder:
         await holder.write_session.scalar(
@@ -329,7 +338,7 @@ async def test_retry_cannot_continue_after_cancellation_revocation_or_expiry(
             )
         )
         async with asyncio.timeout(3):
-            await contention.rolled_back.wait()
+            await contention.observe(case.manager, holder)
         if change == "disable":
             await holder.write_session.execute(
                 sa.update(RDBAgent)
@@ -342,19 +351,18 @@ async def test_retry_cannot_continue_after_cancellation_revocation_or_expiry(
                 asyncio.CancelledError, match="shutdown-during-db-retry"
             ):
                 await task
-    if change in {"replace_owner", "expired"}:
-        async with case.manager() as session:
-            unit = await session.write_session.get(
-                RDBConsolidationUnit, case.claim.unit_id
-            )
-            assert unit is not None
-            if change == "replace_owner":
-                unit.owner_token = "x" * 32
-            else:
-                unit.lease_until = await database_now(session) - datetime.timedelta(
-                    seconds=1
+        if change in {"replace_owner", "expired"}:
+            async with case.manager() as session:
+                unit = await session.write_session.get(
+                    RDBConsolidationUnit, case.claim.unit_id
                 )
-    contention.resume.set()
+                assert unit is not None
+                if change == "replace_owner":
+                    unit.owner_token = "x" * 32
+                else:
+                    unit.lease_until = await database_now(session) - datetime.timedelta(
+                        seconds=1
+                    )
     if change != "cancel":
         with pytest.raises(ConsolidationAuthorityError):
             async with asyncio.timeout(3):
@@ -368,7 +376,7 @@ async def test_retry_cannot_continue_after_cancellation_revocation_or_expiry(
 
 
 async def test_heartbeat_extension_while_busy_does_not_freeze_original_lease(
-    case: _Case, contention: _ContentionBarrier
+    case: _Case, contention: _LockWaitBarrier
 ) -> None:
     async with case.manager() as session:
         unit = await session.write_session.get(RDBConsolidationUnit, case.claim.unit_id)
@@ -389,18 +397,19 @@ async def test_heartbeat_extension_while_busy_does_not_freeze_original_lease(
             )
         )
         async with asyncio.timeout(3):
-            await contention.rolled_back.wait()
-        # Rolled-back manifest contention must release the unit for heartbeat.
-        renewed = await ConsolidationOwnershipRepository(case.manager).renew(
-            case.claim.principal
-        )
+            await contention.observe(case.manager, holder)
+        # Participant acquisition waits before unit ownership, so an independent
+        # heartbeat must be able to renew without waiting for this source writer.
+        async with asyncio.timeout(1):
+            renewed = await ConsolidationOwnershipRepository(case.manager).renew(
+                case.claim.principal
+            )
         assert renewed > original_lease
         remaining = (
             original_lease - datetime.datetime.now(datetime.UTC)
         ).total_seconds()
         # This wait verifies the real lease-time boundary, not scheduling order.
         await asyncio.sleep(max(0, remaining) + 0.02)
-    contention.resume.set()
     async with asyncio.timeout(3):
         await task
     await _assert_running(case)
@@ -433,6 +442,7 @@ async def test_initial_unit_wait_is_bounded_before_locked_owner_admission(
 
 async def test_terminal_settlement_waits_for_unit_then_preserves_exact_owner(
     case: _Case,
+    contention: _LockWaitBarrier,
 ) -> None:
     async with case.manager() as holder:
         await holder.write_session.scalar(
@@ -445,8 +455,8 @@ async def test_terminal_settlement_waits_for_unit_then_preserves_exact_owner(
                 case.claim.principal, failure_code=None, cancelled=False
             )
         )
-        # The row holder is the authoritative serialization barrier. No sleep is
-        # needed: the concurrent transaction cannot commit before this one exits.
+        await contention.observe(case.manager, holder)
+        assert not task.done()
     async with asyncio.timeout(3):
         await task
     async with case.manager() as session:
@@ -462,7 +472,7 @@ async def test_terminal_settlement_waits_for_unit_then_preserves_exact_owner(
 
 @pytest.mark.parametrize("ending", ["release", "cancel", "deadline"])
 async def test_initial_claim_retries_only_before_unchanged_absolute_deadline(
-    case: _Case, contention: _ContentionBarrier, ending: str
+    case: _Case, contention: _LockWaitBarrier, ending: str
 ) -> None:
     key = case.corpus.personal
     deadline = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
@@ -476,7 +486,7 @@ async def test_initial_claim_retries_only_before_unchanged_absolute_deadline(
             ConsolidationOwnershipRepository(case.manager).claim(key, deadline=deadline)
         )
         async with asyncio.timeout(3):
-            await contention.rolled_back.wait()
+            await contention.observe(case.manager, holder)
         if ending == "cancel":
             task.cancel("cancel-initial-claim")
             with pytest.raises(asyncio.CancelledError, match="cancel-initial-claim"):
@@ -485,7 +495,6 @@ async def test_initial_claim_retries_only_before_unchanged_absolute_deadline(
             with pytest.raises(ConsolidationDeadlineError):
                 async with asyncio.timeout(3):
                     await task
-    contention.resume.set()
     result = await task if ending == "release" else None
     async with case.manager() as session:
         count = await session.read_session.scalar(
@@ -506,7 +515,7 @@ async def test_initial_claim_retries_only_before_unchanged_absolute_deadline(
 
 
 async def test_publication_retries_frozen_result_without_repeating_authorship(
-    case: _Case, contention: _ContentionBarrier
+    case: _Case, contention: _LockWaitBarrier
 ) -> None:
     principal = case.claim.principal
     work = ConsolidationWorkRepository(case.manager)
@@ -570,8 +579,7 @@ async def test_publication_retries_frozen_result_without_repeating_authorship(
             )
         )
         async with asyncio.timeout(3):
-            await contention.rolled_back.wait()
-    contention.resume.set()
+            await contention.observe(case.manager, holder)
     async with asyncio.timeout(3):
         result = await task
     async with case.manager() as session:
