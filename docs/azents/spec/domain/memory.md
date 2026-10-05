@@ -74,7 +74,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-05
-spec_version: 17
+spec_version: 18
 ---
 
 # Memory
@@ -252,6 +252,16 @@ Normal model completion is not publication evidence. The host freezes files,
 validates `Historical Context` and meaningful `Source Routes`, exact delivered
 work dispositions, independently rendered size and the complete influence
 manifest, and atomically publishes one immutable revision plus exact coverage.
+Successful publication retires its private workspace in that same transaction:
+draft files (including coverage and temporary notes), draft dependencies, and
+the completed attempt's exposure/receipt payloads are removed only after copying
+the full published dependency manifest. Unpublished considered choices tied to
+that workspace return to pending with their draft/presentation pointers cleared;
+they are not implicitly acknowledged. Immediate continuation creates a fresh
+draft from the published summary and manifest, without a prior coverage file.
+Published work remains excluded from new coverage rather than silently accepted.
+Publication/cleanup rollback or cancellation preserves the unfinished workspace;
+acknowledgement loss still resolves from durable completion without needing it.
 The final model text is not parsed as a replacement document. Failed/hard-cutoff
 attempts retain the prior permitted publication; safe drafts may be recovered
 after current authorization and complete-manifest validation.

@@ -80,7 +80,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-05
-spec_version: 32
+spec_version: 33
 ---
 
 # Periodic Execution Flow Spec
@@ -417,6 +417,12 @@ quota candidate handoff. Jobs renew 120-second leases every 30 seconds and
 preserve exact pending work across
 productive finite slices. Productive progress requeues without failure delay;
 failures/no progress use one-minute exponential backoff capped at six hours.
+Successful publication atomically retires its completed draft workspace and
+private receipt/exposure payloads before releasing ownership. Immediate follow-up
+claims seed a new workspace from published bytes and dependencies without old
+coverage. Unpublished work and its finite-pass boundary survive; failed or
+rolled-back publication keeps its recoverable draft. This does not wait for the
+periodic cleanup sweep to win a race against the next claim.
 Temporary rollback-confirmed database contention is recovered in the same
 claim's database operation rather than immediately counting as a failed/no-progress
 attempt. Heartbeat shares this recovery policy; actual expired/replaced ownership

@@ -90,7 +90,7 @@ async def _ready_for_corpus(
     claim = await owners.claim(key, deadline=consolidation_deadline())
     assert claim is not None
     work = ConsolidationWorkRepository(manager)
-    page = await work.page(claim.principal, after_sequence=None, limit=50)
+    page = await work.page(claim.principal, after_sequence=None, limit=1)
     assert len(page.entries) == 1
     work_id = page.entries[0].work_id
     coverage = ConsolidationCoverage(
@@ -130,6 +130,7 @@ async def _ready_for_corpus(
             DraftFileChange(
                 "coverage.json", journal.file_revision_id, coverage.model_dump_json()
             ),
+            DraftFileChange("notes.md", None, "Temporary working notes"),
         ],
     )
     frozen = await ConsolidationPublicationRepository(
