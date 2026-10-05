@@ -175,14 +175,16 @@ def _speed_radio(driver: WebDriver, option: str) -> WebElement:
     """Locate the real group-aware speed control by its canonical option ID."""
     selector = f"[role='radio'][data-execution-option-id='{option}']"
     if not driver.find_elements(By.CSS_SELECTOR, selector):
-        if not driver.find_elements(
-            By.CSS_SELECTOR, "[role='dialog'][aria-label='Model']"
-        ):
-            _wait(driver).until(
-                ec.element_to_be_clickable(
-                    (By.CSS_SELECTOR, "button[aria-label='Model']")
-                )
-            ).click()
+        trigger = _wait(driver).until(
+            ec.element_to_be_clickable((By.CSS_SELECTOR, "button[aria-label='Model']"))
+        )
+        if trigger.get_attribute("aria-expanded") != "true":
+            trigger.click()
+        _wait(driver).until(
+            ec.visibility_of_element_located(
+                (By.CSS_SELECTOR, "[role='dialog'][aria-label='Model']")
+            )
+        )
         _wait(driver).until(
             ec.element_to_be_clickable(
                 (

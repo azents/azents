@@ -109,12 +109,15 @@ class ChatEventPageResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "items": [ChatEventResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
             "has_more": obj.get("has_more"),
             "has_newer": obj.get("has_newer") if obj.get("has_newer") is not None else False,
             "next_cursor": obj.get("next_cursor"),
             "previous_cursor": obj.get("previous_cursor")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

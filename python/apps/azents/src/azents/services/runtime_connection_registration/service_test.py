@@ -21,10 +21,16 @@ from azents.core.enums import (
     RuntimeProviderKind,
     RuntimeProviderScope,
 )
+from azents.core.runtime_connection_registration import (
+    RuntimeConnectionRegistrationUnavailable,
+)
+from azents.core.runtime_provider_control import RuntimeProviderCredentialAuthentication
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
-from azents.repos.runtime_connection_generation.data import (
-    RuntimeConnectionGeneration,
+from azents.repos.runtime_connection_generation.data import RuntimeConnectionGeneration
+from azents.repos.runtime_connection_registration_operations import (
+    RuntimeProviderConnectionRegistrationOperationRepository,
+    RuntimeRunnerConnectionRegistrationOperationRepository,
 )
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -37,11 +43,7 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionRecord,
 )
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialAuthentication,
-)
 
-from .data import RuntimeConnectionRegistrationUnavailable
 from .service import (
     RuntimeProviderConnectionRegistrationService,
     RuntimeRunnerConnectionRegistrationService,
@@ -122,8 +124,7 @@ class _GenerationAuthority:
         return self._state(key)
 
     def _state(
-        self,
-        key: tuple[RuntimeConnectionAuthorityKind, str],
+        self, key: tuple[RuntimeConnectionAuthorityKind, str]
     ) -> RuntimeConnectionGeneration:
         now = datetime.now(UTC)
         return RuntimeConnectionGeneration(
@@ -144,8 +145,10 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
 
     def _assert_transactions_closed(self) -> None:
         assert all(
-            not session.write_session.in_transaction()
-            for session in self.session_manager.sessions
+            (
+                not session.write_session.in_transaction()
+                for session in self.session_manager.sessions
+            )
         )
         self.external_calls += 1
 
@@ -158,9 +161,7 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
     ) -> bool:
         self._assert_transactions_closed()
         return await super().stage_connection_candidate(
-            record=record,
-            publication_token=publication_token,
-            ttl_seconds=ttl_seconds,
+            record=record, publication_token=publication_token, ttl_seconds=ttl_seconds
         )
 
     async def promote_connection_candidate(
@@ -182,11 +183,7 @@ class _TransactionCheckingStore(InMemoryRuntimeCoordinationStore):
         )
 
     async def revoke_connection(
-        self,
-        *,
-        kind: RuntimeConnectionKind,
-        subject_id: str,
-        generation: int,
+        self, *, kind: RuntimeConnectionKind, subject_id: str, generation: int
     ) -> bool:
         self._assert_transactions_closed()
         return await super().revoke_connection(
@@ -239,9 +236,7 @@ class _ProviderAuthority:
         )
         assert session.write_session.in_transaction()
         await self.validate_connection_authority_in_transaction(
-            session,
-            authentication=authentication,
-            validated_at=authorized_at,
+            session, authentication=authentication, validated_at=authorized_at
         )
         self.create_session = session
         return object()
@@ -249,18 +244,13 @@ class _ProviderAuthority:
 
 class _RunnerAuthority:
     async def authorize_runner_in_transaction(
-        self,
-        session: ReadSession,
-        credential: RuntimeRunnerCredential,
+        self, session: ReadSession, credential: RuntimeRunnerCredential
     ) -> bool:
-        del credential
         assert session.read_session.in_transaction()
         return True
 
     async def fence_runner_registration_in_transaction(
-        self,
-        session: WriteSession,
-        credential: RuntimeRunnerCredential,
+        self, session: WriteSession, credential: RuntimeRunnerCredential
     ) -> bool:
         del credential
         assert session.write_session.in_transaction()
@@ -272,11 +262,7 @@ class _GenerationObserver:
     replacements: list[tuple[int, int]] = dataclasses.field(default_factory=list)
 
     async def on_runner_replaced(
-        self,
-        *,
-        runtime_id: str,
-        previous_generation: int,
-        generation: int,
+        self, *, runtime_id: str, previous_generation: int, generation: int
     ) -> None:
         assert runtime_id == "runtime-1"
         self.replacements.append((previous_generation, generation))
@@ -289,16 +275,17 @@ class _GenerationObserver:
 class _Clock:
     now: datetime
 
+    def advance_to(self, now: datetime) -> None:
+        """Advance authoritative test time after the promotion boundary."""
+        self.now = now
+
     def __call__(self) -> datetime:
         return self.now
 
 
 class _PromotionHookStore(_TransactionCheckingStore):
     def __init__(
-        self,
-        session_manager: _SessionManager,
-        *,
-        after_promotion: Callable[[], None],
+        self, session_manager: _SessionManager, *, after_promotion: Callable[[], None]
     ) -> None:
         super().__init__(session_manager)
         self.after_promotion = after_promotion
@@ -333,19 +320,20 @@ async def test_provider_registration_separates_external_calls_from_transactions(
     provider = _ProviderAuthority()
     now = datetime.now(UTC)
     service = RuntimeProviderConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        provider_control=provider,
         clock=lambda: now,
+        operations=RuntimeProviderConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            provider_control=provider,
+        ),
     )
-
     accepted = await service.register_provider(
         _provider_registration(),
         authentication=_provider_authentication(),
         registered_at=now,
     )
-
     assert accepted.generation == 1
     assert store.external_calls == 2
     assert generations.accept_session is provider.create_session
@@ -363,39 +351,32 @@ async def test_provider_final_acceptance_rechecks_current_evidence_time() -> Non
     clock = _Clock(started_at)
     store = _PromotionHookStore(
         sessions,
-        after_promotion=lambda: setattr(
-            clock,
-            "now",
-            started_at + timedelta(seconds=2),
-        ),
+        after_promotion=lambda: clock.advance_to(started_at + timedelta(seconds=2)),
     )
     service = RuntimeProviderConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        provider_control=provider,
         clock=clock,
+        operations=RuntimeProviderConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            provider_control=provider,
+        ),
     )
     authentication = dataclasses.replace(
         _provider_authentication(),
         evidence_expires_at=started_at + timedelta(seconds=1),
     )
-
     with pytest.raises(RuntimeError, match="provider evidence expired"):
         await service.register_provider(
             _provider_registration(),
             authentication=authentication,
             registered_at=started_at,
         )
-
-    assert provider.validated_at == [
-        started_at,
-        started_at + timedelta(seconds=2),
-    ]
+    assert provider.validated_at == [started_at, started_at + timedelta(seconds=2)]
     assert (
         await store.get_connection(
-            kind=RuntimeConnectionKind.PROVIDER,
-            subject_id="provider-1",
+            kind=RuntimeConnectionKind.PROVIDER, subject_id="provider-1"
         )
         is None
     )
@@ -408,25 +389,25 @@ async def test_failed_final_acceptance_revokes_only_after_transaction_ends() -> 
     generations.reject_acceptance = True
     store = _TransactionCheckingStore(sessions)
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        runner_authentication=_RunnerAuthority(),
         generation_observer=None,
+        operations=RuntimeRunnerConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            runner_authentication=_RunnerAuthority(),
+        ),
     )
-
     with pytest.raises(RuntimeConnectionRegistrationUnavailable, match="superseded"):
         await service.register_runner(
             _runner_registration(),
             authentication=_runner_credential(),
             registered_at=datetime.now(UTC),
         )
-
     assert store.external_calls == 3
     assert (
         await store.get_connection(
-            kind=RuntimeConnectionKind.RUNNER,
-            subject_id="runtime-1",
+            kind=RuntimeConnectionKind.RUNNER, subject_id="runtime-1"
         )
         is None
     )
@@ -440,25 +421,25 @@ async def test_provider_cancellation_after_promotion_revokes_connection() -> Non
     generations.cancel_acceptance = True
     store = _TransactionCheckingStore(sessions)
     service = RuntimeProviderConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        provider_control=_ProviderAuthority(),
         clock=lambda: datetime.now(UTC),
+        operations=RuntimeProviderConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            provider_control=_ProviderAuthority(),
+        ),
     )
-
     with pytest.raises(asyncio.CancelledError):
         await service.register_provider(
             _provider_registration(),
             authentication=_provider_authentication(),
             registered_at=datetime.now(UTC),
         )
-
     assert store.external_calls == 3
     assert (
         await store.get_connection(
-            kind=RuntimeConnectionKind.PROVIDER,
-            subject_id="provider-1",
+            kind=RuntimeConnectionKind.PROVIDER, subject_id="provider-1"
         )
         is None
     )
@@ -472,25 +453,25 @@ async def test_runner_cancellation_after_promotion_revokes_connection() -> None:
     generations.cancel_acceptance = True
     store = _TransactionCheckingStore(sessions)
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        runner_authentication=_RunnerAuthority(),
         generation_observer=None,
+        operations=RuntimeRunnerConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            runner_authentication=_RunnerAuthority(),
+        ),
     )
-
     with pytest.raises(asyncio.CancelledError):
         await service.register_runner(
             _runner_registration(),
             authentication=_runner_credential(),
             registered_at=datetime.now(UTC),
         )
-
     assert store.external_calls == 3
     assert (
         await store.get_connection(
-            kind=RuntimeConnectionKind.RUNNER,
-            subject_id="runtime-1",
+            kind=RuntimeConnectionKind.RUNNER, subject_id="runtime-1"
         )
         is None
     )
@@ -503,25 +484,24 @@ async def test_runner_replacement_observer_runs_after_durable_acceptance() -> No
     store = _TransactionCheckingStore(sessions)
     observer = _GenerationObserver()
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        runner_authentication=_RunnerAuthority(),
         generation_observer=observer,
+        operations=RuntimeRunnerConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            runner_authentication=_RunnerAuthority(),
+        ),
     )
     now = datetime.now(UTC)
-
     first = await service.register_runner(
-        _runner_registration(),
-        authentication=_runner_credential(),
-        registered_at=now,
+        _runner_registration(), authentication=_runner_credential(), registered_at=now
     )
     second = await service.register_runner(
         dataclasses.replace(_runner_registration(), connection_id="connection-2"),
         authentication=_runner_credential(),
         registered_at=now,
     )
-
     assert first.generation == 1
     assert second.generation == 2
     assert observer.replacements == [(1, 2)]
@@ -538,46 +518,35 @@ async def test_runner_observer_failure_does_not_reject_committed_acceptance(
 
     class _FailingObserver(_GenerationObserver):
         async def on_runner_replaced(
-            self,
-            *,
-            runtime_id: str,
-            previous_generation: int,
-            generation: int,
+            self, *, runtime_id: str, previous_generation: int, generation: int
         ) -> None:
             del runtime_id, previous_generation, generation
             raise RuntimeError("observer failed")
 
     service = RuntimeRunnerConnectionRegistrationService(
-        session_manager=sessions,
-        generation_repository=generations,
         coordination_store=store,
-        runner_authentication=_RunnerAuthority(),
         generation_observer=_FailingObserver(),
+        operations=RuntimeRunnerConnectionRegistrationOperationRepository(
+            session_manager=sessions,
+            read_session_manager=sessions,
+            generation_repository=generations,
+            runner_authentication=_RunnerAuthority(),
+        ),
     )
     now = datetime.now(UTC)
     await service.register_runner(
-        _runner_registration(),
-        authentication=_runner_credential(),
-        registered_at=now,
+        _runner_registration(), authentication=_runner_credential(), registered_at=now
     )
-
     with caplog.at_level(
-        logging.ERROR,
-        logger="azents.services.runtime_connection_registration.service",
+        logging.ERROR, logger="azents.services.runtime_connection_registration.service"
     ):
         accepted = await service.register_runner(
-            dataclasses.replace(
-                _runner_registration(),
-                connection_id="connection-2",
-            ),
+            dataclasses.replace(_runner_registration(), connection_id="connection-2"),
             authentication=_runner_credential(),
             registered_at=now,
         )
-
     assert accepted.generation == 2
-    assert (
-        generations.accepted[(RuntimeConnectionAuthorityKind.RUNNER, "runtime-1")] == 2
-    )
+    assert generations.accepted[RuntimeConnectionAuthorityKind.RUNNER, "runtime-1"] == 2
     assert "Runtime Runner replacement observer failed" in caplog.text
 
 
@@ -625,9 +594,7 @@ def _runner_registration() -> RuntimeRunnerRegistration:
         metadata={},
         auth_credential_id="runner-credential-1",
         runtime_configuration=RuntimeConfigurationEvidence(
-            configuration_sequence=1,
-            digest="d" * 64,
-            desired_generation=1,
+            configuration_sequence=1, digest="d" * 64, desired_generation=1
         ),
         connection_id="connection-1",
         owner_replica_id="control-a",

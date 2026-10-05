@@ -95,11 +95,14 @@ class RuntimeProviderAuthenticationBindingRotateResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "binding": RuntimeProviderAuthenticationBindingResponse.from_dict(obj["binding"]) if obj.get("binding") is not None else None,
             "grant_id": obj.get("grant_id"),
             "secret": obj.get("secret"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

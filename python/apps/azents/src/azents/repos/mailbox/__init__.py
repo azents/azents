@@ -1,13 +1,11 @@
 """MailboxItem repository."""
 
 from collections.abc import Sequence
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from pydantic import TypeAdapter
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.engine import CursorResult
 
 from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
 from azents.core.json_value import JSONValue
@@ -19,8 +17,10 @@ from azents.core.mailbox_data import (
 )
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 _MAILBOX_PAYLOAD_ADAPTER = TypeAdapter(MailboxEnvelopePayload)
+_ACTION_ADAPTER = TypeAdapter(dict[str, JSONValue] | None)
 
 
 class MailboxRepository:
@@ -248,14 +248,13 @@ class MailboxRepository:
         """Delete claimed MailboxItem rows inside session scope."""
         if not buffer_ids:
             return 0
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBMailboxItem).where(
                     RDBMailboxItem.session_id == session_id,
                     RDBMailboxItem.id.in_(buffer_ids),
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount or 0
@@ -296,14 +295,13 @@ class MailboxRepository:
         buffer_id: str,
     ) -> bool:
         """Delete MailboxItem whose session and ID match."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBMailboxItem).where(
                     RDBMailboxItem.session_id == session_id,
                     RDBMailboxItem.id == buffer_id,
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount == 1
@@ -315,13 +313,12 @@ class MailboxRepository:
         sender_user_id: str,
     ) -> int:
         """Detach a deleted User from retained MailboxItem rows."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBMailboxItem)
                 .where(RDBMailboxItem.sender_user_id == sender_user_id)
                 .values(sender_user_id=None)
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount or 0
@@ -332,11 +329,10 @@ class MailboxRepository:
         session_id: str,
     ) -> int:
         """Delete all MailboxItems for session."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBMailboxItem).where(RDBMailboxItem.session_id == session_id)
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount or 0
@@ -349,15 +345,14 @@ class MailboxRepository:
         to_session_id: str,
     ) -> int:
         """Transfer pending MailboxItem rows to continuation session."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBMailboxItem)
                 .where(
                     RDBMailboxItem.session_id == from_session_id,
                 )
                 .values(session_id=to_session_id)
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount or 0
@@ -382,7 +377,7 @@ class MailboxRepository:
             content=presentation.content,
             idempotency_key=rdb.idempotency_key,
             metadata={str(k): str(v) for k, v in presentation.metadata.items()},
-            action=cast("dict[str, JSONValue] | None", presentation.action),
+            action=_ACTION_ADAPTER.validate_python(presentation.action),
             attachments=[str(uri) for uri in presentation.attachments],
             file_parts=presentation.file_parts,
             payload=payload,

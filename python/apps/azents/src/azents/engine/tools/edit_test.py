@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 import pytest
 
@@ -58,11 +59,18 @@ class _FakeRunnerOperations:
         )
 
 
+class _EditFixture(NamedTuple):
+    """Edit tool paired with its recording Runner client."""
+
+    tool: FunctionTool
+    runner_operations: _FakeRunnerOperations
+
+
 def _make_tool(
     *,
     replacements: int = 1,
     error: RuntimeRunnerOperationFailedError | None = None,
-) -> tuple[FunctionTool, _FakeRunnerOperations]:
+) -> _EditFixture:
     """Create edit tool with one Runner-native operation fake."""
     runner_operations = _FakeRunnerOperations(
         replacements=replacements,
@@ -78,7 +86,7 @@ def _make_tool(
         owner_session_id="session-1",
         agent_id="agent-1",
     )
-    return tool, runner_operations
+    return _EditFixture(tool=tool, runner_operations=runner_operations)
 
 
 class TestEditFile:
@@ -86,7 +94,9 @@ class TestEditFile:
 
     async def test_replace_single_occurrence(self) -> None:
         """Replace one occurrence through one Runner operation."""
-        tool, runner_operations = _make_tool()
+        fixture = _make_tool()
+        tool = fixture.tool
+        runner_operations = fixture.runner_operations
 
         result = await tool.handler(
             json.dumps(
@@ -119,7 +129,9 @@ class TestEditFile:
 
     async def test_replace_all_occurrences(self) -> None:
         """Return the Runner-reported all-occurrence replacement count."""
-        tool, runner_operations = _make_tool(replacements=3)
+        fixture = _make_tool(replacements=3)
+        tool = fixture.tool
+        runner_operations = fixture.runner_operations
 
         result = await tool.handler(
             json.dumps(
@@ -179,7 +191,7 @@ class TestEditErrors:
         message: str,
     ) -> None:
         """Map safe native operation codes to existing edit guidance."""
-        tool, _runner_operations = _make_tool(error=error)
+        tool = _make_tool(error=error).tool
 
         with pytest.raises(FunctionToolError, match=message):
             await tool.handler(

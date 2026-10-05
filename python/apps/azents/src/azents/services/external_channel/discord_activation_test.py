@@ -4,8 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
-from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
@@ -46,6 +45,7 @@ from azents.services.external_channel.discord_api import (
     DiscordGuildCommandRole,
     DiscordGuildCommandSetCapability,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
 
@@ -298,19 +298,23 @@ def _service(
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield ReadWriteSession(cast(AsyncSession, session))
+        yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=session))
 
     return DiscordConnectionActivationService(
-        config=cast(
-            Config,
-            SimpleNamespace(external_channel_discord_callback_url=callback_url),
+        config=Config.model_construct(
+            external_channel_discord_callback_url=callback_url,
         ),
         operations=DiscordConnectionOperationRepository(
             session_manager=session_manager,
-            external_channel_repository=cast(ExternalChannelRepository, repository),
+            external_channel_repository=require_instance(
+                MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                ExternalChannelRepository,
+            ),
         ),
         credentials_codec=codec,
-        discord_client=cast(DiscordAPIClient, client),
+        discord_client=require_instance(
+            MagicMock(spec=DiscordAPIClient, wraps=client), DiscordAPIClient
+        ),
     )
 
 

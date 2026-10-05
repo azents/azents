@@ -81,9 +81,12 @@ class KubernetesWorkspaceVolume(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "storage_class_name": obj.get("storage_class_name"),
             "storage_request_bytes": obj.get("storage_request_bytes")
+            }.items() if _key in obj
         })
         return _obj
 

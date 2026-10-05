@@ -21,6 +21,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/chatgpt_oauth/**
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/repos/chatgpt_oauth_runtime/**
   - python/apps/azents/src/azents/repos/chatgpt_oauth_session/**
   - python/apps/azents/src/azents/repos/oauth_persistence_errors.py
@@ -42,8 +43,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-04
-spec_version: 32
+last_verified_at: 2026-10-05
+spec_version: 33
 ---
 
 # ChatGPT OAuth Flow
@@ -304,6 +305,14 @@ An enabled `chatgpt_oauth` integration exposes a live subscription-usage snapsho
 integration child endpoint. The read is integration-scoped and read-through: Azents does not persist
 usage snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change
 Agent execution entitlement.
+
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. The refactor does not persist usage, add refresh retries,
+change financial-field authorization, or expose raw provider/secrets material.
 
 The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limits and reset metadata to
 readers. Subscription-usage timestamps without timezone information are interpreted as UTC before the

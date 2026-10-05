@@ -88,9 +88,12 @@ class AgentWorkspaceBulkDeleteRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "paths": obj.get("paths"),
             "recursive": obj.get("recursive") if obj.get("recursive") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
