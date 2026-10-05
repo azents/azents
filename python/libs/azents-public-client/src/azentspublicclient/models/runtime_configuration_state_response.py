@@ -203,7 +203,9 @@ class RuntimeConfigurationStateResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "sequence": obj.get("sequence"),
             "status": obj.get("status"),
             "target_generation": obj.get("target_generation"),
@@ -224,6 +226,7 @@ class RuntimeConfigurationStateResponse(BaseModel):
             "runner_observed_at": obj.get("runner_observed_at"),
             "applied_at": obj.get("applied_at"),
             "network": RuntimeConfigurationNetworkResponse.from_dict(obj["network"]) if obj.get("network") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

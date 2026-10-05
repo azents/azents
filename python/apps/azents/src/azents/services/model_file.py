@@ -292,20 +292,6 @@ class ModelFileService:
             return Failure(ModelFileUnavailable())
         return Success(ModelFileDownload(model_file=model_file, body=body))
 
-    async def validate_resource_authority_in_session(
-        self,
-        session: WriteSession,
-        authority: SessionResourceAuthority,
-        *,
-        lock: bool,
-    ) -> bool:
-        """Validate resource authority inside a caller-owned transaction."""
-        return await self.operation_repository.validate_authority_in_session(
-            session,
-            _repository_authority(authority),
-            lock=lock,
-        )
-
     async def validate_resource_authority(
         self,
         authority: SessionResourceAuthority,

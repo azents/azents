@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { actionExecutionUpdatedEventFromValue } from "../actionExecutionDecoder";
 import type { ChatEvent, ConnectionStatus } from "../types";
 import type { PendingMailboxEnvelope } from "@azents/public-client";
 
@@ -123,10 +124,6 @@ function isChatEventWire(
     case "live_run_cleared":
       return (
         isSessionFrame(value, sessionId) && hasStringField(value, "run_id")
-      );
-    case "action_execution_updated":
-      return (
-        isSessionFrame(value, sessionId) && isRecord(value.action_execution)
       );
     case "action_execution_removed":
       return (
@@ -356,8 +353,11 @@ export function useChatWebSocket({
         return;
       }
       try {
-        const raw: unknown = JSON.parse(e.data);
-        if (!isChatEventWire(raw, currentSessionId)) {
+        const parsed: unknown = JSON.parse(e.data);
+        const raw =
+          actionExecutionUpdatedEventFromValue(parsed, currentSessionId) ??
+          (isChatEventWire(parsed, currentSessionId) ? parsed : null);
+        if (raw === null) {
           return;
         }
         if ("type" in raw && raw.type === "subscribed") {

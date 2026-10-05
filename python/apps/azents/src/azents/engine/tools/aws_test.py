@@ -15,6 +15,7 @@ from botocore.credentials import Credentials
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.mcp_transport import McpToolListResult
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import AwsToolkitConfig, ToolkitState, TurnContext
 from azents.engine.tools.aws import AwsCredentialProvider, AwsSigV4Auth, AwsToolkit
@@ -30,13 +31,6 @@ class _ToolkitStateKey(NamedTuple):
     session_id: str
     toolkit_namespace: str
     state_name: str
-
-
-class _McpToolListResult(NamedTuple):
-    """MCP discovery result returned by local test doubles."""
-
-    tools: list[McpBaseTool]
-    use_streamable_http: bool
 
 
 class _FakeToolkitStateHandle:
@@ -226,7 +220,9 @@ class TestAwsToolkitUpdateContext:
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",
             new_callable=AsyncMock,
-            return_value=([_make_mcp_tool("aws___call_aws")], False),
+            return_value=McpToolListResult(
+                tools=[_make_mcp_tool("aws___call_aws")], use_streamable_http=False
+            ),
         ):
             state = await toolkit.update_context(ctx)
 
@@ -246,7 +242,7 @@ class TestAwsToolkitUpdateContext:
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",
             new_callable=AsyncMock,
-            return_value=(mock_tools, False),
+            return_value=McpToolListResult(tools=mock_tools, use_streamable_http=False),
         ):
             await toolkit._refresh_tool_snapshot()  # noqa: SLF001
             state = await toolkit.update_context(ctx)
@@ -336,11 +332,9 @@ class TestAwsToolkitBackgroundConnect:
             _make_mcp_tool("aws___suggest_aws_commands"),
         ]
 
-        async def slow_list_tools(
-            *args: object, **kwargs: object
-        ) -> _McpToolListResult:
+        async def slow_list_tools(*args: object, **kwargs: object) -> McpToolListResult:
             await connect_event.wait()
-            return _McpToolListResult(mock_tools, False)
+            return McpToolListResult(mock_tools, False)
 
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",
@@ -370,7 +364,7 @@ class TestAwsToolkitBackgroundConnect:
 
         async def failing_list_tools(
             *args: object, **kwargs: object
-        ) -> _McpToolListResult:
+        ) -> McpToolListResult:
             msg = "Connection refused"
             raise ConnectionError(msg)
 
@@ -397,10 +391,10 @@ class TestAwsToolkitBackgroundConnect:
 
         async def forever_list_tools(
             *args: object, **kwargs: object
-        ) -> _McpToolListResult:
+        ) -> McpToolListResult:
             started.set()
             await release.wait()
-            return _McpToolListResult([], False)
+            return McpToolListResult([], False)
 
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",
@@ -424,7 +418,7 @@ class TestAwsToolkitBackgroundConnect:
         with patch(
             "azents.engine.tools.aws.mcp_list_tools",
             new_callable=AsyncMock,
-            return_value=(mock_tools, False),
+            return_value=McpToolListResult(tools=mock_tools, use_streamable_http=False),
         ):
             state = await toolkit.update_context(ctx)
 

@@ -94,10 +94,13 @@ class CatalogTimeWindow(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "start_minute": obj.get("start_minute"),
             "end_minute": obj.get("end_minute"),
             "weekdays": obj.get("weekdays")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

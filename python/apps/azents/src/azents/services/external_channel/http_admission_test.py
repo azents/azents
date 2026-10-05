@@ -38,6 +38,9 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
+from azents.repos.external_channel.http_admission_read import (
+    ExternalChannelHTTPAdmissionReadRepository,
+)
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.connection_revocation import (
@@ -309,8 +312,10 @@ def _service(
     )
     return _AdmissionServiceFixture(
         service=SlackHTTPAdmissionService(
-            session_manager=session_manager,
-            repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+            read_operations=ExternalChannelHTTPAdmissionReadRepository(
+                session_manager=session_manager,
+                repository=MagicMock(spec=ExternalChannelRepository, wraps=repository),
+            ),
             credentials_codec=codec,
             admission_service=admission_service,
             interaction_processor=(

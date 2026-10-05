@@ -25,6 +25,7 @@ from azents.core.model_execution_options import (
     ModelExecutionOptionDefinition,
     list_model_execution_option_definitions,
 )
+from azents.core.upload_images import UploadedImage
 from azents.services.agent.data import (
     AgentAdminOutput,
     AgentDecommissionOutput,
@@ -35,7 +36,6 @@ from azents.services.historical_memory.settings_data import (
     HistoricalMemorySettingsOutput,
 )
 from azents.services.memory.data import MemoryOutput
-from azents.services.uploads.schema import UploadedImage
 
 
 class SelectableModelCandidateResponse(BaseModel):

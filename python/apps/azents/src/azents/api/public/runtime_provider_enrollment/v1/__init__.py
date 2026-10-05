@@ -6,7 +6,7 @@ from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from azents.services.runtime_provider_control.data import (
+from azents.core.runtime_provider_control import (
     RuntimeProviderCredentialIssued,
     RuntimeProviderEnrollmentUnavailable,
 )

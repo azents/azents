@@ -151,7 +151,9 @@ class WorkspaceUploadStatusResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "identity": WorkspaceUploadIdentityResponse.from_dict(obj["identity"]) if obj.get("identity") is not None else None,
             "revision": obj.get("revision"),
             "destination_directory": obj.get("destination_directory"),
@@ -170,6 +172,7 @@ class WorkspaceUploadStatusResponse(BaseModel):
             "cancel_available": obj.get("cancel_available"),
             "overwrite_available": obj.get("overwrite_available"),
             "destination_evidence": WorkspaceUploadDestinationEvidenceResponse.from_dict(obj["destination_evidence"]) if obj.get("destination_evidence") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

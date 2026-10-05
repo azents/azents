@@ -5,7 +5,8 @@ import logging
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import NamedTuple, cast
+from typing import NamedTuple, TypeVar
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from azcommon.infra.s3.service import S3Service
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionStopSignal
 from azents.core.agent_session_data import AgentSession
-from azents.core.config import Config
+from azents.core.config import Config, WorkspaceS3Config
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
@@ -27,11 +28,17 @@ from azents.core.enums import (
     ExchangeFileStatus,
     ModelFileStatus,
 )
+from azents.core.session_lifecycle import SessionLifecyclePurgeContext
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.archived_session_retention import RDBArchivedSessionPurgeJob
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.archived_session_purge_operations import (
+    ArchivedSessionPurgeOperations,
+)
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionPurgeJob,
@@ -42,23 +49,44 @@ from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
+from azents.repos.external_channel_lifecycle_participant import (
+    ExternalChannelLifecycleParticipantRepository,
+)
+from azents.repos.file_lifecycle_cleanup_operations import (
+    FileLifecycleCleanupOperations,
+)
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
+from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
+from azents.repos.scheduled_task_lifecycle_participant import (
+    ScheduledTaskLifecycleParticipantRepository,
+)
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
+from azents.repos.session_lifecycle_purge_operations import (
+    SessionLifecyclePurgeOperations,
+)
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
-from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
+from azents.services.archived_session_retention_test import _create_archived_root
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
+from azents.testing.types import require_instance
+
+T = TypeVar("T")
+
+
+def _typed_fake(value: object, expected: type[T]) -> T:
+    """Expose exercised fake behavior through a runtime-checked concrete dependency."""
+    return require_instance(MagicMock(spec=expected, wraps=value), expected)
 
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder transaction for repository doubles."""
-    yield ReadWriteSession(cast(AsyncSession, object()))
+    yield ReadWriteSession(AsyncSession())
 
 
 def _participant_execution(
@@ -972,47 +1000,64 @@ def _build_service(
     external_channel_lifecycle_service = _ExternalChannelLifecycleService(
         fail_phase=external_lifecycle_fail_phase,
     )
+    retention_dependency = _typed_fake(
+        retention_repository, ArchivedSessionRetentionRepository
+    )
+    session_dependency = _typed_fake(agent_session_repository, AgentSessionRepository)
+    model_dependency = _typed_fake(model_file_repository, ModelFileRepository)
+    artifact_dependency = _typed_fake(artifact_repository, ArtifactRepository)
+    exchange_dependency = _typed_fake(exchange_file_repository, ExchangeFileRepository)
+    lifecycle_operations = SessionLifecyclePurgeOperations(
+        session_manager=_session_manager,
+        read_only_session_manager=_session_manager,
+        retention_repository=retention_dependency,
+        registry=get_session_lifecycle_registry(),
+    )
     service = ArchivedSessionPurgeService(
-        session_manager=cast(SessionManager[WriteSession], _session_manager),
-        retention_repository=cast(
-            ArchivedSessionRetentionRepository,
-            retention_repository,
-        ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        agent_run_repository=cast(
-            AgentRunRepository,
-            _AgentRunRepository(active_checks),
-        ),
-        model_file_repository=cast(ModelFileRepository, model_file_repository),
-        artifact_repository=cast(ArtifactRepository, artifact_repository),
-        exchange_file_repository=cast(
-            ExchangeFileRepository,
-            exchange_file_repository,
-        ),
-        lifecycle_finalizer_repository=cast(
-            SessionLifecycleFinalizerRepository,
-            _LifecycleFinalizerRepository(agent_session_repository),
-        ),
-        broker=cast(SessionBroker, broker),
-        s3_service=cast(S3Service, s3_service),
-        config=cast(
-            Config,
-            SimpleNamespace(workspace_s3=SimpleNamespace(bucket="test-bucket")),
-        ),
-        lifecycle_orchestrator=get_session_lifecycle_orchestrator(),
-        external_channel_lifecycle_service=cast(
-            ExternalChannelLifecycleService,
-            external_channel_lifecycle_service,
-        ),
-        scheduled_task_lifecycle_service=cast(
-            ScheduledTaskLifecycleService,
-            _ScheduledTaskLifecycleService(
-                allows_active_runs=scheduled_allows_active_runs
+        operations=ArchivedSessionPurgeOperations(
+            session_manager=_session_manager,
+            read_only_session_manager=_session_manager,
+            retention_repository=retention_dependency,
+            agent_session_repository=session_dependency,
+            agent_run_repository=_typed_fake(
+                _AgentRunRepository(active_checks), AgentRunRepository
+            ),
+            model_file_repository=model_dependency,
+            artifact_repository=artifact_dependency,
+            exchange_file_repository=exchange_dependency,
+            lifecycle_finalizer_repository=_typed_fake(
+                _LifecycleFinalizerRepository(agent_session_repository),
+                SessionLifecycleFinalizerRepository,
+            ),
+            lifecycle_operations=lifecycle_operations,
+            external_participant=_typed_fake(
+                external_channel_lifecycle_service,
+                ExternalChannelLifecycleParticipantRepository,
+            ),
+            scheduled_participant=_typed_fake(
+                _ScheduledTaskLifecycleService(
+                    allows_active_runs=scheduled_allows_active_runs
+                ),
+                ScheduledTaskLifecycleParticipantRepository,
             ),
         ),
+        file_operations=FileLifecycleCleanupOperations(
+            session_manager=_session_manager,
+            read_only_session_manager=_session_manager,
+            model_file_repository=model_dependency,
+            artifact_repository=artifact_dependency,
+            exchange_file_repository=exchange_dependency,
+            agent_session_repository=session_dependency,
+            model_file_pin_repository=MagicMock(),
+            transcript_repository=MagicMock(),
+            avatar_cleanup_repository=MagicMock(),
+        ),
+        broker=MagicMock(spec=SessionBroker, wraps=broker),
+        s3_service=_typed_fake(s3_service, S3Service),
+        config=Config.model_construct(
+            workspace_s3=WorkspaceS3Config.model_construct(bucket="test-bucket")
+        ),
+        lifecycle_orchestrator=get_session_lifecycle_orchestrator(lifecycle_operations),
     )
     return _ArchivedSessionPurgeFixture(
         service=service,
@@ -1086,9 +1131,10 @@ async def test_existing_purge_snapshot_is_not_expanded_after_registry_growth() -
         if participant.key != "session.external-channel"
     ]
     retention_repository.preserve_participant_executions = True
-    external_lifecycle_service = cast(
-        _ExternalChannelLifecycleService,
-        service.external_channel_lifecycle_service,
+    external_dependency = service.operations.external_participant
+    assert isinstance(external_dependency, MagicMock)
+    external_lifecycle_service = require_instance(
+        external_dependency._mock_wraps, _ExternalChannelLifecycleService
     )
 
     summary = await service.purge_once(
@@ -1132,9 +1178,10 @@ async def test_purge_snapshot_with_missing_dependency_retries_before_cleanup() -
         )
     ]
     retention_repository.preserve_participant_executions = True
-    external_lifecycle_service = cast(
-        _ExternalChannelLifecycleService,
-        service.external_channel_lifecycle_service,
+    external_dependency = service.operations.external_participant
+    assert isinstance(external_dependency, MagicMock)
+    external_lifecycle_service = require_instance(
+        external_dependency._mock_wraps, _ExternalChannelLifecycleService
     )
 
     summary = await service.purge_once(
@@ -1262,9 +1309,10 @@ async def test_purge_checkpoints_external_channel_participant_phases() -> None:
         events=events,
         active_checks=[False, False],
     )
-    external_lifecycle_service = cast(
-        _ExternalChannelLifecycleService,
-        service.external_channel_lifecycle_service,
+    external_dependency = service.operations.external_participant
+    assert isinstance(external_dependency, MagicMock)
+    external_lifecycle_service = require_instance(
+        external_dependency._mock_wraps, _ExternalChannelLifecycleService
     )
 
     summary = await service.purge_once(
@@ -1653,3 +1701,155 @@ async def test_materialization_failure_retries_and_continues_to_next_job() -> No
     assert retention_repository.completed is True
     assert agent_session_repository.deleted is True
     assert events.count("claim") == 3
+
+
+async def test_native_purge_preparation_rolls_back_owner_fence_on_stop_failure(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Owner fencing and dependent stop writes roll back as one native group."""
+    now = datetime.datetime.now(datetime.UTC)
+    retention = ArchivedSessionRetentionRepository()
+    sessions = AgentSessionRepository()
+    async with rdb_session_manager() as session:
+        root_id = await _create_archived_root(
+            session,
+            suffix="purge-operation-owner-rollback",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        session.write_session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_id,
+                eligible_at=now - datetime.timedelta(days=1),
+                policy_revision=1,
+            )
+        )
+        root = await session.read_session.get(RDBAgentSession, root_id)
+        assert root is not None
+        owner_before = root.owner_generation
+    lifecycle_operations = SessionLifecyclePurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=retention,
+        registry=get_session_lifecycle_registry(),
+    )
+    fake_sessions = MagicMock(spec=AgentSessionRepository, wraps=sessions)
+    fake_sessions.request_stop = AsyncMock(
+        side_effect=RuntimeError("Injected stop failure")
+    )
+    operations = ArchivedSessionPurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=retention,
+        agent_session_repository=require_instance(
+            fake_sessions, AgentSessionRepository
+        ),
+        agent_run_repository=AgentRunRepository(),
+        model_file_repository=ModelFileRepository(),
+        artifact_repository=ArtifactRepository(),
+        exchange_file_repository=ExchangeFileRepository(),
+        lifecycle_finalizer_repository=SessionLifecycleFinalizerRepository(),
+        lifecycle_operations=lifecycle_operations,
+        scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
+            ScheduledTaskLifecycleRepository()
+        ),
+        external_participant=ExternalChannelLifecycleParticipantRepository(
+            ExternalChannelLifecycleRepository()
+        ),
+    )
+    claim = await operations.claim(now=now, lease_owner="current-worker")
+    assert claim.job is not None
+    assert claim.materialization_error is None
+    executions = await lifecycle_operations.list_executions(job_id=claim.job.id)
+    assert {item.participant_key for item in executions} == {
+        item.key for item in get_session_lifecycle_registry().participants
+    }
+    with pytest.raises(RuntimeError, match="Injected stop failure"):
+        await operations.prepare_root(
+            job=claim.job, lease_owner="current-worker", now=now
+        )
+    async with rdb_session_manager() as session:
+        root = await session.read_session.get(RDBAgentSession, root_id)
+        assert root is not None
+        assert root.owner_generation == owner_before
+    fake_sessions.request_stop.assert_awaited_once()
+
+
+async def test_native_finalization_failure_restores_deleted_root_and_job_state(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """A finalizer failure after root deletion aborts the entire native final group."""
+    now = datetime.datetime.now(datetime.UTC)
+    retention = ArchivedSessionRetentionRepository()
+    async with rdb_session_manager() as session:
+        root_id = await _create_archived_root(
+            session,
+            suffix="purge-operation-final-rollback",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        session.write_session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_id,
+                eligible_at=now - datetime.timedelta(days=1),
+                policy_revision=1,
+            )
+        )
+    lifecycle_operations = SessionLifecyclePurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=retention,
+        registry=get_session_lifecycle_registry(),
+    )
+    finalizer = SessionLifecycleFinalizerRepository()
+    fake_finalizer = MagicMock(spec=SessionLifecycleFinalizerRepository)
+
+    async def finalize_then_fail(
+        session: WriteSession, *, root_session_id: str, session_ids: list[str]
+    ) -> None:
+        await finalizer.finalize_purged_root_tree(
+            session, root_session_id=root_session_id, session_ids=session_ids
+        )
+        assert await session.read_session.get(RDBAgentSession, root_session_id) is None
+        raise RuntimeError("Injected failure after root deletion")
+
+    fake_finalizer.finalize_purged_root_tree = AsyncMock(side_effect=finalize_then_fail)
+    operations = ArchivedSessionPurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=retention,
+        agent_session_repository=AgentSessionRepository(),
+        agent_run_repository=AgentRunRepository(),
+        model_file_repository=ModelFileRepository(),
+        artifact_repository=ArtifactRepository(),
+        exchange_file_repository=ExchangeFileRepository(),
+        lifecycle_finalizer_repository=require_instance(
+            fake_finalizer, SessionLifecycleFinalizerRepository
+        ),
+        lifecycle_operations=lifecycle_operations,
+        scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
+            ScheduledTaskLifecycleRepository()
+        ),
+        external_participant=ExternalChannelLifecycleParticipantRepository(
+            ExternalChannelLifecycleRepository()
+        ),
+    )
+    claim = await operations.claim(now=now, lease_owner="current-worker")
+    assert claim.job is not None
+    context = SessionLifecyclePurgeContext(
+        purge_job_id=claim.job.id,
+        lease_owner="current-worker",
+        root_session_id=root_id,
+        subtree_session_ids=(root_id,),
+    )
+    with pytest.raises(RuntimeError, match="Injected failure after root deletion"):
+        await operations.finalize(
+            job=claim.job,
+            lease_owner="current-worker",
+            session_ids=(root_id,),
+            context=context,
+            worktree_count=0,
+        )
+    async with rdb_session_manager() as session:
+        assert await session.read_session.get(RDBAgentSession, root_id) is not None
+        job = await session.read_session.get(RDBArchivedSessionPurgeJob, claim.job.id)
+        assert job is not None
+        assert job.status is not ArchivedSessionPurgeStatus.COMPLETED

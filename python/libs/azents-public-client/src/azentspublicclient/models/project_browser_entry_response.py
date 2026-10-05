@@ -127,7 +127,9 @@ class ProjectBrowserEntryResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "name": obj.get("name"),
             "path": obj.get("path"),
             "kind": obj.get("kind"),
@@ -135,6 +137,7 @@ class ProjectBrowserEntryResponse(BaseModel):
             "source": ProjectBrowserEntrySourceResponse.from_dict(obj["source"]) if obj.get("source") is not None else None,
             "status": ProjectBrowserEntryStatusResponse.from_dict(obj["status"]) if obj.get("status") is not None else None,
             "capabilities": ProjectBrowserEntryCapabilitiesResponse.from_dict(obj["capabilities"]) if obj.get("capabilities") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

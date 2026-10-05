@@ -22,6 +22,10 @@ from azents.core.external_account_link import (
     ExternalAccountNativeLinkState,
     VerifiedExternalAccountActor,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationSessionNavigation,
+    ExternalChannelParticipationSettings,
+)
 from azents.core.external_model_settings import (
     ExternalModelApplied,
     ExternalModelDraft,
@@ -62,10 +66,6 @@ from azents.services.external_channel.interaction_test import (
     _Slack,
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
-from azents.services.external_channel.participation import (
-    ExternalChannelParticipationSessionNavigation,
-    ExternalChannelParticipationSettings,
-)
 from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,

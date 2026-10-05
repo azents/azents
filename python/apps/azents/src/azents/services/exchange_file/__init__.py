@@ -28,7 +28,6 @@ from azcommon.result import Failure, Result, Success
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy.exc import SQLAlchemyError
 
 from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
@@ -49,7 +48,6 @@ from azents.core.exchange_upload import ExchangeUploadError, ExchangeUploadState
 from azents.core.file_transfer import GENERAL_FILE_MAXIMUM_BYTES
 from azents.core.s3.deps import get_s3_service
 from azents.core.session_resource_authority import SessionResourceAuthority
-from azents.rdb.session_capabilities import ReadSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository, exchange_file_object_key
 from azents.repos.exchange_file.data import (
@@ -61,6 +59,7 @@ from azents.repos.exchange_file.operations import (
     ExchangeFileMetadataFailure,
     ExchangeFileOperationRepository,
     ExchangeFilePreviewCreate,
+    ExchangeFilePublicationRecoveryError,
 )
 from azents.repos.exchange_file.upload_data import ExchangeUploadOperation
 from azents.repos.file_metadata_authority import FileResourceAuthority
@@ -1489,7 +1488,7 @@ class ExchangeFileService:
             )
         except asyncio.CancelledError:
             raise
-        except SQLAlchemyError as error:
+        except ExchangeFilePublicationRecoveryError as error:
             logger.warning(
                 (
                     "Unable to verify persisted Exchange publication; "
@@ -1905,21 +1904,6 @@ class ExchangeFileService:
                 preview_thumbnail=family.value.preview,
             )
         )
-
-    async def _has_workspace_access(
-        self,
-        session: ReadSession,
-        *,
-        workspace_id: str,
-        user_id: str,
-    ) -> bool:
-        """Check whether user is workspace member."""
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=workspace_id,
-            user_id=user_id,
-        )
-        return workspace_user is not None
 
     async def _cleanup_uploaded_objects(self, object_keys: list[str]) -> None:
         """Delete already uploaded object when metadata commit fails."""
