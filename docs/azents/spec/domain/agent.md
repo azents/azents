@@ -1,6 +1,7 @@
 ---
 title: "Agent Domain Spec"
 created: 2026-04-20
+updated: 2026-10-05
 tags: [backend, engine]
 spec_type: domain
 domain: agent
@@ -60,6 +61,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_admin/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_decommission_operations.py
+  - python/apps/azents/src/azents/core/retirement_data.py
   - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
@@ -145,7 +148,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-10-05
-spec_version: 93
+spec_version: 94
 ---
 
 # Agent Domain Spec
@@ -671,6 +674,20 @@ current-generation Runtime terminal-delete acknowledgement before finalization. 
 remains a content-free tombstone; no public immediate-delete or request-specific purge-deadline
 path exists.
 
+Scheduler claim, phase/retry updates, root retirement, direct-root cleanup
+preparation and finalization finish in complete repository-owned database
+operations. Root and Runtime resource-binding descriptions use native read-only
+scopes. Locked retirement retains Scheduled active-cycle eligibility, durable
+stop writes, descriptive retention lookup, ordered lifecycle participant
+termination, archive/purge scheduling and job phase update in one database-only
+group. Every decommission phase, retry and finalization write carries the claimed
+attempt count together with lease-owner identity; reclaim by the same scheduler
+invalidates an older attempt, and failed attempt CAS rolls back the whole root
+or direct-root preparation group. Provider cleanup, Broker stop publication,
+Runtime requests and S3/avatar deletion occur between completed operations;
+post-commit effect failure cannot undo committed state. Unlimited-retention
+rejection and current-generation Runtime acknowledgement remain unchanged.
+
 External Channel state follows the same irreversible coordinator boundary.
 Decommission disconnects an Agent-owned Single App, removes only the Agent's route
 from Workspace-owned Multi Apps, terminalizes affected active bindings, ends Channel
@@ -832,6 +849,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-10-05** (spec_version 94) — Completed decommission repository transaction
+  ownership while preserving ordered root retirement, claimed-attempt fencing,
+  Runtime acknowledgement and post-commit external cleanup.
 - **2026-10-05** (spec_version 93) — Separated Agent/tree descriptions from
   operation-scoped hierarchy and exact Session mutation admission, preserving
   child-creation cutoffs and savepoint-safe collaboration ordering.

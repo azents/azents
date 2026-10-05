@@ -26,8 +26,11 @@ from azents.runtime.coordination.data import (
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.coordination.stream_ids import operation_reply_stream_id
+from azents.runtime.transfer.cleanup import (
+    RuntimeTransferCleanupDeferred,
+    cleanup_safe_at,
+)
 from azents.runtime.transfer.data import (
-    DIRECT_INGRESS_CLEANUP_GRACE,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
     RuntimeTransferCleanupArtifact,
@@ -428,23 +431,6 @@ class RuntimeTransferCoordinator:
             and record.direct_ingress_handle is None
         ):
             return record
-        if record.direct_ingress_expires_at is not None and self._now() < (
-            max(record.direct_ingress_expires_at, record.admission.deadline_at)
-            + DIRECT_INGRESS_CLEANUP_GRACE
-        ):
-            if (
-                record.cleanup_status is RuntimeTransferCleanupStatus.NOT_REQUIRED
-                and not record.completed_object_cleanup_required
-            ):
-                marked = await self._state_store.record_cleanup(
-                    record.admission.transfer_id,
-                    attempt_id=record.admission.attempt_id,
-                    expected_revision=record.revision,
-                    status=RuntimeTransferCleanupStatus.PENDING,
-                    cleanup_failure=None,
-                )
-                return marked or record
-            return record
         preparation_required = (
             record.preparation_cleanup_state
             is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
@@ -468,7 +454,10 @@ class RuntimeTransferCoordinator:
             and record.direct_ingress_handle is None
         ):
             return record
-        if record.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE:
+        if record.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE or (
+            record.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+            and record.completed_object_cleanup_required is completed_required
+        ):
             marked = record
         elif completed_required:
             marked = await self._state_store.record_completed_object_cleanup(
@@ -491,12 +480,17 @@ class RuntimeTransferCoordinator:
         if marked is None:
             current = await self._state_store.get(record.admission.transfer_id)
             return current or record
+        safe_at = cleanup_safe_at(marked)
+        if safe_at is not None and self._now() < safe_at:
+            return marked
         if self._cleanup is None:
             return marked
         try:
             await self._cleanup.cleanup(marked)
         except asyncio.CancelledError:
             raise
+        except RuntimeTransferCleanupDeferred:
+            return marked
         except Exception as exc:
             cleanup_failure = _cleanup_failure_artifact(marked)
             if completed_required:
@@ -723,14 +717,21 @@ class RuntimeTransferCoordinator:
             for stale_record in page.records:
                 observed += 1
                 current = stale_record
-                if cleanup is not None and (
-                    current.multipart_cleanup_handle is not None
-                    or current.completed_object_cleanup_required
+                safe_at = cleanup_safe_at(current)
+                if (
+                    cleanup is not None
+                    and (safe_at is None or self._now() >= safe_at)
+                    and (
+                        current.multipart_cleanup_handle is not None
+                        or current.completed_object_cleanup_required
+                    )
                 ):
                     try:
                         await cleanup.cleanup(current)
                     except asyncio.CancelledError:
                         raise
+                    except RuntimeTransferCleanupDeferred:
+                        updated = None
                     except Exception as exc:
                         cleanup_failure = _cleanup_failure_artifact(current)
                         if current.completed_object_cleanup_required:

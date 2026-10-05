@@ -122,7 +122,9 @@ class ManagedWork(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "status": obj.get("status"),
             "title": obj.get("title"),
@@ -132,6 +134,7 @@ class ManagedWork(BaseModel):
             "progress_projected": obj.get("progress_projected"),
             "projection_state": obj.get("projection_state"),
             "finished_at": obj.get("finished_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

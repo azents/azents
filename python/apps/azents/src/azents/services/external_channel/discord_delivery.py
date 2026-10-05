@@ -33,8 +33,6 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKUnavailable,
 )
 
-DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
-DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
 _DISCORD_DELIVERY_TIMEOUT_SECONDS = 20.0
 
 

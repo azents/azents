@@ -1,79 +1,36 @@
-"""Authority-scoped Runtime recreation operations and reconciliation."""
+"""Runtime recreation orchestration over completed database operations."""
 
 import dataclasses
 from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.enums import (
-    AgentRuntimeCapability,
-    RuntimeDesiredState,
-    RuntimeLifecycleCommandType,
-    RuntimeProviderConnectionState,
-    RuntimeProviderKind,
-    RuntimeProviderObservedState,
-    RuntimeRunnerState,
+from azents.core.runtime_profile import RuntimeInfrastructureProfileKind
+from azents.core.runtime_recreation import (
+    RuntimeRecreationItemProcessResult,
+    RuntimeRecreationProjection,
+    RuntimeRecreationReconcileResult,
 )
-from azents.core.runtime_profile import (
-    RuntimeConfigurationStateStatus,
-    RuntimeInfrastructureProfileKind,
-    RuntimeRecreationItemStatus,
-    RuntimeRecreationTargetKind,
-)
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
-    RuntimeConfigurationState,
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
 )
-from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_recreation_operations import (
+    RuntimeRecreationOperationRepository,
+    RuntimeRecreationReconcileOperationRepository,
+)
 from azents.services.runtime_terminal.invalidation import (
     RuntimeTerminalInvalidationPublisherDependency,
 )
-
-_DEFAULT_OPERATION_LIMIT = 20
-_DEFAULT_ITEM_LIMIT = 100
-_DEFAULT_MAXIMUM_ATTEMPTS = 3
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeRecreationProjection:
-    """One operation and its bounded non-success item details."""
-
-    operation: RuntimeRecreationOperation
-    items: tuple[RuntimeRecreationOperationItem, ...]
-
-
-@dataclasses.dataclass
-class RuntimeRecreationUnavailable(Exception):
-    """One bounded recreation operation failure."""
-
-    code: str
-    message: str
-    current_version: int | None = None
-
-    def __post_init__(self) -> None:
-        Exception.__init__(self, self.message)
 
 
 @dataclasses.dataclass
 class RuntimeRecreationService:
     """Create and inspect recreation operations within authority boundaries."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
-    ]
-    profile_repository: Annotated[
-        RuntimeProfileRepository, Depends(RuntimeProfileRepository)
-    ]
-    provider_repository: Annotated[
-        RuntimeProviderRepository, Depends(RuntimeProviderRepository)
+    operations: Annotated[
+        RuntimeRecreationOperationRepository,
+        Depends(RuntimeRecreationOperationRepository),
     ]
 
     async def create_provider_operation(
@@ -85,34 +42,12 @@ class RuntimeRecreationService:
         actor_user_id: str,
     ) -> RuntimeRecreationOperation:
         """Create one exact Provider-scoped recreation operation."""
-        async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_logical_id,
-            )
-            if provider is None:
-                raise RuntimeRecreationUnavailable(
-                    code="provider_not_found",
-                    message="Runtime Provider was not found.",
-                )
-            if provider.admin_version != expected_admin_version:
-                raise RuntimeRecreationUnavailable(
-                    code="target_version_conflict",
-                    message="Runtime Provider version is stale.",
-                    current_version=provider.admin_version,
-                )
-            return await self._create_operation(
-                session,
-                target_kind=RuntimeRecreationTargetKind.PROVIDER,
-                target_id=provider.id,
-                target_version=(
-                    f"{provider.admin_version}:"
-                    f"{provider.current_contract_revision_id or '-'}"
-                ),
-                concurrency_limit=concurrency_limit,
-                actor_user_id=actor_user_id,
-                actor_workspace_user_id=None,
-            )
+        return await self.operations.create_provider_operation(
+            provider_logical_id,
+            expected_admin_version=expected_admin_version,
+            concurrency_limit=concurrency_limit,
+            actor_user_id=actor_user_id,
+        )
 
     async def create_infrastructure_profile_operation(
         self,
@@ -125,58 +60,14 @@ class RuntimeRecreationService:
         actor_user_id: str,
     ) -> RuntimeRecreationOperation:
         """Create one exact infrastructure-Profile-scoped operation."""
-        async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_logical_id,
-            )
-            if provider is None:
-                raise RuntimeRecreationUnavailable(
-                    code="provider_not_found",
-                    message="Runtime Provider was not found.",
-                )
-            expected_kind = {
-                RuntimeProviderKind.KUBERNETES: (
-                    RuntimeInfrastructureProfileKind.KUBERNETES_POD
-                ),
-                RuntimeProviderKind.DOCKER: (
-                    RuntimeInfrastructureProfileKind.DOCKER_CONTAINER
-                ),
-            }.get(provider.kind)
-            if expected_kind is not profile_kind:
-                raise RuntimeRecreationUnavailable(
-                    code="profile_kind_mismatch",
-                    message="Profile kind does not match the owning Provider.",
-                )
-            profile = await self.profile_repository.get_infrastructure_profile(
-                session,
-                profile_id=profile_id,
-            )
-            if profile is None or profile.provider_id != provider.id:
-                raise RuntimeRecreationUnavailable(
-                    code="profile_not_found",
-                    message="Runtime infrastructure Profile was not found.",
-                )
-            if profile.profile_kind is not profile_kind:
-                raise RuntimeRecreationUnavailable(
-                    code="profile_kind_mismatch",
-                    message="Profile kind does not match the requested operation.",
-                )
-            if profile.version != expected_version:
-                raise RuntimeRecreationUnavailable(
-                    code="target_version_conflict",
-                    message="Runtime infrastructure Profile version is stale.",
-                    current_version=profile.version,
-                )
-            return await self._create_operation(
-                session,
-                target_kind=RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
-                target_id=profile.id,
-                target_version=str(profile.version),
-                concurrency_limit=concurrency_limit,
-                actor_user_id=actor_user_id,
-                actor_workspace_user_id=None,
-            )
+        return await self.operations.create_infrastructure_profile_operation(
+            provider_logical_id,
+            profile_id,
+            profile_kind=profile_kind,
+            expected_version=expected_version,
+            concurrency_limit=concurrency_limit,
+            actor_user_id=actor_user_id,
+        )
 
     async def create_workspace_profile_operation(
         self,
@@ -188,229 +79,58 @@ class RuntimeRecreationService:
         actor_workspace_user_id: str,
     ) -> RuntimeRecreationOperation:
         """Create one Workspace-Runtime-Profile-scoped operation."""
-        async with self.session_manager() as session:
-            profile = await self.profile_repository.get_workspace_runtime_profile(
-                session,
-                workspace_id=workspace_id,
-                profile_id=profile_id,
-            )
-            if profile is None:
-                raise RuntimeRecreationUnavailable(
-                    code="profile_not_found",
-                    message="Workspace Runtime Profile was not found.",
-                )
-            if profile.version != expected_version:
-                raise RuntimeRecreationUnavailable(
-                    code="target_version_conflict",
-                    message="Workspace Runtime Profile version is stale.",
-                    current_version=profile.version,
-                )
-            return await self._create_operation(
-                session,
-                target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
-                target_id=profile.id,
-                target_version=str(profile.version),
-                concurrency_limit=concurrency_limit,
-                actor_user_id=None,
-                actor_workspace_user_id=actor_workspace_user_id,
-            )
-
-    async def get_platform_operation(
-        self,
-        operation_id: str,
-        *,
-        offset: int,
-        limit: int,
-    ) -> RuntimeRecreationProjection:
-        """Return one Platform-authority operation and bounded item details."""
-        async with self.session_manager() as session:
-            operation = await self.profile_repository.get_recreation_operation(
-                session,
-                operation_id=operation_id,
-            )
-            if operation is None or operation.actor_workspace_user_id is not None:
-                raise RuntimeRecreationUnavailable(
-                    code="operation_not_found",
-                    message="Runtime recreation operation was not found.",
-                )
-            return await self._project_operation(
-                session,
-                operation=operation,
-                offset=offset,
-                limit=limit,
-            )
-
-    async def get_workspace_operation(
-        self,
-        workspace_id: str,
-        operation_id: str,
-        *,
-        offset: int,
-        limit: int,
-    ) -> RuntimeRecreationProjection:
-        """Return an operation only when its target belongs to the Workspace."""
-        async with self.session_manager() as session:
-            operation = await self.profile_repository.get_recreation_operation(
-                session,
-                operation_id=operation_id,
-            )
-            if (
-                operation is None
-                or operation.target_kind
-                is not RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE
-            ):
-                raise RuntimeRecreationUnavailable(
-                    code="operation_not_found",
-                    message="Runtime recreation operation was not found.",
-                )
-            profile = await self.profile_repository.get_workspace_runtime_profile(
-                session,
-                workspace_id=workspace_id,
-                profile_id=operation.target_id,
-            )
-            if profile is None:
-                raise RuntimeRecreationUnavailable(
-                    code="operation_not_found",
-                    message="Runtime recreation operation was not found.",
-                )
-            return await self._project_operation(
-                session,
-                operation=operation,
-                offset=offset,
-                limit=limit,
-            )
-
-    async def _create_operation(
-        self,
-        session: WriteSession,
-        *,
-        target_kind: RuntimeRecreationTargetKind,
-        target_id: str,
-        target_version: str,
-        concurrency_limit: int,
-        actor_user_id: str | None,
-        actor_workspace_user_id: str | None,
-    ) -> RuntimeRecreationOperation:
-        operation = await self.profile_repository.create_recreation_operation(
-            session,
-            target_kind=target_kind,
-            target_id=target_id,
-            target_version=target_version,
+        return await self.operations.create_workspace_profile_operation(
+            workspace_id,
+            profile_id,
+            expected_version=expected_version,
             concurrency_limit=concurrency_limit,
-            actor_user_id=actor_user_id,
             actor_workspace_user_id=actor_workspace_user_id,
         )
-        items = await self.profile_repository.list_recreation_target_items(
-            session,
-            target_kind=target_kind,
-            target_id=target_id,
-        )
-        if items:
-            await self.profile_repository.add_recreation_items(
-                session,
-                operation_id=operation.id,
-                items=items,
-            )
-        else:
-            await self.profile_repository.complete_empty_recreation_operation(
-                session,
-                operation_id=operation.id,
-            )
-        persisted = await self.profile_repository.get_recreation_operation(
-            session,
-            operation_id=operation.id,
-        )
-        if persisted is None:
-            raise AssertionError("Created Runtime recreation operation disappeared.")
-        return persisted
 
-    async def _project_operation(
-        self,
-        session: ReadSession,
-        *,
-        operation: RuntimeRecreationOperation,
-        offset: int,
-        limit: int,
+    async def get_platform_operation(
+        self, operation_id: str, *, offset: int, limit: int
     ) -> RuntimeRecreationProjection:
-        items = await self.profile_repository.list_recreation_items(
-            session,
-            operation_id=operation.id,
-            offset=offset,
-            limit=limit,
-            statuses=(
-                RuntimeRecreationItemStatus.SKIPPED,
-                RuntimeRecreationItemStatus.FAILED,
-            ),
-        )
-        return RuntimeRecreationProjection(
-            operation=operation,
-            items=tuple(items),
+        """Return one Platform-authority operation and bounded item details."""
+        return await self.operations.get_platform_operation(
+            operation_id, offset=offset, limit=limit
         )
 
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeRecreationReconcileResult:
-    """One bounded recreation reconciliation result."""
-
-    operations: int
-    processed_items: int
-    dispatched_items: int
-    completed_items: int
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeRecreationItemProcessResult:
-    """Outcome of processing one Runtime recreation item."""
-
-    dispatched: bool
-    completed: bool
+    async def get_workspace_operation(
+        self, workspace_id: str, operation_id: str, *, offset: int, limit: int
+    ) -> RuntimeRecreationProjection:
+        """Return an operation only when its target belongs to the Workspace."""
+        return await self.operations.get_workspace_operation(
+            workspace_id, operation_id, offset=offset, limit=limit
+        )
 
 
 @dataclasses.dataclass
 class RuntimeRecreationReconciler:
     """Dispatch and observe durable generation-fenced recreation items."""
 
-    session_manager: SessionManager[WriteSession]
-    profile_repository: RuntimeProfileRepository
-    runtime_repository: AgentRuntimeRepository
-    agent_repository: AgentRepository
+    operations: RuntimeRecreationReconcileOperationRepository
     terminal_invalidation_publisher: RuntimeTerminalInvalidationPublisherDependency
-    operation_limit: int = _DEFAULT_OPERATION_LIMIT
-    item_limit: int = _DEFAULT_ITEM_LIMIT
-    maximum_attempts: int = _DEFAULT_MAXIMUM_ATTEMPTS
+    operation_limit: int = 20
+    item_limit: int = 100
 
     async def reconcile_once(self) -> RuntimeRecreationReconcileResult:
         """Advance one bounded batch of active recreation operations."""
-        async with self.session_manager() as session:
-            operation_ids = (
-                await self.profile_repository.list_active_recreation_operation_ids(
-                    session,
-                    limit=self.operation_limit,
-                )
-            )
+        operation_ids = await self.operations.list_active(limit=self.operation_limit)
         processed = 0
         dispatched = 0
         completed = 0
         for operation_id in operation_ids:
-            async with self.session_manager() as session:
-                running = await self.profile_repository.list_recreation_items(
-                    session,
-                    operation_id=operation_id,
-                    offset=0,
-                    limit=self.item_limit,
-                    statuses=(RuntimeRecreationItemStatus.RUNNING,),
-                )
+            running = await self.operations.list_running(
+                operation_id=operation_id, limit=self.item_limit
+            )
             for item in running:
                 item_result = await self._process_item(item)
                 processed += 1
                 dispatched += int(item_result.dispatched)
                 completed += int(item_result.completed)
-            async with self.session_manager() as session:
-                claimed = await self.profile_repository.claim_recreation_items(
-                    session,
-                    operation_id=operation_id,
-                    limit=self.item_limit,
-                )
+            claimed = await self.operations.claim(
+                operation_id=operation_id, limit=self.item_limit
+            )
             for item in claimed:
                 item_result = await self._process_item(item)
                 processed += 1
@@ -424,316 +144,12 @@ class RuntimeRecreationReconciler:
         )
 
     async def _process_item(
-        self,
-        item: RuntimeRecreationOperationItem,
+        self, item: RuntimeRecreationOperationItem
     ) -> RuntimeRecreationItemProcessResult:
-        async with self.session_manager() as session:
-            operation = await self.profile_repository.get_recreation_operation(
-                session,
-                operation_id=item.operation_id,
-            )
-            target_version = (
-                await self.profile_repository.lock_recreation_target_for_dispatch(
-                    session,
-                    target_kind=operation.target_kind,
-                    target_id=operation.target_id,
-                )
-                if operation is not None
-                else None
-            )
-            locked_item = await self.profile_repository.lock_recreation_item(
-                session,
-                item_id=item.id,
-                expected_attempt=item.attempt,
-            )
-            if locked_item is None:
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=False,
-                )
-            item = locked_item
-            operation = await self.profile_repository.get_recreation_operation(
-                session,
-                operation_id=item.operation_id,
-            )
-            runtime = await self.runtime_repository.get_by_id(session, item.runtime_id)
-            state = (
-                await self.profile_repository.get_configuration_state(
-                    session, runtime_id=item.runtime_id
-                )
-                if runtime is not None
-                else None
-            )
-            if operation is None or runtime is None:
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.FAILED,
-                        failure_code="runtime_not_found",
-                        failure_message=(
-                            "The Runtime recreation target no longer exists."
-                        ),
-                    ),
-                )
-            if state is None:
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.FAILED,
-                        failure_code="configuration_missing",
-                        failure_message=(
-                            "The Runtime has no current configuration state."
-                        ),
-                    ),
-                )
-            if not _runtime_matches_target(runtime, state, operation):
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="target_no_longer_matches",
-                        failure_message=(
-                            "The Runtime no longer belongs to this target."
-                        ),
-                    ),
-                )
-            if runtime.terminal_delete_requested_generation is not None:
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="terminal_delete_requested",
-                        failure_message="The Runtime is being terminally deleted.",
-                    ),
-                )
-            if runtime.desired_state is not RuntimeDesiredState.RUNNING:
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="runtime_not_running",
-                        failure_message=(
-                            "A stopped Runtime adopts the latest Profile on start."
-                        ),
-                    ),
-                )
-
-            desired = state.desired
-            applied = state.applied
-            if item.dispatched_generation is not None:
-                if (
-                    applied is not None
-                    and applied.sequence == item.expected_configuration_sequence
-                    and applied.digest == item.expected_configuration_digest
-                    and applied.target_generation == item.expected_desired_generation
-                    and runtime.desired_generation == item.dispatched_generation
-                    and runtime.provider_observed_state
-                    is RuntimeProviderObservedState.RUNNING
-                    and runtime.provider_observed_generation
-                    == item.dispatched_generation
-                    and runtime.provider_connection_state
-                    is RuntimeProviderConnectionState.CONNECTED
-                    and runtime.runner_state is RuntimeRunnerState.READY
-                    and runtime.runner_generation > 0
-                    and runtime.workspace_path is not None
-                ):
-                    return RuntimeRecreationItemProcessResult(
-                        dispatched=False,
-                        completed=(
-                            await self.profile_repository.finish_recreation_item(
-                                session,
-                                item_id=item.id,
-                                expected_attempt=item.attempt,
-                                status=RuntimeRecreationItemStatus.SUCCEEDED,
-                                failure_code=None,
-                                failure_message=None,
-                            )
-                        ),
-                    )
-                if runtime.failure_generation == item.dispatched_generation:
-                    retried = await self.profile_repository.retry_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        maximum_attempts=self.maximum_attempts,
-                        failure_code=runtime.failure_code or "recreation_failed",
-                        failure_message=(
-                            runtime.failure_message or "Runtime recreation failed."
-                        ),
-                    )
-                    return RuntimeRecreationItemProcessResult(
-                        dispatched=False,
-                        completed=(retried and item.attempt >= self.maximum_attempts),
-                    )
-                if (
-                    runtime.desired_generation == item.dispatched_generation
-                    and desired.sequence == item.expected_configuration_sequence
-                    and desired.digest == item.expected_configuration_digest
-                    and desired.target_generation == item.expected_desired_generation
-                ):
-                    return RuntimeRecreationItemProcessResult(
-                        dispatched=False,
-                        completed=False,
-                    )
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="recreation_dispatch_superseded",
-                        failure_message=(
-                            "The Runtime target changed after recreation dispatch."
-                        ),
-                    ),
-                )
-
-            agent = await self.agent_repository.lock_by_id(session, runtime.agent_id)
-            if (
-                agent is None
-                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
-            ):
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="runtime_capability_unavailable",
-                        failure_message=(
-                            "The Agent no longer permits Runtime recreation."
-                        ),
-                    ),
-                )
-            if target_version != operation.target_version:
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="target_version_changed",
-                        failure_message=(
-                            "The recreation target changed after operation creation."
-                        ),
-                    ),
-                )
-            if (
-                desired.sequence != item.expected_configuration_sequence
-                or desired.digest != item.expected_configuration_digest
-                or desired.target_generation != item.expected_desired_generation
-            ):
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="configuration_target_changed",
-                        failure_message=(
-                            "The Runtime configuration changed after target snapshot."
-                        ),
-                    ),
-                )
-            if (
-                desired.status is not RuntimeConfigurationStateStatus.READY
-                or desired.document is None
-                or desired.digest is None
-            ):
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=await self.profile_repository.finish_recreation_item(
-                        session,
-                        item_id=item.id,
-                        expected_attempt=item.attempt,
-                        status=RuntimeRecreationItemStatus.SKIPPED,
-                        failure_code="configuration_blocked",
-                        failure_message=(
-                            "The latest Runtime configuration is not ready."
-                        ),
-                    ),
-                )
-            command = await (
-                self.runtime_repository.set_desired_state_if_configuration_current(
-                    session,
-                    runtime.id,
-                    RuntimeLifecycleCommandType.RESTART,
-                    RuntimeDesiredState.RUNNING,
-                    expected_configuration_sequence=desired.sequence,
-                    expected_digest=desired.digest,
-                    expected_generation=desired.target_generation,
-                )
-            )
-            if command is None:
-                retried = await self.profile_repository.retry_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    maximum_attempts=self.maximum_attempts,
-                    failure_code="runtime_configuration_changed",
-                    failure_message=(
-                        "Runtime configuration changed before recreation dispatch."
-                    ),
-                )
-                return RuntimeRecreationItemProcessResult(
-                    dispatched=False,
-                    completed=retried and item.attempt >= self.maximum_attempts,
-                )
-            next_state = await self.profile_repository.get_configuration_state(
-                session, runtime_id=runtime.id
-            )
-            if next_state is None or next_state.desired.digest is None:
-                raise AssertionError("Recreation dispatch lost desired configuration.")
-            updated = await self.profile_repository.update_recreation_item_dispatch(
-                session,
-                item_id=item.id,
-                expected_attempt=item.attempt,
-                configuration_sequence=next_state.desired.sequence,
-                configuration_digest=next_state.desired.digest,
-                desired_generation=next_state.desired.target_generation,
-                dispatched_generation=command.desired_generation,
-            )
-            result = RuntimeRecreationItemProcessResult(
-                dispatched=updated,
-                completed=False,
-            )
-        if updated:
+        result = await self.operations.process_item(item)
+        if result.invalidated_runtime_id is not None:
             publisher = self.terminal_invalidation_publisher
-            await publisher.publish_runtime_terminal_invalidation(runtime.id)
+            await publisher.publish_runtime_terminal_invalidation(
+                result.invalidated_runtime_id
+            )
         return result
-
-
-def _runtime_matches_target(
-    runtime: AgentRuntime,
-    state: RuntimeConfigurationState,
-    operation: RuntimeRecreationOperation,
-) -> bool:
-    if operation.target_kind is RuntimeRecreationTargetKind.PROVIDER:
-        return runtime.runtime_provider_resource_id == operation.target_id
-    document = state.desired.document
-    if document is None:
-        return False
-    if operation.target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
-        return document.infrastructure_profile_id == operation.target_id
-    if operation.target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
-        return document.workspace_runtime_profile_id == operation.target_id
-    raise AssertionError(f"Unsupported recreation target kind: {operation.target_kind}")

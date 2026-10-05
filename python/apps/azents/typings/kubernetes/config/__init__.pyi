@@ -1,4 +1,4 @@
-"""kubernetes.config — kubeconfig 관련 타입 정의."""
+"""kubernetes.config — kubeconfig type definitions."""
 
 from typing import Any
 

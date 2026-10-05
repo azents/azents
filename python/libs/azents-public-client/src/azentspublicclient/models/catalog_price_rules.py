@@ -114,10 +114,13 @@ class CatalogPriceRules(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "rates": [CatalogPriceRate.from_dict(_item) for _item in obj["rates"]] if obj.get("rates") is not None else None,
             "off_peak": CatalogOffPeakRule.from_dict(obj["off_peak"]) if obj.get("off_peak") is not None else None,
             "issues": [CatalogPriceIssue.from_dict(_item) for _item in obj["issues"]] if obj.get("issues") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

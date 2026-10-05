@@ -25,7 +25,7 @@ class XaiOAuthSessionRepository:
         """
         :param cipher: Credential encryption/decryption object
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
@@ -43,7 +43,7 @@ class XaiOAuthSessionRepository:
             user_id=create.user_id,
             integration_id=create.integration_id,
             method=create.method,
-            encrypted_device_code=self._cipher.encrypt(create.device_code),
+            encrypted_device_code=self.cipher.encrypt(create.device_code),
             user_code=create.user_code,
             verification_uri=create.verification_uri,
             interval_seconds=create.interval_seconds,
@@ -191,5 +191,5 @@ class XaiOAuthSessionRepository:
         base = self._build(rdb)
         return XaiOAuthSessionWithSecrets(
             **base.model_dump(),
-            device_code=self._cipher.decrypt(rdb.encrypted_device_code),
+            device_code=self.cipher.decrypt(rdb.encrypted_device_code),
         )

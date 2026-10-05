@@ -9,6 +9,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
+from azents.core.external_channel_effect_intent import ProviderEffectIntent
 from azents.core.external_channel_provider import DiscordConnectionConfiguration
 
 _PROVIDER_OPERATION_KEY_MAX_LENGTH = 25
@@ -63,6 +64,14 @@ class ProviderTarget:
     agent_name: str | None
     agent_avatar: dict[str, Any] | None = field(repr=False)
     request_payload: dict[str, Any] = field(repr=False)
+
+    def decode_intent(self) -> ProviderEffectIntent:
+        """Decode current consumed metadata at the operation boundary.
+
+        Payload assembly may continue after target construction. Explicit decoding
+        avoids caching a stale snapshot while operation logic uses immutable fields.
+        """
+        return ProviderEffectIntent.decode(self.request_payload)
 
 
 @dataclass(frozen=True)

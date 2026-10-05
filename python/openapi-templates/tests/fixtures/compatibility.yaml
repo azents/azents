@@ -1,0 +1,38 @@
+openapi: 3.0.3
+info:
+  title: Python template compatibility fixture
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Child:
+      type: object
+      additionalProperties: true
+      required: [required-name]
+      properties:
+        required-name:
+          type: string
+        optional-note:
+          type: string
+          nullable: true
+    Patch:
+      type: object
+      additionalProperties: false
+      required: [expected-version]
+      properties:
+        expected-version:
+          type: integer
+        display-label:
+          type: string
+          nullable: true
+        retry-count:
+          type: integer
+          default: 3
+        child-map:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Child'
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Child'

@@ -3,36 +3,21 @@
 import dataclasses
 from datetime import datetime
 
-from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
-    AgentLifecycleStatus,
-    AgentSessionKind,
-    AgentSessionProductMode,
-    AgentSessionStatus,
-    AgentType,
     RuntimeDesiredState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
-    WorkspaceUserRole,
 )
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
 )
-from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.session import SessionRepository
-from azents.repos.user import UserRepository
-from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.repos.runtime_terminal_authority_read import (
+    RuntimeTerminalAuthorityReadRepository,
+)
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
@@ -61,52 +46,19 @@ from azents.services.terminal_policy.service import TerminalPolicyResolver
 _SHELL_LABEL = "Shell"
 
 
-@dataclasses.dataclass(frozen=True)
-class _DurableAuthoritySnapshot:
-    """One transactionally consistent Terminal authority source snapshot."""
-
-    workspace_id: str | None
-    authentication_session_expires_at: datetime | None
-    agent: Agent | None
-    agent_session: AgentSession | None
-    runtime: AgentRuntime | None
-    infrastructure_profile: RuntimeInfrastructureProfile | None
-    workspace_profile: WorkspaceRuntimeProfile | None
-    applied_configuration: RuntimeConfigurationAppliedSlot | None
-    reason_code: RuntimeTerminalReasonCode | None
-
-
 class DatabaseRuntimeTerminalAuthorityResolver:
     """Resolve Public Terminal authority from current PostgreSQL and Runner state."""
 
     def __init__(
         self,
         *,
-        session_manager: SessionManager[WriteSession],
-        user_repository: UserRepository,
-        authentication_session_repository: SessionRepository,
-        workspace_repository: WorkspaceRepository,
-        workspace_user_repository: WorkspaceUserRepository,
-        agent_repository: AgentRepository,
-        agent_admin_repository: AgentAdminRepository,
-        agent_session_repository: AgentSessionRepository,
-        runtime_repository: AgentRuntimeRepository,
-        profile_repository: RuntimeProfileRepository,
+        authority_repository: RuntimeTerminalAuthorityReadRepository,
         runtime_coordination: RuntimeCoordinationStore,
         working_folder_service: SessionWorkingFolderBindingService,
         policy_resolver: TerminalPolicyResolver,
     ) -> None:
         """Initialize explicit durable, volatile, and policy dependencies."""
-        self.session_manager = session_manager
-        self.user_repository = user_repository
-        self.authentication_session_repository = authentication_session_repository
-        self.workspace_repository = workspace_repository
-        self.workspace_user_repository = workspace_user_repository
-        self.agent_repository = agent_repository
-        self.agent_admin_repository = agent_admin_repository
-        self.agent_session_repository = agent_session_repository
-        self.runtime_repository = runtime_repository
-        self.profile_repository = profile_repository
+        self.authority_repository = authority_repository
         self.runtime_coordination = runtime_coordination
         self.working_folder_service = working_folder_service
         self.policy_resolver = policy_resolver
@@ -122,10 +74,12 @@ class DatabaseRuntimeTerminalAuthorityResolver:
         """Return one fail-closed current authority projection."""
         if resolved_at.tzinfo is None or resolved_at.utcoffset() is None:
             raise ValueError("Runtime Terminal authority time must be timezone-aware")
-        snapshot = await self._load_durable_snapshot(
+        snapshot = await self.authority_repository.read_snapshot(
             user_id=user_id,
             authentication_session_id=authentication_session_id,
-            resource=resource,
+            workspace_handle=resource.workspace_handle,
+            agent_id=resource.agent_id,
+            session_id=resource.session_id,
             resolved_at=resolved_at,
         )
         if snapshot.reason_code is not None:
@@ -138,8 +92,10 @@ class DatabaseRuntimeTerminalAuthorityResolver:
                 workspace_id=snapshot.workspace_id or "",
                 resource=resource,
                 projection_state=RuntimeTerminalProjectionState.ABSENT,
-                reason_code=snapshot.reason_code,
-                denied_scope=_identity_denied_scope(snapshot.reason_code),
+                reason_code=RuntimeTerminalReasonCode(snapshot.reason_code),
+                denied_scope=_identity_denied_scope(
+                    RuntimeTerminalReasonCode(snapshot.reason_code)
+                ),
             )
 
         agent = snapshot.agent
@@ -264,171 +220,6 @@ class DatabaseRuntimeTerminalAuthorityResolver:
             can_open_or_attach=True,
         )
 
-    async def _load_durable_snapshot(
-        self,
-        *,
-        user_id: str,
-        authentication_session_id: str,
-        resource: RuntimeTerminalResource,
-        resolved_at: datetime,
-    ) -> _DurableAuthoritySnapshot:
-        async with self.session_manager() as session:
-            user = await self.user_repository.get(session, user_id)
-            authentication_session = await self.authentication_session_repository.get(
-                session,
-                authentication_session_id,
-            )
-            if (
-                user is None
-                or user.access_disabled_at is not None
-                or authentication_session is None
-                or authentication_session.user_id != user_id
-                or authentication_session.revoked_at is not None
-                or authentication_session.expires_at <= resolved_at
-            ):
-                return _empty_snapshot(RuntimeTerminalReasonCode.ACCESS_DENIED)
-
-            workspace_snapshot = await self.workspace_repository.get_with_id_by_handle(
-                session,
-                resource.workspace_handle,
-            )
-            if workspace_snapshot is None:
-                return _empty_snapshot(RuntimeTerminalReasonCode.ACCESS_DENIED)
-            workspace_id = workspace_snapshot.workspace_id
-            membership = await self.workspace_user_repository.get_by_workspace_and_user(
-                session,
-                workspace_id,
-                user_id,
-            )
-            if membership is None:
-                return _empty_snapshot(RuntimeTerminalReasonCode.ACCESS_DENIED)
-
-            agent = await self.agent_repository.get_by_id(session, resource.agent_id)
-            if (
-                agent is None
-                or agent.workspace_id != workspace_id
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
-                return _empty_snapshot(
-                    RuntimeTerminalReasonCode.AGENT_NOT_FOUND,
-                    workspace_id=workspace_id,
-                )
-            if (
-                agent.type is AgentType.PRIVATE
-                and membership.role is not WorkspaceUserRole.OWNER
-                and not await self.agent_admin_repository.is_admin(
-                    session,
-                    agent.id,
-                    membership.id,
-                )
-            ):
-                return _empty_snapshot(
-                    RuntimeTerminalReasonCode.AGENT_NOT_FOUND,
-                    workspace_id=workspace_id,
-                )
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                resource.session_id,
-            )
-            if agent_session is None:
-                return _empty_snapshot(
-                    RuntimeTerminalReasonCode.SESSION_NOT_FOUND,
-                    workspace_id=workspace_id,
-                    agent=agent,
-                )
-            if (
-                agent_session.workspace_id != workspace_id
-                or agent_session.agent_id != agent.id
-            ):
-                return _empty_snapshot(
-                    RuntimeTerminalReasonCode.SESSION_AGENT_MISMATCH,
-                    workspace_id=workspace_id,
-                    agent=agent,
-                    agent_session=agent_session,
-                )
-            if (
-                agent_session.status is not AgentSessionStatus.ACTIVE
-                or not await self._session_access_allowed(
-                    session,
-                    agent_session=agent_session,
-                    user_id=user_id,
-                )
-            ):
-                return _empty_snapshot(
-                    RuntimeTerminalReasonCode.SESSION_NOT_FOUND,
-                    workspace_id=workspace_id,
-                    agent=agent,
-                    agent_session=agent_session,
-                )
-
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent.id)
-            workspace_profile = None
-            infrastructure = None
-            applied = None
-            if agent.runtime_profile_id is not None:
-                workspace_profile = (
-                    await self.profile_repository.get_workspace_runtime_profile(
-                        session,
-                        workspace_id=workspace_id,
-                        profile_id=agent.runtime_profile_id,
-                    )
-                )
-            if workspace_profile is not None:
-                infrastructure = (
-                    await self.profile_repository.get_infrastructure_profile(
-                        session,
-                        profile_id=workspace_profile.infrastructure_profile_id,
-                    )
-                )
-            if runtime is not None:
-                configuration = await self.profile_repository.get_configuration_state(
-                    session,
-                    runtime_id=runtime.id,
-                )
-                applied = configuration.applied if configuration is not None else None
-            return _DurableAuthoritySnapshot(
-                workspace_id=workspace_id,
-                authentication_session_expires_at=authentication_session.expires_at,
-                agent=agent,
-                agent_session=agent_session,
-                runtime=runtime,
-                infrastructure_profile=infrastructure,
-                workspace_profile=workspace_profile,
-                applied_configuration=applied,
-                reason_code=None,
-            )
-
-    async def _session_access_allowed(
-        self,
-        session: ReadSession,
-        *,
-        agent_session: AgentSession,
-        user_id: str,
-    ) -> bool:
-        root = agent_session
-        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-            get_root = (
-                self.agent_session_repository.get_root_session_agent_by_session_id
-            )
-            root_agent = await get_root(session, agent_session.id)
-            if root_agent is None:
-                return False
-            loaded = await self.agent_session_repository.get_by_id(
-                session,
-                root_agent.agent_session_id,
-            )
-            if loaded is None:
-                return False
-            root = loaded
-        elif agent_session.session_kind is not AgentSessionKind.ROOT:
-            return False
-        if root.product_mode is AgentSessionProductMode.TEAM:
-            return True
-        return (
-            root.product_mode is AgentSessionProductMode.USER
-            and root.associated_user_id == user_id
-        )
-
     async def _get_runner(
         self,
         runtime: AgentRuntime | None,
@@ -488,26 +279,6 @@ class DatabaseRuntimeTerminalAuthorityResolver:
             ),
             can_open_or_attach=policy.available,
         )
-
-
-def _empty_snapshot(
-    reason_code: RuntimeTerminalReasonCode,
-    *,
-    workspace_id: str | None = None,
-    agent: Agent | None = None,
-    agent_session: AgentSession | None = None,
-) -> _DurableAuthoritySnapshot:
-    return _DurableAuthoritySnapshot(
-        workspace_id=workspace_id,
-        authentication_session_expires_at=None,
-        agent=agent,
-        agent_session=agent_session,
-        runtime=None,
-        infrastructure_profile=None,
-        workspace_profile=None,
-        applied_configuration=None,
-        reason_code=reason_code,
-    )
 
 
 def _authority(

@@ -86,10 +86,13 @@ class KubernetesDinDModule(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "engine_resources": KubernetesContainerResources.from_dict(obj["engine_resources"]) if obj.get("engine_resources") is not None else None,
             "docker_storage_bytes": obj.get("docker_storage_bytes"),
             "shared_temporary_storage_bytes": obj.get("shared_temporary_storage_bytes")
+            }.items() if _key in obj
         })
         return _obj
 

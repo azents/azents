@@ -94,11 +94,14 @@ class AppliedInferenceProfile(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "model_target_label": obj.get("model_target_label"),
             "model_display_name": obj.get("model_display_name"),
             "reasoning_effort": obj.get("reasoning_effort"),
             "enabled_execution_options": obj.get("enabled_execution_options")
+            }.items() if _key in obj
         })
         return _obj
 

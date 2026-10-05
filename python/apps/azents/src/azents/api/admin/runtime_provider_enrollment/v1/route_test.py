@@ -14,7 +14,7 @@ from azents.api.admin.runtime_provider_enrollment.v1.data import (
     RuntimeProviderEnrollmentGrantIssueRequest,
 )
 from azents.core.auth.deps import SystemAdmin
-from azents.services.runtime_provider_control.data import (
+from azents.core.runtime_provider_control import (
     RuntimeProviderEnrollmentGrantIssued,
     RuntimeProviderEnrollmentUnavailable,
 )
