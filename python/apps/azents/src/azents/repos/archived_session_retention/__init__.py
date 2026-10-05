@@ -900,14 +900,14 @@ class ArchivedSessionRetentionRepository:
 
     async def list_purge_participant_executions(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         job_id: str,
     ) -> list[ArchivedSessionPurgeParticipantExecution]:
         """List participant checkpoints in stable key order."""
         rows = list(
             (
-                await session.write_session.scalars(
+                await session.read_session.scalars(
                     sa.select(RDBArchivedSessionPurgeParticipantExecution)
                     .where(
                         RDBArchivedSessionPurgeParticipantExecution.purge_job_id

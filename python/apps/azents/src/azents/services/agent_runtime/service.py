@@ -5,10 +5,13 @@ import dataclasses
 import time
 from typing import Annotated, assert_never
 
-from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 
+from azents.core.agent_runtime_removal import (
+    AgentRuntimeRemovalConfirmationRequest,
+    AgentRuntimeRemovalUnavailable,
+)
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRuntimeCapability,
@@ -21,33 +24,18 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
-from azents.rdb.deps import get_read_only_session_manager, get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.agent import AgentRepository
+from azents.core.runtime_profile_workspace import RuntimeProfileWorkspaceUnavailable
 from azents.repos.agent.data import Agent
-from azents.repos.agent_admin import AgentAdminRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
     AgentRuntimeActions,
     AgentRuntimeFailureSummary,
 )
-from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime.lifecycle_operations import (
+    AgentRuntimeLifecycleOperationsRepository,
+)
 from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
-from azents.repos.agent_runtime_removal_scope import (
-    AgentRuntimeRemovalScopeRepository,
-)
-from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
-from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider_control.repository import (
-    RuntimeProviderControlRepository,
-)
 from azents.services.agent_runtime_removal import AgentRuntimeRemovalService
-from azents.services.agent_runtime_removal.data import (
-    AgentRuntimeRemovalConfirmationRequest,
-    AgentRuntimeRemovalUnavailable,
-)
 from azents.services.agent_runtime_transition.data import (
     AgentRuntimeAdditionRequest,
     AgentRuntimeAdditionUnavailable,
@@ -64,7 +52,6 @@ from azents.services.runtime_profile_resolution.service import (
 )
 from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,
-    RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.runtime_terminal.invalidation import (
@@ -147,26 +134,9 @@ class _RuntimeLifecycleConvergenceResult:
 class AgentRuntimeService:
     """Agent Runtime lifecycle service."""
 
-    runtime_repository: Annotated[
-        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
-    ]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_admin_repository: Annotated[
-        AgentAdminRepository, Depends(AgentAdminRepository)
-    ]
-    removal_repository: Annotated[
-        AgentRuntimeRemovalRepository,
-        Depends(AgentRuntimeRemovalRepository),
-    ]
-    removal_scope_repository: Annotated[
-        AgentRuntimeRemovalScopeRepository,
-        Depends(AgentRuntimeRemovalScopeRepository),
-    ]
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
-    ]
-    read_session_manager: Annotated[
-        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    operations: Annotated[
+        AgentRuntimeLifecycleOperationsRepository,
+        Depends(AgentRuntimeLifecycleOperationsRepository),
     ]
     runtime_profile_resolution_service: Annotated[
         RuntimeProfileResolutionService,
@@ -175,14 +145,6 @@ class AgentRuntimeService:
     runtime_profile_workspace_service: Annotated[
         RuntimeProfileWorkspaceService,
         Depends(RuntimeProfileWorkspaceService),
-    ]
-    runtime_profile_repository: Annotated[
-        RuntimeProfileRepository,
-        Depends(RuntimeProfileRepository),
-    ]
-    runtime_provider_control_repository: Annotated[
-        RuntimeProviderControlRepository,
-        Depends(RuntimeProviderControlRepository),
     ]
     transition_service: Annotated[
         AgentRuntimeTransitionService,
@@ -352,8 +314,7 @@ class AgentRuntimeService:
         if runtime_id is not None:
             publisher = self.terminal_invalidation_publisher
             await publisher.publish_runtime_terminal_invalidation(runtime_id)
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+        agent = await self.operations.get_agent(agent_id)
         if agent is None:
             return Failure(AgentNotFound(agent_id=agent_id))
         return Success(
@@ -489,19 +450,15 @@ class AgentRuntimeService:
                 == RuntimeProviderConnectionState.DISCONNECTED
             ):
                 return Failure(ProviderDisconnected(runtime_id=runtime.id))
-            async with self.session_manager() as session:
-                command = await (
-                    self.runtime_repository.set_desired_state_if_configuration_current(
-                        session,
-                        runtime.id,
-                        RuntimeLifecycleCommandType.RESET,
-                        final_desired_state,
-                        expected_configuration_sequence=resolution.desired.sequence,
-                        expected_digest=resolution.desired.digest,
-                        expected_generation=runtime.desired_generation,
-                        reset_final_desired_state=final_desired_state,
-                    )
-                )
+            command = await self.operations.set_current_desired_state(
+                runtime_id=runtime.id,
+                command_type=RuntimeLifecycleCommandType.RESET,
+                desired_state=final_desired_state,
+                expected_configuration_sequence=resolution.desired.sequence,
+                expected_digest=resolution.desired.digest,
+                expected_generation=runtime.desired_generation,
+                reset_final_desired_state=final_desired_state,
+            )
             if command is None:
                 return Failure(
                     RuntimeProviderUnavailable(
@@ -577,18 +534,15 @@ class AgentRuntimeService:
             agent_id,
             expected_version=capability_version,
         )
-        async with self.session_manager() as session:
-            command = await (
-                self.runtime_repository.set_desired_state_if_configuration_current(
-                    session,
-                    runtime.id,
-                    RuntimeLifecycleCommandType.START,
-                    RuntimeDesiredState.RUNNING,
-                    expected_configuration_sequence=resolution.desired.sequence,
-                    expected_digest=resolution.desired.digest,
-                    expected_generation=runtime.desired_generation,
-                )
-            )
+        command = await self.operations.set_current_desired_state(
+            runtime_id=runtime.id,
+            command_type=RuntimeLifecycleCommandType.START,
+            desired_state=RuntimeDesiredState.RUNNING,
+            expected_configuration_sequence=resolution.desired.sequence,
+            expected_digest=resolution.desired.digest,
+            expected_generation=runtime.desired_generation,
+            reset_final_desired_state=None,
+        )
         if command is None:
             raise RuntimeProfileResolutionUnavailable(
                 code="runtime_configuration_changed",
@@ -789,8 +743,7 @@ class AgentRuntimeService:
         expected_version: int | None = None,
     ) -> int:
         """Require one current managed Agent capability before Runtime work."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+        agent = await self.operations.get_agent(agent_id)
         if (
             agent is None
             or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
@@ -831,15 +784,8 @@ class AgentRuntimeService:
         self,
         agent_id: str,
     ) -> AgentRuntime | None:
-        """Request idempotent terminal deletion without requiring ready sources."""
-        async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
-            if runtime is None:
-                return None
-            return await self.runtime_repository.request_terminal_delete(
-                session,
-                runtime.id,
-            )
+        """Complete an idempotent terminal deletion request."""
+        return await self.operations.request_terminal_delete(agent_id)
 
     async def _set_lifecycle_command(
         self,
@@ -899,41 +845,28 @@ class AgentRuntimeService:
             assert desired_document is not None
             assert desired_digest is not None
 
-        async with self.session_manager() as session:
-            if command_type is RuntimeLifecycleCommandType.STOP:
-                command = await self.runtime_repository.set_desired_state(
-                    session,
-                    resolution.runtime.id,
-                    command_type,
-                    desired_state,
+        result = await self.operations.lifecycle_command(
+            runtime_id=resolution.runtime.id,
+            command_type=command_type,
+            desired_state=desired_state,
+            provider_id=None
+            if command_type is RuntimeLifecycleCommandType.STOP
+            else desired_document.provider_id,
+            expected_configuration_sequence=resolution.desired.sequence,
+            expected_digest=None
+            if command_type is RuntimeLifecycleCommandType.STOP
+            else desired_digest,
+            expected_generation=resolution.runtime.desired_generation,
+        )
+        if result.provider_disconnected:
+            return Failure(
+                RuntimeProviderUnavailable(
+                    code="provider_disconnected",
+                    provider_id=resolution.runtime.runtime_provider_id,
+                    message="Runtime Provider is disconnected.",
                 )
-            else:
-                provider_connected = await (
-                    self.runtime_provider_control_repository.has_connected_connection(
-                        session,
-                        provider_id=desired_document.provider_id,
-                        now=tznow(),
-                    )
-                )
-                if not provider_connected:
-                    return Failure(
-                        RuntimeProviderUnavailable(
-                            code="provider_disconnected",
-                            provider_id=resolution.runtime.runtime_provider_id,
-                            message="Runtime Provider is disconnected.",
-                        )
-                    )
-                command = await (
-                    self.runtime_repository.set_desired_state_if_configuration_current(
-                        session,
-                        resolution.runtime.id,
-                        command_type,
-                        desired_state,
-                        expected_configuration_sequence=resolution.desired.sequence,
-                        expected_digest=desired_digest,
-                        expected_generation=resolution.runtime.desired_generation,
-                    )
-                )
+            )
+        command = result.command
         if command is None:
             if command_type is RuntimeLifecycleCommandType.STOP:
                 return Failure(RuntimeNotFound(runtime_id=resolution.runtime.id))
@@ -1014,18 +947,14 @@ class AgentRuntimeService:
         _AuthorizedAgent | AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied
     ):
         """Load one visible Agent and derive settings-management authority."""
-        async with self.session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
+        agent = await self.operations.get_agent(agent_id)
         if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             return AgentNotFound(agent_id=agent_id)
         if agent.workspace_id != workspace_id:
             return AgentNotBelongToWorkspace(agent_id=agent_id)
         can_manage = role is WorkspaceUserRole.OWNER
         if not can_manage:
-            async with self.session_manager() as session:
-                can_manage = await self.agent_admin_repository.is_admin(
-                    session, agent_id, workspace_user_id
-                )
+            can_manage = await self.operations.is_admin(agent_id, workspace_user_id)
         if agent.type is AgentType.PRIVATE and not can_manage:
             return AgentAccessDenied(agent_id=agent_id)
         return _AuthorizedAgent(agent=agent, can_manage=can_manage)
@@ -1037,32 +966,12 @@ class AgentRuntimeService:
         can_manage: bool,
     ) -> AgentRuntimeReadOutput:
         """Build the unified Runtime projection without ensuring any Runtime."""
-        async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent.id)
-            active_removal = await self.removal_repository.get_active_by_agent_id(
-                session,
-                agent.id,
-            )
-            completed_removal = (
-                None
-                if active_removal is not None
-                else await self.removal_repository.get_latest_completed_by_agent_id(
-                    session,
-                    agent.id,
-                )
-            )
-            removal = active_removal or completed_removal
-            if not can_manage:
-                removal_impact = None
-            elif removal is not None:
-                removal_impact = self._removal_impact_from_operation(removal)
-            elif agent.runtime_capability is AgentRuntimeCapability.MANAGED:
-                removal_impact = await self.removal_scope_repository.get_impact(
-                    session,
-                    agent_id=agent.id,
-                )
-            else:
-                removal_impact = None
+        state = await self.operations.read_state(agent, can_manage=can_manage)
+        runtime = state.runtime
+        active_removal = state.active_removal
+        completed_removal = state.completed_removal
+        removal = active_removal or completed_removal
+        removal_impact = state.removal_impact
 
         runtime_profile = await self._runtime_profile_projection(agent)
 
@@ -1158,12 +1067,9 @@ class AgentRuntimeService:
         agent_id: str,
     ) -> AgentRuntimeLifecycleSnapshot:
         """Return the shared Runtime lifecycle snapshot without mutation."""
-        async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
-            active_removal = await self.removal_repository.get_active_by_agent_id(
-                session,
-                agent_id,
-            )
+        state = await self.operations.read_lifecycle(agent_id)
+        runtime = state.runtime
+        active_removal = state.active_removal
         resolution = await self._get_existing_resolution(agent_id)
         configuration = (
             await self._configuration_status(resolution)
@@ -1237,18 +1143,6 @@ class AgentRuntimeService:
         )
 
     @staticmethod
-    def _removal_impact_from_operation(
-        operation: AgentRuntimeRemovalOperation,
-    ) -> AgentRuntimeRemovalImpact:
-        """Project immutable privacy-safe impact from a removal operation."""
-        return AgentRuntimeRemovalImpact(
-            active_root_session_count=operation.active_root_session_count,
-            active_subagent_count=operation.active_subagent_count,
-            active_run_count=operation.active_run_count,
-            queued_runtime_action_count=operation.queued_runtime_action_count,
-        )
-
-    @staticmethod
     def _removal_progress_from_operation(
         operation: AgentRuntimeRemovalOperation,
     ) -> AgentRuntimeRemovalProgress:
@@ -1287,45 +1181,38 @@ class AgentRuntimeService:
     async def project_operation_target(
         self, agent_id: str
     ) -> RuntimeOperationTarget | None:
-        """Project retained ready evidence without admission or reconciliation."""
-        async with self.read_session_manager() as session:
-            agent = await self.agent_repository.get_by_id(session, agent_id)
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
-            ):
-                return None
-            resolution = await self._read_existing_resolution(session, agent_id)
-            if resolution is None:
-                return None
-            return self._qualified_operation_target(
-                resolution, runtime_capability_version=agent.runtime_capability_version
-            )
+        """Project retained ready evidence after completed read-only observation."""
+        state = await self.operations.retained_target(agent_id)
+        agent = state.agent
+        if (
+            agent is None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            or state.configuration is None
+        ):
+            return None
+        configuration = state.configuration
+        resolution = RuntimeProfileResolutionResult(
+            runtime=configuration.runtime,
+            desired=configuration.desired,
+            applied=configuration.applied,
+            runtime_created=False,
+        )
+        return self._qualified_operation_target(
+            resolution, runtime_capability_version=agent.runtime_capability_version
+        )
 
     async def _get_existing_resolution(
         self, agent_id: str
     ) -> RuntimeProfileResolutionResult | None:
-        """Load retained configuration evidence without resolving new sources."""
-        async with self.session_manager() as session:
-            return await self._read_existing_resolution(session, agent_id)
-
-    async def _read_existing_resolution(
-        self, session: ReadSession, agent_id: str
-    ) -> RuntimeProfileResolutionResult | None:
-        """Read existing Runtime and configuration in the caller's scope."""
-        runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
-        if runtime is None:
-            return None
-        state = await self.runtime_profile_repository.get_configuration_state(
-            session, runtime_id=runtime.id
-        )
-        if state is None:
+        """Load detached configuration evidence without resolving new sources."""
+        configuration = await self.operations.retained_configuration(agent_id)
+        if configuration is None:
             return None
         return RuntimeProfileResolutionResult(
-            runtime=runtime,
-            desired=state.desired,
-            applied=state.applied,
+            runtime=configuration.runtime,
+            desired=configuration.desired,
+            applied=configuration.applied,
             runtime_created=False,
         )
 

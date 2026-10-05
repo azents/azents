@@ -407,23 +407,24 @@ class AgentSessionInputOperationsRepository:
                         case _:
                             assert_never(claim)
                     if client_request_id is not None:
-                        (
-                            record,
-                            created,
-                        ) = await self.chat_write_request_repository.create_idempotent(
-                            session,
-                            ChatWriteRequestCreate(
-                                session_id=agent_session.id,
-                                requester_user_id=requester_user_id,
-                                creation_agent_id=None,
-                                client_request_id=client_request_id,
-                                write_type=write_type,
-                                accepted_type=write_type,
-                                accepted_id=result.mailbox_item.id,
-                                history_reload_required=False,
-                                payload=canonical_request_payload,
-                            ),
+                        request_result = (
+                            await self.chat_write_request_repository.create_idempotent(
+                                session,
+                                ChatWriteRequestCreate(
+                                    session_id=agent_session.id,
+                                    requester_user_id=requester_user_id,
+                                    creation_agent_id=None,
+                                    client_request_id=client_request_id,
+                                    write_type=write_type,
+                                    accepted_type=write_type,
+                                    accepted_id=result.mailbox_item.id,
+                                    history_reload_required=False,
+                                    payload=canonical_request_payload,
+                                ),
+                            )
                         )
+                        record = request_result.record
+                        created = request_result.created
                         if not created or record.accepted_id != result.mailbox_item.id:
                             raise RuntimeError(
                                 "Session-locked Human input admission lost "
@@ -705,23 +706,24 @@ class AgentSessionInputOperationsRepository:
                         case _:
                             assert_never(enqueue_result)
                     if client_request_id is not None:
-                        (
-                            record,
-                            created,
-                        ) = await self.chat_write_request_repository.create_idempotent(
-                            session,
-                            ChatWriteRequestCreate(
-                                session_id=agent_session.id,
-                                requester_user_id=user_id,
-                                creation_agent_id=agent_id,
-                                client_request_id=client_request_id,
-                                write_type=ChatWriteRequestType.MESSAGE,
-                                accepted_type=ChatWriteRequestType.MESSAGE,
-                                accepted_id=mailbox_item.id,
-                                history_reload_required=False,
-                                payload=canonical_request_payload,
-                            ),
+                        request_result = (
+                            await self.chat_write_request_repository.create_idempotent(
+                                session,
+                                ChatWriteRequestCreate(
+                                    session_id=agent_session.id,
+                                    requester_user_id=user_id,
+                                    creation_agent_id=agent_id,
+                                    client_request_id=client_request_id,
+                                    write_type=ChatWriteRequestType.MESSAGE,
+                                    accepted_type=ChatWriteRequestType.MESSAGE,
+                                    accepted_id=mailbox_item.id,
+                                    history_reload_required=False,
+                                    payload=canonical_request_payload,
+                                ),
+                            )
                         )
+                        record = request_result.record
+                        created = request_result.created
                         if not created or record.accepted_id != mailbox_item.id:
                             # Another creator won the Agent-scoped unique key.
                             # Discard the
@@ -1011,23 +1013,24 @@ class AgentSessionInputOperationsRepository:
                         case _:
                             assert_never(enqueue_result)
                     if client_request_id is not None:
-                        (
-                            record,
-                            created,
-                        ) = await self.chat_write_request_repository.create_idempotent(
-                            session,
-                            ChatWriteRequestCreate(
-                                session_id=agent_session.id,
-                                requester_user_id=user_id,
-                                creation_agent_id=agent_id,
-                                client_request_id=client_request_id,
-                                write_type=ChatWriteRequestType.MESSAGE,
-                                accepted_type=ChatWriteRequestType.MESSAGE,
-                                accepted_id=mailbox_item.id,
-                                history_reload_required=False,
-                                payload=canonical_request_payload,
-                            ),
+                        request_result = (
+                            await self.chat_write_request_repository.create_idempotent(
+                                session,
+                                ChatWriteRequestCreate(
+                                    session_id=agent_session.id,
+                                    requester_user_id=user_id,
+                                    creation_agent_id=agent_id,
+                                    client_request_id=client_request_id,
+                                    write_type=ChatWriteRequestType.MESSAGE,
+                                    accepted_type=ChatWriteRequestType.MESSAGE,
+                                    accepted_id=mailbox_item.id,
+                                    history_reload_required=False,
+                                    payload=canonical_request_payload,
+                                ),
+                            )
                         )
+                        record = request_result.record
+                        created = request_result.created
                         if not created or record.accepted_id != mailbox_item.id:
                             # Another creator won the Agent-scoped unique key.
                             # Discard the

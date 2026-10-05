@@ -28,6 +28,7 @@ from azents.core.xai_oauth import XaiOAuthConnectionMethod, XaiOAuthConnectionSt
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
+from azents.repos.subscription_usage_read import SubscriptionUsageReadRepository
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.kimi_oauth.data import ProviderRejected as KimiProviderRejected
 from azents.services.kimi_oauth.data import (
@@ -248,11 +249,13 @@ async def _service(
     http_client = httpx.AsyncClient(transport=transport)
     return _SubscriptionUsageFixture(
         service=SubscriptionUsageService(
-            repository=repository,
+            read_repository=SubscriptionUsageReadRepository(
+                repository=repository,
+                read_session_manager=_SessionManager(),
+            ),
             chatgpt_oauth_runtime_repository=AsyncMock(),
             xai_oauth_runtime_repository=AsyncMock(),
             runtime_oauth_clients=create_runtime_oauth_client_factories(),
-            session_manager=_SessionManager(),
             http_client=http_client,
             chatgpt_usage_base_url="https://usage.example.test/backend-api",
             xai_usage_base_url="https://xai-usage.example.test/v1",

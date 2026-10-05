@@ -110,13 +110,16 @@ class WorkspaceUploadCreateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "destination_directory": obj.get("destination_directory"),
             "filename": obj.get("filename"),
             "expected_size": obj.get("expected_size"),
             "expected_sha256": obj.get("expected_sha256"),
             "media_type": obj.get("media_type"),
             "session_id": obj.get("session_id")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

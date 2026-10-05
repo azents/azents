@@ -19,14 +19,13 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.scheduled_task_control import ScheduledTaskProviderControlError
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionAdmission,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.http_admission_read import (
+    ExternalChannelHTTPAdmissionReadRepository,
+)
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.discord_api import DiscordGuildCommandRole
@@ -137,13 +136,9 @@ class DiscordAuthenticatedInteraction:
 class DiscordHTTPAdmissionService:
     """Select, authenticate, and exactly dispatch a Discord interaction."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    configuration_repository: Annotated[
+        ExternalChannelHTTPAdmissionReadRepository,
+        Depends(ExternalChannelHTTPAdmissionReadRepository),
     ]
     admission_service: Annotated[
         ExternalChannelAdmissionService,
@@ -190,8 +185,7 @@ class DiscordHTTPAdmissionService:
             timestamp=timestamp,
             signature=signature,
             received_at=received_at,
-            session_manager=self.session_manager,
-            repository=self.repository,
+            configuration_repository=self.configuration_repository,
             admission_service=self.admission_service,
         )
         if authenticated.admission is None:
@@ -908,13 +902,9 @@ class DiscordHTTPDispatcherResolver:
 class DiscordHTTPIngressService:
     """Acknowledge slow controls before resolving the heavy replay graph."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
+    configuration_repository: Annotated[
+        ExternalChannelHTTPAdmissionReadRepository,
+        Depends(ExternalChannelHTTPAdmissionReadRepository),
     ]
     admission_service: Annotated[
         ExternalChannelAdmissionService,
@@ -942,8 +932,7 @@ class DiscordHTTPIngressService:
             timestamp=timestamp,
             signature=signature,
             received_at=received_at,
-            session_manager=self.session_manager,
-            repository=self.repository,
+            configuration_repository=self.configuration_repository,
             admission_service=self.admission_service,
         )
         envelope = authenticated.envelope
@@ -1082,19 +1071,14 @@ async def _authenticate_discord_interaction(
     timestamp: str | None,
     signature: str | None,
     received_at: datetime.datetime,
-    session_manager: SessionManager[WriteSession],
-    repository: ExternalChannelRepository,
+    configuration_repository: ExternalChannelHTTPAdmissionReadRepository,
     admission_service: ExternalChannelAdmissionService,
 ) -> DiscordAuthenticatedInteraction:
     """Authenticate and durably admit one Discord callback without dispatch work."""
     selector_hash = hashlib.sha256(selector.encode()).hexdigest()
-    async with session_manager() as session:
-        configuration = (
-            await repository.get_discord_http_configuration_by_selector_hash(
-                session,
-                selector_hash=selector_hash,
-            )
-        )
+    configuration = await configuration_repository.get_discord_configuration(
+        selector_hash=selector_hash
+    )
     if configuration is None or configuration.capabilities is None:
         raise DiscordInteractionUnauthorized(
             "Discord interaction could not be authenticated.",

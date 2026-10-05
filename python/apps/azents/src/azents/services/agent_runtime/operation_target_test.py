@@ -23,9 +23,12 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
     RuntimeConfigurationStateStatus,
 )
-from azents.rdb.session_capabilities import ReadOnlySession, ReadSession
+from azents.rdb.session_capabilities import ReadOnlySession
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime.lifecycle_operations import (
+    AgentRuntimeLifecycleOperationsRepository,
+)
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
@@ -643,18 +646,12 @@ async def test_target_projection_uses_retained_read_scope(case: str) -> None:
 
     service = AsyncMock(spec=AgentRuntimeService)
 
-    async def load(
-        session: ReadSession, agent_id: str
-    ) -> RuntimeProfileResolutionResult | None:
-        return await AgentRuntimeService._read_existing_resolution(
-            service, session, agent_id
-        )
-
-    service._read_existing_resolution.side_effect = load
-    service.agent_repository = AsyncMock()
-    service.runtime_repository = AsyncMock()
-    service.runtime_profile_repository = AsyncMock()
-    service.session_manager = AsyncMock()
+    operations = object.__new__(AgentRuntimeLifecycleOperationsRepository)
+    service.operations = operations
+    operations.agent_repository = AsyncMock()
+    operations.runtime_repository = AsyncMock()
+    operations.runtime_profile_repository = AsyncMock()
+    operations.session_manager = AsyncMock()
     service._qualified_operation_target = (
         AgentRuntimeService._qualified_operation_target
     )
@@ -663,8 +660,8 @@ async def test_target_projection_uses_retained_read_scope(case: str) -> None:
     async def reads() -> AsyncIterator[ReadOnlySession]:
         yield ReadOnlySession(AsyncMock(spec=AsyncSession))
 
-    service.read_session_manager = reads
-    service.agent_repository.get_by_id.return_value = (
+    operations.read_session_manager = reads
+    operations.agent_repository.get_by_id.return_value = (
         None
         if case == "missing-agent"
         else Agent.model_construct(
@@ -692,10 +689,10 @@ async def test_target_projection_uses_retained_read_scope(case: str) -> None:
                 update={"terminal_delete_requested_generation": 2}
             ),
         )
-    service.runtime_repository.get_by_agent_id.return_value = (
+    operations.runtime_repository.get_by_agent_id.return_value = (
         None if case == "missing-runtime" else resolution.runtime
     )
-    service.runtime_profile_repository.get_configuration_state.return_value = (
+    operations.runtime_profile_repository.get_configuration_state.return_value = (
         None
         if case == "missing-configuration"
         else RuntimeConfigurationState(
@@ -711,4 +708,4 @@ async def test_target_projection_uses_retained_read_scope(case: str) -> None:
     service._require_runtime_operation_capability.assert_not_awaited()
     service._ensure_runtime_for_agent.assert_not_awaited()
     service.ensure_started_for_agent.assert_not_awaited()
-    service.session_manager.assert_not_called()
+    operations.session_manager.assert_not_called()

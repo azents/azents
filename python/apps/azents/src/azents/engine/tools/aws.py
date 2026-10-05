@@ -366,7 +366,7 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
         try:
             credentials = await self.credential_provider.get_credentials()
             sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
-            mcp_tools, use_streamable_http = await mcp_list_tools(
+            discovery = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
                 {},
                 self._timeout,
@@ -386,8 +386,8 @@ class AwsToolkit(Toolkit[AwsToolkitConfig]):
             return
 
         snapshot = _build_aws_tool_snapshot(
-            mcp_tools=mcp_tools,
-            use_streamable_http=use_streamable_http,
+            mcp_tools=discovery.tools,
+            use_streamable_http=discovery.use_streamable_http,
         )
         try:
             await self._save_tool_snapshot(snapshot)
@@ -698,7 +698,7 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         sigv4_auth = AwsSigV4Auth(credentials, _AWS_MCP_REGION, _AWS_MCP_SERVICE)
 
         try:
-            tools, _ = await mcp_list_tools(
+            discovery = await mcp_list_tools(
                 _AWS_MCP_ENDPOINT,
                 {},
                 10.0,
@@ -721,7 +721,8 @@ class AwsToolkitProvider(ToolkitProvider[AwsToolkitConfig]):
         return TestConnectionResult(
             success=True,
             message=(
-                f"Connected to AWS MCP Server{role_info}. {len(tools)} tools available."
+                f"Connected to AWS MCP Server{role_info}. "
+                f"{len(discovery.tools)} tools available."
             ),
             discovered_auth_url=None,
             discovered_token_url=None,

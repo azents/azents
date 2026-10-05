@@ -98,13 +98,16 @@ class RuntimeInfrastructureProfileReplaceRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_version": obj.get("expected_version"),
             "display_name": obj.get("display_name"),
             "description": obj.get("description"),
             "lifecycle": obj.get("lifecycle"),
             "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
             "terminal_enabled": obj.get("terminal_enabled")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

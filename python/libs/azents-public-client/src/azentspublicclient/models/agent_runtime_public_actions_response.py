@@ -94,7 +94,9 @@ class AgentRuntimePublicActionsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "add": obj.get("add"),
             "remove": obj.get("remove"),
             "start": obj.get("start"),
@@ -103,6 +105,7 @@ class AgentRuntimePublicActionsResponse(BaseModel):
             "reset": obj.get("reset"),
             "observe": obj.get("observe"),
             "use_runner": obj.get("use_runner")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

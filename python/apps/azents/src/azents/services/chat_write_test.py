@@ -72,6 +72,7 @@ from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import (
     ChatWriteRequest,
     ChatWriteRequestCreate,
+    IdempotentChatWriteResult,
 )
 from azents.repos.input_attachment_claim import InputAttachmentClaimRepository
 from azents.repos.mailbox import MailboxRepository
@@ -336,13 +337,6 @@ def _failed_run_system_error_payload() -> dict[str, JSONValue]:
     ).model_dump(mode="json", exclude_none=True)
 
 
-class _IdempotentWriteResult(NamedTuple):
-    """Structured result returned by `create_idempotent`."""
-
-    request: ChatWriteRequest
-    created: bool
-
-
 class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
     """ChatWriteRequestRepository double returning an existing record."""
 
@@ -354,11 +348,11 @@ class _ExistingWriteRequestRepository(ChatWriteRequestRepository):
         self,
         session: WriteSession,
         create: ChatWriteRequestCreate,
-    ) -> _IdempotentWriteResult:
+    ) -> IdempotentChatWriteResult:
         """Return an existing idempotency record for another session."""
         del session
-        return _IdempotentWriteResult(
-            request=ChatWriteRequest(
+        return IdempotentChatWriteResult(
+            record=ChatWriteRequest(
                 id="write-request-1",
                 session_id=self.existing_session_id,
                 requester_user_id=create.requester_user_id,

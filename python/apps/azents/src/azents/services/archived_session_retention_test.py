@@ -1,12 +1,18 @@
 """ArchivedSessionRetentionService tests."""
 
 import datetime
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from azents.core.agent_session_data import AgentSessionCreate
+from azents.core.archived_session_retention_data import (
+    RetentionApplicationInProgress,
+    RetentionRevisionConflict,
+)
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
@@ -15,6 +21,7 @@ from azents.core.enums import (
     ArchivedSessionRetentionApplicationStatus,
     LLMProvider,
 )
+from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -26,7 +33,10 @@ from azents.rdb.models.archived_session_retention import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
+from azents.rdb.session_capabilities import (
+    WriteSession,
+    create_read_only_session_manager,
+)
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import (
     ArchivedSessionPurgeParticipantSnapshotInvalid,
@@ -35,29 +45,35 @@ from azents.repos.archived_session_retention import (
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionPurgeParticipantSnapshot,
 )
+from azents.repos.archived_session_retention_operations import (
+    ArchivedSessionRetentionOperations,
+)
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
+)
+from azents.repos.session_lifecycle_purge_operations import (
+    SessionLifecyclePurgeOperations,
 )
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
-from azents.services.archived_session_retention import (
-    ArchivedSessionRetentionService,
-    RetentionApplicationInProgress,
-    RetentionRevisionConflict,
-)
+from azents.services.archived_session_retention import ArchivedSessionRetentionService
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
+from azents.testing.types import require_instance
 
 
 def _service(
     session_manager: SessionManager[WriteSession],
 ) -> ArchivedSessionRetentionService:
     return ArchivedSessionRetentionService(
-        repository=ArchivedSessionRetentionRepository(),
-        session_manager=session_manager,
+        operations=ArchivedSessionRetentionOperations(
+            repository=ArchivedSessionRetentionRepository(),
+            session_manager=session_manager,
+            read_only_session_manager=session_manager,
+        ),
     )
 
 
@@ -971,3 +987,140 @@ async def test_revision_and_active_application_conflicts(
             application_scope="new_archives_only",
             user_id=user_id,
         )
+
+
+async def test_completed_settings_application_failure_rolls_back_revision(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Application enqueue failure rolls back its preceding settings CAS mutation."""
+    repository = ArchivedSessionRetentionRepository()
+    async with rdb_session_manager() as session:
+        user_id = await _create_user(session, "operations-rollback")
+        before = await repository.get_settings(session)
+    fake = MagicMock(spec=ArchivedSessionRetentionRepository, wraps=repository)
+    fake.create_application = AsyncMock(
+        side_effect=RuntimeError("Injected application creation failure")
+    )
+    operations = ArchivedSessionRetentionOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        repository=require_instance(fake, ArchivedSessionRetentionRepository),
+    )
+    with pytest.raises(RuntimeError, match="Injected application creation failure"):
+        await operations.update_settings(
+            expected_revision=before.revision,
+            retention_days=17,
+            application_scope="recalculate_existing",
+            user_id=user_id,
+        )
+    async with rdb_session_manager() as session:
+        current = await repository.get_settings(session)
+        active = await repository.get_active_application(session)
+    assert current.revision == before.revision
+    assert (
+        current.archived_session_retention_days
+        == before.archived_session_retention_days
+    )
+    assert active is None
+
+
+async def test_completed_retention_observation_uses_native_read_only_scope(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """A detached application read is PostgreSQL-enforced read-only."""
+    del latest_db_schema
+    observed: list[str] = []
+    repository = MagicMock(spec=ArchivedSessionRetentionRepository)
+
+    async def read_application(session: WriteSession, *, application_id: str) -> None:
+        del application_id
+        value = await session.read_session.scalar(sa.text("SHOW transaction_read_only"))
+        assert value == "on"
+        observed.append(value)
+        return None
+
+    repository.get_application = AsyncMock(side_effect=read_application)
+    operations = ArchivedSessionRetentionOperations(
+        session_manager=MagicMock(),
+        read_only_session_manager=create_read_only_session_manager(rdb_engine),
+        repository=require_instance(repository, ArchivedSessionRetentionRepository),
+    )
+    assert await operations.get_application(application_id="f" * 32) is None
+    assert observed == ["on"]
+
+
+async def test_completed_participant_checkpoint_rejects_stale_lease(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Checkpoint settlement retains the exact claimed purge lease predicate."""
+    now = datetime.datetime.now(datetime.UTC)
+    repository = ArchivedSessionRetentionRepository()
+    async with rdb_session_manager() as session:
+        root_session_id = await _create_archived_root(
+            session,
+            suffix="checkpoint-operations-lease",
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        session.write_session.add(
+            RDBArchivedSessionPurgeJob(
+                root_session_id=root_session_id,
+                eligible_at=now - datetime.timedelta(days=1),
+                policy_revision=1,
+            )
+        )
+    async with rdb_session_manager() as session:
+        claimed = await repository.claim_due_purge_job(
+            session,
+            now=now,
+            lease_owner="current-worker",
+            lease_until=now + datetime.timedelta(minutes=1),
+        )
+        assert claimed is not None
+        await repository.materialize_purge_participant_executions(
+            session,
+            job_id=claimed.id,
+            lease_owner="current-worker",
+            participants=(
+                ArchivedSessionPurgeParticipantSnapshot(
+                    participant_key="session.execution", policy_version=1
+                ),
+            ),
+        )
+    operations = SessionLifecyclePurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=repository,
+        registry=get_session_lifecycle_registry(),
+    )
+    assert not await operations.start(
+        job_id=claimed.id,
+        lease_owner="stale-worker",
+        participant_key="session.execution",
+        now=now,
+    )
+    assert not await operations.checkpoint(
+        job_id=claimed.id,
+        lease_owner="stale-worker",
+        participant_key="session.execution",
+        phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
+        operational_summary=None,
+        now=now,
+    )
+    assert await operations.start(
+        job_id=claimed.id,
+        lease_owner="current-worker",
+        participant_key="session.execution",
+        now=now,
+    )
+    assert await operations.checkpoint(
+        job_id=claimed.id,
+        lease_owner="current-worker",
+        participant_key="session.execution",
+        phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
+        operational_summary={"prepared": True},
+        now=now,
+    )
+    executions = await operations.list_executions(job_id=claimed.id)
+    assert len(executions) == 1
+    assert executions[0].phase is ArchivedSessionPurgeParticipantPhase.PREPARED

@@ -23,7 +23,14 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/connection.py
+  - python/apps/azents/src/azents/repos/external_channel/connection_revocation_operations.py
+  - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
+  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
+  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
   - python/apps/azents/src/azents/repos/external_channel/management_operations.py
   - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
@@ -57,7 +64,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 48
+spec_version: 50
 ---
 
 # External Channel Lifecycle
@@ -222,7 +229,12 @@ creates leave-presence and Tracker cleanup only for bindings that were still
 connected, removes active route authority, marks resources unavailable, and clears
 provider identity and credentials. Cleanup targets are captured before the purge and
 attempted after the terminal commit. A repeated uninstall is idempotent and creates
-no duplicate presence control. In-flight validation
+no duplicate presence control. The completed revocation repository operation applies
+the required configuration generation and optional Socket lease owner predicates,
+captures terminal cleanup targets, and purges provider state in one atomic scope.
+A stale predicate leaves the connection unchanged; purge failure rolls back the
+terminal transition. The service attempts captured cleanup only after commit and
+scope exit. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
 The connection service reads its Workspace-owned configuration through a completed
 repository operation, performs provider validation with no active database
@@ -273,6 +285,11 @@ creates no recovery work.
 ## Session Archive and Restore
 
 External Channel is registered as the `session.external-channel` lifecycle participant.
+Its DB-only participant operations live in repository composition, not in a service
+that receives live Sessions. Archive/purge operations compose the narrower lifecycle
+repository atomically with their root transition and participant state. The lifecycle
+service only consumes detached committed provider cleanup plans; it owns no DB scope.
+Scheduled participant persistence uses the same repository-only boundary.
 
 Archive uses the explicit terminal transition policy inside the archive
 repository's transaction. The concrete lifecycle operation composes participant
@@ -372,6 +389,18 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 50) — Moved External Channel and Scheduled
+  lifecycle participant DB composition below services while preserving atomic
+  archive/purge finalization and detached post-commit provider cleanup.
+
+- **2026-10-05 (spec_version49)** — Integrated completed channel action/revocation
+  and Scheduled Channel effects with selection/scheduled/lease ownership, retaining
+  exact owner, configuration and claim fences at atomic mutation boundaries.
+
+- **2026-10-05** (spec_version 48) — Made authenticated Slack revocation a
+  completed repository operation with atomic conditional terminal/purge mutation,
+  rollback on purge failure, and detached post-commit cleanup plans.
 
 - **2026-10-05** (spec_version 47) — Made Multi disconnect impact previews independent of connection/route locks and kept exact Single/Multi credential-generation transitions separate from ordinary metadata captures.
 

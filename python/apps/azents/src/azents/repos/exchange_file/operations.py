@@ -106,10 +106,6 @@ class ExchangeFileOperationRepository:
         SessionManager[ReadSession], Depends(get_read_only_session_manager)
     ]
 
-    read_session_manager: Annotated[
-        SessionManager[ReadSession], Depends(get_read_only_session_manager)
-    ]
-
     @property
     def authority_repository(self) -> FileMetadataAuthorityRepository:
         """Build the shared database-only authority validator."""

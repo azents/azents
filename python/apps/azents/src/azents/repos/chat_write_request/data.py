@@ -1,6 +1,7 @@
 """ChatWriteRequest repository data models."""
 
 import datetime
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -25,6 +26,13 @@ class ChatWriteRequest(BaseModel):
     )
     payload: dict[str, object] = Field(description="Write request snapshot")
     created_at: datetime.datetime = Field(description="Creation timestamp")
+
+
+class IdempotentChatWriteResult(NamedTuple):
+    """Persisted request and whether this operation created it."""
+
+    record: ChatWriteRequest
+    created: bool
 
 
 class ChatWriteRequestCreate(BaseModel):

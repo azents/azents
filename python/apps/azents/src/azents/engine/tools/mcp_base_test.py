@@ -14,6 +14,7 @@ from azents.core.engine_tool_state import (
     McpToolSnapshotItem,
     McpToolSnapshotState,
 )
+from azents.core.mcp_transport import McpToolListResult
 from azents.core.toolkit_state import ToolkitStateIdentity
 from azents.core.tools import McpToolkitConfig, TurnContext
 from azents.engine.run.types import FunctionToolError
@@ -148,22 +149,15 @@ async def _wait_refresh(toolkit: McpToolkit) -> None:
         await task
 
 
-class _McpListToolsResult(NamedTuple):
-    """Structured result returned by `slow_list_tools`."""
-
-    tools: list[object]
-    cacheable: bool
-
-
 async def test_update_context_returns_immediately_without_snapshot() -> None:
     """Slow MCP list_tools does not block request preparation."""
     started = asyncio.Event()
     continue_list = asyncio.Event()
 
-    async def slow_list_tools(*_args: object, **_kwargs: object) -> _McpListToolsResult:
+    async def slow_list_tools(*_args: object, **_kwargs: object) -> McpToolListResult:
         started.set()
         await continue_list.wait()
-        return _McpListToolsResult(tools=[_tool("alpha")], cacheable=False)
+        return McpToolListResult(tools=[_tool("alpha")], use_streamable_http=False)
 
     toolkit = McpToolkit(
         config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
@@ -204,7 +198,9 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
     )
     with patch(
         "azents.engine.tools.mcp_base.mcp_list_tools",
-        return_value=([_tool("zeta"), _tool("alpha")], False),
+        return_value=McpToolListResult(
+            tools=[_tool("zeta"), _tool("alpha")], use_streamable_http=False
+        ),
     ):
         async with toolkit:
             await _wait_refresh(toolkit)
@@ -238,7 +234,9 @@ async def test_background_refresh_stops_after_owner_rejection() -> None:
         patch.object(toolkit, "_save_tool_snapshot", save),
         patch(
             "azents.engine.tools.mcp_base.mcp_list_tools",
-            return_value=([_tool("alpha")], False),
+            return_value=McpToolListResult(
+                tools=[_tool("alpha")], use_streamable_http=False
+            ),
         ) as list_tools,
     ):
         async with toolkit:
@@ -312,7 +310,9 @@ async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
     )
     with patch(
         "azents.engine.tools.mcp_base.mcp_list_tools",
-        return_value=([_tool("alpha")], False),
+        return_value=McpToolListResult(
+            tools=[_tool("alpha")], use_streamable_http=False
+        ),
     ):
         async with toolkit:
             await _wait_refresh(toolkit)

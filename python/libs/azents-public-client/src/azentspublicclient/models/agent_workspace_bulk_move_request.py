@@ -89,10 +89,13 @@ class AgentWorkspaceBulkMoveRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "source_paths": obj.get("source_paths"),
             "destination_directory": obj.get("destination_directory"),
             "overwrite": obj.get("overwrite") if obj.get("overwrite") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

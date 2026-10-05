@@ -13,7 +13,7 @@ from azents.api.public.runtime_provider_enrollment.v1 import (
 from azents.api.public.runtime_provider_enrollment.v1.data import (
     RuntimeProviderCredentialExchangeRequest,
 )
-from azents.services.runtime_provider_control.data import (
+from azents.core.runtime_provider_control import (
     RuntimeProviderCredentialIssued,
     RuntimeProviderEnrollmentUnavailable,
 )

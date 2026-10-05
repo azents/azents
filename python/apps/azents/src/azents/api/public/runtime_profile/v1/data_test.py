@@ -19,14 +19,14 @@ from azents.core.runtime_profile import (
     RuntimeProfileCompatibility,
     RuntimeProfileLifecycle,
 )
+from azents.core.runtime_profile_workspace import (
+    SelectableInfrastructureProfileProjection,
+    WorkspaceRuntimeProfileProjection,
+)
 from azents.core.runtime_provider_data import RuntimeProvider
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
-)
-from azents.services.runtime_profile_workspace.service import (
-    SelectableInfrastructureProfileProjection,
-    WorkspaceRuntimeProfileProjection,
 )
 
 
