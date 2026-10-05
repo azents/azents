@@ -23,6 +23,7 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.core.scheduled_task_control import ScheduledTaskProviderControlResult
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -30,6 +31,9 @@ from azents.repos.external_channel.data import (
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
+)
+from azents.repos.external_channel.http_admission_read import (
+    ExternalChannelHTTPAdmissionReadRepository,
 )
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.discord_http import (
@@ -50,10 +54,7 @@ from azents.services.external_channel.discord_settings_scope import (
     build_discord_settings_custom_id,
     parse_discord_settings_custom_id,
 )
-from azents.services.scheduled_task.control import (
-    ScheduledTaskProviderControlResult,
-    build_scheduled_task_control_locator,
-)
+from azents.services.scheduled_task.control import build_scheduled_task_control_locator
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
@@ -388,8 +389,10 @@ def _service(
     interaction_response = _InteractionResponseDouble()
     return _DiscordHTTPServiceFixture(
         service=DiscordHTTPAdmissionService(
-            session_manager=session_manager,
-            repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            configuration_repository=ExternalChannelHTTPAdmissionReadRepository(
+                session_manager=session_manager,
+                repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            ),
             admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
             shortcut_source_service=shortcut_source,  # ty: ignore[invalid-argument-type] # Focused shortcut double implements ensure().
             selector_response_service=selector_response,  # ty: ignore[invalid-argument-type] # Focused response double implements initial_response().
@@ -425,8 +428,10 @@ def _ingress_service(
     resolver = _DispatcherResolverDouble(dispatcher)
     return _DiscordHTTPIngressFixture(
         service=DiscordHTTPIngressService(
-            session_manager=session_manager,
-            repository=_RepositoryDouble(configuration),  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            configuration_repository=ExternalChannelHTTPAdmissionReadRepository(
+                session_manager=session_manager,
+                repository=_RepositoryDouble(configuration),  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+            ),
             admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
             config=SimpleNamespace(
                 auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))

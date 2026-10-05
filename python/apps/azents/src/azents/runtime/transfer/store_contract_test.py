@@ -1,6 +1,7 @@
 """Backend-neutral Runtime transfer state-store contract harness."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,12 @@ from uuid import uuid4
 import pytest
 
 from azents.core.redis import create_redis_client
+from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.transfer.cleanup import (
+    RuntimeTransferCleanupDeferred,
+    cleanup_safe_at,
+)
+from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
 from azents.runtime.transfer.data import (
     DIRECT_INGRESS_CLEANUP_GRACE,
     RuntimeTransferAdmission,
@@ -32,6 +39,7 @@ from azents.runtime.transfer.redis import RedisRuntimeTransferStateStore
 from azents.runtime.transfer.store import RuntimeTransferStateStore
 
 _TEST_STARTED_AT = datetime.now(timezone.utc)
+_PRIVATE_STORAGE_DIAGNOSTIC = "private storage diagnostic must be sanitized"
 
 
 class _Clock:
@@ -219,6 +227,300 @@ async def _claim_stream(
         claim_id=claim_id,
         owner_replica_id="test-replica",
     )
+
+
+class _DirectCleanup:
+    """Record eligible exact cleanup and model a storage-boundary deferral."""
+
+    def __init__(self, clock: _Clock) -> None:
+        self.clock = clock
+        self.fail = False
+        self.defer = False
+        self.calls: list[RuntimeTransferRecord] = []
+        self.deleted: list[RuntimeTransferObject] = []
+
+    async def cleanup(self, record: RuntimeTransferRecord) -> None:
+        self.calls.append(record)
+        safe_at = cleanup_safe_at(record)
+        if safe_at is not None and (self.clock() < safe_at or self.defer):
+            raise RuntimeTransferCleanupDeferred(safe_at=safe_at)
+        if self.fail:
+            raise OSError(_PRIVATE_STORAGE_DIAGNOSTIC)
+        if record.completed_object_cleanup_required:
+            assert record.object is not None
+            self.deleted.append(record.object)
+
+
+async def _owned_direct_claim(
+    harness: _StoreHarness, *, upload: bool
+) -> RuntimeTransferRecord:
+    """Prepare a direct claim with an exact owned object and optional PUT ingress."""
+    store = harness.store
+    admitted = await store.admit(
+        replace(
+            _admission(),
+            direction=(
+                RuntimeTransferDirection.UPLOAD
+                if upload
+                else RuntimeTransferDirection.DOWNLOAD
+            ),
+            source_transport=(
+                RuntimeTransferSourceTransport.TRANSFER_OBJECT
+                if upload
+                else RuntimeTransferSourceTransport.DIRECT_OBJECT
+            ),
+            upload_transport=(
+                RuntimeTransferUploadTransport.DIRECT_OBJECT
+                if upload
+                else RuntimeTransferUploadTransport.CONTROL_STREAM
+            ),
+        ),
+        lease_id="lease",
+    )
+    assert admitted is not None
+    ready = await store.mark_ready(
+        "transfer",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=admitted.revision,
+        object=RuntimeTransferObject("owned-object", 1, "a" * 64),
+    )
+    assert ready is not None
+    bound = await store.bind_dispatch(
+        "transfer",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        expected_revision=ready.revision,
+        dispatch_id="dispatch",
+        dispatch_request_id="request",
+    )
+    assert bound is not None
+    deliverable = await store.mark_dispatch_deliverable(
+        "transfer",
+        attempt_id="attempt",
+        expected_revision=bound.revision,
+        dispatch_id="dispatch",
+        dispatch_request_id="request",
+    )
+    assert deliverable is not None
+    claimed = await store.claim_direct_object(
+        "transfer",
+        attempt_id="attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        accepted_runner_generation=2,
+        claim_id="claim",
+        owner_replica_id="test-replica",
+        upload=upload,
+    )
+    assert claimed is not None
+    if upload:
+        reserved = await store.reserve_direct_ingress(
+            "transfer",
+            attempt_id="attempt",
+            accepted_runner_generation=2,
+            expected_revision=claimed.revision,
+            claim_id="claim",
+            owner_replica_id="test-replica",
+            ingress_handle="mutable-ingress",
+            expires_at=harness.clock.now + timedelta(minutes=1),
+            sha256="a" * 64,
+        )
+        assert reserved is not None
+        pending = await store.record_completed_object_cleanup(
+            "transfer",
+            attempt_id="attempt",
+            expected_revision=reserved.revision,
+            status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
+            multipart_cleanup_required=False,
+            completed_object_cleanup_required=True,
+        )
+        assert pending is not None
+        return pending
+    return claimed
+
+
+@pytest.mark.parametrize("upload", [False, True], ids=["get", "put"])
+async def test_coordinator_direct_cleanup_deferral_and_recovery(
+    store_harness: _StoreHarness,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    upload: bool,
+) -> None:
+    """Both repair paths wait silently and recover genuine cleanup failures."""
+    harness = store_harness
+    claimed = await _owned_direct_claim(harness, upload=upload)
+    cleanup = _DirectCleanup(harness.clock)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=harness.store,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=cleanup,
+        clock=harness.clock,
+    )
+    caplog.set_level(logging.WARNING, logger="azents.runtime.transfer.coordinator")
+    settled = await coordinator.settle_terminal(
+        claimed,
+        outcome=RuntimeTransferOutcome.FAILED,
+        failure=RuntimeTransferFailure.STREAM,
+        cleanup_completed=False,
+        destination_conflict=None,
+    )
+    assert settled is not None
+    assert settled.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+    assert settled.completed_object_cleanup_required
+    assert settled.cleanup_failure is None
+    safe_at = cleanup_safe_at(settled)
+    assert safe_at is not None
+    harness.clock.now = settled.admission.deadline_at - timedelta(seconds=1)
+    refreshed = await harness.store.get("transfer")
+    assert refreshed is not None
+    for instant in (
+        harness.clock.now,
+        safe_at - timedelta(microseconds=1),
+        safe_at - timedelta(microseconds=1),
+    ):
+        harness.clock.now = instant
+        await coordinator.repair_terminal_correlations(page_size=2)
+        await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+        pending = await harness.store.get("transfer")
+        assert pending is not None
+        assert pending.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+        assert pending.cleanup_failure is None
+        assert pending.revision == refreshed.revision
+    assert cleanup.calls == []
+    assert caplog.records == []
+
+    harness.clock.now = safe_at
+    cleanup.fail = True
+    await coordinator.repair_terminal_correlations(page_size=2)
+    await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+    failed = await harness.store.get("transfer")
+    assert failed is not None and failed.cleanup_failure is not None
+    assert failed.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+    assert failed.cleanup_failure.attempts == 2
+    assert len(caplog.records) == 2
+    assert all(record.exc_info is not None for record in caplog.records)
+    assert "private storage diagnostic" not in caplog.text
+
+    harness.clock.now = safe_at - timedelta(microseconds=1)
+    calls_before_wait = len(cleanup.calls)
+    await coordinator.repair_terminal_correlations(page_size=2)
+    await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+    assert await harness.store.get("transfer") == failed
+    assert len(cleanup.calls) == calls_before_wait
+    assert len(caplog.records) == 2
+    harness.clock.now = safe_at
+
+    # A boundary deferral must not erase a previous real failure or imply success.
+    cleanup.fail = False
+    cleanup.defer = True
+    await coordinator.repair_terminal_correlations(page_size=2)
+    await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+    deferred = await harness.store.get("transfer")
+    assert deferred == failed
+    assert len(caplog.records) == 2
+    assert cleanup.deleted == []
+
+    cleanup.defer = False
+    await coordinator.repair_terminal_correlations(page_size=2)
+    cleaned = cleanup.calls[-1]
+    assert cleaned.admission.attempt_id == claimed.admission.attempt_id
+    assert cleanup.deleted == [claimed.object]
+    # A completed terminal may already have expired its TTL and be purged.
+    retained = await harness.store.get("transfer")
+    if retained is not None:
+        assert retained.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
+        assert retained.cleanup_failure is None
+        assert retained.direct_ingress_handle is None
+    await coordinator.repair_terminal_correlations(page_size=2)
+    await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+    assert cleanup.deleted == [claimed.object]
+    assert len(caplog.records) == 2
+
+
+async def test_stale_direct_claim_cleanup_preserves_new_attempt(
+    store_harness: _StoreHarness,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Old stream repair retains its owned object without touching a newer attempt."""
+    harness = store_harness
+    claimed = await _owned_direct_claim(harness, upload=False)
+    cleanup = _DirectCleanup(harness.clock)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=harness.store,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=cleanup,
+        clock=harness.clock,
+    )
+    caplog.set_level(logging.WARNING, logger="azents.runtime.transfer.coordinator")
+    harness.clock.now += timedelta(seconds=31)
+    assert (
+        await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2) == 1
+    )
+    old = await harness.store.get("transfer")
+    assert old is not None
+    assert old.phase is RuntimeTransferPhase.TERMINAL
+    assert old.cleanup_status is RuntimeTransferCleanupStatus.PENDING
+    assert old.completed_object_cleanup_required
+    assert old.cleanup_failure is None
+    assert cleanup.calls == []
+
+    safe_at = cleanup_safe_at(old)
+    assert safe_at is not None
+    harness.clock.now = safe_at - timedelta(microseconds=1)
+    newer = await harness.store.admit(
+        replace(
+            old.admission,
+            attempt_id="new-attempt",
+            deadline_at=safe_at + timedelta(minutes=5),
+            expected_sha256="b" * 64,
+        ),
+        lease_id="new-lease",
+    )
+    assert newer is not None
+    new_object = RuntimeTransferObject("new-owned-object", 1, "b" * 64)
+    ready = await harness.store.mark_ready(
+        "transfer",
+        attempt_id="new-attempt",
+        runtime_id="runtime",
+        desired_generation=1,
+        expected_revision=newer.revision,
+        object=new_object,
+    )
+    assert ready is not None
+    assert (
+        await harness.store.record_completed_object_cleanup(
+            "transfer",
+            attempt_id="new-attempt",
+            expected_revision=old.revision,
+            status=RuntimeTransferCleanupStatus.COMPLETE,
+            cleanup_failure=None,
+            multipart_cleanup_required=False,
+            completed_object_cleanup_required=False,
+        )
+        is None
+    )
+    await coordinator.repair_terminal_correlations(page_size=2)
+    await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+    assert cleanup.calls == []
+    harness.clock.now = safe_at
+    # Exercise the independent stale path first, rather than letting terminal repair
+    # perform every deletion in the identity-fencing scenario.
+    await coordinator.repair_stale_stream_claims(cleanup=cleanup, page_size=2)
+    await coordinator.repair_terminal_correlations(page_size=2)
+    assert cleanup.deleted == [claimed.object]
+    assert all(record.admission.attempt_id == "attempt" for record in cleanup.calls)
+    current = await harness.store.get("transfer")
+    assert current is not None
+    assert current.admission.attempt_id == "new-attempt"
+    assert current.object == new_object
+    assert current.cleanup_failure is None
+    assert current.cleanup_status is RuntimeTransferCleanupStatus.NOT_REQUIRED
+    assert caplog.records == []
 
 
 @pytest.mark.asyncio

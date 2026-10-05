@@ -116,7 +116,9 @@ class ExternalChannelMultiConnectionImpact(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "connection_id": obj.get("connection_id"),
             "generation": obj.get("generation"),
             "active_route_count": obj.get("active_route_count"),
@@ -130,6 +132,7 @@ class ExternalChannelMultiConnectionImpact(BaseModel):
             "pending_access_request_count": obj.get("pending_access_request_count"),
             "affected_defaults": [ExternalChannelMultiImpactDefault.from_dict(_item) for _item in obj["affected_defaults"]] if obj.get("affected_defaults") is not None else None,
             "affected_bindings": [ExternalChannelMultiImpactBinding.from_dict(_item) for _item in obj["affected_bindings"]] if obj.get("affected_bindings") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

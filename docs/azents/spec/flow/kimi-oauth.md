@@ -11,7 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/core/model_provider_declarations.py
   - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/src/azents/core/kimi_oauth.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -19,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/**
   - python/apps/azents/src/azents/services/kimi_oauth/**
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/llm_catalog/__init__.py
   - python/apps/azents/src/azents/repos/kimi_oauth_session/**
@@ -34,8 +35,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-04
-spec_version: 7
+last_verified_at: 2026-10-05
+spec_version: 9
 ---
 
 # Kimi OAuth Flow
@@ -200,6 +201,12 @@ Azents canonical history, native completion evidence, provider-failure classific
 compaction and titles. The `moonshot/` namespace remains a source-metadata lookup key, not a stored
 or reconstructed execution identifier.
 
+Device session persistence, pending-session reads, interval changes and cancellation
+complete inside injected repository operations. Token consumption and Kimi
+integration create/update share one database-only operation, preserving the
+existing transition result and rollback behavior. Provider device requests and
+credential preparation remain outside these operations.
+
 ## Integration-Scoped Model Catalog
 
 A Kimi integration owns an integration-scoped catalog. Synchronization ensures fresh OAuth
@@ -242,6 +249,14 @@ call Kimi directly.
 An enabled Kimi integration exposes live usage through the existing integration child endpoint.
 Azents does not persist usage snapshots, poll in the background, aggregate workspaces, or use usage to
 change execution entitlement.
+
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. Usage persistence, financial-field authorization and
+provider/secrets redaction retain their existing contracts.
 
 The usage adapter ensures fresh credentials and requests `GET /usages` with the access token and
 compatibility headers. It accepts an optional `usage` summary and zero or more `limits` entries,
@@ -305,6 +320,8 @@ message submission, or integration management.
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-10-05 | 9 | Completed Device OAuth session and atomic integration-save repository ownership | Preserve existing provider flow, consume predicates and credential outcomes |
+| 2026-10-05 | 8 | Reconciled code-path discovery with current defining modules | Keep implementation discovery aligned with the current source tree; system behavior is unchanged |
 | 2026-10-03 | 6 | Adopted current catalog entries/latest sync without snapshot history | Retain Kimi account visibility and existing synchronization policy |
 | 2026-10-01 | 5 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep Kimi model visibility independent of optional generic metadata |
 | 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |

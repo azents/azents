@@ -1,16 +1,14 @@
-"""kubernetes_asyncio.client 타입 스텁.
+"""Type stubs for the kubernetes_asyncio.client surface used by Azents.
 
-kubernetes_asyncio는 타입 스텁을 제공하지 않으므로
-프로젝트에서 사용하는 API를 직접 선언한다.
-
-Agent Home은 lightkube로 마이그레이션 완료.
-여기에는 exec 도구(WsApiClient) + 인증에 필요한 최소 타입만 유지한다.
+Declare exec, authentication, and Provider credential bootstrap operations.
+Agent Home operations use lightkube.
 """
 
 from collections.abc import Callable, Coroutine
 from typing import Any
 
 from aiohttp import ClientSession
+from kubernetes_asyncio.client.models.v1_secret import V1Secret
 
 # ── Configuration / ApiClient ──────────────────────────
 
@@ -33,12 +31,21 @@ class ApiClient:
     def __init__(self, configuration: Configuration | None = None) -> None: ...
     async def close(self) -> None: ...
 
-# ── CoreV1Api (exec + version 전용) ─────────────────────
+# ── CoreV1Api (exec and Provider credential bootstrap) ──
 
 class CoreV1Api:
     def __init__(self, api_client: ApiClient | None = None) -> None: ...
+    def read_namespaced_secret(
+        self, name: str, namespace: str, **kwargs: Any
+    ) -> Coroutine[Any, Any, V1Secret]: ...
+    def create_namespaced_secret(
+        self, namespace: str, body: V1Secret, **kwargs: Any
+    ) -> Coroutine[Any, Any, V1Secret]: ...
+    def patch_namespaced_secret(
+        self, name: str, namespace: str, body: dict[str, object], **kwargs: Any
+    ) -> Coroutine[Any, Any, V1Secret]: ...
 
-    # exec — WsApiClient를 통해 호출
+    # Exec operations are called through WsApiClient.
     def connect_get_namespaced_pod_exec(
         self, **kwargs: Any
     ) -> Coroutine[Any, Any, Any]: ...

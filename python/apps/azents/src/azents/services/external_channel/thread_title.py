@@ -7,28 +7,19 @@ from typing import Annotated
 from fastapi import Depends
 
 from azents.core.enums import (
-    AgentLifecycleStatus,
-    AgentSessionStatus,
     EventKind,
-    ExternalChannelConnectionStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
-    ExternalChannelResourceStatus,
     ExternalChannelResourceType,
-    ExternalChannelRouteCatalogStatus,
 )
 from azents.core.external_channel_provider import DiscordConnectionCredentials
 from azents.core.external_channel_title import (
-    DISCORD_INITIAL_THREAD_TITLE_LABEL,
     normalize_discord_thread_title,
 )
 from azents.engine.events.types import Event, ExternalChannelMessagePayload
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.thread_title_read import (
+    ExternalChannelThreadTitleReadRepository,
+)
 from azents.services.external_channel.channel_action import (
     get_discord_delivery_client,
 )
@@ -56,15 +47,9 @@ class _DiscordThreadTitleAuthority:
 class ExternalChannelThreadTitleService:
     """Attempt one eligible Discord thread rename without durable attempt state."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
-    ]
-    external_channel_repository: Annotated[
-        ExternalChannelRepository, Depends(ExternalChannelRepository.create)
-    ]
-    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
+    repository: Annotated[
+        ExternalChannelThreadTitleReadRepository,
+        Depends(ExternalChannelThreadTitleReadRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -136,103 +121,26 @@ class ExternalChannelThreadTitleService:
             )
 
     async def _load_authority(
-        self,
-        *,
-        session_id: str,
-        payload: ExternalChannelMessagePayload,
+        self, *, session_id: str, payload: ExternalChannelMessagePayload
     ) -> _DiscordThreadTitleAuthority | None:
-        """Load current Session, Binding, route, connection, and Resource authority."""
-        async with self.session_manager() as session:
-            resource = await self.external_channel_repository.get_resource(
-                session,
-                resource_id=payload.resource_id,
-            )
-            binding = await self.external_channel_repository.get_binding(
-                session,
-                binding_id=payload.binding_id,
-            )
-            agent_session = await self.agent_session_repository.get_by_id(
-                session,
-                session_id,
-            )
-            if (
-                resource is None
-                or resource.status is not ExternalChannelResourceStatus.ACTIVE
-                or resource.resource_type is not ExternalChannelResourceType.THREAD
-                or binding is None
-                or binding.resource_id != resource.id
-                or binding.agent_session_id != session_id
-                or binding.disconnected_at is not None
-                or agent_session is None
-                or agent_session.status is not AgentSessionStatus.ACTIVE
-                or agent_session.stop_requested_at is not None
-                or agent_session.ended_at is not None
-            ):
-                return None
-            route = await self.external_channel_repository.get_agent_route(
-                session,
-                route_id=binding.route_id,
-            )
-            connection = (
-                await self.external_channel_repository.get_connection_configuration(
-                    session,
-                    connection_id=resource.connection_id,
-                )
-            )
-            if (
-                route is None
-                or route.connection_id != resource.connection_id
-                or route.agent_id != agent_session.agent_id
-                or route.catalog_status
-                is not ExternalChannelRouteCatalogStatus.AVAILABLE
-                or connection is None
-                or connection.provider is not ExternalChannelProvider.DISCORD
-                or connection.status
-                not in {
-                    ExternalChannelConnectionStatus.ACTIVE,
-                    ExternalChannelConnectionStatus.DEGRADED,
-                }
-                or connection.disconnected_at is not None
-                or connection.provider_tenant_id != payload.provider_tenant_id
-                or connection.app_mode is not route.connection_app_mode
-                or connection.encrypted_credentials is None
-            ):
-                return None
-            agent = await self.agent_repository.get_by_id(
-                session,
-                agent_session.agent_id,
-            )
-            if (
-                agent is None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            ):
-                return None
-            labels = resource.labels or {}
-            if (
-                labels.get("provider") != ExternalChannelProvider.DISCORD.value
-                or labels.get("guild_id") != payload.provider_tenant_id
-            ):
-                return None
-            channel_id = labels.get("delivery_channel_id")
-            provisional_title = labels.get(DISCORD_INITIAL_THREAD_TITLE_LABEL)
-            if (
-                not isinstance(channel_id, str)
-                or not channel_id.isdigit()
-                or not isinstance(provisional_title, str)
-                or not provisional_title
-            ):
-                return None
-            try:
-                credentials = self.credentials_codec.decrypt(
-                    connection.encrypted_credentials
-                )
-            except ValueError:
-                return None
-            if not isinstance(credentials, DiscordConnectionCredentials):
-                return None
-            return _DiscordThreadTitleAuthority(
-                bot_token=credentials.bot_token,
-                guild_id=payload.provider_tenant_id,
-                channel_id=channel_id,
-                provisional_title=provisional_title,
-            )
+        """Decode credentials only after the current exact authority read closes."""
+        snapshot = await self.repository.load_authority(
+            session_id=session_id,
+            resource_id=payload.resource_id,
+            binding_id=payload.binding_id,
+            provider_tenant_id=payload.provider_tenant_id,
+        )
+        if snapshot is None:
+            return None
+        try:
+            credentials = self.credentials_codec.decrypt(snapshot.encrypted_credentials)
+        except ValueError:
+            return None
+        if not isinstance(credentials, DiscordConnectionCredentials):
+            return None
+        return _DiscordThreadTitleAuthority(
+            bot_token=credentials.bot_token,
+            guild_id=snapshot.guild_id,
+            channel_id=snapshot.channel_id,
+            provisional_title=snapshot.provisional_title,
+        )

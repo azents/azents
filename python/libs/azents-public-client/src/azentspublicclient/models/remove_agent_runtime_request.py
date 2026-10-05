@@ -91,11 +91,14 @@ class RemoveAgentRuntimeRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_capability_version": obj.get("expected_capability_version"),
             "expected_runtime_profile_selection_version": obj.get("expected_runtime_profile_selection_version"),
             "idempotency_key": obj.get("idempotency_key"),
             "confirmed": obj.get("confirmed")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

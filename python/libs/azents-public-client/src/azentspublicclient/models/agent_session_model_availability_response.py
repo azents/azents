@@ -118,7 +118,9 @@ class AgentSessionModelAvailabilityResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "semantic_label": obj.get("semantic_label"),
             "primary": ModelCandidateIdentity.from_dict(obj["primary"]) if obj.get("primary") is not None else None,
             "primary_display_name": obj.get("primary_display_name"),
@@ -127,6 +129,7 @@ class AgentSessionModelAvailabilityResponse(BaseModel):
             "server_time": obj.get("server_time"),
             "first_usable_fallback_display_name": obj.get("first_usable_fallback_display_name"),
             "reservation": PrimaryModelReservation.from_dict(obj["reservation"]) if obj.get("reservation") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

@@ -1,6 +1,7 @@
 """Runtime Provider Control persistence tests."""
 
 import datetime
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
@@ -43,9 +44,15 @@ from .data import (
 from .repository import RuntimeProviderControlRepository
 
 
-async def _provider_source_and_binding(
-    session: WriteSession,
-) -> tuple[str, str, str]:
+class _ProviderFixture(NamedTuple):
+    """Durable Provider, bootstrap source and issued-token binding identities."""
+
+    provider_id: str
+    source_id: str
+    binding_id: str
+
+
+async def _provider_source_and_binding(session: WriteSession) -> _ProviderFixture:
     """Create a durable Provider, bootstrap source, and issued-token binding."""
     provider_repository = RuntimeProviderRepository()
     provider = await provider_repository.create(
@@ -83,7 +90,9 @@ async def _provider_source_and_binding(
             config=None,
         ),
     )
-    return provider.id, source.id, binding.id
+    return _ProviderFixture(
+        provider_id=provider.id, source_id=source.id, binding_id=binding.id
+    )
 
 
 class TestRuntimeProviderControlRepository:
@@ -95,9 +104,10 @@ class TestRuntimeProviderControlRepository:
     ) -> None:
         """A grant creates exactly one credential even after replay."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id, binding_id = await _provider_source_and_binding(
-            rdb_session
-        )
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
+        source_id = provider_fixture.source_id
+        binding_id = provider_fixture.binding_id
         now = tznow()
         grant = await repository.create_enrollment_grant(
             rdb_session,
@@ -152,9 +162,10 @@ class TestRuntimeProviderControlRepository:
     ) -> None:
         """A reconnect never inherits or permits updates to an older snapshot."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id, binding_id = await _provider_source_and_binding(
-            rdb_session
-        )
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
+        source_id = provider_fixture.source_id
+        binding_id = provider_fixture.binding_id
         auth_subject = f"admin:{provider_id}"
         now = tznow()
         grant = await repository.create_enrollment_grant(
@@ -312,9 +323,10 @@ class TestRuntimeProviderControlRepository:
     ) -> None:
         """Credential revocation immediately prevents connection heartbeat."""
         repository = RuntimeProviderControlRepository()
-        provider_id, source_id, binding_id = await _provider_source_and_binding(
-            rdb_session
-        )
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
+        source_id = provider_fixture.source_id
+        binding_id = provider_fixture.binding_id
         auth_subject = f"admin:{provider_id}"
         now = tznow()
         grant = await repository.create_enrollment_grant(
@@ -424,7 +436,8 @@ class TestRuntimeProviderControlRepository:
     ) -> None:
         """Binding revocation immediately removes workload connection authority."""
         repository = RuntimeProviderControlRepository()
-        provider_id, _, _ = await _provider_source_and_binding(rdb_session)
+        provider_fixture = await _provider_source_and_binding(rdb_session)
+        provider_id = provider_fixture.provider_id
         binding_repository = RuntimeProviderAuthBindingRepository()
         subject = "system:serviceaccount:azents-runtime:provider"
         binding = await binding_repository.create(

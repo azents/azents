@@ -87,8 +87,11 @@ class ConnectionAccessPolicyRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "open_access_enabled": obj.get("open_access_enabled") if obj.get("open_access_enabled") is not None else True
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

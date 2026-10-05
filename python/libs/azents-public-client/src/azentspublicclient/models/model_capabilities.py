@@ -138,7 +138,9 @@ class ModelCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "capability_schema_version": obj.get("capability_schema_version") if obj.get("capability_schema_version") is not None else 3,
             "context_window": ModelContextWindow.from_dict(obj["context_window"]) if obj.get("context_window") is not None else None,
             "modalities": ModelModalities.from_dict(obj["modalities"]) if obj.get("modalities") is not None else None,
@@ -149,6 +151,7 @@ class ModelCapabilities(BaseModel):
             "compatibility": ModelCompatibilityCapabilities.from_dict(obj["compatibility"]) if obj.get("compatibility") is not None else None,
             "structured_response": obj.get("structured_response") if obj.get("structured_response") is not None else False,
             "request_constraints": ModelRequestConstraints.from_dict(obj["request_constraints"]) if obj.get("request_constraints") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

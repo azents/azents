@@ -38,6 +38,9 @@ from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
 )
+from azents.repos.runtime_terminal_authority_read import (
+    RuntimeTerminalAuthorityReadRepository,
+)
 from azents.repos.workspace.data import Workspace, WorkspaceSnapshot
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -262,16 +265,18 @@ def _resolver(
         yield SimpleNamespace()
 
     resolver = DatabaseRuntimeTerminalAuthorityResolver(
-        session_manager=session_manager,
-        user_repository=user_repository,
-        authentication_session_repository=authentication_session_repository,
-        workspace_repository=workspace_repository,
-        workspace_user_repository=workspace_user_repository,
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        agent_session_repository=agent_session_repository,
-        runtime_repository=runtime_repository,
-        profile_repository=profile_repository,
+        authority_repository=RuntimeTerminalAuthorityReadRepository(
+            session_manager=session_manager,
+            user_repository=user_repository,
+            authentication_session_repository=authentication_session_repository,
+            workspace_repository=workspace_repository,
+            workspace_user_repository=workspace_user_repository,
+            agent_repository=agent_repository,
+            agent_admin_repository=agent_admin_repository,
+            agent_session_repository=agent_session_repository,
+            runtime_repository=runtime_repository,
+            profile_repository=profile_repository,
+        ),
         runtime_coordination=runtime_coordination,
         working_folder_service=working_folder,
         policy_resolver=TerminalPolicyResolver(),

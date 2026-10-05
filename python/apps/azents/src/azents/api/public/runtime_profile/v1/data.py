@@ -16,7 +16,7 @@ from azents.core.runtime_profile import (
     project_runtime_network,
 )
 from azents.core.runtime_profile_deletion import WorkspaceRuntimeProfileDeletion
-from azents.services.runtime_profile_workspace.service import (
+from azents.core.runtime_profile_workspace import (
     SelectableInfrastructureProfileProjection,
     WorkspaceRuntimeProfileDefaultProjection,
     WorkspaceRuntimeProfileProjection,

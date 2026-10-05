@@ -26,6 +26,10 @@ from azents.core.runtime_provider_bootstrap import (
     RuntimeProviderBootstrapDeclarationInput,
     RuntimeProviderBootstrapSnapshot,
 )
+from azents.core.runtime_provider_control import (
+    RuntimeProviderCredentialUnavailable,
+    RuntimeProviderEnrollmentUnavailable,
+)
 from azents.core.runtime_provider_credential import RuntimeProviderCredentialVerifier
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -47,15 +51,11 @@ from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.services.runtime_provider_bootstrap.service import (
     RuntimeProviderBootstrapService,
 )
-from azents.services.runtime_provider_control.data import (
-    RuntimeProviderCredentialUnavailable,
-    RuntimeProviderEnrollmentUnavailable,
+from azents.services.runtime_provider_control.deps import (
+    create_runtime_provider_enrollment_service,
 )
 from azents.services.runtime_provider_control.rate_limit import (
     RedisRuntimeProviderEnrollmentRateLimiter,
-)
-from azents.services.runtime_provider_control.service import (
-    RuntimeProviderEnrollmentService,
 )
 
 
@@ -168,7 +168,7 @@ class TestRuntimeProviderEnrollmentService:
                 adapter_kind=RuntimeProviderBootstrapAdapterKind.HELM_FILE,
             ),
         )
-        service = RuntimeProviderEnrollmentService(
+        service = create_runtime_provider_enrollment_service(
             session_manager=session_manager,
             repository=RuntimeProviderControlRepository(),
             provider_repository=provider_repository,
@@ -243,7 +243,7 @@ class TestRuntimeProviderEnrollmentService:
             binding_repository=binding_repository,
             provider_id=provider_id,
         )
-        service = RuntimeProviderEnrollmentService(
+        service = create_runtime_provider_enrollment_service(
             session_manager=session_manager,
             repository=RuntimeProviderControlRepository(),
             provider_repository=provider_repository,
@@ -366,7 +366,7 @@ class TestRuntimeProviderEnrollmentService:
             provider_id=provider_id,
         )
         repository = RuntimeProviderControlRepository()
-        service = RuntimeProviderEnrollmentService(
+        service = create_runtime_provider_enrollment_service(
             session_manager=session_manager,
             repository=repository,
             provider_repository=provider_repository,
@@ -407,7 +407,7 @@ class TestRuntimeProviderEnrollmentService:
             issued_by_source_id=bootstrap_result.source_id,
         )
         monkeypatch.setattr(
-            "azents.services.runtime_provider_control.service.tznow",
+            "azents.repos.runtime_provider_control.operations.tznow",
             lambda: now + datetime.timedelta(minutes=2),
         )
 

@@ -4,7 +4,8 @@ import contextlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import cast
+from typing import NamedTuple
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -109,7 +110,7 @@ class _SDKFactory:
         self.open_count += 1
         if self.error is not None:
             raise self.error
-        yield cast(DiscordSDKSession, self.session)
+        yield AsyncMock(spec=DiscordSDKSession, wraps=self.session)
 
 
 @dataclass
@@ -154,20 +155,26 @@ class _EndpointTransport(DiscordInteractionEndpointTransport):
         return endpoint_url
 
 
+class _ClientFixture(NamedTuple):
+    """SDK adapter and its observable transports."""
+
+    client: DiscordAPIClient
+    factory: _SDKFactory
+    endpoint: _EndpointTransport
+    create: _CreateTransport
+
+
 def _client(
     session: _SDKSession | None = None,
     *,
     error: Exception | None = None,
-) -> tuple[
-    DiscordAPIClient,
-    _SDKFactory,
-    _EndpointTransport,
-    _CreateTransport,
-]:
+) -> _ClientFixture:
     factory = _SDKFactory(session or _SDKSession(), error=error)
     endpoint = _EndpointTransport()
     create = _CreateTransport()
-    return DiscordAPIClient(factory, endpoint, create), factory, endpoint, create
+    return _ClientFixture(
+        DiscordAPIClient(factory, endpoint, create), factory, endpoint, create
+    )
 
 
 @pytest.mark.asyncio

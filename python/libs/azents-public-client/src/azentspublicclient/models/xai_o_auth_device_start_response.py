@@ -92,12 +92,15 @@ class XaiOAuthDeviceStartResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "session_id": obj.get("session_id"),
             "user_code": obj.get("user_code"),
             "verification_uri": obj.get("verification_uri"),
             "interval_seconds": obj.get("interval_seconds"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
