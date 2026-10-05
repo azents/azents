@@ -3,6 +3,8 @@
 import dataclasses
 import hashlib
 import inspect
+import math
+from collections.abc import Callable
 from typing import Protocol
 
 from redis.asyncio import Redis
@@ -32,6 +34,37 @@ class RuntimeProviderEnrollmentRateLimiter(Protocol):
     async def acquire(self, *, grant_id: str, source_address: str) -> None:
         """Consume one admission attempt."""
         ...
+
+
+@dataclasses.dataclass
+class _MemoryWindow:
+    count: int
+    expires_at: float
+
+
+class InMemoryRuntimeProviderEnrollmentRateLimiter:
+    """Retain the same bounded admission limits within one process."""
+
+    def __init__(self, *, clock: Callable[[], float]) -> None:
+        self.clock = clock
+        self.windows: dict[str, _MemoryWindow] = {}
+
+    async def acquire(self, *, grant_id: str, source_address: str) -> None:
+        """Consume an attempt without yielding within the fixed-window update."""
+        now = self.clock()
+        for expired_key in tuple(self.windows):
+            if self.windows[expired_key].expires_at <= now:
+                del self.windows[expired_key]
+        key = _rate_limit_key(grant_id, source_address)
+        window = self.windows.get(key)
+        if window is None:
+            window = _MemoryWindow(0, now + _WINDOW_SECONDS)
+            self.windows[key] = window
+        window.count += 1
+        if window.count > _MAX_ATTEMPTS:
+            raise RuntimeProviderEnrollmentRateLimited(
+                max(1, math.ceil(window.expires_at - now))
+            )
 
 
 @dataclasses.dataclass(frozen=True)

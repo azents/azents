@@ -6,10 +6,35 @@ import pytest
 from redis.asyncio import Redis
 
 from azents.services.runtime_provider_control.rate_limit import (
+    InMemoryRuntimeProviderEnrollmentRateLimiter,
     RedisRuntimeProviderEnrollmentRateLimiter,
     RuntimeProviderEnrollmentRateLimited,
 )
 from azents.testing.types import require_instance
+
+
+@pytest.mark.asyncio
+async def test_memory_limit_preserves_window_and_grant_source_isolation() -> None:
+    now = 0.0
+
+    def clock() -> float:
+        return now
+
+    limiter = InMemoryRuntimeProviderEnrollmentRateLimiter(clock=clock)
+    for _ in range(10):
+        await limiter.acquire(grant_id="grant", source_address="source")
+    with pytest.raises(RuntimeProviderEnrollmentRateLimited) as rejected:
+        await limiter.acquire(grant_id="grant", source_address="source")
+    assert rejected.value.retry_after_seconds == 60
+    await limiter.acquire(grant_id="other-grant", source_address="source")
+    await limiter.acquire(grant_id="grant", source_address="other-source")
+    now = 30.0
+    with pytest.raises(RuntimeProviderEnrollmentRateLimited) as rejected:
+        await limiter.acquire(grant_id="grant", source_address="source")
+    assert rejected.value.retry_after_seconds == 30
+    now = 60.0
+    await limiter.acquire(grant_id="grant", source_address="source")
+    assert len(limiter.windows) == 1
 
 
 class FakeRedis:

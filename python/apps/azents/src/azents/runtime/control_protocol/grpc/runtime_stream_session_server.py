@@ -283,10 +283,12 @@ class RuntimeWebCapacityRegistry:
         self,
         *,
         config: RuntimeWebCapacityConfig,
-        redis: CapacityRedisStore,
+        redis: CapacityRedisStore | None,
         monotonic_clock_milliseconds: Callable[[], int],
         recoverable_errors: tuple[type[Exception], ...],
     ) -> None:
+        if config.backend is RuntimeWebCapacityBackend.REDIS and redis is None:
+            raise ValueError("Redis capacity requires a Redis store")
         self.config = config
         self.redis = redis
         self.monotonic_clock_milliseconds = monotonic_clock_milliseconds
@@ -318,6 +320,8 @@ class RuntimeWebCapacityRegistry:
                     )
                 )
             else:
+                if self.redis is None:
+                    raise RuntimeError("Redis capacity store is unavailable")
                 coordinator = await RedisRuntimeWebCapacityCoordinator.create(
                     redis=self.redis,
                     key=(

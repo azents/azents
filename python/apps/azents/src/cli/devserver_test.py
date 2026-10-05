@@ -9,11 +9,20 @@ from azcommon import di
 from fastapi import FastAPI
 
 import cli.devserver as devserver
-from azents.core.config import Config
+from azents.broker.deps import get_broker
+from azents.broker.types import SessionWakeUp
+from azents.core.config import Config, Settings
 from azents.core.deps import AppContextBinding
 from azents.core.enums import JobRuntimeBackend
 from azents.process_lifecycle import create_container
+from azents.runtime.control_server import RuntimeControlSettings
+from azents.runtime.coordination.local import LocalRuntimeStores
+from azents.runtime.deps import (
+    get_runtime_coordination_store,
+    get_runtime_terminal_coordination_store,
+)
 from azents.utils.appctx import AppContext
+from azents.worker.deps import get_worker_broker
 from cli.devserver import _create_api_targets, _run_devserver_resources
 
 
@@ -70,8 +79,11 @@ async def test_devserver_resources_start_runtime_control_before_app_container(
     @asynccontextmanager
     async def fake_runtime_control_lifespan(
         settings: object,
+        *,
+        local_stores: object,
     ) -> AsyncIterator[None]:
         assert settings is runtime_control_settings
+        assert local_stores is None
         events.append("runtime-control-start")
         yield
         events.append("runtime-control-stop")
@@ -107,3 +119,58 @@ async def test_devserver_resources_start_runtime_control_before_app_container(
         "app-container-stop",
         "runtime-control-stop",
     ]
+
+
+def test_memory_mode_rejects_reload_before_creating_api_roots() -> None:
+    config = Config.model_construct(session_broker_backend="memory")
+    appctx = AppContext(config)
+    container = create_container(appctx)
+    with pytest.raises(ValueError, match="reload child"):
+        _create_api_targets(config, appctx=appctx, container=container, reload=True)
+
+
+@pytest.mark.asyncio
+async def test_memory_devserver_passes_exact_application_stores_to_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = Config.from_settings(
+        Settings(
+            _env_file=None,
+            rdb_host="unused",
+            rdb_user="unused",
+            rdb_db_name="unused",
+            auth_jwt_secret_key="synthetic",
+            credential_encryption_key="synthetic",
+            session_broker_backend="memory",
+        )
+    )
+    captured: list[LocalRuntimeStores] = []
+    settings = RuntimeControlSettings.model_construct()
+
+    @asynccontextmanager
+    async def control_lifespan(
+        supplied: RuntimeControlSettings,
+        *,
+        local_stores: LocalRuntimeStores | None,
+    ) -> AsyncIterator[None]:
+        assert local_stores is not None
+        assert supplied.session_broker_backend == "memory"
+        assert supplied.runtime_control_transfer_backend == "memory"
+        assert supplied.runtime_control_workspace_upload_backend == "memory"
+        assert supplied.runtime_control_web_capacity_backend == "memory"
+        captured.append(local_stores)
+        yield
+
+    monkeypatch.setattr(devserver, "RuntimeControlSettings", lambda: settings)
+    monkeypatch.setattr(devserver, "runtime_control_server_lifespan", control_lifespan)
+    async with _run_devserver_resources(config) as container:
+        assert captured[0].coordination is await container.solve(
+            get_runtime_coordination_store
+        )
+        assert captured[0].terminal is await container.solve(
+            get_runtime_terminal_coordination_store
+        )
+        broker = await container.solve(get_broker)
+        worker = await container.solve(get_worker_broker)
+        await broker.send_message(SessionWakeUp("co-located"))
+        assert await worker.receive_messages() == [SessionWakeUp("co-located")]

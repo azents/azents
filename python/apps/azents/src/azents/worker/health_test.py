@@ -4,11 +4,21 @@ import asyncio
 import contextlib
 
 import pytest
+from aiohttp.test_utils import make_mocked_request
 from redis.asyncio import Redis
 
 from azents.runtime.observability import RuntimeReplyDeliveryMetrics
 from azents.worker import health
 from azents.worker.health import HealthServer
+
+
+@pytest.mark.asyncio
+async def test_memory_readiness_has_no_redis_probe_and_retains_shutdown_fence() -> None:
+    server = HealthServer(None, metrics=RuntimeReplyDeliveryMetrics())
+    request = make_mocked_request("GET", "/readyz")
+    assert (await server._readiness(request)).status == 200
+    server.mark_shutting_down()
+    assert (await server._readiness(request)).status == 503
 
 
 class _ObservedMetrics(RuntimeReplyDeliveryMetrics):

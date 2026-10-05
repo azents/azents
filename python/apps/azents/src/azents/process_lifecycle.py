@@ -21,6 +21,17 @@ from azents.utils.appctx import AppContext
 @asynccontextmanager
 async def run_with_container(config: Config) -> AsyncIterator[di.Container]:
     """Run one non-HTTP process with its configured dependency container."""
+    if config.session_broker_backend == "memory":
+        raise RuntimeError(
+            "Memory Session broker requires the co-located all-in-one process"
+        )
+    async with run_co_located_container(config) as container:
+        yield container
+
+
+@asynccontextmanager
+async def run_co_located_container(config: Config) -> AsyncIterator[di.Container]:
+    """Own shared dependencies for API, Worker and Scheduler in one process."""
     async with (
         AppContext(config) as appctx,
         create_container(appctx) as container,

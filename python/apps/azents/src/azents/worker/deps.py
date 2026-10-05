@@ -16,6 +16,8 @@ from redis.asyncio import Redis
 from azents.broker.broadcast import (
     BaseWebSocketBroadcast,
 )
+from azents.broker.deps import get_memory_broker_state
+from azents.broker.memory import InMemoryBroker
 from azents.broker.redis import RedisBroker
 from azents.broker.types import SessionBroker
 from azents.broker.websocket_deps import get_websocket_broadcast
@@ -499,7 +501,12 @@ async def get_worker_broker(
     Cached by AppContext and created only once in same process.
     """
 
-    async def create_broker() -> AsyncIterator[RedisBroker]:
+    async def create_broker() -> AsyncIterator[SessionBroker]:
+        if appctx.config.session_broker_backend == "memory":
+            yield InMemoryBroker(
+                await get_memory_broker_state(appctx), worker_id=worker_id
+            )
+            return
         redis = create_redis_client(appctx.config.redis.url)
         broker = RedisBroker(redis, worker_id=worker_id)
         await broker.setup()
@@ -534,11 +541,14 @@ def get_dynamic_worktree_toolkit_provider(
 
 async def get_worker_redis(
     appctx: Annotated[AppContext[Config], Depends(get_appctx)],
-) -> Redis:
+) -> Redis | None:
     """Worker-only Redis client.
 
     Cached by AppContext and created only once in same process.
     """
+
+    if appctx.config.session_broker_backend == "memory":
+        return None
 
     async def create_redis() -> AsyncIterator[Redis]:
         redis = create_redis_client(appctx.config.redis.url)
@@ -551,7 +561,7 @@ async def get_worker_redis(
 
 
 def get_health_server(
-    worker_redis: Annotated[Redis, Depends(get_worker_redis)],
+    worker_redis: Annotated[Redis | None, Depends(get_worker_redis)],
     metrics: Annotated[
         RuntimeReplyDeliveryMetrics,
         Depends(get_runtime_reply_delivery_metrics),

@@ -58,7 +58,7 @@ def runtime_control_transfer_config(
 def create_runtime_control_transfer_state_store(
     *,
     settings: RuntimeControlTransferSettings,
-    redis: Redis,
+    redis: Redis | None,
     clock: Callable[[], datetime],
 ) -> RuntimeTransferStateStore:
     """Create the Runtime Control-owned Transfer State backend."""
@@ -67,6 +67,8 @@ def create_runtime_control_transfer_state_store(
     if backend == "memory":
         return InMemoryRuntimeTransferStateStore(config=config, clock=clock)
     if backend == "redis":
+        if redis is None:
+            raise ValueError("Redis Transfer State requires a Redis client")
         return RedisRuntimeTransferStateStore(
             redis=redis,
             config=config,

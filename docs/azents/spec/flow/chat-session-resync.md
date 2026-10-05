@@ -43,7 +43,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-10-05
-spec_version: 56
+spec_version: 57
 ---
 
 # Chat Session Resync
@@ -74,6 +74,12 @@ Memory mode composes one broadcast and in-memory live store per `AppContext`;
 API and Worker wrappers share that instance only when they use the same context.
 Separate contexts, processes or replicas cannot fan out through this adapter.
 Cross-process deployments therefore require the Redis adapter.
+
+Selecting `AZ_SESSION_BROKER_BACKEND=memory` for the supported non-reload
+all-in-one process also selects memory broadcast/live storage, regardless of the
+separate broadcast option. This avoids a Redis dependency in co-located memory
+operation while leaving the ordinary Redis Session backend and independent
+broadcast option unchanged.
 
 The in-memory store is seeded only after the existing PostgreSQL owner-generation
 validation. Publication and owner-scoped clearing reject stale generations;

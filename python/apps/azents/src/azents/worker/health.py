@@ -35,7 +35,7 @@ class HealthServer:
 
     def __init__(
         self,
-        redis: Redis,
+        redis: Redis | None,
         *,
         metrics: RuntimeReplyDeliveryMetrics,
         port: int = _DEFAULT_PORT,
@@ -91,6 +91,8 @@ class HealthServer:
                 {"status": "not_ready", "reason": "shutting down"},
                 status=503,
             )
+        if self._redis is None:
+            return web.json_response({"status": "ok"})
         try:
             ping = (
                 self._redis.ping()

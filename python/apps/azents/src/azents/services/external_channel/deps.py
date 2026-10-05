@@ -31,6 +31,9 @@ async def get_external_channel_conversation_lock(
     lock_config = config.external_channel_conversation.lock
 
     async def create() -> AsyncIterator[ExternalChannelConversationLock]:
+        if config.session_broker_backend == "memory":
+            yield InMemoryExternalChannelConversationLock()
+            return
         match lock_config.backend:
             case ExternalChannelConversationLockBackend.MEMORY:
                 yield InMemoryExternalChannelConversationLock()
