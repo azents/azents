@@ -13,17 +13,17 @@ from azents.core.agent import (
     SelectableModelOption,
 )
 from azents.core.enums import AgentRuntimeCapability, ExternalChannelResponseMode
+from azents.core.upload_images import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
 from azents.rdb.session_capabilities import ReadWriteSession
-from azents.services.uploads.schema import (
-    StoredImage,
-    StoredImageFile,
-    StoredImageThumbnails,
-)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,

@@ -24,14 +24,13 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngressAuthority,
 )
 from azents.core.external_channel_provider import SlackConnectionCredentials
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelTrigger,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.slack_socket_operations import (
+    SlackSocketOperationRepository,
+)
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -84,14 +83,10 @@ class SlackSocketCredentialError(RuntimeError):
 class SlackSocketManagerService:
     """Own multiple Slack sockets in External Channel Gateway processes."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
+    operations: Annotated[
+        SlackSocketOperationRepository, Depends(SlackSocketOperationRepository)
     ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
-    ]
+
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
         Depends(get_external_channel_credentials_codec),
@@ -169,8 +164,7 @@ class SlackSocketManagerService:
                 await asyncio.gather(*tasks.values(), return_exceptions=True)
 
     async def _list_connection_ids(self) -> list[str]:
-        async with self.session_manager() as session:
-            return await self.repository.list_socket_connection_ids(session)
+        return await self.operations.list_connection_ids()
 
     async def _run_owned_connection(
         self,
@@ -366,14 +360,9 @@ class SlackSocketManagerService:
             )
 
     async def _owned_active(self, connection_id: str) -> bool:
-        async with self.session_manager() as session:
-            connection = await self.repository.socket_connection_owned_active(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=_utc_now(),
-            )
-            return connection is not None
+        return await self.operations.owned_active(
+            connection_id=connection_id, lease_owner=self.manager_id, now=_utc_now()
+        )
 
     async def _handle_owned_event(
         self,
@@ -494,29 +483,21 @@ class SlackSocketManagerService:
         connection_id: str,
     ) -> ExternalChannelConnectionConfiguration | None:
         now = _utc_now()
-        async with self.session_manager() as session:
-            configuration = await self.repository.claim_socket_connection(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=now,
-                lease_until=now + self._lease_duration(),
-            )
-            await session.write_session.commit()
-            return configuration
+        return await self.operations.claim(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            now=now,
+            lease_until=now + self._lease_duration(),
+        )
 
     async def _renew(self, connection_id: str) -> bool:
         now = _utc_now()
-        async with self.session_manager() as session:
-            renewed = await self.repository.renew_socket_connection_lease(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=now,
-                lease_until=now + self._lease_duration(),
-            )
-            await session.write_session.commit()
-            return renewed
+        return await self.operations.renew(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            now=now,
+            lease_until=now + self._lease_duration(),
+        )
 
     def _lease_override(self) -> ExternalChannelGatewayLeaseConfig | None:
         """Return the validated testenv lease override when configured."""
@@ -540,27 +521,17 @@ class SlackSocketManagerService:
         return self.renew_interval if override is None else override.renewal_interval
 
     async def _mark_active(self, connection_id: str) -> bool:
-        async with self.session_manager() as session:
-            active = await self.repository.mark_socket_connection_active(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=_utc_now(),
-            )
-            await session.write_session.commit()
-            return active
+        return await self.operations.mark_active(
+            connection_id=connection_id, lease_owner=self.manager_id, now=_utc_now()
+        )
 
     async def _record_gap(self, connection_id: str, reason: str) -> bool:
-        async with self.session_manager() as session:
-            recorded = await self.repository.record_socket_connection_gap(
-                session,
-                connection_id=connection_id,
-                lease_owner=self.manager_id,
-                now=_utc_now(),
-                gap_reason=reason,
-            )
-            await session.write_session.commit()
-            return recorded
+        return await self.operations.record_gap(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            now=_utc_now(),
+            reason=reason,
+        )
 
     async def _release(
         self,
@@ -569,28 +540,13 @@ class SlackSocketManagerService:
         reason: str,
         status: ExternalChannelConnectionStatus,
     ) -> bool:
-        async with self.session_manager() as session:
-            now = _utc_now()
-            if status is ExternalChannelConnectionStatus.RECONNECT_REQUIRED:
-                released = await self.repository.mark_connection_reconnect_required(
-                    session,
-                    connection_id=connection_id,
-                    reason=reason,
-                    now=now,
-                    required_configuration_generation=None,
-                    required_socket_lease_owner=self.manager_id,
-                )
-            else:
-                released = await self.repository.release_socket_connection_lease(
-                    session,
-                    connection_id=connection_id,
-                    lease_owner=self.manager_id,
-                    now=now,
-                    gap_reason=reason,
-                    gap_status=status,
-                )
-            await session.write_session.commit()
-            return released
+        return await self.operations.release(
+            connection_id=connection_id,
+            lease_owner=self.manager_id,
+            now=_utc_now(),
+            reason=reason,
+            status=status,
+        )
 
 
 def _required_ciphertext(

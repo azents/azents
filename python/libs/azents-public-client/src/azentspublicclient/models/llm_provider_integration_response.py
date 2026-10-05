@@ -104,7 +104,9 @@ class LLMProviderIntegrationResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "provider": obj.get("provider"),
             "name": obj.get("name"),
@@ -112,6 +114,7 @@ class LLMProviderIntegrationResponse(BaseModel):
             "enabled": obj.get("enabled"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

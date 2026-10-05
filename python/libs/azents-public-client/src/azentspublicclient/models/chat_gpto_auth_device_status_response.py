@@ -99,10 +99,13 @@ class ChatGPTOAuthDeviceStatusResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "session_id": obj.get("session_id"),
             "status": obj.get("status"),
             "integration": LLMProviderIntegrationResponse.from_dict(obj["integration"]) if obj.get("integration") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

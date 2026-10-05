@@ -142,7 +142,9 @@ class RuntimeProviderAuthenticationBindingResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "provider_id": obj.get("provider_id"),
             "auth_method": obj.get("auth_method"),
@@ -160,6 +162,7 @@ class RuntimeProviderAuthenticationBindingResponse(BaseModel):
             "revocation_reason": obj.get("revocation_reason"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

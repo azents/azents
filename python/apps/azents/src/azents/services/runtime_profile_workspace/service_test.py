@@ -4,6 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,12 +12,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import RuntimeProfileLifecycle
+from azents.core.runtime_profile_workspace import RuntimeProfileWorkspaceUnavailable
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileDeleteOutcome,
     WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
+)
+from azents.repos.runtime_profile_workspace_operations import (
+    RuntimeProfileWorkspaceOperationsRepository,
+    _workspace_terminal_only_change,
 )
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
@@ -31,11 +37,7 @@ from azents.services.terminal_policy.invalidation import (
 )
 from azents.testing.types import require_instance
 
-from .service import (
-    RuntimeProfileWorkspaceService,
-    RuntimeProfileWorkspaceUnavailable,
-    _workspace_terminal_only_change,
-)
+from .service import RuntimeProfileWorkspaceService
 
 
 def _profile(*, version: int = 8) -> WorkspaceRuntimeProfile:
@@ -71,9 +73,17 @@ def _deletion() -> WorkspaceRuntimeProfileDeletion:
     )
 
 
+class _WorkspaceServiceFixture(NamedTuple):
+    """Named Profile service collaborators and completed transaction state."""
+
+    service: RuntimeProfileWorkspaceService
+    repository: AsyncMock
+    transaction: dict[str, bool]
+
+
 def _service(
     outcome: WorkspaceRuntimeProfileDeleteOutcome | None = None,
-) -> tuple[RuntimeProfileWorkspaceService, AsyncMock, dict[str, bool]]:
+) -> _WorkspaceServiceFixture:
     """Build the service with transaction-state tracking dependencies."""
     transaction = {"committed": False, "rolled_back": False}
 
@@ -91,29 +101,27 @@ def _service(
     if outcome is not None:
         profile_repository.delete_workspace_runtime_profile.return_value = outcome
     service = RuntimeProfileWorkspaceService(
-        session_manager=session_manager,
-        profile_repository=profile_repository,
-        provider_repository=require_instance(
-            MagicMock(spec=RuntimeProviderRepository),
-            RuntimeProviderRepository,
+        operations=RuntimeProfileWorkspaceOperationsRepository(
+            session_manager=session_manager,
+            profile_repository=profile_repository,
+            provider_repository=require_instance(
+                MagicMock(spec=RuntimeProviderRepository), RuntimeProviderRepository
+            ),
+            policy_repository=require_instance(
+                MagicMock(spec=RuntimeProviderPolicyRepository),
+                RuntimeProviderPolicyRepository,
+            ),
+            control_repository=require_instance(
+                MagicMock(spec=RuntimeProviderControlRepository),
+                RuntimeProviderControlRepository,
+            ),
+            workspace_repository=require_instance(
+                MagicMock(spec=WorkspaceRepository), WorkspaceRepository
+            ),
         ),
-        policy_repository=require_instance(
-            MagicMock(spec=RuntimeProviderPolicyRepository),
-            RuntimeProviderPolicyRepository,
-        ),
-        control_repository=require_instance(
-            MagicMock(spec=RuntimeProviderControlRepository),
-            RuntimeProviderControlRepository,
-        ),
-        workspace_repository=require_instance(
-            MagicMock(spec=WorkspaceRepository),
-            WorkspaceRepository,
-        ),
-        terminal_policy_invalidation_publisher=(
-            NoopTerminalPolicyInvalidationPublisher()
-        ),
+        terminal_policy_invalidation_publisher=NoopTerminalPolicyInvalidationPublisher(),
     )
-    return service, profile_repository, transaction
+    return _WorkspaceServiceFixture(service, profile_repository, transaction)
 
 
 def test_terminal_only_workspace_change_skips_physical_reconciliation() -> None:

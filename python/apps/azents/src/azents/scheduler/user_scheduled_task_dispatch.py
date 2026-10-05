@@ -13,13 +13,12 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.scheduled_task.definition import RDBScheduledTaskAuthorityValidator
+from azents.repos.scheduled_task.dispatch import ScheduledTaskDispatchRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.scheduler.types import TaskContext, TaskResult
-from azents.services.scheduled_task.service import (
-    RDBScheduledTaskAuthorityValidator,
-    ScheduledTaskDispatcher,
-)
+from azents.services.scheduled_task.service import ScheduledTaskDispatcher
 
 
 def _utc_now() -> datetime.datetime:
@@ -56,13 +55,16 @@ def get_user_scheduled_task_dispatcher(
 ) -> ScheduledTaskDispatcher:
     """Compose the bounded user Scheduled Task dispatcher."""
     return ScheduledTaskDispatcher(
-        session_manager=session_manager,
-        agent_session_repository=agent_session_repository,
-        cycle_repository=cycle_repository,
-        mailbox_repository=mailbox_repository,
+        operations=ScheduledTaskDispatchRepository(
+            session_manager=session_manager,
+            agent_session_repository=agent_session_repository,
+            cycle_repository=cycle_repository,
+            mailbox_repository=mailbox_repository,
+            authority_validator=authority_validator,
+            task_repository=task_repository,
+            clock=_utc_now,
+        ),
         broker=broker,
-        authority_validator=authority_validator,
-        task_repository=task_repository,
         clock=_utc_now,
     )
 

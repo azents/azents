@@ -317,6 +317,20 @@ def _preparation(
 
 
 @pytest.mark.asyncio
+async def test_provider_stream_returns_named_immutable_evidence() -> None:
+    """Streaming evidence is named and immutable while part order stays stable."""
+    fixture = _source(body=b"abc")
+    streamed = await fixture.source._stream_parts(
+        S3MultipartUpload(S3ObjectIdentity("workspace", "preparation"), "upload")
+    )
+    assert streamed.actual_size == 3
+    assert streamed.actual_sha256 == hashlib.sha256(b"abc").hexdigest()
+    assert len(streamed.parts) == 1
+    assert streamed.parts[0].part_number == 1
+    assert fixture.stream.opened == fixture.stream.closed == 1
+
+
+@pytest.mark.asyncio
 async def test_provider_stages_bounded_stream_then_promotes_to_canonical_object() -> (
     None
 ):

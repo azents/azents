@@ -2,14 +2,15 @@
 
 import datetime
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TypeVar
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import sqlalchemy as sa
 from azcommon.infra.s3.service import S3Service
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.config import Config
 from azents.core.enums import (
@@ -20,12 +21,22 @@ from azents.core.enums import (
     ExchangeFileStatus,
     ModelFileStatus,
 )
+from azents.core.upload_images import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.engine.events.types import (
     ClientToolResultPayload,
     Event,
     FileOutputPart,
 )
-from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadSession,
+    ReadWriteSession,
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent_avatar_cleanup import AgentAvatarCleanupRepository
 from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
 from azents.repos.agent_execution import EventTranscriptRepository
@@ -34,16 +45,14 @@ from azents.repos.artifact import ArtifactRepository
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.file_lifecycle_cleanup_operations import (
+    FileLifecycleCleanupOperations,
+)
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
 from azents.repos.model_file_pin import ModelFilePinRepository
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import (
-    StoredImage,
-    StoredImageFile,
-    StoredImageThumbnails,
-)
 from azents.testing.types import require_instance
 
 _NOW = datetime.datetime.now(datetime.UTC)
@@ -648,40 +657,34 @@ def _service(
 ) -> FileLifecycleCleanupService:
     """Build service with fake dependencies."""
     return FileLifecycleCleanupService(
-        session_manager=_session_manager,
-        artifact_repository=_typed_fake(
-            _ArtifactRepo(artifacts or []),
-            ArtifactRepository,
-        ),
-        exchange_file_repository=_typed_fake(
-            _ExchangeRepo(exchange_files or []),
-            ExchangeFileRepository,
-        ),
-        model_file_repository=_typed_fake(
-            model_file_repo or _ModelFileRepo([]),
-            ModelFileRepository,
-        ),
-        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
-        agent_session_repository=_typed_fake(
-            agent_session_repo or _AgentSessionRepo([]),
-            AgentSessionRepository,
-        ),
-        transcript_repository=_typed_fake(
-            transcript_repo or _TranscriptRepo([]),
-            EventTranscriptRepository,
-        ),
-        avatar_cleanup_repository=_typed_fake(
-            avatar_cleanup_repo or _AvatarCleanupRepo([]),
-            AgentAvatarCleanupRepository,
+        operations=FileLifecycleCleanupOperations(
+            session_manager=_session_manager,
+            artifact_repository=_typed_fake(
+                _ArtifactRepo(artifacts or []), ArtifactRepository
+            ),
+            exchange_file_repository=_typed_fake(
+                _ExchangeRepo(exchange_files or []), ExchangeFileRepository
+            ),
+            model_file_repository=_typed_fake(
+                model_file_repo or _ModelFileRepo([]), ModelFileRepository
+            ),
+            model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+            agent_session_repository=_typed_fake(
+                agent_session_repo or _AgentSessionRepo([]), AgentSessionRepository
+            ),
+            transcript_repository=_typed_fake(
+                transcript_repo or _TranscriptRepo([]), EventTranscriptRepository
+            ),
+            avatar_cleanup_repository=_typed_fake(
+                avatar_cleanup_repo or _AvatarCleanupRepo([]),
+                AgentAvatarCleanupRepository,
+            ),
+            read_only_session_manager=_session_manager,
         ),
         avatar_handler=_typed_fake(
-            avatar_handler or _AvatarHandler(),
-            AvatarUploadHandler,
+            avatar_handler or _AvatarHandler(), AvatarUploadHandler
         ),
-        s3_service=_typed_fake(
-            s3_service or _S3Service(),
-            S3Service,
-        ),
+        s3_service=_typed_fake(s3_service or _S3Service(), S3Service),
         config=_config(),
     )
 
@@ -693,22 +696,22 @@ async def test_cleanup_once_expires_ttl_resources_and_retries_blob_deletion() ->
     exchange_repo = _ExchangeRepo([_exchange_file()])
     s3 = _S3Service()
     service = FileLifecycleCleanupService(
-        session_manager=_session_manager,
-        artifact_repository=_typed_fake(artifact_repo, ArtifactRepository),
-        exchange_file_repository=_typed_fake(exchange_repo, ExchangeFileRepository),
-        model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
-        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
-        agent_session_repository=_typed_fake(
-            _AgentSessionRepo([]),
-            AgentSessionRepository,
-        ),
-        transcript_repository=_typed_fake(
-            _TranscriptRepo([]),
-            EventTranscriptRepository,
-        ),
-        avatar_cleanup_repository=_typed_fake(
-            _AvatarCleanupRepo([]),
-            AgentAvatarCleanupRepository,
+        operations=FileLifecycleCleanupOperations(
+            session_manager=_session_manager,
+            artifact_repository=_typed_fake(artifact_repo, ArtifactRepository),
+            exchange_file_repository=_typed_fake(exchange_repo, ExchangeFileRepository),
+            model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
+            model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+            agent_session_repository=_typed_fake(
+                _AgentSessionRepo([]), AgentSessionRepository
+            ),
+            transcript_repository=_typed_fake(
+                _TranscriptRepo([]), EventTranscriptRepository
+            ),
+            avatar_cleanup_repository=_typed_fake(
+                _AvatarCleanupRepo([]), AgentAvatarCleanupRepository
+            ),
+            read_only_session_manager=_session_manager,
         ),
         avatar_handler=_typed_fake(_AvatarHandler(), AvatarUploadHandler),
         s3_service=_typed_fake(s3, S3Service),
@@ -782,22 +785,22 @@ async def test_cleanup_once_counts_pending_blob_deletion_attempts() -> None:
     )
     exchange_repo = _ExchangeRepo([expired_exchange_file])
     service = FileLifecycleCleanupService(
-        session_manager=_session_manager,
-        artifact_repository=_typed_fake(_ArtifactRepo([]), ArtifactRepository),
-        exchange_file_repository=_typed_fake(exchange_repo, ExchangeFileRepository),
-        model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
-        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
-        agent_session_repository=_typed_fake(
-            _AgentSessionRepo([]),
-            AgentSessionRepository,
-        ),
-        transcript_repository=_typed_fake(
-            _TranscriptRepo([]),
-            EventTranscriptRepository,
-        ),
-        avatar_cleanup_repository=_typed_fake(
-            _AvatarCleanupRepo([]),
-            AgentAvatarCleanupRepository,
+        operations=FileLifecycleCleanupOperations(
+            session_manager=_session_manager,
+            artifact_repository=_typed_fake(_ArtifactRepo([]), ArtifactRepository),
+            exchange_file_repository=_typed_fake(exchange_repo, ExchangeFileRepository),
+            model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
+            model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+            agent_session_repository=_typed_fake(
+                _AgentSessionRepo([]), AgentSessionRepository
+            ),
+            transcript_repository=_typed_fake(
+                _TranscriptRepo([]), EventTranscriptRepository
+            ),
+            avatar_cleanup_repository=_typed_fake(
+                _AvatarCleanupRepo([]), AgentAvatarCleanupRepository
+            ),
+            read_only_session_manager=_session_manager,
         ),
         avatar_handler=_typed_fake(_AvatarHandler(), AvatarUploadHandler),
         s3_service=_typed_fake(_S3Service(), S3Service),
@@ -818,25 +821,24 @@ async def test_cleanup_once_counts_blob_deletion_failures() -> None:
     """Cleanup reports failed deletes while preserving later retry eligibility."""
     artifact_repo = _ArtifactRepo([_artifact()])
     service = FileLifecycleCleanupService(
-        session_manager=_session_manager,
-        artifact_repository=_typed_fake(artifact_repo, ArtifactRepository),
-        exchange_file_repository=_typed_fake(
-            _ExchangeRepo([]),
-            ExchangeFileRepository,
-        ),
-        model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
-        model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
-        agent_session_repository=_typed_fake(
-            _AgentSessionRepo([]),
-            AgentSessionRepository,
-        ),
-        transcript_repository=_typed_fake(
-            _TranscriptRepo([]),
-            EventTranscriptRepository,
-        ),
-        avatar_cleanup_repository=_typed_fake(
-            _AvatarCleanupRepo([]),
-            AgentAvatarCleanupRepository,
+        operations=FileLifecycleCleanupOperations(
+            session_manager=_session_manager,
+            artifact_repository=_typed_fake(artifact_repo, ArtifactRepository),
+            exchange_file_repository=_typed_fake(
+                _ExchangeRepo([]), ExchangeFileRepository
+            ),
+            model_file_repository=_typed_fake(_ModelFileRepo([]), ModelFileRepository),
+            model_file_pin_repository=_typed_fake(_PinRepo(), ModelFilePinRepository),
+            agent_session_repository=_typed_fake(
+                _AgentSessionRepo([]), AgentSessionRepository
+            ),
+            transcript_repository=_typed_fake(
+                _TranscriptRepo([]), EventTranscriptRepository
+            ),
+            avatar_cleanup_repository=_typed_fake(
+                _AvatarCleanupRepo([]), AgentAvatarCleanupRepository
+            ),
+            read_only_session_manager=_session_manager,
         ),
         avatar_handler=_typed_fake(_AvatarHandler(), AvatarUploadHandler),
         s3_service=_typed_fake(_FailingS3Service(), S3Service),
@@ -998,3 +1000,54 @@ async def test_cleanup_once_uses_fresh_avatar_cleanup_token_per_pass() -> None:
     assert first_token.startswith("scheduler-1:")
     assert second_token.startswith("scheduler-1:")
     assert first_token != second_token
+
+
+async def test_native_avatar_claim_closes_before_delete_and_settlement(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Real PostgreSQL claim/settlement scopes never span object-store deletion."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    scopes: list[ReadSession] = []
+
+    @asynccontextmanager
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
+        async with manager() as session:
+            scopes.append(session)
+            try:
+                yield session
+            finally:
+                scopes.remove(session)
+
+    job = _avatar_cleanup_job()
+    repository = MagicMock(spec=AgentAvatarCleanupRepository)
+
+    async def claim(session: ReadSession, **_: object) -> list[AgentAvatarCleanupJob]:
+        await session.read_session.execute(sa.text("SELECT 1"))
+        assert session.read_session.in_transaction()
+        return [job]
+
+    async def settle(session: ReadSession, **_: object) -> bool:
+        await session.read_session.execute(sa.text("SELECT 1"))
+        assert scopes
+        return True
+
+    async def delete(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        assert not scopes
+
+    repository.claim_due = AsyncMock(side_effect=claim)
+    repository.delete_completed = AsyncMock(side_effect=settle)
+    service = _service()
+    service.operations.avatar_cleanup_repository = require_instance(
+        repository, AgentAvatarCleanupRepository
+    )
+    service.operations.session_manager = tracked_manager
+    service.avatar_handler = require_instance(
+        MagicMock(spec=AvatarUploadHandler, delete_files=AsyncMock(side_effect=delete)),
+        AvatarUploadHandler,
+    )
+    result = await service._cleanup_superseded_avatars(lease_token="lease")
+    assert result.attempted == result.completed == 1
+    assert not scopes
