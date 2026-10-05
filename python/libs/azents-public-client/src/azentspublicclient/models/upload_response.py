@@ -91,12 +91,15 @@ class UploadResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "attachment_id": obj.get("attachment_id"),
             "uri": obj.get("uri"),
             "media_type": obj.get("media_type"),
             "size": obj.get("size"),
             "name": obj.get("name")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

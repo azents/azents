@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from dataclasses import replace as dataclass_replace
 from pathlib import PurePosixPath
-from typing import Annotated, Literal, NotRequired, TypedDict, assert_never
+from typing import Annotated, NotRequired, TypedDict, assert_never
 from urllib.parse import urlparse
 
 import httpx
@@ -29,6 +29,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_effect_intent import ProviderEffectIntent
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelOutboundFileManifest,
@@ -596,16 +597,11 @@ class ExternalChannelActionService:
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
-        work_id = current.target.request_payload.get("work_id")
-        desired_revision = current.target.request_payload.get(
-            "desired_progress_revision"
-        )
-        part = current.target.request_payload.get("part_ordinal", 0)
-        if (
-            isinstance(work_id, str)
-            and isinstance(desired_revision, int)
-            and isinstance(part, int)
-        ):
+        intent = current.target.decode_intent()
+        work_id = intent.work_id
+        desired_revision = intent.desired_progress_revision
+        part = intent.part_ordinal
+        if work_id is not None and desired_revision is not None and part is not None:
             await self.operations.apply_direct_effect_outcome(
                 effect=ChannelActionEffectPlan(
                     provider=current,
@@ -613,16 +609,11 @@ class ExternalChannelActionService:
                     work_cycle_id=work_id,
                     expected_desired_progress_revision=desired_revision,
                     dependencies=(),
-                    projection_host_kind=_tracker_host_kind(
-                        current.target.request_payload
-                    ),
+                    projection_host_kind=intent.tracker_host_kind,
                 ),
                 outcome=outcome,
             )
-        elif isinstance(
-            current.target.request_payload.get("access_request_id"),
-            str,
-        ):
+        elif intent.access_request_id is not None:
             await self.operations.apply_access_control_outcome(
                 plan=current,
                 outcome=outcome,
@@ -682,16 +673,11 @@ class ExternalChannelActionService:
             provider_delivery_service=None,
             resolve_runtime_target=None,
         )
-        work_id = current.target.request_payload.get("work_id")
-        desired_revision = current.target.request_payload.get(
-            "desired_progress_revision"
-        )
-        part = current.target.request_payload.get("part_ordinal", 0)
-        if (
-            isinstance(work_id, str)
-            and isinstance(desired_revision, int)
-            and isinstance(part, int)
-        ):
+        intent = current.target.decode_intent()
+        work_id = intent.work_id
+        desired_revision = intent.desired_progress_revision
+        part = intent.part_ordinal
+        if work_id is not None and desired_revision is not None and part is not None:
             await self.operations.apply_direct_effect_outcome(
                 effect=ChannelActionEffectPlan(
                     provider=current,
@@ -699,9 +685,7 @@ class ExternalChannelActionService:
                     work_cycle_id=work_id,
                     expected_desired_progress_revision=desired_revision,
                     dependencies=(),
-                    projection_host_kind=_tracker_host_kind(
-                        current.target.request_payload
-                    ),
+                    projection_host_kind=intent.tracker_host_kind,
                 ),
                 outcome=outcome,
             )
@@ -793,6 +777,7 @@ class ExternalChannelActionService:
     ) -> DiscordDeliveryResult:
         """Deliver one Discord text, multipart file, or control mutation."""
         payload = target.request_payload
+        intent = target.decode_intent()
         guild_id = payload.get("guild_id")
         channel_id = payload.get("channel_id")
         configuration = target.provider_configuration
@@ -881,10 +866,11 @@ class ExternalChannelActionService:
             ):
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "session_presence"
+                    and intent.control_kind == "session_presence"
                 ):
                     presence = _session_presence_context(
                         target,
+                        intent=intent,
                         web_url=self.config.web_url,
                     )
                     if presence is None or files:
@@ -917,7 +903,7 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "setup_required"
+                    and intent.control_kind == "setup_required"
                 ):
                     setup_claim_id = payload.get("setup_claim_id")
                     claim_generation = payload.get("claim_generation")
@@ -968,7 +954,7 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "scheduled_task_registration"
+                    and intent.control_kind == "scheduled_task_registration"
                 ):
                     text = payload.get("text")
                     embeds = _discord_embeds(payload.get("embeds"))
@@ -1007,7 +993,7 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "scheduled_task_deletion"
+                    and intent.control_kind == "scheduled_task_deletion"
                 ):
                     text = payload.get("text")
                     embeds = _discord_embeds(payload.get("embeds"))
@@ -1053,6 +1039,7 @@ class ExternalChannelActionService:
                         return _discord_invalid_payload()
                     components = _discord_tracker_components(
                         target,
+                        intent=intent,
                         session_url=context.session_url,
                         secret=self.config.auth.jwt.secret_key,
                     )
@@ -1175,7 +1162,7 @@ class ExternalChannelActionService:
                     payload.get("provider_message_key"),
                     guild_id=guild_id,
                 )
-                host_kind = _tracker_host_kind(payload)
+                host_kind = intent.tracker_host_kind
                 if (
                     not isinstance(text, str)
                     or embeds is None
@@ -1185,6 +1172,7 @@ class ExternalChannelActionService:
                     return _discord_invalid_payload()
                 components = _discord_tracker_components(
                     target,
+                    intent=intent,
                     session_url=context.session_url,
                     secret=self.config.auth.jwt.secret_key,
                 )
@@ -1213,7 +1201,7 @@ class ExternalChannelActionService:
                 )
                 if message_id is None:
                     return _discord_invalid_payload()
-                if _tracker_host_kind(payload) == "reply":
+                if intent.tracker_host_kind == "reply":
                     return await discord_client.update_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
@@ -1263,6 +1251,7 @@ class ExternalChannelActionService:
         resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> SlackControlMessageResult:
         payload = target.request_payload
+        intent = target.decode_intent()
         presentation = resolve_slack_agent_presentation(
             target,
             avatar_cdn_base_url=self.config.avatar_cdn_base_url,
@@ -1334,6 +1323,7 @@ class ExternalChannelActionService:
                     return _invalid_payload()
                 blocks.append(
                     _slack_progress_actions(
+                        intent=intent,
                         target=target,
                         channel_id=channel_id,
                         session_url=context.session_url,
@@ -1366,6 +1356,7 @@ class ExternalChannelActionService:
                     return _invalid_payload()
                 blocks.append(
                     _slack_progress_actions(
+                        intent=intent,
                         target=target,
                         channel_id=channel_id,
                         session_url=context.session_url,
@@ -1414,10 +1405,11 @@ class ExternalChannelActionService:
     ) -> SlackControlMessageResult:
         """Deliver one validated selector, notice, or approval control."""
         payload = target.request_payload
+        intent = target.decode_intent()
         payload_tenant_id = payload.get("tenant_id")
         if payload_tenant_id is not None and payload_tenant_id != tenant_id:
             return _invalid_payload()
-        control_kind = payload.get("control_kind")
+        control_kind = intent.control_kind
         if control_kind in {
             "scheduled_task_registration",
             "scheduled_task_deletion",
@@ -1476,6 +1468,7 @@ class ExternalChannelActionService:
         if control_kind == "session_presence":
             context = _session_presence_context(
                 target,
+                intent=intent,
                 web_url=self.config.web_url,
             )
             if context is None:
@@ -1789,13 +1782,6 @@ class ExternalChannelActionService:
         return result
 
 
-def _tracker_host_kind(
-    payload: dict[str, object],
-) -> Literal["standalone", "reply"]:
-    """Return the persisted Tracker host kind with standalone compatibility."""
-    return "reply" if payload.get("tracker_host_kind") == "reply" else "standalone"
-
-
 def _provider_mutation_outcome(
     result: SlackControlMessageResult | DiscordDeliveryResult,
 ) -> ProviderMutationOutcome:
@@ -1859,16 +1845,13 @@ def _discord_agent_content(target: ProviderTarget, text: str) -> str:
 def _session_presence_context(
     target: ProviderTarget,
     *,
+    intent: ProviderEffectIntent,
     web_url: str | None,
 ) -> _SessionPresenceContext | None:
     """Resolve one presence control without trusting persisted display content."""
-    match target.request_payload.get("presence_state"):
-        case "joined":
-            state: ExternalChannelSessionPresenceState = "joined"
-        case "left":
-            state = "left"
-        case _:
-            return None
+    state = intent.presence_state
+    if state is None:
+        return None
     context = _session_navigation_context(target, web_url=web_url)
     if context is None:
         return None
@@ -1914,11 +1897,12 @@ def _slack_progress_actions(
     *,
     target: ProviderTarget,
     channel_id: str,
+    intent: ProviderEffectIntent,
     session_url: str,
     jwt_secret: str,
 ) -> dict[str, object]:
     """Render Slack Tracker controls from exact current target authority."""
-    if target.request_payload.get("tracker_kind") == "scheduled_task":
+    if intent.scheduled_tracker:
         return render_slack_session_actions(
             session_url=session_url,
             settings_action_id=None,
@@ -1942,11 +1926,12 @@ def _slack_progress_actions(
 def _discord_tracker_components(
     target: ProviderTarget,
     *,
+    intent: ProviderEffectIntent,
     session_url: str,
     secret: str,
 ) -> list[dict[str, object]] | None:
     """Render current Discord Tracker controls from exact target authority."""
-    if target.request_payload.get("tracker_kind") == "scheduled_task":
+    if intent.scheduled_tracker:
         return render_discord_session_navigation_components(
             session_url,
             settings_custom_id=None,

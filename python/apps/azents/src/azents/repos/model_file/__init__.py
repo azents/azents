@@ -225,13 +225,13 @@ class ModelFileRepository:
 
     async def list_deleted_pending_blob_deletion(
         self,
-        session: WriteSession,
+        session: ReadSession,
         *,
         limit: int,
     ) -> list[ModelFile]:
         """List deleted ModelFiles whose blob deletion has not been recorded."""
         rows = (
-            await session.write_session.scalars(
+            await session.read_session.scalars(
                 sa.select(RDBModelFile)
                 .where(
                     RDBModelFile.status == ModelFileStatus.DELETED,

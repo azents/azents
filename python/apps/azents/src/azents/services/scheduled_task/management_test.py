@@ -5,8 +5,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +18,6 @@ from azents.core.enums import (
     ScheduledTaskScheduleType,
 )
 from azents.core.scheduled_task_management import ScheduledTaskManagementUnavailable
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -29,7 +27,6 @@ from azents.repos.external_channel.management import (
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
-from azents.repos.scheduled_task.definition import ScheduledTaskAuthorityValidator
 from azents.repos.scheduled_task.management_operations import (
     ScheduledTaskManagementRepository,
 )
@@ -41,6 +38,7 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleState,
 )
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.testing.types import require_instance
 
 from .management import ScheduledTaskManagementService
 
@@ -53,10 +51,11 @@ _CURRENT_BINDING_ID = "b" * 32
 _REQUESTED_BINDING_ID = "c" * 32
 
 
-class _Session:
+class _Session(AsyncSession):
     """Minimal AsyncSession substitute with commit observation."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.committed = False
 
     async def commit(self) -> None:
@@ -74,7 +73,7 @@ class _SessionManager:
     async def __call__(self) -> AsyncIterator[WriteSession]:
         self.active = True
         try:
-            yield ReadWriteSession(cast(AsyncSession, self.session))
+            yield ReadWriteSession(self.session)
         finally:
             self.active = False
 
@@ -397,34 +396,49 @@ def _service(
 ) -> ScheduledTaskManagementService:
     return ScheduledTaskManagementService(
         operations=ScheduledTaskManagementRepository(
-            session_manager=cast(SessionManager[WriteSession], _SessionManager()),
-            agent_repository=cast(
+            session_manager=_SessionManager(),
+            agent_repository=require_instance(
+                MagicMock(
+                    spec=AgentRepository,
+                    wraps=agent_repository or _AgentRepository(events),
+                ),
                 AgentRepository,
-                agent_repository or _AgentRepository(events),
             ),
-            agent_session_repository=cast(
+            agent_session_repository=require_instance(
+                MagicMock(
+                    spec=AgentSessionRepository,
+                    wraps=agent_session_repository or _AgentSessionRepository(events),
+                ),
                 AgentSessionRepository,
-                agent_session_repository or _AgentSessionRepository(events),
             ),
-            task_repository=cast(ScheduledTaskRepository, task_repository),
-            cycle_repository=cast(
+            task_repository=require_instance(
+                MagicMock(spec=ScheduledTaskRepository, wraps=task_repository),
+                ScheduledTaskRepository,
+            ),
+            cycle_repository=require_instance(
+                MagicMock(
+                    spec=ScheduledTaskCycleRepository,
+                    wraps=cycle_repository or _CycleRepository(events),
+                ),
                 ScheduledTaskCycleRepository,
-                cycle_repository or _CycleRepository(events),
             ),
-            mailbox_repository=cast(MailboxRepository, _MailboxRepository(events)),
-            external_channel_repository=cast(
+            mailbox_repository=require_instance(
+                MagicMock(spec=MailboxRepository, wraps=_MailboxRepository(events)),
+                MailboxRepository,
+            ),
+            external_channel_repository=require_instance(
+                MagicMock(
+                    spec=ExternalChannelRepository,
+                    wraps=_ExternalChannelRepository(events),
+                ),
                 ExternalChannelRepository,
-                _ExternalChannelRepository(events),
             ),
-            external_channel_management_repository=cast(
-                ExternalChannelManagementRepository,
+            external_channel_management_repository=require_instance(
                 AsyncMock(spec=ExternalChannelManagementRepository),
+                ExternalChannelManagementRepository,
             ),
-            authority_validator=cast(
-                ScheduledTaskAuthorityValidator,
-                authority_validator,
-            ),
-            read_session_manager=cast(SessionManager[WriteSession], _SessionManager()),
+            authority_validator=authority_validator,
+            read_session_manager=_SessionManager(),
         ),
         channel_service=channel_service,
     )

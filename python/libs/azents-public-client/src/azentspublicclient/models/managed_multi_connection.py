@@ -166,7 +166,9 @@ class ManagedMultiConnection(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "provider": obj.get("provider"),
             "transport": obj.get("transport"),
@@ -187,6 +189,7 @@ class ManagedMultiConnection(BaseModel):
             "generation": obj.get("generation"),
             "active_agent_count": obj.get("active_agent_count"),
             "configured_default_count": obj.get("configured_default_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

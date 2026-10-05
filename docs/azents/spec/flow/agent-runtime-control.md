@@ -110,7 +110,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-05
-spec_version: 97
+spec_version: 98
 ---
 
 # Agent Runtime Control
@@ -476,7 +476,18 @@ Backend lifecycle policy remains a later infrastructure-owned defense and is not
 Runtime Transfer authorization or startup input.
 
 Cleanup responsibility is `pending` before the first exact external cleanup
-attempt. A handled multipart-abort, completed-object-delete, combined, or
+attempt. Outstanding direct capabilities defer physical cleanup without delaying
+logical terminal settlement or correlation: an owned Direct GET source is protected
+until its admission deadline plus five minutes, and Direct PUT ingress is protected
+until the later of ingress expiry and admission deadline plus five minutes.
+Terminal and stale-stream repair derive the same boundary from retained exact-attempt
+metadata, retain pending responsibility or existing genuine failure evidence, and
+skip external cleanup while protected. Repeated expected deferral emits no per-attempt
+warning or traceback and does not increment cleanup failure evidence; it remains
+observable through the existing aggregate repair observation. The object-store
+boundary independently signals typed expected deferral instead of cleanup success.
+At the exact safe time, ordinary idempotent cleanup becomes eligible.
+A handled multipart-abort, completed-object-delete, combined, or
 preparation cleanup failure changes it to `retryable_failure` with bounded latest
 evidence. Each later failed repair updates the observation and saturating attempt
 count; successful cleanup clears the evidence and marks cleanup complete. The
@@ -494,6 +505,17 @@ and safe transfer/attempt or aggregate artifact fields. It never logs storage
 keys, raw provider upload IDs, raw exception text, hashes, credentials,
 endpoints, or bytes. State-independent orphan repair additionally reports
 bounded listed/deleted/aborted/failed/skipped counters.
+
+Direct-object Runner capability, PUT grant, HEAD, and immutable-copy boundaries
+classify only SDK connection, HTTP transport, and service response failures as
+ordinary storage unavailability. Workspace Upload finalization also handles its
+explicit object-validation failures; its state-independent orphan repair counts
+only expected storage failures. Programming and SDK argument-validation failures
+propagate to the owning error boundary instead of becoming an outage response or
+cleanup counter. Cancellation propagates unchanged, and reserved ingress/source
+handles and pending immutable-copy cleanup evidence remain available for repair.
+The managed Runner session reader closes its queue on every exit and leaves
+exception logging to the handling boundary.
 
 Runtime-to-Server transfer cleanup uses bounded abandon, status-recovery, and
 cancellation-confirmation attempts after the transfer result is fixed. A
@@ -1290,13 +1312,19 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
-- **2026-10-05** (spec_version 97) — Completed Runtime Web service and Gateway
+- **2026-10-05** (spec_version 98) — Narrowed direct-object storage failure
+  classification while preserving cancellation and durable cleanup evidence;
+  removed duplicate logging from the managed Runner session reader.
+- **2026-10-05** (spec_version 98) — Completed Runtime Web service and Gateway
   authentication/admission database operations before detached projection and
   transport; grouped opaque-ID activation membership preflight with its exact On CAS.
 
-- **2026-10-05** (spec_version 96) — Recorded completed read-only Workspace
+- **2026-10-05** (spec_version 97) — Recorded completed read-only Workspace
   access authority before Runtime and Runner orchestration.
 
+- **2026-10-05** (spec_version 96) — Distinguished expected direct-capability
+  cleanup deferral from genuine failure in terminal and stale-stream repair,
+  preserving read/write grace, exact cleanup identity, and real failure diagnostics.
 - **2026-10-05** (spec_version 95) — Separated Runtime, Runner, binding and worktree
   descriptions from actual mutation fences; retained captured removal/decommission
   attempts, exact resource acknowledgements, recreation targets and path overlap.

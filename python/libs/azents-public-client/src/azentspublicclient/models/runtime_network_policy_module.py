@@ -80,9 +80,12 @@ class RuntimeNetworkPolicyModule(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "allowed_cidrs": obj.get("allowed_cidrs"),
             "denied_cidrs": obj.get("denied_cidrs")
+            }.items() if _key in obj
         })
         return _obj
 

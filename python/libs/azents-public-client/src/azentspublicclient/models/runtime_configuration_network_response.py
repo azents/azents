@@ -105,12 +105,15 @@ class RuntimeConfigurationNetworkResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "mode": obj.get("mode"),
             "domain_mode": obj.get("domain_mode"),
             "protocol_summary": obj.get("protocol_summary"),
             "https_inspection": obj.get("https_inspection"),
             "enforcement_status": obj.get("enforcement_status")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

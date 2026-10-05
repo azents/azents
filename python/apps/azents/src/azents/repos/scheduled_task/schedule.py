@@ -31,6 +31,14 @@ class CanonicalSchedule:
     next_eligible_at: datetime.datetime
 
 
+@dataclass(frozen=True)
+class CronCursorAdvance:
+    """Earliest due occurrence and first future occurrence."""
+
+    first_due: datetime.datetime
+    first_future: datetime.datetime
+
+
 def parse_rfc3339_explicit_offset(value: str) -> datetime.datetime:
     """Parse one RFC3339 timestamp that carries an explicit UTC offset."""
     if not value or _RFC3339_PATTERN.fullmatch(value) is None:
@@ -118,7 +126,7 @@ def advance_cron_cursor(
     cursor: datetime.datetime,
     now: datetime.datetime,
     max_iterations: int = _MAX_CRON_ITERATIONS,
-) -> tuple[datetime.datetime, datetime.datetime]:
+) -> CronCursorAdvance:
     """Return earliest due occurrence and first future occurrence.
 
     The iteration guard prevents malformed or pathological persisted schedules from
@@ -129,7 +137,7 @@ def advance_cron_cursor(
     first_due = occurrence
     for _ in range(max_iterations):
         if occurrence > current:
-            return first_due, occurrence
+            return CronCursorAdvance(first_due=first_due, first_future=occurrence)
         occurrence = next_cron_occurrence(expression, timezone, occurrence)
     raise InvalidScheduledTaskSchedule("Cron cursor advancement exceeded its bound.")
 

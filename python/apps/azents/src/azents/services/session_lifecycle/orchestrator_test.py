@@ -1,5 +1,7 @@
 """Session lifecycle transition orchestration tests."""
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from azents.core.session_lifecycle import (
@@ -9,9 +11,13 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.repos.session_lifecycle_purge_operations import (
+    SessionLifecyclePurgeOperations,
+)
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
 )
+from azents.testing.types import require_instance
 
 
 def _participant(
@@ -36,6 +42,10 @@ def _participant(
 def _orchestrator() -> SessionLifecycleOrchestrator:
     """Build a registry with each archive and restore dispatch mode."""
     return SessionLifecycleOrchestrator(
+        operations=require_instance(
+            MagicMock(spec=SessionLifecyclePurgeOperations),
+            SessionLifecyclePurgeOperations,
+        ),
         registry=SessionLifecycleRegistry(
             (
                 _participant(
@@ -61,7 +71,7 @@ def _orchestrator() -> SessionLifecycleOrchestrator:
                     restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
                 ),
             )
-        )
+        ),
     )
 
 

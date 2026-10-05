@@ -41,8 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_workspace_access.py
   - python/apps/azents/src/azents/services/chat/workspace_upload.py
   - python/apps/azents/src/azents/repos/workspace_upload_authority/**
-  - python/apps/azents/src/azents/services/file_download_stream.py
-  - python/apps/azents/src/azents/api/public/file_download.py
+  - python/apps/azents/src/azents/services/browser_file_download.py
   - python/apps/azents/src/azents/runtime/transfer/**
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
@@ -70,7 +69,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/git_worktree_cleanup_claim.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/core/session_git_worktree_results.py
@@ -163,7 +162,6 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-10-05
 spec_version: 97
-
 ---
 
 # Workspace & Membership
@@ -1091,6 +1089,9 @@ stateDiagram-v2
   operations with membership boundaries. Preserved descriptive catalog status,
   read-only policy/manifest snapshots, detached Runtime evidence and atomic final
   policy/catalog mutation authority on the common scoped-fence implementation.
+
+- **2026-10-05** (spec_version 94) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05 (spec_version=93)** — Moved invitation and join-request reads and
   atomic membership mutations into completed repository operations, keeping

@@ -1,12 +1,12 @@
 """ChatWriteRequestRepository tests."""
 
 import datetime
-from types import SimpleNamespace
 from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSessionCreate
@@ -166,7 +166,9 @@ class TestChatWriteRequestRepository:
     async def test_delete_by_requester_user_id_deletes_retained_rows(self) -> None:
         """Delete retained idempotency rows for one requester User."""
         session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=2))
+        result = MagicMock(spec=CursorResult)
+        result.rowcount = 2
+        session.execute = AsyncMock(return_value=result)
         session.flush = AsyncMock()
 
         deleted = await ChatWriteRequestRepository().delete_by_requester_user_id(
@@ -193,7 +195,7 @@ class TestChatWriteRequestRepository:
         )
         repo = ChatWriteRequestRepository()
 
-        record, created = await repo.create_idempotent(
+        request_result = await repo.create_idempotent(
             rdb_session,
             _create_payload(
                 session_id=session_id,
@@ -201,6 +203,8 @@ class TestChatWriteRequestRepository:
                 client_request_id="request-1",
             ),
         )
+        record = request_result.record
+        created = request_result.created
 
         assert created is True
         assert len(record.id) == 32
@@ -229,8 +233,12 @@ class TestChatWriteRequestRepository:
             client_request_id="request-1",
         )
 
-        first, first_created = await repo.create_idempotent(rdb_session, payload)
-        second, second_created = await repo.create_idempotent(rdb_session, payload)
+        request_result = await repo.create_idempotent(rdb_session, payload)
+        first = request_result.record
+        first_created = request_result.created
+        request_result = await repo.create_idempotent(rdb_session, payload)
+        second = request_result.record
+        second_created = request_result.created
 
         assert first_created is True
         assert second_created is False
@@ -276,14 +284,18 @@ class TestChatWriteRequestRepository:
             }
         )
 
-        first, first_created = await repo.create_idempotent(
+        request_result = await repo.create_idempotent(
             rdb_session,
             first_create,
         )
-        second, second_created = await repo.create_idempotent(
+        first = request_result.record
+        first_created = request_result.created
+        request_result = await repo.create_idempotent(
             rdb_session,
             conflicting_create,
         )
+        second = request_result.record
+        second_created = request_result.created
 
         assert first_created is True
         assert second_created is False
