@@ -9,6 +9,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import NamedTuple
 
 import httpx2 as httpx
 from mcp.client.session import ClientSession
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 # 429 Rate Limit retry settings
 _RATE_LIMIT_MAX_RETRIES = 3
 _RATE_LIMIT_BASE_DELAY = 1.0  # seconds
+
+
+class McpToolListResult(NamedTuple):
+    """Discovered tools and the selected MCP transport."""
+
+    tools: list[McpBaseTool]
+    use_streamable_http: bool
 
 
 def _is_http_405(exc: Exception) -> bool:
@@ -143,7 +151,7 @@ async def list_tools(
     *,
     proxy_url: str | None = None,
     auth: httpx.Auth | None = None,
-) -> tuple[list[McpBaseTool], bool]:
+) -> McpToolListResult:
     """Fetch tool list from MCP server.
 
     Try Streamable HTTP first and fall back to SSE on HTTP 405.
@@ -165,7 +173,7 @@ async def list_tools(
             auth=auth,
         ) as session:
             result = await session.list_tools()
-            return list(result.tools), True
+            return McpToolListResult(tools=list(result.tools), use_streamable_http=True)
     except Exception as exc:
         if not _is_http_405(exc):
             raise
@@ -178,7 +186,7 @@ async def list_tools(
         server_url, headers, timeout, proxy_url=proxy_url, auth=auth
     ) as session:
         result = await session.list_tools()
-        return list(result.tools), False
+        return McpToolListResult(tools=list(result.tools), use_streamable_http=False)
 
 
 async def call_tool(
@@ -304,7 +312,7 @@ async def test_mcp_transport(
     :return: Connection test result
     """
     try:
-        tools, _ = await list_tools(
+        result = await list_tools(
             server_url, headers, timeout, proxy_url=proxy_url, auth=auth
         )
     except Exception as exc:
@@ -319,7 +327,7 @@ async def test_mcp_transport(
             )
         raise
 
-    tool_names = [t.name for t in tools]
+    tool_names = [t.name for t in result.tools]
     tool_list = ", ".join(tool_names)
     return TestConnectionResult(
         success=True,

@@ -9,11 +9,11 @@ from azents.core.runtime_profile import (
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.core.runtime_recreation import RuntimeRecreationProjection
 from azents.repos.runtime_profile.data import (
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
 )
-from azents.services.runtime_recreation.service import RuntimeRecreationProjection
 
 
 class RuntimeRecreationCreateRequest(BaseModel):

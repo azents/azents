@@ -4,6 +4,7 @@ import datetime
 from dataclasses import dataclass
 from typing import Annotated
 
+import sqlalchemy as sa
 from fastapi import Depends
 
 from azents.core.enums import (
@@ -21,6 +22,7 @@ from azents.core.external_channel_interaction import (
 )
 from azents.core.external_channel_selector_state import selector_state_from_interaction
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
+from azents.rdb.models.external_channel import RDBExternalChannelInteraction
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
@@ -231,8 +233,15 @@ class ExternalChannelInteractionOperations:
     ) -> None:
         """Bind a new submission to the current authorized origin snapshot."""
         async with self.read_session_manager() as session:
-            origin = await self.repository.get_interaction(
-                session, interaction_id=origin_interaction_id
+            row = await session.read_session.scalar(
+                sa.select(RDBExternalChannelInteraction).where(
+                    RDBExternalChannelInteraction.id == origin_interaction_id
+                )
+            )
+            origin = (
+                ExternalChannelInteraction.model_validate(row)
+                if row is not None
+                else None
             )
             if (
                 origin is None
@@ -252,7 +261,12 @@ class ExternalChannelInteractionOperations:
     async def _read_interaction(
         self, session: ReadSession, *, interaction_id: str
     ) -> ExternalChannelInteraction | None:
-        """Read current interaction through the repository's plain observation API."""
-        return await self.repository.get_interaction(
-            session, interaction_id=interaction_id
+        """Complete a nonlocking read of retained processing identity."""
+        row = await session.read_session.scalar(
+            sa.select(RDBExternalChannelInteraction).where(
+                RDBExternalChannelInteraction.id == interaction_id
+            )
+        )
+        return (
+            ExternalChannelInteraction.model_validate(row) if row is not None else None
         )

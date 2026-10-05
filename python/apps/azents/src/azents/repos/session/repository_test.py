@@ -149,7 +149,8 @@ class TestSessionRepository:
 
         # Then: CURRENT match
         assert result is not None
-        found_session, match = result
+        found_session = result.session
+        match = result.token_match
         assert found_session.id == sess.id
         assert match == TokenMatch.CURRENT
 
@@ -183,7 +184,8 @@ class TestSessionRepository:
 
         # Then: PREVIOUS match
         assert result is not None
-        found_session, match = result
+        found_session = result.session
+        match = result.token_match
         assert found_session.id == sess.id
         assert match == TokenMatch.PREVIOUS
 

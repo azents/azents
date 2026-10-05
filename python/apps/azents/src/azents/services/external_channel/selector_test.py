@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +26,6 @@ from azents.core.external_channel_selector_state import (
     projection_with_selector_state,
     selector_state_from_interaction,
 )
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -43,6 +42,7 @@ from azents.repos.external_channel.selector_operations import (
     ExternalChannelSelectorOperations,
 )
 from azents.services.external_channel.selector import ExternalChannelSelectorService
+from azents.testing.types import require_instance
 
 
 class _SelectorOperations(ExternalChannelSelectorOperations):
@@ -330,12 +330,15 @@ def _service(
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield ReadWriteSession(cast(AsyncSession, session))
+        yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=session))
 
     operations = _SelectorOperations(
-        session_manager=cast(SessionManager[WriteSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
-        read_session_manager=cast(SessionManager[WriteSession], session_manager),
+        session_manager=session_manager,
+        repository=require_instance(
+            MagicMock(spec=ExternalChannelRepository, wraps=repository),
+            ExternalChannelRepository,
+        ),
+        read_session_manager=session_manager,
     )
     operations.bind_fake(repository)
     return ExternalChannelSelectorService(operations=operations)

@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/repos/external_channel/admission_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_recovery_read.py
   - python/apps/azents/src/azents/core/external_channel_interaction.py
   - python/apps/azents/src/azents/core/external_channel_selection.py
   - python/apps/azents/src/azents/core/external_channel_participation.py
@@ -20,6 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_conversation_preparation.py
   - python/apps/azents/src/azents/core/external_channel_discord_selector_scope.py
   - python/apps/azents/src/azents/core/external_channel_ingestion.py
+  - python/apps/azents/src/azents/core/external_channel_replay.py
   - python/apps/azents/src/azents/core/external_channel_participation_state.py
   - python/apps/azents/src/azents/core/external_channel_selector_state.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
@@ -27,6 +30,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/access_operations.py
   - python/apps/azents/src/azents/repos/external_channel/conversation_provisioning.py
   - python/apps/azents/src/azents/repos/external_channel/ingress_drain.py
+  - python/apps/azents/src/azents/repos/external_channel/http_admission_read.py
+  - python/apps/azents/src/azents/repos/external_channel/ingestion_history_read.py
+  - python/apps/azents/src/azents/repos/external_channel/transport_ingestion_read.py
+  - python/apps/azents/src/azents/repos/external_channel/ingestion_replay_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_admission_operations.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/route.py
   - python/apps/azents/src/azents/services/external_channel/admission.py
@@ -89,7 +97,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
@@ -107,7 +115,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-10-05
-spec_version: 68
+spec_version: 70
 ---
 
 # External Channel Provider Ingress
@@ -146,6 +154,16 @@ operation fixtures; it does not mutate SDK globals, emulate private SDK HTTP sta
 run a duplicate Discord Gateway protocol server.
 
 ## HTTP Admission
+
+Slack candidate configuration, provider-history configuration, Discord transport
+authority/resource snapshots, access/setup replay owners and bounded recovery IDs
+are captured by completed native read-only repository operations.
+Selected-interaction replay retains its row lock inside a completed write operation.
+Configured triggers enter one repository-owned atomic write operation preserving
+connection-to-route/resource/principal/position/queue order and deduplication.
+Every operation finishes before result-dependent credential/signature processing,
+provider history/ingestion, committed-outcome logging or Runtime submission.
+Services receive detached domain evidence rather than a live SQL session.
 
 Slack sends HTTP callbacks to the single fixed endpoint
 `POST /external-channel/v1/slack/events`.
@@ -224,6 +242,13 @@ Unknown selectors, malformed bodies, invalid signatures, mismatched Application/
 identity, and unsupported interaction types fail before durable interaction state. Discord
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
+
+HTTP interaction/principal admission and durable processing/terminal claims are
+completed repository operations with the existing connection lock order and
+lease/status predicates. Discord callback configuration capture and bounded
+recoverable-owner scans use completed native read-only operations. Signature
+verification, provider callbacks and Local Job Runtime submissions occur only
+after these operations close.
 
 ## Interactive Admission and Selection
 
@@ -684,12 +709,26 @@ shared gateway unready. General Agent Workers own Session execution and do not o
 persistent provider connections.
 
 ## Changelog
+- **2026-10-05** (spec_version 70) — Completed residual interaction admission/claim ownership and native read-only Discord callback/recovery observations before authentication, provider mutation and job wake.
 
-- **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
-- **2026-10-05** (spec_version 67) — Moved interaction/selector scope observations
+
+- **2026-10-05** (spec_version 69) — Moved interaction/selector scope observations
   and shortcut materialization into completed repository operations, with native
   read-only descriptive reads and configuration-fenced atomic writes; kept signed
   metadata authority and provider effects outside transaction lifetimes.
+
+- **2026-10-05** (spec_version 68) — Integrated completed admission/replay
+  repository ownership with the existing scoped owner fences and nonblocking
+  provenance observations.
+
+
+- **2026-10-05** (spec_version 68) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
+
+- **2026-10-05** (spec_version 67) — Separated owner/diagnostic/first-trigger observations from exact ingress lease and batch claims, preserving generation/cursor-conditioned mailbox and queue finalization.
+- **2026-10-05** — v67. Completed provider ingress configuration/replay reads
+  and atomic configured-trigger admission in repositories, preserving authorization,
+  idempotency and postcommit provider/Runtime orchestration.
 
 - **2026-10-03** (spec_version 65) — Added Session and AgentRun execution authority
   to the Gateway typing target projection.

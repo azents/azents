@@ -13,6 +13,7 @@ from typing import Any, NamedTuple, Protocol, TypeVar
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.mailbox_activity import MailboxActivityObserverProtocol
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.session_resource_authority import SessionResourceAuthority
 from azents.core.tools import PublishEventFn, Toolkit
@@ -216,7 +217,7 @@ class RunContext:
     publish_event: PublishEventFn
     model_operation_completion: ModelOperationCompletion | None
     resource_authority: SessionResourceAuthority | None = None
-    mailbox_activity_observer: object | None = None
+    mailbox_activity_observer: MailboxActivityObserverProtocol | None = None
     prepare_compaction_request: Callable[[RunRequest], Awaitable[RunRequest]] | None = (
         None
     )

@@ -45,6 +45,7 @@ from azents.core.external_channel_selector_state import (
     projection_with_selector_state,
 )
 from azents.core.external_model_settings import ExternalModelActorContext
+from azents.core.scheduled_task_control import ScheduledTaskProviderControlResult
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -85,7 +86,6 @@ from azents.services.external_channel.slack_events import (
 from azents.services.external_channel.slack_native_protocol import SlackNativeControl
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.control import (
-    ScheduledTaskProviderControlResult,
     ScheduledTaskProviderControlService,
     build_scheduled_task_control_locator,
 )

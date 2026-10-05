@@ -4,6 +4,7 @@ import datetime
 from dataclasses import dataclass
 from typing import Annotated
 
+import sqlalchemy as sa
 from fastapi import Depends
 
 from azents.core.enums import (
@@ -27,6 +28,7 @@ from azents.core.external_channel_selector_state import (
     projection_with_selector_state,
 )
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
+from azents.rdb.models.external_channel import RDBExternalChannelInteraction
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.external_channel.data import (
@@ -412,7 +414,12 @@ class ExternalChannelSelectorOperations:
     async def _read_interaction(
         self, session: ReadSession, *, interaction_id: str
     ) -> ExternalChannelInteraction | None:
-        """Read current interaction through the repository's plain observation API."""
-        return await self.repository.get_interaction(
-            session, interaction_id=interaction_id
+        """Read detached current interaction without a row lock."""
+        row = await session.read_session.scalar(
+            sa.select(RDBExternalChannelInteraction).where(
+                RDBExternalChannelInteraction.id == interaction_id
+            )
+        )
+        return (
+            ExternalChannelInteraction.model_validate(row) if row is not None else None
         )

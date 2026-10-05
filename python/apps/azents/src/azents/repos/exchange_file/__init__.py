@@ -2,15 +2,14 @@
 
 import datetime
 from collections.abc import Sequence
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
 
 from azents.core.enums import ExchangeFileStatus
 from azents.rdb.models.exchange_file import RDBExchangeFile
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import (
     ExchangeFile,
@@ -134,13 +133,12 @@ class ExchangeFileRepository:
         source_user_id: str,
     ) -> int:
         """Detach a deleted User from retained ExchangeFile provenance."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBExchangeFile)
                 .where(RDBExchangeFile.source_user_id == source_user_id)
                 .values(source_user_id=None)
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount or 0

@@ -43,6 +43,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.core.external_channel_limits import SLACK_MARKDOWN_TEXT_MAX_LENGTH
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.slack_blocks import (
@@ -53,7 +54,6 @@ from azents.services.external_channel.slack_endpoint import slack_file_url_allow
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
-SLACK_MARKDOWN_TEXT_MAX_LENGTH = 12_000
 SLACK_INTERACTION_VIEW_TITLE_MAX_LENGTH = 24
 SLACK_INTERACTION_VIEW_PRIVATE_METADATA_MAX_LENGTH = 3_000
 SLACK_INTERACTION_VIEW_MAX_BLOCKS = 100

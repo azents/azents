@@ -138,7 +138,9 @@ class AgentWorkspaceStatResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "path": obj.get("path"),
             "name": obj.get("name"),
             "kind": obj.get("kind"),
@@ -148,6 +150,7 @@ class AgentWorkspaceStatResponse(BaseModel):
             "symlink": obj.get("symlink"),
             "real_path": obj.get("real_path"),
             "resolved_kind": obj.get("resolved_kind")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -41,6 +41,10 @@ from azents.core.external_channel_provider import SlackConnectionCredentials
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_selection import ExternalChannelSelectorCatalog
 from azents.core.external_model_settings import ExternalModelActorContext
+from azents.core.scheduled_task_control import (
+    ScheduledTaskEditInput,
+    ScheduledTaskProviderControlError,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
@@ -90,8 +94,6 @@ from azents.services.scheduled_task.channel import (
     get_scheduled_task_channel_service,
 )
 from azents.services.scheduled_task.control import (
-    ScheduledTaskEditInput,
-    ScheduledTaskProviderControlError,
     ScheduledTaskProviderControlService,
     build_scheduled_task_slack_edit_metadata,
     parse_scheduled_task_control_locator,
