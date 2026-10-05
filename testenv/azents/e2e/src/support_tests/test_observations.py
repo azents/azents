@@ -144,7 +144,7 @@ def test_turn_usage_rejects_coerced_token_evidence(invalid: object) -> None:
 def test_turn_provenance_and_usage_retain_opaque_extensions() -> None:
     marker = TurnMarkerObservation.model_validate(
         {
-            "usage": {"prompt_tokens": 1, "raw": {"provider": [1, None]}},
+            "usage": {"prompt_tokens": 1, "future_usage": {"provider": [1, None]}},
             "applied_inference_profile": {
                 "model_target_label": "Quality",
                 "model_display_name": "Model",
@@ -156,7 +156,7 @@ def test_turn_provenance_and_usage_retain_opaque_extensions() -> None:
         }
     )
     assert marker.usage is not None
-    assert marker.usage.raw == {"provider": [1, None]}
+    assert marker.usage.model_extra == {"future_usage": {"provider": [1, None]}}
     assert marker.applied_inference_profile is not None
     assert marker.applied_inference_profile.model_target_label == "Quality"
     assert marker.effective_context_window_tokens == 32000
