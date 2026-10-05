@@ -342,6 +342,7 @@ def _decode_usage_billing_details(
 def apply_model_usage_pricing(
     usage: TokenUsagePayload,
     *,
+    raw_usage: Mapping[str, object],
     provider: str,
     model_identifier: str,
     pricing: CapturedModelPricing | None,
@@ -352,6 +353,7 @@ def apply_model_usage_pricing(
     """Apply a native charge or a captured, content-free estimate.
 
     :param usage: Responses common totals, including cache and reasoning counters
+    :param raw_usage: Transient native receipt used only for directed billing quantities
     :param provider: authoritative selected provider identity
     :param model_identifier: authoritative selected model identifier
     :param pricing: immutable captured source pricing, or unavailable authority
@@ -385,7 +387,7 @@ def apply_model_usage_pricing(
         return usage.model_copy(update={"cost_usd": None, "cost_provenance": None})
 
     details = _decode_usage_billing_details(
-        usage.raw, normalized_cached_tokens=usage.cached_tokens
+        raw_usage, normalized_cached_tokens=usage.cached_tokens
     )
     if usage.cache_creation_tokens is None and (
         details.cache_write_5m_tokens is not None

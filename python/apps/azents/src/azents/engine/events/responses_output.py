@@ -1064,17 +1064,14 @@ def _normalize_response_usage(
             )
         ),
     )
-    raw_hidden_params = response_item_dict(response.get("_hidden_params")) or None
     normalized = TokenUsagePayload(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
-        raw=raw_usage,
         cached_tokens=cached_tokens,
         cache_creation_tokens=cache_creation_tokens,
         reasoning_tokens=reasoning_tokens,
         cost_usd=None,
-        raw_hidden_params=raw_hidden_params,
     )
     output = response.get("output")
     output_items = (
@@ -1088,6 +1085,7 @@ def _normalize_response_usage(
     service_tier = response.get("service_tier")
     return apply_model_usage_pricing(
         normalized,
+        raw_usage=raw_usage,
         provider=provider,
         model_identifier=model,
         pricing=pricing,

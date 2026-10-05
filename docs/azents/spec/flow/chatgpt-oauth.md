@@ -44,7 +44,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
 last_verified_at: 2026-10-05
-spec_version: 33
+spec_version: 34
 ---
 
 # ChatGPT OAuth Flow
@@ -248,7 +248,8 @@ Rules:
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
 - Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
-- Completed SDK usage maps directly into the existing turn marker. Azents captures the physical
+- Completed SDK usage is normalized into the turn marker without retaining native raw usage,
+  attribution or hidden parameters. The receipt remains transient through pricing. Azents captures the physical
   candidate's saved normalized ChatGPT-scoped pricing definition and aware call time without a
   price DB lookup, source restore, or hashing, then computes `cost_usd` from
   content-free usage and billing metadata. Optional typed provenance distinguishes an estimate

@@ -266,7 +266,7 @@ class _ScriptedModel:
                     )
                 ],
                 usage=TokenUsagePayload(
-                    prompt_tokens=20, completion_tokens=5, total_tokens=25, raw={}
+                    prompt_tokens=20, completion_tokens=5, total_tokens=25
                 ),
             )
         return NormalizedAdapterOutput[TransientModelMessage](
@@ -284,7 +284,7 @@ class _ScriptedModel:
                 )
             ],
             usage=TokenUsagePayload(
-                prompt_tokens=20, completion_tokens=5, total_tokens=25, raw={}
+                prompt_tokens=20, completion_tokens=5, total_tokens=25
             ),
         )
 

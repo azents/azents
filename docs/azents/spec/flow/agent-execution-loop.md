@@ -184,7 +184,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-05
-spec_version: 215
+spec_version: 216
 ---
 
 # Agent Execution Loop
@@ -833,8 +833,12 @@ client execution, the bound Images SDK call uses `gpt-image-2` for the maintaine
 default or the exact validated explicit image-model identifier. Neither choice
 is forwarded as a provider-hosted image tool or placed in model-visible arguments.
 
-OpenAI SDK completion usage maps directly into the existing turn-marker token fields. Its raw usage is
-the SDK usage object serialized to plain JSON and does not synthesize adapter-private hidden parameters.
+OpenAI SDK completion usage is normalized into turn-marker token fields. All output paths retain
+native usage receipts only through normalization and pricing, passing them explicitly into the
+directed billing-quantity decoder. Durable usage and run-usage serialization contain normalized
+counts and finalized cost/provenance, not raw receipts, attribution or adapter-private hidden
+parameters. Existing stored receipts are omitted by typed projections but are not physically
+rewritten by this change.
 Azents captures the actual selected candidate's saved normalized pricing definition
 and aware request time before each physical model call. Exact hosting/API scope and
 literal model identity accompany immutable typed price rules, descriptive source/model

@@ -185,7 +185,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-05
-spec_version: 183
+spec_version: 184
 ---
 
 # Conversation & Events
@@ -865,7 +865,11 @@ Event kinds:
 - `system_error`
 - `unknown_adapter_output`
 
-Turn-marker token usage keeps nullable `cost_usd` and optional typed `cost_provenance`.
+Turn-marker token usage stores normalized input/output/total/cache/reasoning counters,
+nullable `cost_usd` and optional typed `cost_provenance`. Native raw usage and hidden
+parameters are transient normalization/pricing inputs, not durable usage fields.
+Typed projections omit those extras from existing records without rewriting their physical
+JSONB storage; historical receipt cleanup requires a separate approved operation.
 Known estimates identify the selected provider/model, applicable tier and captured source
 snapshot/hash/key/estimator version. Native reported charges use a separate
 `provider_reported` method and do not acquire price-source provenance. Old amounts without

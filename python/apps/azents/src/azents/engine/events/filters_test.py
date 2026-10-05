@@ -318,11 +318,6 @@ def _usage(prompt_tokens: int) -> TokenUsagePayload:
         prompt_tokens=prompt_tokens,
         completion_tokens=5,
         total_tokens=prompt_tokens + 5,
-        raw={
-            "input_tokens": prompt_tokens,
-            "output_tokens": 5,
-            "total_tokens": prompt_tokens + 5,
-        },
     )
 
 

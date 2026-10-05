@@ -60,7 +60,6 @@ def _usage() -> TokenUsagePayload:
         prompt_tokens=20,
         completion_tokens=5,
         total_tokens=25,
-        raw={"sensitive": "not-persisted"},
     )
 
 
@@ -208,7 +207,6 @@ async def test_large_actual_usage_is_durable_without_refusing_completion(
             prompt_tokens=250001,
             completion_tokens=16001,
             total_tokens=266002,
-            raw={},
         )
     )
     assert admission.settled

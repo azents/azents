@@ -121,7 +121,6 @@ class UsageObservation(ExtensionObservation):
     total_tokens: StrictInt | None = None
     prompt_tokens: StrictInt | None = None
     completion_tokens: StrictInt | None = None
-    raw: dict[str, JsonValue] | None = None
     cost_usd: StrictFloat | StrictInt | None = None
 
 

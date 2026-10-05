@@ -1267,11 +1267,6 @@ def _usage() -> TokenUsagePayload:
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
-        raw={
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "total_tokens": 15,
-        },
     )
 
 
@@ -1938,12 +1933,10 @@ async def test_model_usage_is_appended_as_turn_marker(
         prompt_tokens=100,
         completion_tokens=20,
         total_tokens=120,
-        raw={"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
         cached_tokens=75,
         cache_creation_tokens=10,
         reasoning_tokens=5,
         cost_usd=0.001,
-        raw_hidden_params={"response_cost": 0.001, "model_id": "gpt-5.1"},
     )
     inference_state = SessionInferenceState(
         model_target_label="planning",

@@ -1837,7 +1837,6 @@ def _normalize_openai_usage(
         prompt_tokens=usage.input_tokens,
         completion_tokens=usage.output_tokens,
         total_tokens=usage.total_tokens,
-        raw=raw_usage,
         cached_tokens=_optional_usage_detail(input_details, "cached_tokens"),
         cache_creation_tokens=_optional_usage_detail(
             input_details,
@@ -1848,7 +1847,6 @@ def _normalize_openai_usage(
             "reasoning_tokens",
         ),
         cost_usd=None,
-        raw_hidden_params=None,
     )
     output_item_types = (
         [item.type for item in response.output]
@@ -1861,6 +1859,7 @@ def _normalize_openai_usage(
     )
     return apply_model_usage_pricing(
         normalized,
+        raw_usage=raw_usage,
         provider=provider,
         model_identifier=model,
         pricing=pricing,

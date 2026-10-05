@@ -1332,10 +1332,12 @@ class TestAgentExecutionPersistence:
         assert _run_complete_ids(payload)
         turn_usages = _turn_usage_items(payload)
         assert turn_usages
-        assert turn_usages[-1].total_tokens is not None
-        assert turn_usages[-1].prompt_tokens is not None
-        assert turn_usages[-1].completion_tokens is not None
-        assert turn_usages[-1].raw is not None
+        assert turn_usages[-1].total_tokens == 0
+        assert turn_usages[-1].prompt_tokens == 0
+        assert turn_usages[-1].completion_tokens == 0
+        durable_usage = turn_usages[-1].model_dump(exclude_unset=True)
+        assert "raw" not in durable_usage
+        assert "raw_hidden_params" not in durable_usage
 
     def test_canonical_ws_history_pagination_and_intent_converge(
         self,

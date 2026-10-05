@@ -6,7 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
 last_verified_at: 2026-10-05
-spec_version: 28
+spec_version: 29
 code_paths:
   - python/apps/azents/src/azents/core/chat_data.py
   - python/apps/azents/src/azents/services/agent/**
@@ -78,7 +78,7 @@ Context query is read-only and requires an existing `session_id`. It does not cr
 
 ## Usage Summary
 
-Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned by provider/adapter and can include:
+Latest usage comes from event `TurnMarkerPayload.usage`. Durable usage contains normalized accounting:
 
 - `prompt_tokens`
 - `completion_tokens`
@@ -87,10 +87,13 @@ Latest usage comes from event `TurnMarkerPayload.usage`. Usage is value returned
 - `cache_creation_tokens`
 - `reasoning_tokens`
 - `cost_usd`
-- raw provider usage payload
+- optional typed `cost_provenance`
 
-For OpenAI API-key and ChatGPT OAuth turns, token fields and raw usage come directly from the official
-OpenAI SDK completed `ResponseUsage`; raw usage does not contain synthetic adapter-private hidden parameters.
+For OpenAI API-key and ChatGPT OAuth turns, token fields are normalized from the official
+OpenAI SDK completed `ResponseUsage`. Native receipts, including attribution and adapter-private
+hidden parameters, are transient normalization/pricing inputs and are not retained in new usage
+records or exposed through usage projections. Existing records are projected through the same
+normalized contract; this change does not physically rewrite their stored JSONB receipts.
 Their `cost_usd` is a content-free Azents estimate from the physical candidate's
 saved normalized pricing definition captured with its actual call time, with optional
 typed method/source-model/collection-time/tier/estimator provenance. Capture does not

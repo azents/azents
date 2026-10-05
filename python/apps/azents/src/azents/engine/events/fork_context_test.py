@@ -56,7 +56,6 @@ def _turn_marker(id_suffix: str) -> Event:
                 prompt_tokens=1,
                 completion_tokens=1,
                 total_tokens=2,
-                raw={},
             ),
         ),
     )

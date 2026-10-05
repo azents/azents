@@ -296,15 +296,14 @@ class ShutdownInterruptError(Exception):
 class TokenUsage(BaseModel):
     """Per-turn token usage.
 
-    Stores normalized common fields together with provider raw data.
+    Stores normalized common fields without provider receipt data.
 
     ``cached_tokens`` are cache read tokens with discount, and ``cache_creation_tokens``
     are cache write tokens with surcharge. Anthropic pricing is create 1.25x and
     read 0.1x, so separate storage is required.
 
     ``cost_usd`` is the provider-reported charge or the captured source-snapshot
-    estimate for this attempt. ``raw_hidden_params`` retains optional billing
-    diagnostics without becoming a pricing or execution authority.
+    estimate for this attempt.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -316,8 +315,6 @@ class TokenUsage(BaseModel):
     cache_creation_tokens: int | None = None
     reasoning_tokens: int | None = None
     cost_usd: float | None = None
-    raw: RawDict | None = None
-    raw_hidden_params: RawDict | None = None
 
 
 # ---------------------------------------------------------------------------
