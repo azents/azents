@@ -99,11 +99,14 @@ class UploadedImage(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "filename": obj.get("filename"),
             "default": ImageFile.from_dict(obj["default"]) if obj.get("default") is not None else None,
             "thumbnails": ImageThumbnails.from_dict(obj["thumbnails"]) if obj.get("thumbnails") is not None else None,
             "uploaded_at": obj.get("uploaded_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

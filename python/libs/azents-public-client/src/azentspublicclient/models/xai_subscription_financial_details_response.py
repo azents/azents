@@ -130,7 +130,9 @@ class XaiSubscriptionFinancialDetailsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "prepaid_balance_cents": obj.get("prepaid_balance_cents"),
             "payg_cap_cents": obj.get("payg_cap_cents"),
@@ -138,6 +140,7 @@ class XaiSubscriptionFinancialDetailsResponse(BaseModel):
             "auto_top_up_enabled": obj.get("auto_top_up_enabled"),
             "auto_top_up_amount_cents": obj.get("auto_top_up_amount_cents"),
             "auto_top_up_monthly_maximum_cents": obj.get("auto_top_up_monthly_maximum_cents")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

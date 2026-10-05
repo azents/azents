@@ -24,7 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/core/mailbox_errors.py
   - python/apps/azents/src/azents/repos/external_channel/access_operations.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
@@ -43,7 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_account_link.py
   - python/apps/azents/src/azents/services/external_channel/participation.py
   - python/apps/azents/src/azents/services/external_channel/management.py
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/model_settings.py
@@ -342,6 +342,9 @@ Session cannot mutate the Task.
   ownership with native read-only descriptive operations, writable atomic
   authorization/selection groups and post-commit replay/cleanup intents; retained
   existing actor, generation, timestamp and immutable-route fences.
+
+- **2026-10-05** (spec_version 30) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 29) — Clarified ordinary model-editor authorization versus final Apply/security guards and the exact Agent/principal absent-block/grant-revocation protocol.
 

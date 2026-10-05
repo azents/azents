@@ -84,8 +84,8 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         self,
         *,
         store: GoalStateStore,
-        agent_id: str = "",
-        session_id: str = "",
+        agent_id: str | None,
+        session_id: str | None,
     ) -> None:
         """Create Goal Toolkit."""
         self.store = store
@@ -98,6 +98,8 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         owner: SessionExecutionOwner,
     ) -> None:
         """Bind this resolved Toolkit to one immutable Session owner."""
+        if self._session_id is None:
+            raise ValueError("Execution owner Session does not match Toolkit")
         if accepts_execution_owner(
             self._execution_owner,
             owner,
@@ -127,7 +129,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         """Return current goal prompt and goal tools."""
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
-        if not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
@@ -162,7 +164,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         context: CompactionSummaryHookContext,
     ) -> CompactionSummaryReplace | None:
         """Append current unfinished Goal state to compaction summary."""
-        if not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return None
         goal_state = await self.store.load(self._agent_id, self._session_id)
         snapshot = render_goal_snapshot(goal_state)
@@ -176,7 +178,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
         self, context: SessionIdleHookContext
     ) -> SessionIdleResult | None:
         """Return continuation input when active goal exists."""
-        if not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return None
         goal_state = await self.store.load(self._agent_id, self._session_id)
         if goal_state.status != "active" or not goal_state.objective:
@@ -219,7 +221,7 @@ class GoalToolkitProvider(ToolkitProvider[GoalToolkitConfig]):
     ) -> Toolkit[GoalToolkitConfig]:
         """Return executable Goal Toolkit."""
         del config, context
-        return GoalToolkit(store=self.store)
+        return GoalToolkit(store=self.store, agent_id=None, session_id=None)
 
 
 def render_goal_snapshot(state: GoalState) -> str | None:

@@ -11,20 +11,23 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.core.runtime_provider_contract_errors import (
+    RuntimeProviderContractUnavailable,
+)
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_contract_operations import (
+    RuntimeProviderContractOperationsRepository,
+)
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.testing.types import is_object_list, is_string_object_dict
 
-from .service import (
-    RuntimeProviderContractService,
-    RuntimeProviderContractUnavailable,
-)
+from .service import RuntimeProviderContractService
 
 _PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v2"
 
@@ -98,10 +101,12 @@ def _service(
 ) -> RuntimeProviderContractService:
     """Build the production contract service."""
     return RuntimeProviderContractService(
-        session_manager=session_manager,
-        provider_repository=RuntimeProviderRepository(),
-        policy_repository=RuntimeProviderPolicyRepository(),
-        profile_repository=RuntimeProfileRepository(),
+        operations=RuntimeProviderContractOperationsRepository(
+            session_manager=session_manager,
+            provider_repository=RuntimeProviderRepository(),
+            policy_repository=RuntimeProviderPolicyRepository(),
+            profile_repository=RuntimeProfileRepository(),
+        )
     )
 
 

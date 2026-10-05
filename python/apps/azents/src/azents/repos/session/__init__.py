@@ -1,18 +1,17 @@
 """Session repository."""
 
 import datetime
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
 
 from azents.rdb.models.session import RDBSession
 from azents.rdb.models.user import RDBUser
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
-from .data import NotFound, Session, SessionCreate, TokenMatch
+from .data import NotFound, RefreshTokenSessionMatch, Session, SessionCreate, TokenMatch
 
 
 class SessionRepository:
@@ -74,12 +73,12 @@ class SessionRepository:
 
     async def get_by_refresh_token(
         self, session: WriteSession, refresh_token: str
-    ) -> tuple[Session, TokenMatch] | None:
+    ) -> RefreshTokenSessionMatch | None:
         """Fetch Session by refresh token, current or previous token.
 
         :param session: Database session
         :param refresh_token: Refresh token
-        :return: (Session, TokenMatch) tuple or None
+        :return: Named Session/token-generation match or None
         """
         # Fetch by current token
         result = await session.write_session.execute(
@@ -87,7 +86,9 @@ class SessionRepository:
         )
         rdb_session = result.scalar_one_or_none()
         if rdb_session is not None:
-            return (Session.from_rdb(rdb_session), TokenMatch.CURRENT)
+            return RefreshTokenSessionMatch(
+                session=Session.from_rdb(rdb_session), token_match=TokenMatch.CURRENT
+            )
 
         # Fetch by previous token (grace period)
         result = await session.write_session.execute(
@@ -95,7 +96,9 @@ class SessionRepository:
         )
         rdb_session = result.scalar_one_or_none()
         if rdb_session is not None:
-            return (Session.from_rdb(rdb_session), TokenMatch.PREVIOUS)
+            return RefreshTokenSessionMatch(
+                session=Session.from_rdb(rdb_session), token_match=TokenMatch.PREVIOUS
+            )
 
         return None
 
@@ -150,9 +153,7 @@ class SessionRepository:
         if except_session_id is not None:
             query = query.where(RDBSession.id != except_session_id)
 
-        cursor_result = cast(
-            CursorResult[Any], await session.write_session.execute(query)
-        )
+        cursor_result = mutation_result(await session.write_session.execute(query))
         return cursor_result.rowcount or 0
 
     async def rotate_refresh_token(
