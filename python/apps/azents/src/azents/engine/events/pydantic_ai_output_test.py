@@ -889,7 +889,8 @@ def test_google_native_modality_receipt_reaches_captured_directed_pricing() -> N
     assert usage.prompt_tokens == 7
     assert usage.completion_tokens == 5
     assert usage.reasoning_tokens == 3
-    assert usage.raw["promptTokensDetails"] == raw["promptTokensDetails"]
+    assert "raw" not in usage.model_dump()
+    assert "raw_hidden_params" not in usage.model_dump()
     assert usage.cost_usd == pytest.approx(4.1)
     assert usage.cost_provenance is not None
     assert usage.cost_provenance.source_model_key == "gemini/selected-model"

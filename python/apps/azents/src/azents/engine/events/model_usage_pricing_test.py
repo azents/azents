@@ -36,18 +36,16 @@ def _pricing(
     )
 
 
-def _usage(raw: dict[str, object]) -> TokenUsagePayload:
+def _usage() -> TokenUsagePayload:
     """Create inclusive common Responses counters."""
     return TokenUsagePayload(
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
-        raw=raw,
         cached_tokens=2,
         cache_creation_tokens=3,
         reasoning_tokens=1,
         cost_usd=None,
-        raw_hidden_params=None,
     )
 
 
@@ -55,7 +53,8 @@ def _usage(raw: dict[str, object]) -> TokenUsagePayload:
 def test_reported_charge_survives_absent_price_authority(charge: float) -> None:
     """A native charge cannot become unavailable with the optional source."""
     result = apply_model_usage_pricing(
-        _usage({}),
+        _usage(),
+        raw_usage={},
         provider="openrouter",
         model_identifier="publisher/model",
         pricing=None,
@@ -75,7 +74,8 @@ def test_invalid_reported_charge_stays_unknown_without_source(
 ) -> None:
     """Invalid native amounts do not become a zero charge."""
     result = apply_model_usage_pricing(
-        _usage({}),
+        _usage(),
+        raw_usage={},
         provider="openrouter",
         model_identifier="publisher/model",
         pricing=None,
@@ -90,7 +90,8 @@ def test_invalid_reported_charge_stays_unknown_without_source(
 def test_generic_estimate_retains_captured_provenance() -> None:
     """The isolated generic evaluator returns a complete captured estimate."""
     result = apply_model_usage_pricing(
-        _usage({}),
+        _usage(),
+        raw_usage={},
         provider="openai",
         model_identifier="selected-model",
         pricing=_pricing(
@@ -138,7 +139,8 @@ def test_output_item_count_does_not_invent_session_or_media_quantity(
         request_timestamp=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
     )
     result = apply_model_usage_pricing(
-        _usage({}),
+        _usage(),
+        raw_usage={},
         provider="openai",
         model_identifier="selected-model",
         pricing=pricing,
@@ -173,7 +175,8 @@ def test_malformed_or_undirected_breakdown_does_not_produce_a_partial_estimate(
         request_timestamp=datetime.datetime(2026, 10, 2, tzinfo=datetime.UTC),
     )
     result = apply_model_usage_pricing(
-        _usage(raw),
+        _usage(),
+        raw_usage=raw,
         provider="openai",
         model_identifier="m",
         pricing=pricing,
@@ -183,7 +186,8 @@ def test_malformed_or_undirected_breakdown_does_not_produce_a_partial_estimate(
     )
     assert result.cost_usd is None
     reported = apply_model_usage_pricing(
-        _usage(raw),
+        _usage(),
+        raw_usage=raw,
         provider="openai",
         model_identifier="m",
         pricing=pricing,
@@ -197,11 +201,10 @@ def test_malformed_or_undirected_breakdown_does_not_produce_a_partial_estimate(
 
 
 def test_upstream_computed_cost_is_not_adopted_without_native_charge() -> None:
-    usage = _usage({}).model_copy(
-        update={"cost_usd": 99.0, "raw_hidden_params": {"response_cost": 99.0}}
-    )
+    usage = _usage().model_copy(update={"cost_usd": 99.0})
     result = apply_model_usage_pricing(
         usage,
+        raw_usage={"response_cost": 99.0},
         provider="openai",
         model_identifier="m",
         pricing=None,
@@ -238,9 +241,8 @@ def _google_estimate(
             cache_creation_tokens=None,
             reasoning_tokens=None,
             cost_usd=None,
-            raw=raw,
-            raw_hidden_params=None,
         ),
+        raw_usage=raw,
         provider="google_gemini",
         model_identifier="selected-model",
         pricing=pricing,

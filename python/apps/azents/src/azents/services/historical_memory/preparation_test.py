@@ -141,7 +141,6 @@ async def test_generate_historical_memory_decodes_strict_json(
         prompt_tokens=40,
         completion_tokens=10,
         total_tokens=50,
-        raw={},
         cached_tokens=5,
         cost_usd=0.01,
     )
@@ -213,7 +212,6 @@ async def test_generate_historical_memory_attributes_litellm_stream_usage(
         prompt_tokens=60,
         completion_tokens=15,
         total_tokens=75,
-        raw={},
         reasoning_tokens=4,
         cost_usd=0.02,
     )

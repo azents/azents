@@ -905,23 +905,14 @@ class PydanticAIOutputStream[MessageT: Event | TransientModelMessage]:
             completion == 0 and native_completion_evidence is None
         ):
             return None
-        raw.update(
-            {
-                "input_tokens": prompt,
-                "output_tokens": completion,
-                "total_tokens": prompt + completion,
-            }
-        )
         usage = TokenUsagePayload(
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=prompt + completion,
-            raw=raw,
             cached_tokens=cached,
             cache_creation_tokens=written,
             reasoning_tokens=reasoning,
             cost_usd=None,
-            raw_hidden_params=None,
         )
         output_types = [
             "web_search_call"
@@ -955,6 +946,7 @@ class PydanticAIOutputStream[MessageT: Event | TransientModelMessage]:
                     represented_tools.add(identity)
         return apply_model_usage_pricing(
             usage,
+            raw_usage=raw,
             provider=self.normalizer.provider,
             model_identifier=self.normalizer.model,
             pricing=self.pricing,

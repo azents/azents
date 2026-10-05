@@ -38,12 +38,10 @@ def _usage() -> TokenUsagePayload:
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
-        raw={},
         cached_tokens=None,
         cache_creation_tokens=None,
         reasoning_tokens=None,
         cost_usd=None,
-        raw_hidden_params=None,
     )
 
 
@@ -96,6 +94,7 @@ def test_capture_keeps_saved_prices_after_current_definition_changes() -> None:
     )
     result = apply_model_usage_pricing(
         _usage(),
+        raw_usage={},
         provider="openai",
         model_identifier="model",
         pricing=pricing,
@@ -166,6 +165,7 @@ def test_capture_and_estimate_do_not_use_transitive_price_authority(
     )
     result = apply_model_usage_pricing(
         _usage(),
+        raw_usage={},
         provider="openai",
         model_identifier="model",
         pricing=pricing,
@@ -182,6 +182,7 @@ def test_capture_and_estimate_do_not_use_transitive_price_authority(
         assert result.cost_provenance is None
     reported = apply_model_usage_pricing(
         _usage(),
+        raw_usage={},
         provider="openai",
         model_identifier="model",
         pricing=pricing,

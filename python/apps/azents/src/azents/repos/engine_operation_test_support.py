@@ -581,7 +581,6 @@ def token_usage() -> TokenUsagePayload:
         prompt_tokens=10,
         completion_tokens=5,
         total_tokens=15,
-        raw={},
     )
 
 

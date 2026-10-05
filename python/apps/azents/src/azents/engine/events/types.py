@@ -619,14 +619,13 @@ class ModelCostProvenance(BaseModel):
 
 
 class TokenUsagePayload(BaseModel):
-    """Model token usage with adapter raw payload preserved."""
+    """Durable normalized token usage and finalized cost evidence."""
 
     model_config = ConfigDict(frozen=True)
 
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
-    raw: RawDict = Field(description="Adapter-native usage payload")
     cached_tokens: int | None = Field(default=None)
     cache_creation_tokens: int | None = Field(default=None)
     reasoning_tokens: int | None = Field(default=None)
@@ -635,7 +634,6 @@ class TokenUsagePayload(BaseModel):
         default=None,
         description="Known charge or estimate authority; absent on historical usage",
     )
-    raw_hidden_params: RawDict | None = Field(default=None)
 
 
 class TurnMarkerPayload(BaseModel):

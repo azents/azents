@@ -3039,7 +3039,19 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost() -> None:
             type="response.output_text.delta",
         )
     )
-    output.process_event(_completed_event())
+    response = _response()
+    assert response.usage is not None
+    receipt = response.usage.model_dump(mode="json")
+    receipt["attribution"] = {
+        "items": {"private-item": {"input_tokens": 10, "cached_tokens": 2}}
+    }
+    provider_usage = ResponseUsage.model_validate(receipt)
+    assert (
+        provider_usage.model_dump(mode="json")["attribution"] == receipt["attribution"]
+    )
+    output.process_event(
+        _completed_event(response.model_copy(update={"usage": provider_usage}))
+    )
 
     completed = output.complete()
 
@@ -3057,7 +3069,9 @@ def test_typed_normalizer_builds_openai_artifact_usage_and_cost() -> None:
     assert completed.usage.cache_creation_tokens == 3
     assert completed.usage.reasoning_tokens == 1
     assert completed.usage.cost_usd == pytest.approx(1.97)
-    assert completed.usage.raw_hidden_params is None
+    assert "raw" not in completed.usage.model_dump()
+    assert "raw_hidden_params" not in completed.usage.model_dump()
+    assert "attribution" not in completed.usage.model_dump_json()
     assert completed.usage.cost_provenance is not None
     assert completed.usage.cost_provenance.method == "estimated"
     assert completed.usage.cost_provenance.source_key == "litellm_catalog"
