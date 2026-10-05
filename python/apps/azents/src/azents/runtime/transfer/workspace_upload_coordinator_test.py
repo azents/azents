@@ -7,7 +7,17 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from azcommon.infra.s3.service import S3ObjectIdentity
+from azcommon.infra.s3.service import (
+    S3ObjectIdentity,
+    S3ObjectMetadata,
+    S3TransferCleanupRequired,
+)
+from botocore.exceptions import (
+    ClientError,
+    EndpointConnectionError,
+    ParamValidationError,
+    ReadTimeoutError,
+)
 
 from azents.runtime.transfer.workspace_upload import (
     WorkspaceUploadAdmission,
@@ -258,3 +268,102 @@ async def test_finalize_claims_direct_ingress_and_reconcile_starts_delivery() ->
 
     assert result.reconciled == 1
     assert reconciler.records == ["upload"]
+
+
+class _FailingHeadS3(_S3):
+    """Raise one explicit finalization failure without contacting storage."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(now=_NOW)
+        self.error = error
+
+    async def head_with_checksum(
+        self, identity: S3ObjectIdentity
+    ) -> S3ObjectMetadata | None:
+        """Expose the selected SDK or programming failure."""
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject"),
+        EndpointConnectionError(endpoint_url="https://objects.test"),
+        ReadTimeoutError(endpoint_url="https://objects.test"),
+    ],
+)
+async def test_finalize_storage_outage_preserves_ingress_cleanup(
+    error: Exception,
+) -> None:
+    """Expected storage failures remain fail-closed and retain both handles."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _FailingHeadS3(error)
+    setup = _coordinator(store, clock, s3, _Reconciler())
+    created = await _create_and_seed(setup.coordinator, setup.object_store, s3)
+
+    finalized = await setup.coordinator.finalize(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+        expected_revision=created.revision,
+    )
+
+    assert finalized is None
+    current = await store.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.failure is WorkspaceUploadFailure.INGRESS
+    assert current.cleanup_status is WorkspaceUploadCleanupStatus.PENDING
+    assert current.ingress_handle == created.ingress_handle
+    assert current.pending_source_handle == "d" * 32
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("programming failure"),
+        RuntimeError("programming failure"),
+        ParamValidationError(report="invalid SDK arguments"),
+        S3TransferCleanupRequired(
+            "cleanup pending",
+            multipart_cleanup_required=True,
+            completed_object_cleanup_required=False,
+        ),
+    ],
+)
+async def test_finalize_unexpected_failure_propagates_with_pending_source(
+    error: Exception,
+) -> None:
+    """Unexpected failures stay visible without losing durable cleanup evidence."""
+    clock = _Clock()
+    store = InMemoryWorkspaceUploadStore(config=_config(), clock=clock)
+    s3 = _FailingHeadS3(error)
+    setup = _coordinator(store, clock, s3, _Reconciler())
+    created = await _create_and_seed(setup.coordinator, setup.object_store, s3)
+
+    with pytest.raises(type(error)) as raised:
+        await setup.coordinator.finalize(
+            "upload",
+            requester_user_id="requester",
+            workspace_id="workspace",
+            agent_id="agent",
+            expected_revision=created.revision,
+        )
+
+    assert raised.value is error
+    current = await store.get(
+        "upload",
+        requester_user_id="requester",
+        workspace_id="workspace",
+        agent_id="agent",
+    )
+    assert current is not None
+    assert current.failure is None
+    assert current.pending_source_handle == "d" * 32
+    assert current.source_handle is None

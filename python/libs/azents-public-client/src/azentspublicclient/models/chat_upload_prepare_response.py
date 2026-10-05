@@ -91,11 +91,14 @@ class ChatUploadPrepareResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "upload_id": obj.get("upload_id"),
             "put_url": obj.get("put_url"),
             "put_headers": obj.get("put_headers"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

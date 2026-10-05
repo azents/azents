@@ -11,14 +11,6 @@ from azents.repos.agent_wait_read import AgentWaitReadRepository
 from azents.services.mailbox import MailboxService
 
 
-class MailboxActivityObserverProtocol(Protocol):
-    """Run-scoped activity observer required by the wait service."""
-
-    def current_revision(self) -> int: ...
-
-    async def wait_after(self, revision: int, timeout_seconds: float) -> bool: ...
-
-
 @dataclasses.dataclass(frozen=True)
 class WaitObservation:
     """Durable wait state snapshot."""
@@ -26,6 +18,14 @@ class WaitObservation:
     mailbox_updated: bool
     descendant_count: int
     active_paths: tuple[str, ...]
+
+
+class WaitStateReader(Protocol):
+    """Completed wait-state observations required by the Wait Toolkit."""
+
+    async def observe(self, session_id: str) -> WaitObservation:
+        """Return one detached wait observation."""
+        ...
 
 
 @dataclasses.dataclass(frozen=True)

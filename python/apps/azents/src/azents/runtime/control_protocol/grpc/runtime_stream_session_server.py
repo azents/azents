@@ -2712,11 +2712,6 @@ async def _read_runner(
     try:
         async for envelope in messages:
             await data_plane.runner_response(envelope)
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        _LOGGER.exception("Runtime Web Runner session reader failed")
-        raise
     finally:
         await connection.queue.close()
 

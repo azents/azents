@@ -4,9 +4,9 @@ import datetime
 
 import sqlalchemy as sa
 
+from azents.core.upload_images import StoredImage
 from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
 from azents.rdb.session_capabilities import WriteSession
-from azents.services.uploads.schema import StoredImage
 
 from .data import AgentAvatarCleanupJob
 

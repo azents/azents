@@ -102,7 +102,9 @@ class ManagedChannelDefaultMutation(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "channel_default": ManagedChannelDefault.from_dict(obj["channel_default"]) if obj.get("channel_default") is not None else None,
             "changed": obj.get("changed"),
             "invalidated_participation_setting_count": obj.get("invalidated_participation_setting_count"),
@@ -110,6 +112,7 @@ class ManagedChannelDefaultMutation(BaseModel):
             "expired_interaction_count": obj.get("expired_interaction_count"),
             "disconnected_parent_binding_count": obj.get("disconnected_parent_binding_count"),
             "direct_cleanup_count": obj.get("direct_cleanup_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
