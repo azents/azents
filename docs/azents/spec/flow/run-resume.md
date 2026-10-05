@@ -25,7 +25,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/broker/redis.py
+  - python/apps/azents/src/azents/broker/memory.py
+  - python/apps/azents/src/azents/broker/deps.py
   - python/apps/azents/src/azents/broker/types.py
+  - python/apps/azents/src/azents/process_lifecycle.py
+  - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
@@ -50,7 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution/cutover_replay_data.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
 last_verified_at: 2026-10-05
-spec_version: 41
+spec_version: 42
 ---
 
 # Run Resume
@@ -58,6 +62,29 @@ spec_version: 41
 Run resume handles worker shutdown, process crash, stale running state, and interrupted tool calls.
 The event runtime resumes from durable transcript and `agent_runs`, not SDK serialized
 `RunState`.
+
+## Session Broker Backends
+
+`AZ_SESSION_BROKER_BACKEND=redis` remains the default for independent API,
+Worker, Scheduler and Runtime Control processes. Explicit `memory` selection
+supports the non-reload all-in-one devserver only. API and Worker endpoints use
+different identities over one AppContext-owned in-memory broker state; independent
+application/process roots and reload child processes reject memory mode before
+serving work. Redis errors never select memory as an automatic fallback.
+
+The memory broker preserves ordered per-Session wake/stop draining, live-owner
+routing, the 30-minute sticky lease and 120-second heartbeat, 30-second activity
+generation fences, purge and exact-token cutover barriers. Mailbox activity hints
+only reach a live owner and never start an idle Session. Cutover barriers expire
+after one hour and survive Session purge. Queued broker messages expire after
+24 hours. Monotonic expiry and condition notifications govern local waits; receiver
+cancellation does not consume subsequent work. Root teardown clears ephemeral
+state and wakes blocked receivers.
+
+Memory state cannot coordinate separate processes and is lost on restart.
+PostgreSQL recovery candidates, owner generations, input buffers and Runs remain
+authoritative. Existing stuck-Session recovery recreates wake-up routing from an
+empty broker; losing a queue or activity record never implies completed work.
 
 ### Durable owner revocation
 
@@ -78,7 +105,7 @@ live execution. Error-event persistence also requires the caller's generation.
 If that durable append fails, the Worker does not manufacture a non-durable
 history Event as a fallback.
 
-Redis SessionActivity uses a PostgreSQL-derived writer generation. Set accepts
+SessionActivity in both broker backends uses a PostgreSQL-derived writer generation. Set accepts
 only the newest observed generation, and clear removes only the matching
 generation's payload while retaining its fence. This prevents a previous Worker
 from overwriting or deleting the replacement owner's phase even when both recover
@@ -130,8 +157,8 @@ idle continuations, and durable stop requests. Preflight validates each candidat
 canonical authority and non-mailbox work snapshot without Redis I/O or
 message/file/credential content. Mailbox presence remains part of replay candidate selection rather
 than canonical execution authority. Replay fail-closes the batch when a selected candidate is
-invalid; otherwise it fences the owner generation, purges Redis routing state, and emits only
-`SessionWakeUp(session_id)`. Redis is notification/ownership state, never replay truth. Old or rich
+invalid; otherwise it fences the owner generation, purges ephemeral broker routing state, and emits only
+`SessionWakeUp(session_id)`. The broker is notification/ownership state, never replay truth. Old or rich
 broker payloads are rejected rather than decoded through compatibility.
 
 ## Ownership Lease
@@ -141,8 +168,8 @@ to keep follow-up inputs on the same warm `_SessionRunner` and session-scoped to
 
 | Concept | Authority | Duration | Purpose |
 | --- | --- | --- | --- |
-| Sticky ownership lease | Redis session owner key | 30 minutes of session idle time | Route follow-up inputs to the same worker and preserve warm session toolkit lifecycle |
-| Owner heartbeat | Redis owner heartbeat key | 120 seconds | Prove that the sticky owner worker is still alive |
+| Sticky ownership lease | Redis owner key or shared memory owner record | 30 minutes of session idle time | Route follow-up inputs to the same worker and preserve warm session toolkit lifecycle |
+| Owner heartbeat | Redis heartbeat key or shared memory heartbeat expiry | 120 seconds | Prove that the sticky owner worker is still alive |
 | Heartbeat interval | Worker idle loop | 30 seconds | Refresh owner heartbeat while the runner is idle but still owns the session |
 | Graceful release | Worker shutdown / runner teardown | Immediate | Return ownership when the worker intentionally stops owning the session |
 

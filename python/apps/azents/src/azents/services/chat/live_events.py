@@ -1380,7 +1380,10 @@ async def get_live_event_store(
     """API-side event live event store dependency."""
 
     async def create_store() -> AsyncIterator[BaseLiveEventStore]:
-        if appctx.config.broadcast_backend == "memory":
+        if (
+            appctx.config.session_broker_backend == "memory"
+            or appctx.config.broadcast_backend == "memory"
+        ):
             yield InMemoryLiveEventStore()
             return
         redis = create_redis_client(appctx.config.redis.url)

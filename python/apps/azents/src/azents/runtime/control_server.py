@@ -155,9 +155,11 @@ from azents.runtime.control_protocol.reconciler import (
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
+from azents.runtime.coordination.local import LocalRuntimeStores
 from azents.runtime.coordination.redis import (
     RedisRuntimeCoordinationStore,
 )
+from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.stream_session_owner import (
     RuntimeStreamOwnedSession,
     RuntimeStreamOwnerSessionRegistry,
@@ -580,6 +582,7 @@ class RuntimeControlSettings(BaseSettings):
     runtime_env: RuntimeEnvironment = RuntimeEnvironment.LOCAL
     sentry_dsn: str | None = None
     redis_url: str = "redis://localhost:6379"
+    session_broker_backend: Literal["memory", "redis"] = "redis"
     runtime_control_port: int = _DEFAULT_PORT
     runtime_control_web_transport_enabled: bool = False
     runtime_control_trusted_port: int = 8032
@@ -756,13 +759,34 @@ class _RuntimeWebCapacityRedisAdapter:
 @asynccontextmanager
 async def runtime_control_server_lifespan(
     settings: RuntimeControlSettings,
+    *,
+    local_stores: LocalRuntimeStores | None,
 ) -> AsyncGenerator[grpc.aio.Server]:
     """Manage runtime-control gRPC server resources."""
     validate_runtime_control_transfer_settings(settings)
     validate_runtime_control_workspace_upload_settings(settings)
     validate_runtime_control_web_settings(settings)
-    redis = create_redis_client(settings.redis_url)
-    coordination_store = RedisRuntimeCoordinationStore(redis)
+    if (settings.session_broker_backend == "memory") != (local_stores is not None):
+        raise ValueError("Memory Runtime Control requires co-located shared stores")
+    redis: Redis | None
+    coordination_store: RuntimeCoordinationStore
+    terminal_coordination: RuntimeTerminalCoordinationStore
+    if local_stores is not None:
+        if (
+            settings.runtime_control_transfer_backend != "memory"
+            or settings.runtime_control_workspace_upload_backend != "memory"
+            or settings.runtime_control_web_capacity_backend != "memory"
+        ):
+            raise ValueError(
+                "Co-located Runtime Control requires memory state backends"
+            )
+        redis = None
+        coordination_store = local_stores.coordination
+        terminal_coordination = local_stores.terminal
+    else:
+        redis = create_redis_client(settings.redis_url)
+        coordination_store = RedisRuntimeCoordinationStore(redis)
+        terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
     clock = _utc_now
     transfer_state = create_runtime_control_transfer_state_store(
         settings=settings,
@@ -786,21 +810,21 @@ async def runtime_control_server_lifespan(
         clock=clock,
     )
     workspace_upload_config = _workspace_upload_config(settings)
-    if not isinstance(redis, _RedisClient):
-        raise TypeError("Redis client does not support Workspace upload commands")
-    workspace_upload_store = (
-        RedisWorkspaceUploadStore(
+    workspace_upload_store: RedisWorkspaceUploadStore | InMemoryWorkspaceUploadStore
+    if settings.runtime_control_workspace_upload_backend == "redis":
+        if not isinstance(redis, _RedisClient):
+            raise TypeError("Redis client does not support Workspace upload commands")
+        workspace_upload_store = RedisWorkspaceUploadStore(
             redis=redis,
             config=workspace_upload_config,
             clock=clock,
             namespace=settings.runtime_control_workspace_upload_redis_namespace,
         )
-        if settings.runtime_control_workspace_upload_backend == "redis"
-        else InMemoryWorkspaceUploadStore(
+    else:
+        workspace_upload_store = InMemoryWorkspaceUploadStore(
             config=workspace_upload_config,
             clock=clock,
         )
-    )
     workspace_upload_object_store = WorkspaceUploadObjectStore(
         s3_service=transfer_s3,
         bucket=settings.runtime_control_workspace_s3_bucket,
@@ -845,7 +869,6 @@ async def runtime_control_server_lifespan(
         object_store=workspace_upload_object_store,
         live_object_handles=workspace_upload_store.list_object_handles,
     )
-    terminal_coordination = RedisRuntimeTerminalCoordinationStore(redis)
     runner_generation_observer = CompositeRuntimeRunnerGenerationObserver(
         transfer_coordinator,
         RuntimeTerminalRunnerGenerationObserver(
@@ -1015,7 +1038,9 @@ async def runtime_control_server_lifespan(
         )
         capacity_registry = RuntimeWebCapacityRegistry(
             config=_runtime_web_capacity_config(settings),
-            redis=_RuntimeWebCapacityRedisAdapter(redis),
+            redis=(
+                _RuntimeWebCapacityRedisAdapter(redis) if redis is not None else None
+            ),
             monotonic_clock_milliseconds=lambda: int(time.monotonic() * 1000),
             recoverable_errors=(RedisError, OSError, TimeoutError),
         )
@@ -1388,7 +1413,8 @@ async def runtime_control_server_lifespan(
         if kubernetes_api_client is not None:
             await kubernetes_api_client.close()
         await resources.aclose()
-        await redis.aclose()
+        if redis is not None:
+            await redis.aclose()
         await engine.dispose()
 
 
@@ -2254,5 +2280,5 @@ async def run_runtime_control_server() -> None:
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(signum, stop.set)
-    async with runtime_control_server_lifespan(settings):
+    async with runtime_control_server_lifespan(settings, local_stores=None):
         await stop.wait()

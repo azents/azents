@@ -110,6 +110,8 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379"
+    # Memory mode is restricted to the shared all-in-one process.
+    session_broker_backend: Literal["redis", "memory"] = "redis"
     # Explicit process-local standalone broadcast; Redis remains the default.
     broadcast_backend: Literal["redis", "memory"] = "redis"
 
@@ -554,6 +556,7 @@ class Config(BaseModel):
     job_runtime_backend: JobRuntimeBackend = JobRuntimeBackend.LOCAL
     broadcast_backend: Literal["redis", "memory"] = "redis"
     sentry_dsn: str | None
+    session_broker_backend: Literal["redis", "memory"] = "redis"
     rdb: PostgreSQLConfig
     auth: AuthConfig
     system_bootstrap: SystemBootstrapConfig
@@ -616,6 +619,7 @@ class Config(BaseModel):
             runtime_env=settings.runtime_env,
             job_runtime_backend=settings.job_runtime_backend,
             broadcast_backend=settings.broadcast_backend,
+            session_broker_backend=settings.session_broker_backend,
             sentry_dsn=settings.sentry_dsn,
             rdb=PostgreSQLConfig(
                 host=settings.rdb_host,

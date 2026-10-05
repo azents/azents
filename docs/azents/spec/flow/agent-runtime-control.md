@@ -110,7 +110,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-05
-spec_version: 98
+spec_version: 99
 ---
 
 # Agent Runtime Control
@@ -125,6 +125,21 @@ The local all-in-one devserver starts Runtime Control before composing the Worke
 then keeps Runtime Control, APIs, Worker, and Scheduler under one shared shutdown
 lifecycle. Local configuration uses the same trusted coordinator interface as
 production while explicitly opting into insecure loopback transport.
+
+With `AZ_SESSION_BROKER_BACKEND=memory`, the non-reload all-in-one root creates
+the shared AppContext first and passes its exact Runtime and Terminal coordination
+stores into Runtime Control. APIs, Worker and Control therefore observe the same
+process-local connection, command, reply and terminal state. Transfer, Workspace
+Upload, Runtime Web capacity, broadcast/live projections, external-channel
+conversation locks and Provider enrollment limiting also use memory adapters.
+Neither application composition nor Runtime Control constructs a Redis client in
+this mode. Worker readiness does not ping Redis.
+
+Standalone Runtime Control rejects memory selection without shared local stores;
+independent API/Worker/Scheduler roots and reload mode likewise reject unsupported
+memory composition. Redis remains the default for distributed deployments, with
+no automatic memory fallback. Restart loses ephemeral coordination, not durable
+Runtime existence, authorization or recovery authority.
 
 ## Planes
 
@@ -848,8 +863,11 @@ Every Provider stream declares exactly one authentication method in gRPC metadat
 
 The normalized Provider authentication result contains the durable binding ID, Provider ID, method, normalized subject, method-safe audit metadata, and evidence expiry. Control records that result on the durable Provider connection. An issued-token connection records its credential ID; a Kubernetes ServiceAccount connection has no synthetic credential or enrollment grant. A binding must be active and belong to the authenticated Provider. Registration `provider_id`, credential identifiers, scope, and generation cannot select or discover a Provider; a mismatched registration is rejected with `PERMISSION_DENIED`.
 
-The public Provider enrollment exchange rate limit is a best-effort Redis abuse-control
-window, not credential authority. Replacing Redis empty opens a fresh counting window.
+The public Provider enrollment exchange rate limit is a best-effort abuse-control
+window, backed by Redis by default and process-local memory in co-located memory
+mode, not credential authority. Replacing Redis empty or restarting the memory
+process opens a fresh counting window. Both implementations retain the same
+grant/source-address key, attempt limit and fixed-window duration.
 Every exchange still applies PostgreSQL-backed grant consumption, expiry, revocation,
 binding, subject, and Provider checks, so lost rate-limit state cannot make invalid
 enrollment evidence usable.

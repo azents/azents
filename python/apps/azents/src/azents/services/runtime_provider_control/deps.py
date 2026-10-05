@@ -1,5 +1,6 @@
 """Runtime Provider Control dependency providers."""
 
+import time
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -34,7 +35,11 @@ from azents.services.runtime_provider_control.provider_auth import (
 )
 from azents.utils.appctx import AppContext
 
-from .rate_limit import RedisRuntimeProviderEnrollmentRateLimiter
+from .rate_limit import (
+    InMemoryRuntimeProviderEnrollmentRateLimiter,
+    RedisRuntimeProviderEnrollmentRateLimiter,
+    RuntimeProviderEnrollmentRateLimiter,
+)
 from .service import RuntimeProviderEnrollmentService
 
 
@@ -61,10 +66,13 @@ def get_runtime_provider_enrollment_service(
 async def get_runtime_provider_enrollment_rate_limiter(
     appctx: Annotated[AppContext[Config], Depends(get_appctx)],
     config: Annotated[Config, Depends(get_config)],
-) -> RedisRuntimeProviderEnrollmentRateLimiter:
+) -> RuntimeProviderEnrollmentRateLimiter:
     """Return the process-wide public enrollment exchange rate limiter."""
 
-    async def create() -> AsyncIterator[RedisRuntimeProviderEnrollmentRateLimiter]:
+    async def create() -> AsyncIterator[RuntimeProviderEnrollmentRateLimiter]:
+        if config.session_broker_backend == "memory":
+            yield InMemoryRuntimeProviderEnrollmentRateLimiter(clock=time.monotonic)
+            return
         redis = create_redis_client(config.redis.url)
         try:
             yield RedisRuntimeProviderEnrollmentRateLimiter(redis)

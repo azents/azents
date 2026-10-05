@@ -30,7 +30,10 @@ async def get_websocket_broadcast(
     """
 
     async def create() -> AsyncIterator[BaseWebSocketBroadcast]:
-        if appctx.config.broadcast_backend == "memory":
+        if (
+            appctx.config.session_broker_backend == "memory"
+            or appctx.config.broadcast_backend == "memory"
+        ):
             store = await get_live_event_store(appctx)
             assert isinstance(store, InMemoryLiveEventStore)
             broadcast = InMemoryWebSocketBroadcast(store)

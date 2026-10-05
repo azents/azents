@@ -16,6 +16,11 @@ from azents.runtime.control_server import (
     runtime_control_server_lifespan,
     validate_runtime_control_transfer_settings,
 )
+from azents.runtime.coordination.local import LocalRuntimeStores
+from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.terminal_coordination.memory import (
+    InMemoryRuntimeTerminalCoordinationStore,
+)
 from azents.runtime.transfer.object_store import RuntimeTransferOrphanRepairResult
 
 
@@ -246,8 +251,10 @@ async def test_runtime_s3_clients_use_checksum_capable_sigv4_presigning(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("memory_mode", [False, True])
 async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch: pytest.MonkeyPatch,
+    memory_mode: bool,
 ) -> None:
     """One process owns state, S3, repair, and all Runtime Control services."""
     redis = _Redis()
@@ -255,7 +262,12 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     s3 = _S3()
     registrations: list[tuple[str, dict[str, object]]] = []
 
-    monkeypatch.setattr(control_server, "create_redis_client", lambda _: redis)
+    def create_redis(_url: str) -> _Redis:
+        if memory_mode:
+            raise AssertionError("Memory Runtime Control constructed Redis")
+        return redis
+
+    monkeypatch.setattr(control_server, "create_redis_client", create_redis)
     monkeypatch.setattr(control_server, "_create_engine", lambda _: engine)
     monkeypatch.setattr(
         control_server,
@@ -340,7 +352,20 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
     monkeypatch.setattr(control_server.web, "AppRunner", _AppRunner)
     monkeypatch.setattr(control_server.web, "TCPSite", _TCPSite)
 
-    async with runtime_control_server_lifespan(_settings()):
+    settings = _settings()
+    local_stores = None
+    if memory_mode:
+        settings = settings.model_copy(
+            update={
+                "session_broker_backend": "memory",
+                "runtime_control_workspace_upload_backend": "memory",
+            }
+        )
+        local_stores = LocalRuntimeStores(
+            coordination=InMemoryRuntimeCoordinationStore(),
+            terminal=InMemoryRuntimeTerminalCoordinationStore(),
+        )
+    async with runtime_control_server_lifespan(settings, local_stores=local_stores):
         names = [name for name, _kwargs in registrations]
         assert names == [
             "runtime-web-sessions",
@@ -353,6 +378,8 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         transfer = dict(registrations)["transfer"]
         provider = dict(registrations)["provider"]
         runner = dict(registrations)["runner"]
+        if local_stores is not None:
+            assert runner["coordination_store"] is local_stores.coordination
         workspace = dict(registrations)["workspace-upload"]
         sessions = dict(registrations)["runtime-web-sessions"]
         assert transfer["object_store"] is s3
@@ -399,7 +426,7 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert read_session_manager is not session_manager
         assert "secret-key" not in repr(registrations)
 
-    assert redis.closed
+    assert redis.closed is not memory_mode
     assert engine.disposed
     assert s3.closed
 
