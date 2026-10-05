@@ -145,7 +145,9 @@ class ChatWriteSnapshotResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "partial_history_events": [ChatEventResponse.from_dict(_item) for _item in obj["partial_history_events"]] if obj.get("partial_history_events") is not None else None,
             "mailbox_items": [PendingMailboxEnvelope.from_dict(_item) for _item in obj["mailbox_items"]] if obj.get("mailbox_items") is not None else None,
             "run": ChatLiveRunStateResponse.from_dict(obj["run"]) if obj.get("run") is not None else None,
@@ -153,6 +155,7 @@ class ChatWriteSnapshotResponse(BaseModel):
             "todo": TodoStateResponse.from_dict(obj["todo"]) if obj.get("todo") is not None else None,
             "goal": GoalStateResponse.from_dict(obj["goal"]) if obj.get("goal") is not None else None,
             "action_executions": [ActionExecutionProjectionResponse.from_dict(_item) for _item in obj["action_executions"]] if obj.get("action_executions") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

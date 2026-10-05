@@ -3,8 +3,7 @@
 import datetime
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,16 +30,26 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionReason,
 )
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
-from azents.services.external_channel.ingestion_replay import (
-    ExternalChannelIngestionReplayService,
+from azents.core.external_channel_replay import (
     ExternalChannelIngestionReplayUnavailable,
 )
+from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.repos.external_channel.ingestion_replay_operations import (
+    ExternalChannelReplayOperations,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_channel.ingestion import (
+    ExternalChannelConversationIngestionService,
+)
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+)
+from azents.testing.types import require_instance
 
 
 class _SessionContext(AbstractAsyncContextManager[WriteSession]):
     async def __aenter__(self) -> WriteSession:
-        return ReadWriteSession(cast(AsyncSession, SimpleNamespace(commit=AsyncMock())))
+        return ReadWriteSession(AsyncMock(spec=AsyncSession))
 
     async def __aexit__(self, *args: object) -> None:
         return None
@@ -57,9 +66,20 @@ def _service(
     ingestion: object,
 ) -> ExternalChannelIngestionReplayService:
     return ExternalChannelIngestionReplayService(
-        session_manager=cast(Any, _SessionManager()),
-        repository=cast(Any, repository),
-        ingestion_service=cast(Any, ingestion),
+        operations=ExternalChannelReplayOperations(
+            read_session_manager=_SessionManager(),
+            write_session_manager=_SessionManager(),
+            repository=require_instance(
+                MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                ExternalChannelRepository,
+            ),
+        ),
+        ingestion_service=require_instance(
+            MagicMock(
+                spec=ExternalChannelConversationIngestionService, wraps=ingestion
+            ),
+            ExternalChannelConversationIngestionService,
+        ),
     )
 
 

@@ -116,7 +116,9 @@ class ActionExecutionEventResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "action_execution_id": obj.get("action_execution_id"),
             "sequence": obj.get("sequence"),
@@ -126,6 +128,7 @@ class ActionExecutionEventResponse(BaseModel):
             "content": obj.get("content"),
             "exit_code": obj.get("exit_code"),
             "created_at": obj.get("created_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

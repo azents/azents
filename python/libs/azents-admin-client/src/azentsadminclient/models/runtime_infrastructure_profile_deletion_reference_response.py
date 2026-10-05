@@ -97,7 +97,9 @@ class RuntimeInfrastructureProfileDeletionReferenceResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "workspace_id": obj.get("workspace_id"),
             "workspace_name": obj.get("workspace_name"),
             "workspace_handle": obj.get("workspace_handle"),
@@ -107,6 +109,7 @@ class RuntimeInfrastructureProfileDeletionReferenceResponse(BaseModel):
             "workspace_runtime_profile_version": obj.get("workspace_runtime_profile_version"),
             "selected_agent_count": obj.get("selected_agent_count"),
             "running_runtime_count": obj.get("running_runtime_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

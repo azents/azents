@@ -80,8 +80,11 @@ class RuntimeWebSeparateInitiateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "service_id": obj.get("service_id")
+            }.items() if _key in obj
         })
         return _obj
 

@@ -25,8 +25,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-04
-spec_version: 11
+last_verified_at: 2026-10-05
+spec_version: 12
 ---
 
 # MCP OAuth Flow
@@ -59,6 +59,11 @@ The flow supports OAuth authorization code + PKCE S256, RFC 8414 metadata discov
   propagate instead of being classified as an invalid callback.
 - Internal PKCE, verified shared callback state, and MCP discovery results expose
   named immutable fields. Their wire formats and transport selection are unchanged.
+- Authlib public APIs own authorization URL construction and authorization-code
+  and refresh grant encoding. A public HTTP transport adapter retains configured
+  proxy routing and the existing `httpx` error family. Response compliance
+  validation preserves typed tokens, HTTP-200 provider errors, and missing/null
+  refresh-token fields before SDK token-state normalization.
 
 ## Shared Setup Transaction Boundaries
 

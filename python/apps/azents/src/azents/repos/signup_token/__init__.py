@@ -1,17 +1,16 @@
 """Signup token repository."""
 
 import datetime
-from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
-from sqlalchemy.engine import CursorResult
 
 from azents.rdb.models.signup_token import (
     RDBSignupToken,
     RDBSignupTokenRedemption,
 )
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import (
     SignupToken,
@@ -109,13 +108,12 @@ class SignupTokenRepository:
         :param revoked_at: Revocation time
         :return: True when token exists
         """
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.update(RDBSignupToken)
                 .where(RDBSignupToken.id == token_id)
                 .values(revoked_at=revoked_at)
-            ),
+            )
         )
         return (result.rowcount or 0) > 0
 

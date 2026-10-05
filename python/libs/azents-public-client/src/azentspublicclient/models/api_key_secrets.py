@@ -98,9 +98,12 @@ class ApiKeySecrets(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type") if obj.get("type") is not None else 'api_key',
             "api_key": obj.get("api_key")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

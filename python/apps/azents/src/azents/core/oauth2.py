@@ -11,10 +11,12 @@ import hashlib
 import json
 import os
 import secrets
-import urllib.parse
 from typing import NamedTuple, TypeGuard
 
 import httpx
+import httpx2
+from authlib.integrations.httpx_client import AsyncOAuth2Client
+from authlib.oauth2.client import OAuth2Client
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import BaseModel, model_validator
@@ -114,21 +116,21 @@ def build_authorization_url(
     :param resource: RFC 8707 resource indicator
     :return: Completed authorization URL
     """
-    params = {
-        "response_type": "code",
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "state": state,
-    }
-    if scopes:
-        params["scope"] = " ".join(scopes)
+    client = OAuth2Client(
+        session=None,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
+        scope=" ".join(scopes) if scopes else None,
+    )
+    params: dict[str, str] = {}
     if code_challenge is not None:
         params["code_challenge"] = code_challenge
         params["code_challenge_method"] = "S256"
     if resource is not None:
         params["resource"] = resource
 
-    return f"{auth_url}?{urllib.parse.urlencode(params)}"
+    url, _state = client.create_authorization_url(auth_url, state=state, **params)
+    return url
 
 
 async def exchange_authorization_code(
@@ -155,29 +157,31 @@ async def exchange_authorization_code(
     :return: Token response
     :raises httpx.HTTPStatusError: On token exchange failure
     """
-    post_data: dict[str, str] = {
-        "grant_type": "authorization_code",
-        "client_id": client_id,
-        "code": code,
-        "redirect_uri": redirect_uri,
-    }
-    if client_secret is not None:
-        post_data["client_secret"] = client_secret
+    params: dict[str, str] = {}
     if code_verifier is not None:
-        post_data["code_verifier"] = code_verifier
+        params["code_verifier"] = code_verifier
     if resource is not None:
-        post_data["resource"] = resource
-
-    async with httpx.AsyncClient(proxy=proxy_url) as client:
-        response = await client.post(
-            token_url,
-            data=post_data,
-            headers={"Accept": "application/json"},
-        )
-        response.raise_for_status()
-
-    data = response.json()
-    return parse_token_response(data)
+        params["resource"] = resource
+    decoder = _OAuthTokenDecoder(response=None)
+    async with httpx.AsyncClient(proxy=proxy_url) as http_client:
+        async with AsyncOAuth2Client(
+            client_id=client_id,
+            client_secret=client_secret,
+            token_endpoint_auth_method=(
+                "client_secret_post" if client_secret is not None else "none"
+            ),
+            transport=_OAuthHttpTransport(client=http_client),
+        ) as client:
+            client.register_compliance_hook("access_token_response", decoder.decode)
+            await client.fetch_token(
+                token_url,
+                grant_type="authorization_code",
+                code=code,
+                redirect_uri=redirect_uri,
+                headers={"Accept": "application/json"},
+                **params,
+            )
+    return decoder.result()
 
 
 async def refresh_access_token(
@@ -198,24 +202,23 @@ async def refresh_access_token(
     :return: Refreshed token response
     :raises httpx.HTTPStatusError: On token refresh failure
     """
-    post_data: dict[str, str] = {
-        "grant_type": "refresh_token",
-        "client_id": client_id,
-        "refresh_token": refresh_token,
-    }
-    if client_secret is not None:
-        post_data["client_secret"] = client_secret
-
-    async with httpx.AsyncClient(proxy=proxy_url) as client:
-        response = await client.post(
-            token_url,
-            data=post_data,
-            headers={"Accept": "application/json"},
-        )
-        response.raise_for_status()
-
-    data = response.json()
-    return parse_token_response(data)
+    decoder = _OAuthTokenDecoder(response=None)
+    async with httpx.AsyncClient(proxy=proxy_url) as http_client:
+        async with AsyncOAuth2Client(
+            client_id=client_id,
+            client_secret=client_secret,
+            token_endpoint_auth_method=(
+                "client_secret_post" if client_secret is not None else "none"
+            ),
+            transport=_OAuthHttpTransport(client=http_client),
+        ) as client:
+            client.register_compliance_hook("refresh_token_response", decoder.decode)
+            await client.refresh_token(
+                token_url,
+                refresh_token=refresh_token,
+                headers={"Accept": "application/json"},
+            )
+    return decoder.result()
 
 
 def parse_token_response(data: object) -> OAuthTokenResponse:
@@ -241,6 +244,70 @@ def parse_token_response(data: object) -> OAuthTokenResponse:
 
 class OAuthTokenError(Exception):
     """Provider returned HTTP 200 with error body."""
+
+
+@dataclasses.dataclass
+class _OAuthHttpTransport(httpx2.AsyncBaseTransport):
+    """Send SDK-owned requests through the established HTTP error boundary."""
+
+    client: httpx.AsyncClient
+
+    async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        """Preserve proxy routing, status errors and original response bytes."""
+        response = await self.client.request(
+            request.method,
+            str(request.url),
+            headers=request.headers.multi_items(),
+            content=await request.aread(),
+        )
+        response.raise_for_status()
+        return httpx2.Response(
+            response.status_code,
+            headers=[
+                (name, value)
+                for name, value in response.headers.multi_items()
+                if name.lower()
+                not in {"content-encoding", "content-length", "transfer-encoding"}
+            ],
+            content=response.content,
+            request=request,
+        )
+
+
+@dataclasses.dataclass
+class _OAuthTokenDecoder:
+    """Validate the provider response before SDK token-state normalization."""
+
+    response: OAuthTokenResponse | None
+
+    def decode(self, response: httpx2.Response) -> httpx2.Response:
+        """Retain omitted refresh tokens and the existing typed/error contract."""
+        token = parse_token_response(response.json())
+        self.response = token
+        normalized: dict[str, str | int] = {
+            "access_token": token.access_token,
+            "token_type": token.token_type,
+        }
+        if token.refresh_token is not None:
+            normalized["refresh_token"] = token.refresh_token
+        if token.expires_in is not None:
+            normalized["expires_in"] = token.expires_in
+        return httpx2.Response(
+            response.status_code,
+            headers=[
+                (name, value)
+                for name, value in response.headers.multi_items()
+                if name.lower() != "content-length"
+            ],
+            json=normalized,
+            request=response.request,
+        )
+
+    def result(self) -> OAuthTokenResponse:
+        """Return the exact typed provider result, not SDK refresh fallback state."""
+        if self.response is None:
+            raise AssertionError("OAuth SDK did not decode a token response.")
+        return self.response
 
 
 # ---------------------------------------------------------------------------
