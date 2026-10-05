@@ -16,6 +16,7 @@ from azents.engine.tools.todo import (
     apply_todo_update,
     render_todo_snapshot,
 )
+from azents.repos.toolkit_state.engine import TodoStateStore
 
 
 def _compaction_context(
@@ -33,6 +34,28 @@ def _compaction_context(
         summary=summary,
         continuity_history="Recent context",
     )
+
+
+async def test_todo_toolkit_waits_for_explicit_identity_binding() -> None:
+    """Unbound Todo state stays absent until both durable identities are set."""
+    store = AsyncMock(spec=TodoStateStore)
+    toolkit = TodoToolkit(store=store, agent_id=None, session_id=None)
+    context = TurnContext(
+        workspace_id="workspace-1",
+        model="model",
+        run_id="run-1",
+        publish_event=AsyncMock(),
+    )
+    assert (await toolkit.update_context(context)).tools == []
+    assert await toolkit._on_compaction_summary(_compaction_context()) is None
+    store.load.assert_not_awaited()
+    toolkit.set_session_id("session-1")
+    assert (await toolkit.update_context(context)).tools == []
+    toolkit.set_agent_id("agent-1")
+    assert [
+        tool.spec.name for tool in (await toolkit.update_context(context)).tools
+    ] == ["update_todo"]
+    store.load.assert_not_awaited()
 
 
 def test_replace_sets_full_todo_list() -> None:

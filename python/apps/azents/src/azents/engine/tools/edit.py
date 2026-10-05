@@ -4,7 +4,7 @@ import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -111,14 +111,14 @@ def make_edit_tool(
                 "Runtime is temporarily unavailable. Please try again in a moment."
             ) from None
         except RuntimeRunnerOperationFailedError as exc:
-            code, _detail = _operation_failure(exc)
+            failure = _operation_failure(exc)
             logger.info(
                 "Runtime edit failed",
                 extra={
                     "agent_id": agent_id,
                     "session_id": owner_session_id,
                     "path": input.path,
-                    "failure_code": code,
+                    "failure_code": failure.code,
                 },
             )
             raise FunctionToolError(_failure_message(exc, input.path)) from None
@@ -151,7 +151,9 @@ def make_edit_tool(
 
 def _failure_message(exc: RuntimeRunnerOperationFailedError, path: str) -> str:
     """Map safe Runner edit failure codes to existing model-visible messages."""
-    code, detail = _operation_failure(exc)
+    failure = _operation_failure(exc)
+    code = failure.code
+    detail = failure.detail
     if code == "FILE_EDIT_NOT_FOUND":
         return f"File not found: {path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
     if code == "FILE_EDIT_INVALID_UTF8":
@@ -178,10 +180,20 @@ def _failure_message(exc: RuntimeRunnerOperationFailedError, path: str) -> str:
     return f"Failed to edit file: {exc}"
 
 
-def _operation_failure(exc: RuntimeRunnerOperationFailedError) -> tuple[str, str]:
+class _OperationFailure(NamedTuple):
+    """Runner-reported edit failure code and safe detail."""
+
+    code: str
+    detail: str
+
+
+def _operation_failure(exc: RuntimeRunnerOperationFailedError) -> _OperationFailure:
     """Split a Runner error without interpreting raw operation input."""
     code, separator, detail = str(exc).partition(": ")
-    return (code, detail) if separator else (code, "Runtime edit operation failed")
+    return _OperationFailure(
+        code=code,
+        detail=detail if separator else "Runtime edit operation failed",
+    )
 
 
 def _match_count(detail: str) -> int:

@@ -10,7 +10,8 @@ from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.config import Config
 from azents.core.enums import (
@@ -34,10 +35,18 @@ from azents.core.external_channel_provider_effect import (
     ProviderTarget,
 )
 from azents.core.session_resource_authority import SessionResourceAuthority
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import (
+    ReadWriteSession,
+    WriteSession,
+    create_read_write_session_manager,
+)
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.external_channel.repository_test import _create_workspace
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task_channel_operations import (
+    ScheduledTaskChannelOperations,
+)
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
@@ -55,6 +64,7 @@ from azents.repos.scheduled_task_cycle.progress_data import (
 from azents.repos.scheduled_task_terminal_operations import (
     ScheduledTaskTerminalEffectSnapshot,
 )
+from azents.repos.workspace import WorkspaceRepository
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
@@ -219,14 +229,14 @@ def _service() -> _ServiceFixture:
         Config,
     )
     service = ScheduledTaskChannelService(
-        session_manager=_session_manager,
-        progress_repository=require_instance(
-            progress_repository,
-            ScheduledTaskProgressRepository,
+        operations=ScheduledTaskChannelOperations(
+            session_manager=_session_manager,
+            repository=require_instance(
+                provider_repository, ExternalChannelWorkRepository
+            ),
         ),
-        provider_repository=require_instance(
-            provider_repository,
-            ExternalChannelWorkRepository,
+        progress_repository=require_instance(
+            progress_repository, ScheduledTaskProgressRepository
         ),
         action_service=require_instance(action_service, ExternalChannelActionService),
         config=config,
@@ -521,16 +531,14 @@ async def test_external_effects_observe_zero_active_database_transactions() -> N
         Config,
     )
     service = ScheduledTaskChannelService(
-        session_manager=transaction_tracker.session_manager,
+        operations=ScheduledTaskChannelOperations(
+            session_manager=transaction_tracker.session_manager,
+            repository=require_instance(
+                provider_repository, ExternalChannelWorkRepository
+            ),
+        ),
         progress_repository=progress_repository,
-        provider_repository=require_instance(
-            provider_repository,
-            ExternalChannelWorkRepository,
-        ),
-        action_service=require_instance(
-            action_service,
-            ExternalChannelActionService,
-        ),
+        action_service=require_instance(action_service, ExternalChannelActionService),
         config=config,
     )
 
@@ -1085,3 +1093,153 @@ async def test_terminal_cleanup_runs_after_failed_publication() -> None:
     assert reply_kwargs["files"] == (manifest,)
     assert reply_kwargs["slack_reply_broadcast"] is True
     assert reply_kwargs["discord_forward_to_parent"] is True
+
+
+@pytest.mark.parametrize("presentation", ["registration", "deletion", "terminal"])
+async def test_native_presentation_preparation_closes_before_provider_io(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+    presentation: str,
+) -> None:
+    """Native PostgreSQL transactions are closed before every presentation effect."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    active_sessions: list[WriteSession] = []
+
+    @asynccontextmanager
+    async def tracked_manager() -> AsyncIterator[WriteSession]:
+        async with manager() as session:
+            active_sessions.append(session)
+            try:
+                yield session
+            finally:
+                active_sessions.remove(session)
+
+    service, _, provider_repository, action_service = _service()
+    plan = _plan(ExternalChannelDeliveryOperation.CONTROL_MESSAGE)
+
+    async def prepare(session: WriteSession, **_: object) -> ProviderEffectPlan:
+        assert session in active_sessions
+        # Execute an authoritative PostgreSQL statement to open a real transaction.
+        await session.read_session.execute(sa.text("SELECT 1"))
+        assert session.read_session.in_transaction()
+        return plan
+
+    async def prepare_replies(
+        session: WriteSession, **_: object
+    ) -> tuple[ProviderEffectPlan, ...]:
+        return (await prepare(session),)
+
+    async def deliver(plan: ProviderEffectPlan, **_: object) -> ProviderMutationOutcome:
+        del plan
+        assert not active_sessions
+        return ProviderMutationOutcome(
+            status="delivered",
+            provider_message_key="message",
+            error_kind=None,
+            error_summary=None,
+        )
+
+    provider_repository.prepare_binding_effect.side_effect = prepare
+    provider_repository.prepare_binding_reply_effects.side_effect = prepare_replies
+    action_service.execute_binding_effect.side_effect = deliver
+    service.operations = ScheduledTaskChannelOperations(
+        session_manager=tracked_manager,
+        repository=require_instance(provider_repository, ExternalChannelWorkRepository),
+    )
+    if presentation == "registration":
+        await service.execute_registration(_task())
+    elif presentation == "deletion":
+        await service.execute_deletion(_task())
+    else:
+        snapshot = ScheduledTaskTerminalEffectSnapshot(
+            cycle_id=_CYCLE_ID,
+            task_id="t" * 32,
+            workspace_id="w" * 32,
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            binding_id=_BINDING_ID,
+            status="finished",
+            result="Done",
+            tracker_desired_revision=1,
+            tracker_projection_parts=(
+                ScheduledTrackerProjectionPart(
+                    part_ordinal=0,
+                    desired_revision=1,
+                    status=ExternalChannelWorkProjectionStatus.PRESENT,
+                    provider_message_key="tracker-message",
+                ),
+            ),
+        )
+        await service.execute_terminal(
+            snapshot,
+            files=(),
+            file_storage=None,
+            authority=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+    assert not active_sessions
+    assert action_service.execute_binding_effect.await_count == (
+        2 if presentation == "terminal" else 1
+    )
+
+
+async def test_native_terminal_preparation_rolls_back_entire_group_on_cleanup_error(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Failed cleanup preparation rolls back writes and prevents provider I/O."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    service, _, provider_repository, action_service = _service()
+    reply = _plan(ExternalChannelDeliveryOperation.REPLY)
+
+    async def prepare_replies(
+        session: WriteSession, **_: object
+    ) -> tuple[ProviderEffectPlan, ...]:
+        await _create_workspace(session, "scheduled-terminal-preparation-rollback")
+        return (reply,)
+
+    provider_repository.prepare_binding_reply_effects.side_effect = prepare_replies
+    provider_repository.prepare_binding_effect.side_effect = RuntimeError(
+        "Cleanup preparation failed"
+    )
+    service.operations = ScheduledTaskChannelOperations(
+        session_manager=manager,
+        repository=require_instance(provider_repository, ExternalChannelWorkRepository),
+    )
+    snapshot = ScheduledTaskTerminalEffectSnapshot(
+        cycle_id=_CYCLE_ID,
+        task_id="t" * 32,
+        workspace_id="w" * 32,
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        binding_id=_BINDING_ID,
+        status="finished",
+        result="Done",
+        tracker_desired_revision=1,
+        tracker_projection_parts=(
+            ScheduledTrackerProjectionPart(
+                part_ordinal=0,
+                desired_revision=1,
+                status=ExternalChannelWorkProjectionStatus.PRESENT,
+                provider_message_key="tracker-message",
+            ),
+        ),
+    )
+    with pytest.raises(RuntimeError, match="Cleanup preparation failed"):
+        await service.execute_terminal(
+            snapshot,
+            files=(),
+            file_storage=None,
+            authority=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
+        )
+    async with manager() as session:
+        persisted = await WorkspaceRepository().resolve_id(
+            session, "scheduled-terminal-preparation-rollback"
+        )
+    assert persisted is None
+    action_service.execute_binding_effect.assert_not_awaited()

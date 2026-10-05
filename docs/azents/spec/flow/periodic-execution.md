@@ -45,6 +45,16 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/archived_session_retention_operations.py
+  - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
+  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
+  - python/apps/azents/src/azents/core/archived_session_purge_data.py
+  - python/apps/azents/src/azents/core/archived_session_retention_data.py
+  - python/apps/azents/src/azents/core/file_lifecycle_cleanup_data.py
+  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
   - python/apps/azents/src/azents/services/chat/__init__.py
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime_removal/**
@@ -70,7 +80,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-05
-spec_version: 30
+spec_version: 31
 ---
 
 # Periodic Execution Flow Spec
@@ -445,6 +455,30 @@ read cannot archive a newly active or newly pinned tree. The task result reports
 `archived`, and `skipped`; skipped candidates are expected races or no-longer-eligible roots rather
 than batch failure.
 
+## Archive and file maintenance database ownership
+
+Archive retention, purge, and file cleanup services sequence completed repository
+operations. Retention revision replacement and optional application creation share one
+transaction; recalculation batch effects and cursor advancement remain atomic under
+the exact durable application lease. First-use settings initialization remains a
+write operation, while independent application/impact observations use native
+PostgreSQL read-only scopes.
+
+Purge claim and immutable participant materialization commit together. Root-tree
+fencing and stop requests complete before broker signals. Participant attempts,
+failure attribution, and checkpoints each finish their database scope before the
+service runs the participant. Database-only Scheduled and External Channel
+participants are composed below services, including restrictive final verification
+and root deletion in the same finalization transaction. Pure participant policy
+validation and external participant ordering remain service-side. Broker, blob,
+provider and Runtime I/O never run inside those database scopes.
+
+File cleanup captures its preexisting terminal-blob IDs before current expiration
+and GC mutations. Independent metadata/transcript reads use native read-only scopes;
+terminal marking and cursor advancement preserve their existing conditional writes.
+Avatar claim and post-delete settlement use the exact cleanup lease. Object deletion
+runs after preparation closes and before its completed metadata settlement.
+
 ## Archived-session retention recalculation task
 
 `archived_session_retention_recalculation` runs every minute with a two-minute task timeout and
@@ -530,6 +564,11 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 31) — Moved archive retention, purge participant
+  checkpoints/finalization, and file cleanup database lifetimes into completed
+  repository operations, preserving leases, policy snapshots, cursor CAS, and
+  transaction-free external cleanup.
 
 - **2026-10-05** (spec_version 30) — Recorded completed Scheduled claim,
   admission, management, and provider-control ownership with native read-only

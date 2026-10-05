@@ -52,12 +52,14 @@ def test_cron_requires_exactly_five_fields() -> None:
 def test_cron_cursor_includes_exact_due_boundary() -> None:
     """A cursor exactly at now is represented as the due occurrence."""
     instant = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
-    due, future = advance_cron_cursor(
+    cursor_advance = advance_cron_cursor(
         expression="0 * * * *",
         timezone="UTC",
         cursor=instant,
         now=instant,
     )
+    due = cursor_advance.first_due
+    future = cursor_advance.first_future
     assert due == instant
     assert future == instant + datetime.timedelta(hours=1)
 
@@ -65,12 +67,14 @@ def test_cron_cursor_includes_exact_due_boundary() -> None:
 def test_cron_cursor_handles_dst_gap_in_named_zone() -> None:
     """Cron calculation persists UTC instants across a DST spring transition."""
     cursor = datetime.datetime(2026, 3, 8, 6, 0, tzinfo=datetime.UTC)
-    due, future = advance_cron_cursor(
+    cursor_advance = advance_cron_cursor(
         expression="30 2 * * *",
         timezone="America/New_York",
         cursor=cursor,
         now=datetime.datetime(2026, 3, 8, 7, 0, tzinfo=datetime.UTC),
     )
+    due = cursor_advance.first_due
+    future = cursor_advance.first_future
     assert due == cursor
     assert future > due
     assert future.tzinfo is datetime.UTC

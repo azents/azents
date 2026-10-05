@@ -127,7 +127,9 @@ class ManagedBinding(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "agent_session_id": obj.get("agent_session_id"),
             "provider": obj.get("provider"),
@@ -140,6 +142,7 @@ class ManagedBinding(BaseModel):
             "disconnect_reason": obj.get("disconnect_reason"),
             "latest_activity_at": obj.get("latest_activity_at"),
             "work": ManagedWork.from_dict(obj["work"]) if obj.get("work") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -1,6 +1,7 @@
 """read_text tool tests."""
 
 import json
+from typing import NamedTuple
 
 import pytest
 
@@ -13,17 +14,24 @@ from azents.engine.tools.testing import FakeSharedStorage
 # ---------------------------------------------------------------------------
 
 
+class _ReadFixture(NamedTuple):
+    """Read tool paired with its storage fixture."""
+
+    tool: FunctionTool
+    storage: FakeSharedStorage
+
+
 def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
-) -> tuple[FunctionTool, FakeSharedStorage]:
+) -> _ReadFixture:
     """Create read_text tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
     tool = make_read_text_tool(
         session_storage=storage,
         agent_id="",
     )
-    return tool, storage
+    return _ReadFixture(tool=tool, storage=storage)
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +46,7 @@ class TestReadTextFromSessionData:
         """Read entire short text file."""
         # Given: text file in session data
         content = "Hello, world!"
-        tool, _ = _make_tool(files={"/workspace/agent/note.txt": content.encode()})
+        tool = _make_tool(files={"/workspace/agent/note.txt": content.encode()}).tool
 
         # When: call read_text
         result = await tool.handler(json.dumps({"path": "/workspace/agent/note.txt"}))
@@ -52,7 +60,7 @@ class TestReadTextFromSessionData:
         """Read from the middle with offset."""
         # Given: long text
         content = "A" * 100
-        tool, _ = _make_tool(files={"/workspace/agent/data.txt": content.encode()})
+        tool = _make_tool(files={"/workspace/agent/data.txt": content.encode()}).tool
 
         # When: call with offset=50
         result = await tool.handler(
@@ -67,7 +75,7 @@ class TestReadTextFromSessionData:
         """Read only beginning with limit."""
         # Given: long text
         content = "B" * 20_000
-        tool, _ = _make_tool(files={"/workspace/agent/big.txt": content.encode()})
+        tool = _make_tool(files={"/workspace/agent/big.txt": content.encode()}).tool
 
         # When: call with limit=5000
         result = await tool.handler(
@@ -83,7 +91,7 @@ class TestReadTextFromSessionData:
         """offset + limit combination test."""
         # Given: text
         content = "C" * 500
-        tool, _ = _make_tool(files={"/workspace/agent/mid.txt": content.encode()})
+        tool = _make_tool(files={"/workspace/agent/mid.txt": content.encode()}).tool
 
         # When: offset=100, limit=200
         result = await tool.handler(
@@ -99,7 +107,7 @@ class TestReadTextFromSessionData:
     async def test_offset_beyond_file_length(self) -> None:
         """Return empty content when offset exceeds file length."""
         # Given: short text
-        tool, _ = _make_tool(files={"/workspace/agent/short.txt": b"hi"})
+        tool = _make_tool(files={"/workspace/agent/short.txt": b"hi"}).tool
 
         # When: offset=100
         result = await tool.handler(
@@ -113,7 +121,7 @@ class TestReadTextFromSessionData:
     async def test_no_more_hint_when_fully_read(self) -> None:
         """No 'Use offset' guidance when entire file is read."""
         # Given: short text
-        tool, _ = _make_tool(files={"/workspace/agent/small.txt": b"abc"})
+        tool = _make_tool(files={"/workspace/agent/small.txt": b"abc"}).tool
 
         # When: read entire file
         result = await tool.handler(json.dumps({"path": "/workspace/agent/small.txt"}))
@@ -124,9 +132,9 @@ class TestReadTextFromSessionData:
 
     async def test_read_uses_explicit_encoding(self) -> None:
         """Decode a text file with the caller-selected encoding."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={"/workspace/agent/latin.txt": "café".encode("latin-1")}
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -158,9 +166,9 @@ class TestReadTextFromSessionData:
         expected: str,
     ) -> None:
         """Offsets and limits count decoded characters for mixed-width text."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={"/workspace/agent/mixed.txt": content.encode("utf-8")}
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -190,9 +198,9 @@ class TestReadTextFromSessionData:
         expected: str,
     ) -> None:
         """Offsets before, at, and after a multibyte character remain valid."""
-        tool, _ = _make_tool(
+        tool = _make_tool(
             files={"/workspace/agent/boundary.txt": "A가B".encode("utf-8")}
-        )
+        ).tool
 
         result = await tool.handler(
             json.dumps(
@@ -210,9 +218,11 @@ class TestReadTextFromSessionData:
     async def test_read_delegates_one_character_range_to_storage(self) -> None:
         """The Tool delegates character calculations instead of reading bytes."""
         content = "A가B"
-        tool, storage = _make_tool(
+        fixture = _make_tool(
             files={"/workspace/agent/chunked.txt": content.encode("utf-8")}
         )
+        tool = fixture.tool
+        storage = fixture.storage
 
         result = await tool.handler(
             json.dumps(
@@ -242,13 +252,13 @@ class TestReadTextErrors:
 
     async def test_unsupported_path(self) -> None:
         """Disallowed path raises FunctionToolError."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         with pytest.raises(FunctionToolError, match="File not found"):
             await tool.handler(json.dumps({"path": "/tmp/file.txt"}))
 
     async def test_file_not_found(self) -> None:
         """Nonexistent file raises FunctionToolError."""
-        tool, _ = _make_tool(files={})
+        tool = _make_tool(files={}).tool
         with pytest.raises(FunctionToolError, match="File not found") as exc_info:
             await tool.handler(json.dumps({"path": "/workspace/agent/missing.txt"}))
         message = str(exc_info.value)
@@ -259,7 +269,9 @@ class TestReadTextErrors:
     async def test_binary_file_utf8_decode_error(self) -> None:
         """Binary data raises a deterministic decode error."""
         # Given: binary data
-        tool, _ = _make_tool(files={"/workspace/agent/binary.dat": b"\xff\xfe\x00\x01"})
+        tool = _make_tool(
+            files={"/workspace/agent/binary.dat": b"\xff\xfe\x00\x01"}
+        ).tool
 
         # When/Then: FunctionToolError
         with pytest.raises(FunctionToolError, match="cannot be decoded as utf-8"):
@@ -267,7 +279,7 @@ class TestReadTextErrors:
 
     async def test_unsupported_encoding_error_is_explicit(self) -> None:
         """Unknown encodings fail separately from invalid source bytes."""
-        tool, _ = _make_tool(files={"/workspace/agent/text.txt": b"text"})
+        tool = _make_tool(files={"/workspace/agent/text.txt": b"text"}).tool
 
         with pytest.raises(FunctionToolError, match="Unsupported text encoding"):
             await tool.handler(

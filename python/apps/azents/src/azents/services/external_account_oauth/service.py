@@ -67,9 +67,9 @@ class ExternalAccountOAuthAttemptService:
         current = now or tznow()
         state = secrets.token_urlsafe(32)
         state_hash = hashlib.sha256(state.encode("ascii")).hexdigest()
-        code_verifier, code_challenge = (
-            generate_pkce_pair() if use_pkce else (None, None)
-        )
+        pkce = generate_pkce_pair() if use_pkce else None
+        code_verifier = pkce.code_verifier if pkce is not None else None
+        code_challenge = pkce.code_challenge if pkce is not None else None
         encrypted_verifier = (
             self.cipher.encrypt(code_verifier) if code_verifier is not None else None
         )

@@ -105,10 +105,13 @@ class CatalogOffPeakRule(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "windows": [CatalogTimeWindow.from_dict(_item) for _item in obj["windows"]] if obj.get("windows") is not None else None,
             "weekday_timezone": obj.get("weekday_timezone"),
             "overrides": [CatalogPriceRate.from_dict(_item) for _item in obj["overrides"]] if obj.get("overrides") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

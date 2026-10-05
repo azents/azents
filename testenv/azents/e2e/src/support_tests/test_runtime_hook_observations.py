@@ -51,6 +51,16 @@ def _session(run_state: str) -> dict[str, object]:
         "run_state": run_state,
         "pinned": False,
         "current_enabled_execution_options": [],
+        "current_model_target_label": None,
+        "current_reasoning_effort": None,
+        "title": None,
+        "title_source": None,
+        "product_mode": None,
+        "unread_terminal_run_id": None,
+        "auto_archive_after": None,
+        "archived_at": None,
+        "purge_after": None,
+        "archive_retention_days_snapshot": None,
         "created_at": "2026-10-04T00:00:00Z",
         "updated_at": "2026-10-04T00:00:00Z",
         "future_session": {"opaque": [None, True, "retained"]},
@@ -265,6 +275,42 @@ def test_native_session_and_write_projections_keep_known_fields_and_extensions()
     assert result["phase"].to_dict() == "completed"
     assert result["reason_code"].to_dict() is None
     assert write.additional_properties["future_write"] == {"opaque": [None, "retained"]}
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "current_model_target_label",
+        "current_reasoning_effort",
+        "title",
+        "title_source",
+        "product_mode",
+        "unread_terminal_run_id",
+        "auto_archive_after",
+        "archived_at",
+        "purge_after",
+        "archive_retention_days_snapshot",
+    ],
+)
+def test_native_session_requires_nullable_response_fields_to_be_present(
+    field: str,
+) -> None:
+    """Required nullable response fields allow null, not wire-key omission."""
+    wire = _session("idle")
+    assert wire[field] is None
+    session = hooks._decode_hook_session(wire)
+    assert session.id == "session" and session.run_state == "idle"
+    assert field in session.model_fields_set
+    assert session.to_dict()[field] is None
+    assert "primary_kind" not in session.model_fields_set
+
+    del wire[field]
+    with pytest.raises(ValidationError) as captured:
+        hooks._decode_hook_session(wire)
+    assert any(
+        error["type"] == "missing" and error["loc"] == (field,)
+        for error in captured.value.errors()
+    )
 
 
 @pytest.mark.parametrize("field", ["id", "run_state", "pinned"])

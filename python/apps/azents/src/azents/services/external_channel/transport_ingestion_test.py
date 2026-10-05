@@ -4,7 +4,8 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,13 +24,15 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
 )
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelResource,
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.transport_ingestion_read import (
+    ExternalChannelTransportReadRepository,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
 )
@@ -40,6 +43,7 @@ from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
     external_channel_transport_deadline,
 )
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 7, 29, 1, tzinfo=datetime.UTC)
 
@@ -146,30 +150,47 @@ class _QueueAdmission:
         return self.outcome
 
 
+class _TransportFixture(NamedTuple):
+    """Authenticated transport and its ingestion observer."""
+
+    service: ExternalChannelTransportIngestionService
+    ingestion: _Ingestion
+
+
 def _service(
     *,
     repository: _Repository | None = None,
     queue_outcome: ExternalChannelIngestionOutcome | None = None,
-) -> tuple[ExternalChannelTransportIngestionService, _Ingestion]:
+) -> _TransportFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[WriteSession]:
-        yield ReadWriteSession(cast(AsyncSession, object()))
+        yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
     ingestion = _Ingestion()
-    return (
+    return _TransportFixture(
         ExternalChannelTransportIngestionService(
-            session_manager=cast(SessionManager[WriteSession], session_manager),
-            repository=cast(
-                ExternalChannelRepository,
-                repository or _Repository(),
+            read_operations=ExternalChannelTransportReadRepository(
+                session_manager=session_manager,
+                repository=require_instance(
+                    MagicMock(
+                        spec=ExternalChannelRepository,
+                        wraps=repository or _Repository(),
+                    ),
+                    ExternalChannelRepository,
+                ),
             ),
-            ingestion_service=cast(
+            ingestion_service=require_instance(
+                MagicMock(
+                    spec=ExternalChannelConversationIngestionService, wraps=ingestion
+                ),
                 ExternalChannelConversationIngestionService,
-                ingestion,
             ),
-            queue_admission_service=cast(
+            queue_admission_service=require_instance(
+                MagicMock(
+                    spec=ExternalChannelIngressAdmissionService,
+                    wraps=_QueueAdmission(queue_outcome),
+                ),
                 ExternalChannelIngressAdmissionService,
-                _QueueAdmission(queue_outcome),
             ),
         ),
         ingestion,
@@ -477,12 +498,9 @@ async def test_discord_manual_thread_reuses_thread_without_provisioning() -> Non
 
 @pytest.mark.asyncio
 async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
-    resource = cast(
-        ExternalChannelResource,
-        SimpleNamespace(
-            provider_resource_key="discord:300:100",
-            labels={"delivery_channel_id": "201"},
-        ),
+    resource = ExternalChannelResource.model_construct(
+        provider_resource_key="discord:300:100",
+        labels={"delivery_channel_id": "201"},
     )
     service, ingestion = _service(repository=_Repository(delivery_resource=resource))
 
@@ -505,18 +523,15 @@ async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
 @pytest.mark.asyncio
 async def test_discord_provisioned_thread_starter_reuses_root_scope() -> None:
     """A starter replay from an Azents-created Thread remains the root trigger."""
-    resource = cast(
-        ExternalChannelResource,
-        SimpleNamespace(
-            provider_resource_key="discord:300:100",
-            labels={
-                "source_channel_id": "200",
-                "parent_channel_id": "200",
-                "root_message_id": "100",
-                "thread_id": "100",
-                "delivery_channel_id": "100",
-            },
-        ),
+    resource = ExternalChannelResource.model_construct(
+        provider_resource_key="discord:300:100",
+        labels={
+            "source_channel_id": "200",
+            "parent_channel_id": "200",
+            "root_message_id": "100",
+            "thread_id": "100",
+            "delivery_channel_id": "100",
+        },
     )
     service, ingestion = _service(repository=_Repository(provider_resource=resource))
 

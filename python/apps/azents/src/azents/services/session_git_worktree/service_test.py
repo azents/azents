@@ -106,6 +106,9 @@ from azents.repos.session_execution import (
 )
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
+from azents.repos.session_git_worktree.operations import (
+    SessionGitWorktreeOperationsRepository,
+)
 from azents.repos.session_working_folder_binding import (
     SessionWorkingFolderBindingRepository,
 )
@@ -224,24 +227,32 @@ class _ReadonlyAgentSessionRepository(AgentSessionRepository):
 def _readonly_service() -> SessionGitWorktreeService:
     """Build a service that can test read-only checks without DB fixtures."""
     return SessionGitWorktreeService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=_ReadonlyAgentSessionRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
-        session_git_worktree_repository=SessionGitWorktreeRepository(),
-        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        session_workspace_project_operations_repository=(
-            _project_operations_repository(_session_manager_double)
+        repository=SessionGitWorktreeOperationsRepository(
+            agent_repository=AgentRepository(),
+            agent_session_repository=_ReadonlyAgentSessionRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            session_git_worktree_repository=SessionGitWorktreeRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            action_execution_repository=ActionExecutionRepository(),
+            mailbox_item_repository=MailboxRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            session_manager=_session_manager_double,
+            read_session_manager=_session_manager_double,
+            binding_repository=SessionWorkingFolderBindingRepository(
+                agent_repository=AgentRepository(),
+                agent_session_repository=_ReadonlyAgentSessionRepository(),
+                session_manager=_session_manager_double,
+                read_session_manager=_session_manager_double,
+            ),
         ),
-        agent_project_catalog_repository=AgentProjectCatalogRepository(),
+        session_workspace_project_operations_repository=_project_operations_repository(
+            _session_manager_double
+        ),
         agent_project_catalog_service=_CatalogRefreshService(
             AgentProjectCatalogStatus.AVAILABLE
         ),
-        action_execution_repository=ActionExecutionRepository(),
-        mailbox_item_repository=MailboxRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        session_manager=_session_manager_double,
-        read_session_manager=_session_manager_double,
         runtime_target_resolver=_RuntimeTargetResolver(
             _session_manager_double,
             AgentRuntimeRepository(),
@@ -969,26 +980,27 @@ def _service(
         )
     )
     return SessionGitWorktreeService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        workspace_user_repository=WorkspaceUserRepository(),
-        agent_runtime_repository=runtime_repository,
-        session_git_worktree_repository=SessionGitWorktreeRepository(),
-        session_workspace_project_repository=project_repository,
-        session_workspace_project_operations_repository=(
-            _project_operations_repository(
-                session_manager,
-                project_repository=project_repository,
-            )
+        repository=SessionGitWorktreeOperationsRepository(
+            agent_repository=AgentRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            agent_runtime_repository=runtime_repository,
+            session_git_worktree_repository=SessionGitWorktreeRepository(),
+            session_workspace_project_repository=project_repository,
+            agent_project_catalog_repository=catalog_repository
+            or AgentProjectCatalogRepository(),
+            action_execution_repository=ActionExecutionRepository(),
+            mailbox_item_repository=MailboxRepository(),
+            event_transcript_repository=EventTranscriptRepository(),
+            session_manager=session_manager,
+            read_session_manager=session_manager,
+            binding_repository=binding_service.repository,
         ),
-        agent_project_catalog_repository=catalog_repository
-        or AgentProjectCatalogRepository(),
+        session_workspace_project_operations_repository=_project_operations_repository(
+            session_manager,
+            project_repository=project_repository,
+        ),
         agent_project_catalog_service=_CatalogRefreshService(refresh_status),
-        action_execution_repository=ActionExecutionRepository(),
-        mailbox_item_repository=MailboxRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
-        session_manager=session_manager,
-        read_session_manager=session_manager,
         runtime_target_resolver=_RuntimeTargetResolver(
             session_manager,
             runtime_repository,
@@ -4346,7 +4358,6 @@ class TestSessionGitWorktreeService:
 
         async with rdb_session_manager() as session:
             request = await worktree_service.mark_cleanup_pending_for_session(
-                session,
                 session_id=session_id,
             )
             allocation = await SessionGitWorktreeRepository().get_by_session_id(
@@ -4376,7 +4387,6 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             await worktree_service.mark_cleanup_pending_for_session(
-                session,
                 session_id=session_id,
             )
 
@@ -4432,7 +4442,7 @@ class TestSessionGitWorktreeService:
             runner=runner,
         )
         unavailable_repository = _UnavailableRuntimeRepository()
-        worktree_service.agent_runtime_repository = unavailable_repository
+        worktree_service.repository.agent_runtime_repository = unavailable_repository
         worktree_service.runtime_target_resolver = _RuntimeTargetResolver(
             rdb_session_manager,
             unavailable_repository,
@@ -4892,7 +4902,6 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             await worktree_service.mark_cleanup_pending_for_session(
-                session,
                 session_id=session_id,
             )
 
@@ -4942,7 +4951,6 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             await worktree_service.mark_cleanup_pending_for_session(
-                session,
                 session_id=session_id,
             )
 
@@ -4983,7 +4991,6 @@ class TestSessionGitWorktreeService:
         )
         async with rdb_session_manager() as session:
             await worktree_service.mark_cleanup_pending_for_session(
-                session,
                 session_id=session_id,
             )
         await worktree_service.run_cleanup_for_session(
@@ -5043,7 +5050,6 @@ class TestSessionGitWorktreeService:
             row.worktree_path = "/workspace/agent/user-owned/repo"
             await session.write_session.flush()
             await worktree_service.mark_cleanup_pending_for_session(
-                session,
                 session_id=session_id,
             )
 
