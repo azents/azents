@@ -92,12 +92,15 @@ class WorkspaceRuntimeProfileDeleteResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "profile_id": obj.get("profile_id"),
             "cleared_workspace_default": obj.get("cleared_workspace_default"),
             "cleared_agent_count": obj.get("cleared_agent_count"),
             "affected_running_runtime_count": obj.get("affected_running_runtime_count"),
             "superseded_recreation_operation_count": obj.get("superseded_recreation_operation_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

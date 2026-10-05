@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import sqlalchemy as sa
 from pydantic import ValidationError
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import DBAPIError
 from uuid6 import uuid7
 
 from azents.core.enums import AgentLifecycleStatus
@@ -18,6 +19,7 @@ from azents.core.historical_memory_consolidation import (
 from azents.core.historical_memory_publication import (
     ConsolidationCoverage,
     ConsolidationOutputError,
+    ConsolidationPublicationUncertainError,
     ValidatedConsolidationOverview,
     validate_consolidation_overview,
 )
@@ -247,6 +249,27 @@ class ConsolidationPublicationRepository:
         return result
 
     async def publish(
+        self,
+        principal: ConsolidationJobPrincipal,
+        *,
+        expected_draft_revision_id: str,
+        expected_observation_epoch: int,
+        overview: ValidatedConsolidationOverview,
+    ) -> ConsolidationPublicationOutcome:
+        """Translate database outcome uncertainty after the owned scope closes."""
+        try:
+            return await self._publish(
+                principal,
+                expected_draft_revision_id=expected_draft_revision_id,
+                expected_observation_epoch=expected_observation_epoch,
+                overview=overview,
+            )
+        except DBAPIError as error:
+            raise ConsolidationPublicationUncertainError(
+                "Consolidation publication outcome is uncertain."
+            ) from error
+
+    async def _publish(
         self,
         principal: ConsolidationJobPrincipal,
         *,

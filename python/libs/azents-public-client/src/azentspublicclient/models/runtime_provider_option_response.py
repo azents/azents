@@ -104,7 +104,9 @@ class RuntimeProviderOptionResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider_id": obj.get("provider_id"),
             "display_name": obj.get("display_name"),
             "kind": obj.get("kind"),
@@ -113,6 +115,7 @@ class RuntimeProviderOptionResponse(BaseModel):
             "capabilities": obj.get("capabilities"),
             "current_contract_revision_id": obj.get("current_contract_revision_id"),
             "active_config_revision_id": obj.get("active_config_revision_id")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

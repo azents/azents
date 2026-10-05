@@ -102,13 +102,16 @@ class PendingMailboxEnvelope(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "mailbox_item_id": obj.get("mailbox_item_id"),
             "session_id": obj.get("session_id"),
             "kind": obj.get("kind"),
             "scheduling_mode": obj.get("scheduling_mode"),
             "created_at": obj.get("created_at"),
             "items": [PendingMailboxItem.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

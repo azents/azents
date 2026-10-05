@@ -104,10 +104,13 @@ class WorkspaceRuntimeProfileDefaultResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "runtime_profile_id": obj.get("runtime_profile_id"),
             "version": obj.get("version"),
             "profile": WorkspaceRuntimeProfileResponse.from_dict(obj["profile"]) if obj.get("profile") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

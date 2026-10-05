@@ -34,7 +34,7 @@ from typing import ClassVar, Protocol
 
 from azcommon.infra.s3.service import S3Service
 
-from azents.services.uploads.schema import StoredImage
+from azents.core.upload_images import StoredImage
 
 logger = logging.getLogger(__name__)
 
@@ -200,18 +200,7 @@ class UploadService:
             },
         )
         try:
-            try:
-                await handler.validate(body)
-            except UploadValidationError:
-                logger.warning(
-                    "Finalize validation failed",
-                    extra={
-                        "category": category,
-                        "owner_id": owner_id,
-                        "upload_key": upload_key,
-                    },
-                )
-                raise
+            await handler.validate(body)
             result = await handler.process_and_publish(
                 body=body,
                 owner_id=owner_id,

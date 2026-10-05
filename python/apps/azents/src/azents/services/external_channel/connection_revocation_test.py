@@ -3,7 +3,7 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,7 +23,6 @@ from azents.core.external_channel_provider_effect import (
 )
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import (
     ReadWriteSession,
     WriteSession,
@@ -135,30 +134,40 @@ class _ActionService:
         self.attempted.append(plan)
 
 
-def _service() -> tuple[
-    ExternalChannelConnectionRevocationService,
-    _Session,
-    _Repository,
-    _ActionService,
-]:
+class _RevocationFixture(NamedTuple):
+    """Coordinator and boundary-observing collaborators."""
+
+    service: ExternalChannelConnectionRevocationService
+    session: _Session
+    repository: _Repository
+    action_service: _ActionService
+
+
+def _service() -> _RevocationFixture:
     session = _Session()
 
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[WriteSession]:
         try:
-            yield ReadWriteSession(cast(AsyncSession, session))
+            yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=session))
         finally:
             session.closed = True
 
     repository = _Repository()
     action_service = _ActionService(session)
-    return (
+    return _RevocationFixture(
         ExternalChannelConnectionRevocationService(
             operations=ExternalChannelConnectionRevocationOperations(
-                session_manager=cast(SessionManager[WriteSession], session_manager),
-                repository=cast(ExternalChannelRepository, repository),
+                session_manager=session_manager,
+                repository=require_instance(
+                    MagicMock(spec=ExternalChannelRepository, wraps=repository),
+                    ExternalChannelRepository,
+                ),
             ),
-            action_service=cast(ExternalChannelActionService, action_service),
+            action_service=require_instance(
+                MagicMock(spec=ExternalChannelActionService, wraps=action_service),
+                ExternalChannelActionService,
+            ),
         ),
         session,
         repository,

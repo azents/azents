@@ -466,7 +466,7 @@ async def test_candidate_host_uses_only_claim_remaining_logical_turns(
 
 
 class _UncertainPublication(ConsolidationPublicationRepository):
-    async def publish(
+    async def _publish(
         self,
         principal: ConsolidationJobPrincipal,
         *,
@@ -474,7 +474,7 @@ class _UncertainPublication(ConsolidationPublicationRepository):
         expected_observation_epoch: int,
         overview: ValidatedConsolidationOverview,
     ) -> ConsolidationPublicationOutcome:
-        await super().publish(
+        await super()._publish(
             principal,
             expected_draft_revision_id=expected_draft_revision_id,
             expected_observation_epoch=expected_observation_epoch,

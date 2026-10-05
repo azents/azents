@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 from PIL import Image
 
+from azents.core.upload_images import StoredImage
 from azents.services.uploads import UploadValidationError
 from azents.services.uploads.handlers.avatar import AvatarUploadHandler
-from azents.services.uploads.schema import StoredImage
 
 
 def _make_png(width: int, height: int) -> bytes:

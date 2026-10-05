@@ -117,13 +117,16 @@ class AgentRuntimeSystemMetricsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "summary": obj.get("summary"),
             "scope": obj.get("scope"),
             "cpu": AgentRuntimeSystemMetricCurrentResponse.from_dict(obj["cpu"]) if obj.get("cpu") is not None else None,
             "memory": AgentRuntimeSystemMetricCurrentResponse.from_dict(obj["memory"]) if obj.get("memory") is not None else None,
             "disk": AgentRuntimeSystemMetricCurrentResponse.from_dict(obj["disk"]) if obj.get("disk") is not None else None,
             "samples": [AgentRuntimeSystemMetricsSampleResponse.from_dict(_item) for _item in obj["samples"]] if obj.get("samples") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
