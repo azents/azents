@@ -1,4 +1,4 @@
-"""kubernetes.client — Configuration/ApiClient/CoreV1Api 타입 보강."""
+"""kubernetes.client — Configuration/ApiClient/CoreV1Api type extensions."""
 
 from collections.abc import Callable
 from typing import Any

@@ -26,6 +26,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/connection_revocation_operations.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
+  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
+  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
   - python/apps/azents/src/azents/repos/external_channel/management_operations.py
   - python/apps/azents/src/azents/repos/external_channel/management_operation_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
@@ -59,7 +64,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-10-05
-spec_version: 49
+spec_version: 50
 ---
 
 # External Channel Lifecycle
@@ -280,6 +285,11 @@ creates no recovery work.
 ## Session Archive and Restore
 
 External Channel is registered as the `session.external-channel` lifecycle participant.
+Its DB-only participant operations live in repository composition, not in a service
+that receives live Sessions. Archive/purge operations compose the narrower lifecycle
+repository atomically with their root transition and participant state. The lifecycle
+service only consumes detached committed provider cleanup plans; it owns no DB scope.
+Scheduled participant persistence uses the same repository-only boundary.
 
 Archive uses the explicit terminal transition policy inside the archive
 repository's transaction. The concrete lifecycle operation composes participant
@@ -379,6 +389,10 @@ started cycles, removes residual Task/trigger/cycle state, and verifies absence
 before finalization.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 50) — Moved External Channel and Scheduled
+  lifecycle participant DB composition below services while preserving atomic
+  archive/purge finalization and detached post-commit provider cleanup.
 
 - **2026-10-05 (spec_version49)** — Integrated completed channel action/revocation
   and Scheduled Channel effects with selection/scheduled/lease ownership, retaining

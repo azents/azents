@@ -4,7 +4,8 @@ import datetime
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import cast
+from typing import NamedTuple
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +41,7 @@ class _SessionDouble:
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder session for repository doubles."""
-    yield ReadWriteSession(cast(AsyncSession, _SessionDouble()))
+    yield ReadWriteSession(AsyncMock(spec=AsyncSession, wraps=_SessionDouble()))
 
 
 def _job(
@@ -430,6 +431,17 @@ class _BrokerDouble:
         self.signals.append(signal.session_id)
 
 
+class _OwnerFixture(NamedTuple):
+    """Lifecycle coordinator and cleanup observers."""
+
+    service: OwnerLifecycleService
+    lifecycle: _OwnerLifecycleRepositoryDouble
+    retention: _RetentionRepositoryDouble
+    memory: _MemoryRepositoryDouble
+    users: _UserRepositoryDouble
+    broker: _BrokerDouble
+
+
 def _service(
     *,
     jobs: list[OwnerLifecycleJob],
@@ -440,14 +452,7 @@ def _service(
     users: _UserRepositoryDouble | None = None,
     retained_references: _RetainedReferenceRepositoryDouble | None = None,
     scheduled_lifecycle: _ExternalChannelDouble | None = None,
-) -> tuple[
-    OwnerLifecycleService,
-    _OwnerLifecycleRepositoryDouble,
-    _RetentionRepositoryDouble,
-    _MemoryRepositoryDouble,
-    _UserRepositoryDouble,
-    _BrokerDouble,
-]:
+) -> _OwnerFixture:
     """Build a coordinator with doubles."""
     lifecycle_repo = _OwnerLifecycleRepositoryDouble(jobs)
     retention_repo = retention or _RetentionRepositoryDouble()
@@ -483,7 +488,9 @@ def _service(
         external_channel_lifecycle_service=_ExternalChannelDouble(),
         broker=broker,
     )
-    return service, lifecycle_repo, retention_repo, memory_repo, user_repo, broker
+    return _OwnerFixture(
+        service, lifecycle_repo, retention_repo, memory_repo, user_repo, broker
+    )
 
 
 @pytest.mark.asyncio

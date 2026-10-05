@@ -2,16 +2,16 @@
 
 from pydantic import BaseModel, Field
 
+from azents.core.archived_session_retention_data import (
+    RetentionSettingsReadResult,
+    RetentionSettingsUpdateResult,
+)
 from azents.core.enums import SystemUserRole
 from azents.repos.archived_session_retention.data import (
     ArchivedSessionRetentionApplication,
     RetentionApplicationScope,
     RetentionImpactPreview,
     SystemFileLifecycleSettings,
-)
-from azents.services.archived_session_retention import (
-    RetentionSettingsReadResult,
-    RetentionSettingsUpdateResult,
 )
 from azents.services.system_user_role.data import SystemUserRoleAssignmentOutput
 

@@ -89,9 +89,12 @@ class RuntimeWebServiceListResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "items": [RuntimeWebServiceResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
             "total_count": obj.get("total_count")
+            }.items() if _key in obj
         })
         return _obj
 

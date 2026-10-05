@@ -103,11 +103,14 @@ class KubernetesContainerResources(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "cpu_request_millicores": obj.get("cpu_request_millicores"),
             "cpu_limit_millicores": obj.get("cpu_limit_millicores"),
             "memory_request_bytes": obj.get("memory_request_bytes"),
             "memory_limit_bytes": obj.get("memory_limit_bytes")
+            }.items() if _key in obj
         })
         return _obj
 

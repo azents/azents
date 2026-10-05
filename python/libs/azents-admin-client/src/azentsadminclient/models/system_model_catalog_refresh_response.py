@@ -117,7 +117,9 @@ class SystemModelCatalogRefreshResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "provider": obj.get("provider"),
             "catalog_id": obj.get("catalog_id"),
             "last_success_at": obj.get("last_success_at"),
@@ -127,6 +129,7 @@ class SystemModelCatalogRefreshResponse(BaseModel):
             "failure_code": obj.get("failure_code"),
             "failure_message": obj.get("failure_message"),
             "action_hint": obj.get("action_hint")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
