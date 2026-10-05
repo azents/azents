@@ -351,6 +351,7 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
             "workspace-upload",
         ]
         transfer = dict(registrations)["transfer"]
+        provider = dict(registrations)["provider"]
         runner = dict(registrations)["runner"]
         workspace = dict(registrations)["workspace-upload"]
         sessions = dict(registrations)["runtime-web-sessions"]
@@ -367,7 +368,32 @@ async def test_lifespan_composes_all_transfer_services_and_closes_resources(
         assert isinstance(
             owner_registry, control_server.RuntimeStreamOwnerSessionRegistry
         )
-        assert read_factory_engines == [engine]
+        assert read_factory_engines == [engine, engine, engine, engine]
+        runner_authenticator = runner["runner_authenticator"]
+        assert isinstance(
+            runner_authenticator, control_server.RuntimeRunnerAuthenticationService
+        )
+        provider_registrar = provider["connection_registrar"]
+        assert isinstance(
+            provider_registrar,
+            control_server.RuntimeProviderConnectionRegistrationService,
+        )
+        runner_registrar = runner["connection_registrar"]
+        assert isinstance(
+            runner_registrar,
+            control_server.RuntimeRunnerConnectionRegistrationService,
+        )
+        assert runner_authenticator.operations.session_manager is read_session_manager
+        assert (
+            provider_registrar.operations.read_session_manager is read_session_manager
+        )
+        assert runner_registrar.operations.read_session_manager is read_session_manager
+        assert provider_registrar.operations.session_manager is session_manager
+        assert runner_registrar.operations.session_manager is session_manager
+        assert (
+            runner_registrar.operations.runner_authentication
+            is runner_authenticator.operations
+        )
         assert owner_registry.repository.session_manager is session_manager
         assert owner_registry.repository.read_session_manager is read_session_manager
         assert read_session_manager is not session_manager

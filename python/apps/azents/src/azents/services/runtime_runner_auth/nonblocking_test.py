@@ -11,9 +11,15 @@ from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifie
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.workspace import RDBWorkspace
-from azents.rdb.session_capabilities import create_read_write_session_manager
+from azents.rdb.session_capabilities import (
+    create_read_only_session_manager,
+    create_read_write_session_manager,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime_removal.repository_test import _create_agent
+from azents.repos.runtime_runner_auth_operations import (
+    RuntimeRunnerAuthenticationOperationRepository,
+)
 from azents.services.runtime_runner_auth.service import (
     RuntimeRunnerAuthenticationService,
 )
@@ -35,7 +41,11 @@ async def test_runner_poll_nonblocking_and_registration_rejects_replaced_generat
     )
     credential = verifier.verify(issued.token)
     service = RuntimeRunnerAuthenticationService(
-        session_manager=writes, runtime_repository=repository, verifier=verifier
+        operations=RuntimeRunnerAuthenticationOperationRepository(
+            session_manager=create_read_only_session_manager(rdb_engine),
+            runtime_repository=repository,
+        ),
+        verifier=verifier,
     )
     held, attempting, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
@@ -52,7 +62,7 @@ async def test_runner_poll_nonblocking_and_registration_rejects_replaced_generat
     async def register() -> bool:
         async with writes() as session:
             attempting.set()
-            return await service.fence_runner_registration_in_transaction(
+            return await service.operations.fence_runner_registration_in_transaction(
                 session, credential
             )
 

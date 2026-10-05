@@ -736,12 +736,15 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
-- **2026-10-05** (v29) — Completed owner-lifecycle repository transaction ownership
-  while preserving root retirement, atomic account finalization and post-commit
+- **2026-10-05** (v29) — Integrated completed owner-lifecycle transaction ownership
+  with password reset and first-admin bootstrap. Preserved root retirement,
+  atomic account finalization, single-use authority rechecks and post-commit
   provider/Broker effects.
+
 - **2026-10-05** (v28) — Completed password-reset and first-admin bootstrap
   repository operations, retaining single-use atomic mutation groups and final
   authority revalidation with hash preparation before SQL and effects after commit.
+
 
 - **2026-10-03** (v25) — Completed all five SignupToken database groups in domain
   repository operations. Preserved prepared-clock/crypto ordering, atomic

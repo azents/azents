@@ -1,16 +1,14 @@
 """ChatWriteRequest repository."""
 
-from typing import Any, cast
-
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.engine import CursorResult
 
 from azents.rdb.models.chat_write_request import RDBChatWriteRequest
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
-from .data import ChatWriteRequest, ChatWriteRequestCreate
+from .data import ChatWriteRequest, ChatWriteRequestCreate, IdempotentChatWriteResult
 
 
 class ChatWriteRequestRepository:
@@ -20,10 +18,10 @@ class ChatWriteRequestRepository:
         self,
         session: WriteSession,
         create: ChatWriteRequestCreate,
-    ) -> tuple[ChatWriteRequest, bool]:
+    ) -> IdempotentChatWriteResult:
         """Atomically create ChatWriteRequest or fetch existing row.
 
-        :return: `(record, created)` pair. `created` is False when retry.
+        :return: Named request result; ``created`` is False for a retry.
         """
         insert = pg_insert(RDBChatWriteRequest).values(
             id=uuid7().hex,
@@ -54,7 +52,7 @@ class ChatWriteRequestRepository:
         result = await session.write_session.execute(stmt)
         rdb = result.scalar_one_or_none()
         if rdb is not None:
-            return self._build(rdb), True
+            return IdempotentChatWriteResult(record=self._build(rdb), created=True)
         if create.creation_agent_id is None:
             existing = await self.get_by_client_request_id(
                 session,
@@ -71,7 +69,7 @@ class ChatWriteRequestRepository:
             )
         if existing is None:
             raise RuntimeError("Idempotent chat write request lookup failed")
-        return existing, False
+        return IdempotentChatWriteResult(record=existing, created=False)
 
     async def get_by_session_creation_client_request_id(
         self,
@@ -122,13 +120,12 @@ class ChatWriteRequestRepository:
         requester_user_id: str,
     ) -> int:
         """Delete retained idempotency records owned by one User."""
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBChatWriteRequest).where(
                     RDBChatWriteRequest.requester_user_id == requester_user_id
                 )
-            ),
+            )
         )
         await session.write_session.flush()
         return result.rowcount or 0

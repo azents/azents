@@ -1,207 +1,22 @@
-"""Transaction-bound External Channel lifecycle participant operations."""
+"""Post-commit External Channel lifecycle provider cleanup."""
 
 import dataclasses
-import datetime
 from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.external_channel_impact import ExternalChannelMultiRouteImpact
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
-from azents.core.session_lifecycle import (
-    SessionLifecycleParticipantDefinition,
-    SessionLifecyclePurgeContext,
-    SessionLifecycleTransitionContext,
-)
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.external_channel.data import (
-    ExternalChannelAgentDecommissionCleanup,
-    ExternalChannelArchiveTermination,
-    ExternalChannelMultiConnectionDisconnect,
-    ExternalChannelMultiRouteRemoval,
-    ExternalChannelPurgeCleanup,
-    ExternalChannelPurgeVerification,
-    ExternalChannelRestoreValidation,
-)
-from azents.repos.external_channel.lifecycle import (
-    ExternalChannelLifecycleRepository,
-)
-from azents.services.external_channel.channel_action import (
-    ExternalChannelActionService,
-)
-
-_PARTICIPANT_KEY = "session.external-channel"
+from azents.services.external_channel.channel_action import ExternalChannelActionService
 
 
 @dataclasses.dataclass
 class ExternalChannelLifecycleService:
-    """Run External Channel lifecycle work inside caller-owned transactions."""
+    """Attempt detached provider cleanup only after lifecycle persistence completes."""
 
-    repository: Annotated[
-        ExternalChannelLifecycleRepository,
-        Depends(ExternalChannelLifecycleRepository.create),
-    ]
     action_service: Annotated[
-        ExternalChannelActionService,
-        Depends(ExternalChannelActionService.create),
+        ExternalChannelActionService, Depends(ExternalChannelActionService.create)
     ]
-
-    async def archive_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecycleTransitionContext,
-    ) -> ExternalChannelArchiveTermination | None:
-        """Terminate only the External Channel archive participant."""
-        if definition.key != _PARTICIPANT_KEY:
-            return None
-        return await self.repository.terminate_session_tree(
-            session,
-            session_ids=context.subtree_session_ids,
-            now=datetime.datetime.now(datetime.UTC),
-        )
-
-    async def restore_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecycleTransitionContext,
-    ) -> ExternalChannelRestoreValidation | None:
-        """Validate restore without reactivating External Channel state."""
-        if definition.key != _PARTICIPANT_KEY:
-            return None
-        return await self.repository.validate_restore_session_tree(
-            session,
-            session_ids=context.subtree_session_ids,
-        )
-
-    async def prepare_purge_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecyclePurgeContext,
-    ) -> None:
-        """Require no provider-delivery preparation before canonical purge."""
-        if definition.key != _PARTICIPANT_KEY:
-            return None
-        del session, context
-        return None
-
-    async def cleanup_purge_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecyclePurgeContext,
-    ) -> ExternalChannelPurgeCleanup | None:
-        """Remove Session-owned External Channel rows in restrictive order."""
-        if definition.key != _PARTICIPANT_KEY:
-            return None
-        return await self.repository.purge_session_tree(
-            session,
-            session_ids=context.subtree_session_ids,
-        )
-
-    async def verify_purge_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecyclePurgeContext,
-    ) -> ExternalChannelPurgeVerification | None:
-        """Verify the External Channel purge boundary is empty."""
-        if definition.key != _PARTICIPANT_KEY:
-            return None
-        return await self.repository.verify_session_tree_purged(
-            session,
-            session_ids=context.subtree_session_ids,
-        )
-
-    async def finalize_purge_participant(
-        self,
-        session: WriteSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecyclePurgeContext,
-    ) -> ExternalChannelPurgeVerification | None:
-        """Recheck absence immediately before root-tree finalization."""
-        return await self.verify_purge_participant(session, definition, context)
-
-    async def cleanup_decommissioned_agent(
-        self,
-        session: WriteSession,
-        *,
-        agent_id: str,
-        now: datetime.datetime,
-    ) -> ExternalChannelAgentDecommissionCleanup:
-        """Remove direct Agent-owned route and authorization state."""
-        return await self.repository.cleanup_decommissioned_agent(
-            session,
-            agent_id=agent_id,
-            now=now,
-        )
-
-    async def project_multi_route_impact(
-        self,
-        session: WriteSession,
-        *,
-        connection_id: str,
-        route_id: str,
-    ) -> ExternalChannelMultiRouteImpact | None:
-        """Return one internal, sanitized Multi route removal projection."""
-        return await self.repository.project_multi_route_impact(
-            session,
-            connection_id=connection_id,
-            route_id=route_id,
-        )
-
-    async def remove_multi_route(
-        self,
-        session: WriteSession,
-        *,
-        connection_id: str,
-        route_id: str,
-        removed_by_user_id: str | None,
-        now: datetime.datetime,
-    ) -> ExternalChannelMultiRouteRemoval | None:
-        """Remove one internal Multi association inside the caller transaction."""
-        return await self.repository.remove_multi_route(
-            session,
-            connection_id=connection_id,
-            route_id=route_id,
-            removed_by_user_id=removed_by_user_id,
-            now=now,
-        )
-
-    async def reenable_multi_route(
-        self,
-        session: WriteSession,
-        *,
-        connection_id: str,
-        route_id: str,
-    ) -> bool:
-        """Re-enable one preserved internal Multi association."""
-        return await self.repository.reenable_multi_route(
-            session,
-            connection_id=connection_id,
-            route_id=route_id,
-        )
-
-    async def disconnect_multi_connection(
-        self,
-        session: WriteSession,
-        *,
-        connection_id: str,
-        now: datetime.datetime,
-        reason: str,
-        defer_provider_state_purge: bool = False,
-    ) -> ExternalChannelMultiConnectionDisconnect | None:
-        """Disconnect an internal Multi App inside the caller transaction."""
-        return await self.repository.disconnect_multi_connection(
-            session,
-            connection_id=connection_id,
-            now=now,
-            reason=reason,
-            defer_provider_state_purge=defer_provider_state_purge,
-        )
 
     async def consume_archive_cleanup(
         self,
@@ -211,14 +26,3 @@ class ExternalChannelLifecycleService:
         for plan in plans:
             await self.action_service.execute_terminal_control(plan)
         return len(plans)
-
-    async def purge_decommissioned_provider_state(
-        self,
-        session: WriteSession,
-        connection_ids: Sequence[str],
-    ) -> int:
-        """Purge deferred Single-App credentials after target capture."""
-        return await self.repository.purge_disconnected_connection_provider_state(
-            session,
-            connection_ids=connection_ids,
-        )

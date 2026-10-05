@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +23,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.core.upload_images import StoredImage
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.repos.agent_decommission_operations import (
@@ -36,13 +37,12 @@ from azents.services.agent_decommission import (
     AgentDecommissionAdvanceResult,
     AgentDecommissionService,
 )
-from azents.services.uploads.schema import StoredImage
 
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder session for repository doubles."""
-    yield ReadWriteSession(cast(AsyncSession, object()))
+    yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
 
 def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
@@ -160,10 +160,11 @@ async def test_decommission_continues_after_one_job_retries() -> None:
     assert repository.retries == [("failed", "RuntimeError")]
 
 
-class _TransactionDouble:
+class _TransactionDouble(AsyncSession):
     """Minimal transaction double used to prove archive callback ordering."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.committed = False
 
     async def commit(self) -> None:
@@ -174,7 +175,7 @@ class _TransactionDouble:
 @asynccontextmanager
 async def _transaction_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield one stable transaction object to all lifecycle collaborators."""
-    yield ReadWriteSession(cast(AsyncSession, _TransactionDouble()))
+    yield ReadWriteSession(_TransactionDouble())
 
 
 @dataclass(frozen=True)

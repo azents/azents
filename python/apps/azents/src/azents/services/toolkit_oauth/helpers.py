@@ -29,8 +29,10 @@ from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
 from azents.services.toolkit.credential_edits import (
+    decode_credential_values,
+    decode_stored_credential_values,
+    merge_credential_edits,
     merge_kubernetes_credentials,
-    merge_redacted_credential_values,
 )
 from azents.services.toolkit_oauth.data import (
     GitHubInstallationProjection,
@@ -41,7 +43,6 @@ from azents.services.toolkit_oauth.data import (
 
 _OAuthSecretsUnion = McpSecretsOAuth2 | McpSecretsOAuth2Token | McpSecretsOAuth2Dcr
 _oauth_secrets_adapter = TypeAdapter[_OAuthSecretsUnion](_OAuthSecretsUnion)
-_credentials_adapter = TypeAdapter(dict[str, object])
 
 
 class OAuthClientCredentials(NamedTuple):
@@ -204,15 +205,12 @@ def merge_saved_test_credentials(
                 request.config,
             )
         )
-    saved: dict[str, object] = {}
-    if saved_credentials is not None:
-        try:
-            saved = _credentials_adapter.validate_json(saved_credentials)
-        except ValidationError:
-            pass
+    saved = decode_stored_credential_values(saved_credentials)
     if request.credentials is not None:
-        saved = merge_redacted_credential_values(saved, request.credentials)
-    return json.dumps(saved) if saved else None
+        saved = merge_credential_edits(
+            saved, decode_credential_values(request.credentials)
+        )
+    return json.dumps(saved.to_payload()) if saved.fields else None
 
 
 async def bind_platform_app_test_credentials(
@@ -222,8 +220,8 @@ async def bind_platform_app_test_credentials(
     """Bind unsaved Platform GitHub credentials to the server App identity."""
     if credentials_json is None:
         return None
-    parsed: object = json.loads(credentials_json)
-    if not isinstance(parsed, dict) or parsed.get("type") != "github_app_platform":
+    parsed = decode_credential_values(json.loads(credentials_json))
+    if parsed.credential_type != "github_app_platform":
         return credentials_json
     platform = await platform_runtime.resolve()
     if platform.app_id is None:
@@ -231,4 +229,4 @@ async def bind_platform_app_test_credentials(
             ToolkitOAuthFailureReason.RESOURCE_NOT_FOUND,
             "GitHub Platform App is not configured.",
         )
-    return json.dumps({**parsed, "app_id": platform.app_id})
+    return json.dumps({**parsed.to_payload(), "app_id": platform.app_id})

@@ -91,13 +91,16 @@ class RuntimeNetworkProjection(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "mode": obj.get("mode"),
             "allowed_cidrs": obj.get("allowed_cidrs"),
             "denied_cidrs": obj.get("denied_cidrs"),
             "domain_mode": obj.get("domain_mode"),
             "allowed_domains": obj.get("allowed_domains"),
             "denied_domains": obj.get("denied_domains")
+            }.items() if _key in obj
         })
         return _obj
 

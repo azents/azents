@@ -110,12 +110,15 @@ class ModelParameters(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "temperature": obj.get("temperature"),
             "top_p": obj.get("top_p"),
             "top_k": obj.get("top_k"),
             "stop_sequences": obj.get("stop_sequences"),
             "reasoning_effort": obj.get("reasoning_effort")
+            }.items() if _key in obj
         })
         return _obj
 
