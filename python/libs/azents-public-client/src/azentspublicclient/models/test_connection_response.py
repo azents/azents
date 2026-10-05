@@ -106,12 +106,15 @@ class TestConnectionResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "success": obj.get("success"),
             "message": obj.get("message"),
             "discovered_auth_url": obj.get("discovered_auth_url"),
             "discovered_token_url": obj.get("discovered_token_url"),
             "supports_dcr": obj.get("supports_dcr")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

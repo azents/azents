@@ -21,7 +21,7 @@ class MCPOAuthConnectionRepository:
         """
         :param cipher: Credential encryption/decryption object
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def get_by_toolkit_id(
         self, session: ReadSession, toolkit_id: str
@@ -128,15 +128,15 @@ class MCPOAuthConnectionRepository:
         :param expires_at: Access token expiration timestamp
         :return: Stored OAuth connection
         """
-        encrypted_client_id = self._cipher.encrypt(client_id)
+        encrypted_client_id = self.cipher.encrypt(client_id)
         encrypted_client_secret = (
-            self._cipher.encrypt(client_secret) if client_secret is not None else None
+            self.cipher.encrypt(client_secret) if client_secret is not None else None
         )
         encrypted_access_token = (
-            self._cipher.encrypt(access_token) if access_token is not None else None
+            self.cipher.encrypt(access_token) if access_token is not None else None
         )
         encrypted_refresh_token = (
-            self._cipher.encrypt(refresh_token) if refresh_token is not None else None
+            self.cipher.encrypt(refresh_token) if refresh_token is not None else None
         )
         values = {
             "id": uuid7().hex,
@@ -232,13 +232,13 @@ class MCPOAuthConnectionRepository:
         :return: Updated OAuth connection or None
         """
         values: dict[str, object] = {
-            "encrypted_access_token": self._cipher.encrypt(access_token),
+            "encrypted_access_token": self.cipher.encrypt(access_token),
             "expires_at": expires_at,
             "status": MCPOAuthConnectionStatus.CONNECTED,
             "updated_at": sa.func.now(),
         }
         if refresh_token is not None:
-            values["encrypted_refresh_token"] = self._cipher.encrypt(refresh_token)
+            values["encrypted_refresh_token"] = self.cipher.encrypt(refresh_token)
         stmt = (
             sa.update(RDBMCPOAuthConnection)
             .where(RDBMCPOAuthConnection.toolkit_id == toolkit_id)
@@ -293,21 +293,21 @@ class MCPOAuthConnectionRepository:
             authorization_endpoint=rdb.authorization_endpoint,
             token_endpoint=rdb.token_endpoint,
             registration_endpoint=rdb.registration_endpoint,
-            client_id=self._cipher.decrypt(rdb.encrypted_client_id),
+            client_id=self.cipher.decrypt(rdb.encrypted_client_id),
             client_secret=(
-                self._cipher.decrypt(rdb.encrypted_client_secret)
+                self.cipher.decrypt(rdb.encrypted_client_secret)
                 if rdb.encrypted_client_secret is not None
                 else None
             ),
             token_endpoint_auth_method=rdb.token_endpoint_auth_method,
             scope=rdb.scope,
             access_token=(
-                self._cipher.decrypt(rdb.encrypted_access_token)
+                self.cipher.decrypt(rdb.encrypted_access_token)
                 if rdb.encrypted_access_token is not None
                 else None
             ),
             refresh_token=(
-                self._cipher.decrypt(rdb.encrypted_refresh_token)
+                self.cipher.decrypt(rdb.encrypted_refresh_token)
                 if rdb.encrypted_refresh_token is not None
                 else None
             ),

@@ -31,6 +31,7 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.runtime_profile_workspace import RuntimeProfileWorkspaceUnavailable
 from azents.core.s3.deps import get_s3_service
 from azents.core.upload_images import (
     ImageFile,
@@ -73,7 +74,6 @@ from azents.services.model_options import (
 )
 from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,
-    RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.terminal_policy.invalidation import (
     TerminalPolicyInvalidationPublisherDependency,

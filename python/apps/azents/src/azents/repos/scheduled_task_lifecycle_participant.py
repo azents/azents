@@ -1,4 +1,4 @@
-"""Transaction-bound Scheduled Task lifecycle participant operations."""
+"""Database-only lifecycle participant repository composition."""
 
 from collections.abc import Sequence
 from dataclasses import asdict
@@ -21,8 +21,8 @@ from azents.repos.scheduled_task.lifecycle import (
 _PARTICIPANT_KEY = "session.scheduled-task"
 
 
-class ScheduledTaskLifecycleService:
-    """Run Scheduled Task lifecycle work inside caller-owned transactions."""
+class ScheduledTaskLifecycleParticipantRepository:
+    """Compose narrower lifecycle persistence inside native operation groups."""
 
     def __init__(
         self,

@@ -96,12 +96,15 @@ class RuntimeWebCreateRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "port": obj.get("port"),
             "label": obj.get("label"),
             "selected_duration_seconds": obj.get("selected_duration_seconds"),
             "turn_on": obj.get("turn_on"),
             "operation_key": obj.get("operation_key")
+            }.items() if _key in obj
         })
         return _obj
 
