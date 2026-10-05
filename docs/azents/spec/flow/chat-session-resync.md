@@ -32,7 +32,6 @@ code_paths:
   - python/apps/azents/src/azents/broker/broadcast.py
   - python/apps/azents/src/azents/broker/websocket_deps.py
   - python/apps/azents/src/azents/core/config.py
-  - python/apps/azents/src/azents/core/settings.py
   - python/apps/azents/src/azents/transport/chat.py
   - python/apps/azents/src/azents/engine/tools/skill.py
   - python/apps/azents/src/azents/worker/deps.py
@@ -44,7 +43,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/subagent-tree/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
 last_verified_at: 2026-10-05
-spec_version: 55
+spec_version: 56
 ---
 
 # Chat Session Resync
@@ -259,6 +258,14 @@ matching live execution row and progress events. The server then publishes the d
 before `action_execution_removed`. Durable observation suppresses a matching live projection even if
 a delayed live update or removal arrives out of order. Terminal operations have no retry/discard
 mutation response.
+
+The frontend decodes durable `action_execution_result` payloads and live
+`action_execution_updated` frames before admitting their projections. Validation covers all
+required execution fields, the supported action discriminator and its payload, and each progress
+event's required and optional fields. Nullable fields remain distinct from omitted fields; an
+execution's `action_type` must match its action payload. Additive response fields are stripped by
+the decoder. Malformed history results and live updates are ignored rather than entering timeline
+state, and live frames must match the subscribed Session ID.
 
 Raw live partials remain separate from raw durable history until render selection. Assistant,
 reasoning, provider-tool, client-tool, and internal-agent rows use semantic projection identity so a
@@ -592,6 +599,12 @@ Session Channels management state is queried separately from timeline resync.
 
 ## 12. Changelog
 
+- **2026-10-05** — v56. Reconciled code-path discovery with current defining
+  modules; system behavior is unchanged.
+
+- **2026-10-05** — v56. Decode durable and live action execution projections
+  against the complete wire shape, preserving omitted/nullable fields and
+  skipping malformed projections before timeline admission.
 - **2026-10-05** — v55. Kept stale applied-label fallback in detached REST
   projections without hidden profile writes or fabricated generations, and
   removed inherited ownership/tree gates from baseline descriptions.

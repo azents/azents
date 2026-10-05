@@ -18,6 +18,11 @@ from azents.core.external_channel_ingestion import (
     ExternalChannelIngestionReason,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.external_channel_selection import (
+    ExternalChannelSelectorCandidate,
+    ExternalChannelSelectorCatalog,
+    ExternalChannelSelectorSelection,
+)
 from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
@@ -30,12 +35,7 @@ from azents.services.external_channel.ingestion_replay import (
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
-from azents.services.external_channel.selector import (
-    ExternalChannelSelectorCandidate,
-    ExternalChannelSelectorCatalog,
-    ExternalChannelSelectorSelection,
-    ExternalChannelSelectorService,
-)
+from azents.services.external_channel.selector import ExternalChannelSelectorService
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 28, tzinfo=datetime.UTC)

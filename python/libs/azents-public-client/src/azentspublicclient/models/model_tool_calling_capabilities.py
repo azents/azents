@@ -89,10 +89,13 @@ class ModelToolCallingCapabilities(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "supported": obj.get("supported") if obj.get("supported") is not None else False,
             "parallel_tool_calls": obj.get("parallel_tool_calls") if obj.get("parallel_tool_calls") is not None else False,
             "strict_json_schema": obj.get("strict_json_schema") if obj.get("strict_json_schema") is not None else False
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

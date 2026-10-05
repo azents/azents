@@ -36,16 +36,10 @@ from azents.core.xai_oauth import (
     XaiOAuthConnectionStatus,
     resolve_xai_usage_base_url,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
 from azents.repos.chatgpt_oauth_runtime import ChatGPTOAuthRuntimeRepository
 from azents.repos.kimi_oauth_runtime import KimiOAuthRuntimeRepository
-from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
-from azents.repos.llm_provider_integration.deps import (
-    get_llm_provider_integration_repository,
-)
+from azents.repos.subscription_usage_read import SubscriptionUsageReadRepository
 from azents.repos.xai_oauth_runtime import XaiOAuthRuntimeRepository
 from azents.services.chatgpt_oauth.data import ProviderRejected, ProviderUnavailable
 from azents.services.chatgpt_oauth.runtime import (
@@ -151,9 +145,9 @@ def get_kimi_usage_base_url() -> str:
 class SubscriptionUsageService:
     """Load, authorize, refresh, and normalize one subscription usage read."""
 
-    repository: Annotated[
-        LLMProviderIntegrationRepository,
-        Depends(get_llm_provider_integration_repository),
+    read_repository: Annotated[
+        SubscriptionUsageReadRepository,
+        Depends(SubscriptionUsageReadRepository),
     ]
     kimi_oauth_runtime_repository: Annotated[
         KimiOAuthRuntimeRepository, Depends(KimiOAuthRuntimeRepository)
@@ -166,9 +160,6 @@ class SubscriptionUsageService:
     ]
     runtime_oauth_clients: Annotated[
         RuntimeOAuthClientFactories, Depends(create_runtime_oauth_client_factories)
-    ]
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
     ]
     http_client: Annotated[httpx.AsyncClient, Depends(_get_http_client)]
     chatgpt_usage_base_url: Annotated[str, Depends(get_chatgpt_usage_base_url)]
@@ -185,10 +176,7 @@ class SubscriptionUsageService:
     ) -> Result[SubscriptionUsageOutcome, SubscriptionUsageServiceFailure]:
         """Read subscription usage for one workspace integration."""
         started_at = time.perf_counter()
-        async with self.session_manager() as session:
-            integration = await self.repository.get_by_id_with_secrets(
-                session, integration_id
-            )
+        integration = await self.read_repository.load(integration_id)
         if integration is None:
             failure = SubscriptionUsageNotFound(integration_id=integration_id)
             self._log_service_failure(

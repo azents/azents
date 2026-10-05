@@ -116,7 +116,9 @@ class ExternalAccountOAuthDetailResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "section": obj.get("section"),
             "provider": obj.get("provider"),
             "schema_version": obj.get("schema_version"),
@@ -125,6 +127,7 @@ class ExternalAccountOAuthDetailResponse(BaseModel):
             "callback_url": obj.get("callback_url"),
             "fields": [ExternalAccountOAuthFieldResponse.from_dict(_item) for _item in obj["fields"]] if obj.get("fields") is not None else None,
             "health": ExternalAccountOAuthHealthResponse.from_dict(obj["health"]) if obj.get("health") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

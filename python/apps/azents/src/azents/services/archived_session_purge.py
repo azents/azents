@@ -7,16 +7,14 @@ import logging
 from typing import Annotated
 
 from azcommon.infra.s3.service import S3Service
-from azcommon.uuid import uuid7
 from fastapi import Depends
 
 from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker, SessionStopSignal
+from azents.core.archived_session_purge_data import ArchivedSessionPurgeJobSummary
 from azents.core.config import Config, require_workspace_s3_bucket
 from azents.core.deps import get_config
 from azents.core.enums import (
-    AgentSessionRunState,
-    AgentSessionStatus,
     ArchivedSessionPurgeParticipantPhase,
     ArtifactStatus,
     ExchangeFileStatus,
@@ -27,36 +25,25 @@ from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgeContext,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
-from azents.repos.archived_session_retention.data import ArchivedSessionPurgeJob
-from azents.repos.artifact import ArtifactRepository
-from azents.repos.artifact.data import Artifact
-from azents.repos.exchange_file import ExchangeFileRepository
-from azents.repos.exchange_file.data import ExchangeFile
-from azents.repos.model_file import ModelFileRepository
-from azents.repos.model_file.data import ModelFile
-from azents.repos.session_lifecycle_finalizer import (
-    SessionLifecycleFinalizerRepository,
-)
-from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
-from azents.services.session_lifecycle.orchestrator import (
-    SessionLifecycleOrchestrator,
+from azents.core.session_lifecycle_purge import (
     SessionLifecyclePurgeParticipantFailure,
     SessionLifecyclePurgeSnapshotValidationFailure,
 )
+from azents.repos.archived_session_purge_operations import (
+    ArchivedSessionPurgeOperations,
+)
+from azents.repos.archived_session_retention.data import ArchivedSessionPurgeJob
+from azents.repos.artifact.data import Artifact
+from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.file_lifecycle_cleanup_operations import (
+    FileLifecycleCleanupOperations,
+)
+from azents.repos.model_file.data import ModelFile
+from azents.services.session_lifecycle.orchestrator import SessionLifecycleOrchestrator
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
 
-_LEASE_DURATION = datetime.timedelta(minutes=15)
-_MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
-_STALE_JOB_RECONCILIATION_LIMIT = 100
 _PURGE_JOB_LIMIT = 100
 _DEADLINE_SAFETY_MARGIN = datetime.timedelta(seconds=30)
 
@@ -80,53 +67,15 @@ class ArchivedSessionPurgeSummary:
     deadline_reached: bool
 
 
-@dataclasses.dataclass(frozen=True)
-class _ArchivedSessionPurgeJobSummary:
-    """Result of advancing one claimed archived-session purge job."""
-
-    completed: bool
-    retry_scheduled: bool
-    model_file_count: int
-    artifact_count: int
-    exchange_file_count: int
-    worktree_count: int
-
-
-@dataclasses.dataclass(frozen=True)
-class _PurgeFileCleanupState:
-    """Durable file cleanup scope selected before external object deletion."""
-
-    model_files: list[ModelFile]
-    artifacts: list[Artifact]
-    exchange_files: list[ExchangeFile]
-    model_file_count: int
-    artifact_count: int
-    exchange_file_count: int
-
-
 @dataclasses.dataclass
 class ArchivedSessionPurgeService:
     """Fence and purge a bounded batch of archived SessionAgent trees."""
 
-    session_manager: Annotated[
-        SessionManager[WriteSession], Depends(get_session_manager)
+    operations: Annotated[
+        ArchivedSessionPurgeOperations, Depends(ArchivedSessionPurgeOperations)
     ]
-    retention_repository: Annotated[
-        ArchivedSessionRetentionRepository,
-        Depends(ArchivedSessionRetentionRepository),
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
-    ]
-    agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
-    model_file_repository: Annotated[ModelFileRepository, Depends(ModelFileRepository)]
-    artifact_repository: Annotated[ArtifactRepository, Depends(ArtifactRepository)]
-    exchange_file_repository: Annotated[
-        ExchangeFileRepository, Depends(ExchangeFileRepository)
-    ]
-    lifecycle_finalizer_repository: Annotated[
-        SessionLifecycleFinalizerRepository,
-        Depends(SessionLifecycleFinalizerRepository),
+    file_operations: Annotated[
+        FileLifecycleCleanupOperations, Depends(FileLifecycleCleanupOperations)
     ]
     broker: Annotated[SessionBroker, Depends(get_broker)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
@@ -134,14 +83,6 @@ class ArchivedSessionPurgeService:
     lifecycle_orchestrator: Annotated[
         SessionLifecycleOrchestrator,
         Depends(get_session_lifecycle_orchestrator),
-    ]
-    external_channel_lifecycle_service: Annotated[
-        ExternalChannelLifecycleService,
-        Depends(ExternalChannelLifecycleService),
-    ]
-    scheduled_task_lifecycle_service: Annotated[
-        ScheduledTaskLifecycleService,
-        Depends(ScheduledTaskLifecycleService),
     ]
 
     async def purge_once(
@@ -152,14 +93,7 @@ class ArchivedSessionPurgeService:
     ) -> ArchivedSessionPurgeSummary:
         """Claim and advance a bounded batch of durable purge jobs."""
         now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            stale_job_count = (
-                await self.retention_repository.cancel_invalid_unstarted_purge_jobs(
-                    session,
-                    now=now,
-                    limit=_STALE_JOB_RECONCILIATION_LIMIT,
-                )
-            )
+        stale_job_count = await self.operations.cancel_invalid_jobs(now=now)
 
         claimed_count = 0
         completed_count = 0
@@ -176,35 +110,9 @@ class ArchivedSessionPurgeService:
             if now + _DEADLINE_SAFETY_MARGIN >= deadline:
                 deadline_reached = True
                 break
-            materialization_error: (
-                SessionLifecyclePurgeSnapshotValidationFailure
-                | RuntimeError
-                | ValueError
-                | None
-            ) = None
-            async with self.session_manager() as session:
-                job = await self.retention_repository.claim_due_purge_job(
-                    session,
-                    now=now,
-                    lease_owner=lease_owner,
-                    lease_until=now + _LEASE_DURATION,
-                )
-                if job is not None:
-                    lifecycle_orchestrator = self.lifecycle_orchestrator
-                    materialize_participants = (
-                        lifecycle_orchestrator.materialize_claimed_purge_participants
-                    )
-                    try:
-                        await materialize_participants(
-                            session,
-                            retention_repository=self.retention_repository,
-                            purge_job_id=job.id,
-                            lease_owner=lease_owner,
-                        )
-                    except asyncio.CancelledError:
-                        raise
-                    except (RuntimeError, ValueError) as exc:
-                        materialization_error = exc
+            claim = await self.operations.claim(now=now, lease_owner=lease_owner)
+            job = claim.job
+            materialization_error = claim.materialization_error
             if job is None:
                 break
             claimed_count += 1
@@ -313,71 +221,16 @@ class ArchivedSessionPurgeService:
         *,
         job: ArchivedSessionPurgeJob,
         lease_owner: str,
-    ) -> _ArchivedSessionPurgeJobSummary:
+    ) -> ArchivedSessionPurgeJobSummary:
         now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            sessions = await self.agent_session_repository.lock_root_tree_sessions(
-                session,
-                root_session_id=job.root_session_id,
-            )
-            if not sessions:
-                completed = await self.retention_repository.complete_purge_job(
-                    session,
-                    job_id=job.id,
-                    lease_owner=lease_owner,
-                    now=now,
-                )
-                return _ArchivedSessionPurgeJobSummary(
-                    completed=completed,
-                    retry_scheduled=False,
-                    model_file_count=0,
-                    artifact_count=0,
-                    exchange_file_count=0,
-                    worktree_count=0,
-                )
-            root_session = next(
-                (item for item in sessions if item.id == job.root_session_id),
-                None,
-            )
-            if (
-                root_session is None
-                or root_session.status is not AgentSessionStatus.ARCHIVED
-            ):
-                raise RuntimeError("Purge root session is no longer archived")
-            session_ids = [item.id for item in sessions]
-            fenced_count = (
-                await self.agent_session_repository.fence_purge_owner_generations(
-                    session,
-                    session_ids=session_ids,
-                )
-            )
-            if fenced_count != len(session_ids):
-                raise RuntimeError("Purge root tree ownership fence is incomplete")
-            active = await self.agent_run_repository.has_active_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            scheduled_lifecycle = self.scheduled_task_lifecycle_service
-            preserve_scheduled = (
-                active
-                and await scheduled_lifecycle.archive_allows_active_runs(
-                    session,
-                    session_ids=session_ids,
-                    running_session_ids=[
-                        item.id
-                        for item in sessions
-                        if item.run_state is AgentSessionRunState.RUNNING
-                    ],
-                )
-            )
-            if not preserve_scheduled:
-                for session_id in session_ids:
-                    await self.agent_session_repository.request_stop(
-                        session,
-                        session_id=session_id,
-                        stop_request_id=uuid7().hex,
-                        stop_requester_user_id=None,
-                    )
+        preparation = await self.operations.prepare_root(
+            job=job, lease_owner=lease_owner, now=now
+        )
+        if preparation.terminal is not None:
+            return preparation.terminal
+        session_ids = preparation.session_ids
+        active = preparation.active
+        preserve_scheduled = preparation.preserve_scheduled
 
         if not preserve_scheduled:
             for session_id in session_ids:
@@ -392,7 +245,7 @@ class ArchivedSessionPurgeService:
                 error_participant_key=None,
                 error_phase=ArchivedSessionPurgeParticipantPhase.PENDING,
             )
-            return _ArchivedSessionPurgeJobSummary(
+            return ArchivedSessionPurgeJobSummary(
                 completed=False,
                 retry_scheduled=True,
                 model_file_count=0,
@@ -417,96 +270,27 @@ class ArchivedSessionPurgeService:
             )
 
         await self.lifecycle_orchestrator.run_purge_phase(
-            session_manager=self.session_manager,
-            retention_repository=self.retention_repository,
             context=context,
             phase=ArchivedSessionPurgeParticipantPhase.PREPARED,
             operation=prepare_participant,
         )
 
-        async with self.session_manager() as session:
-            model_files = await self.model_file_repository.list_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            artifacts = await self.artifact_repository.list_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            exchange_files = (
-                await self.exchange_file_repository.list_for_retention_root(
-                    session,
-                    retention_root_session_id=job.root_session_id,
-                )
-            )
-            model_file_count = len(model_files)
-            artifact_count = len(artifacts)
-            exchange_file_count = len(exchange_files)
-            await self.model_file_repository.mark_deleted_for_session_ids(
-                session,
-                session_ids=session_ids,
-                deleted_at=now,
-            )
-            await self.artifact_repository.expire_for_session_ids(
-                session,
-                session_ids=session_ids,
-                expired_at=now,
-            )
-            await self.exchange_file_repository.expire_for_retention_root(
-                session,
-                retention_root_session_id=job.root_session_id,
-                expired_at=now,
-            )
-            model_files = await self.model_file_repository.list_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            artifacts = await self.artifact_repository.list_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            exchange_files = (
-                await self.exchange_file_repository.list_for_retention_root(
-                    session,
-                    retention_root_session_id=job.root_session_id,
-                )
-            )
-        cleanup_state = _PurgeFileCleanupState(
-            model_files=model_files,
-            artifacts=artifacts,
-            exchange_files=exchange_files,
-            model_file_count=model_file_count,
-            artifact_count=artifact_count,
-            exchange_file_count=exchange_file_count,
+        cleanup_state = await self.operations.prepare_files(
+            root_session_id=job.root_session_id, session_ids=session_ids, now=now
         )
+        model_file_count = cleanup_state.model_file_count
+        artifact_count = cleanup_state.artifact_count
+        exchange_file_count = cleanup_state.exchange_file_count
         worktree_count = 0
 
         async def cleanup_participant(
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
             match participant.key:
-                case "session.scheduled-task":
-                    async with self.session_manager() as session:
-                        lifecycle = self.scheduled_task_lifecycle_service
-                        summary = await lifecycle.cleanup_purge_participant(
-                            session,
-                            participant,
-                            context,
-                        )
-                    return (
-                        self.scheduled_task_lifecycle_service.summary_dict(summary)
-                        if summary is not None
-                        else None
+                case "session.scheduled-task" | "session.external-channel":
+                    return await self.operations.cleanup_participant(
+                        participant, context=context
                     )
-                case "session.external-channel":
-                    async with self.session_manager() as session:
-                        lifecycle_service = self.external_channel_lifecycle_service
-                        summary = await lifecycle_service.cleanup_purge_participant(
-                            session,
-                            participant,
-                            context,
-                        )
-                    return summary.model_dump() if summary is not None else None
                 case "session.broker-state":
                     for session_id in session_ids:
                         await self.broker.purge_session_state(session_id)
@@ -538,239 +322,53 @@ class ArchivedSessionPurgeService:
                     return None
 
         await self.lifecycle_orchestrator.run_purge_phase(
-            session_manager=self.session_manager,
-            retention_repository=self.retention_repository,
             context=context,
             phase=ArchivedSessionPurgeParticipantPhase.CLEANUP_COMPLETED,
             operation=cleanup_participant,
         )
-        async with self.session_manager() as session:
-            marked = await self.retention_repository.mark_purge_cleaning(
-                session,
-                job_id=job.id,
-                lease_owner=lease_owner,
-                model_file_count=model_file_count,
-                artifact_count=artifact_count,
-                exchange_file_count=exchange_file_count,
-                worktree_count=worktree_count,
-                now=datetime.datetime.now(datetime.UTC),
-            )
+        marked = await self.operations.mark_cleaning(
+            job_id=job.id,
+            lease_owner=lease_owner,
+            model_file_count=model_file_count,
+            artifact_count=artifact_count,
+            exchange_file_count=exchange_file_count,
+            worktree_count=worktree_count,
+            now=datetime.datetime.now(datetime.UTC),
+        )
         if not marked:
             raise RuntimeError("Archived-session purge lease was lost")
 
         async def verify_participant(
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
-            match participant.key:
-                case "session.scheduled-task":
-                    async with self.session_manager() as session:
-                        lifecycle = self.scheduled_task_lifecycle_service
-                        summary = await lifecycle.verify_purge_participant(
-                            session,
-                            participant,
-                            context,
-                        )
-                    return (
-                        self.scheduled_task_lifecycle_service.summary_dict(summary)
-                        if summary is not None
-                        else None
-                    )
-                case "session.external-channel":
-                    async with self.session_manager() as session:
-                        lifecycle_service = self.external_channel_lifecycle_service
-                        summary = await lifecycle_service.verify_purge_participant(
-                            session,
-                            participant,
-                            context,
-                        )
-                    return summary.model_dump() if summary is not None else None
-                case "session.model-files":
-                    async with self.session_manager() as session:
-                        files = await self.model_file_repository.list_for_session_ids(
-                            session,
-                            session_ids=session_ids,
-                        )
-                    if any(
-                        file.status is not ModelFileStatus.DELETED
-                        or file.blob_deleted_at is None
-                        for file in files
-                    ):
-                        raise RuntimeError("ModelFile purge cleanup is incomplete")
-                    return {"model_file_count": len(files)}
-                case "session.artifacts":
-                    async with self.session_manager() as session:
-                        artifacts = await self.artifact_repository.list_for_session_ids(
-                            session,
-                            session_ids=session_ids,
-                        )
-                    if any(
-                        artifact.status is not ArtifactStatus.EXPIRED
-                        or artifact.blob_deleted_at is None
-                        for artifact in artifacts
-                    ):
-                        raise RuntimeError("Artifact purge cleanup is incomplete")
-                    return {"artifact_count": len(artifacts)}
-                case "session.exchange-files":
-                    async with self.session_manager() as session:
-                        files = (
-                            await self.exchange_file_repository.list_for_retention_root(
-                                session,
-                                retention_root_session_id=job.root_session_id,
-                            )
-                        )
-                    if any(
-                        file.status is not ExchangeFileStatus.EXPIRED
-                        or file.blob_deleted_at is None
-                        for file in files
-                    ):
-                        raise RuntimeError("ExchangeFile purge cleanup is incomplete")
-                    return {"exchange_file_count": len(files)}
-                case _:
-                    return None
+            if participant.key in {
+                "session.scheduled-task",
+                "session.external-channel",
+            }:
+                return await self.operations.verify_participant(
+                    participant, context=context
+                )
+            if participant.key in {
+                "session.model-files",
+                "session.artifacts",
+                "session.exchange-files",
+            }:
+                return await self.operations.verify_files(
+                    kind=participant.key, context=context
+                )
+            return None
 
         await self.lifecycle_orchestrator.run_purge_phase(
-            session_manager=self.session_manager,
-            retention_repository=self.retention_repository,
             context=context,
             phase=ArchivedSessionPurgeParticipantPhase.VERIFIED,
             operation=verify_participant,
         )
 
-        async with self.session_manager() as session:
-            final_sessions = (
-                await self.agent_session_repository.lock_root_tree_sessions(
-                    session,
-                    root_session_id=job.root_session_id,
-                )
-            )
-            if {item.id for item in final_sessions} != set(session_ids):
-                raise RuntimeError("Purge root tree boundary changed during cleanup")
-            final_root_session = next(
-                (item for item in final_sessions if item.id == job.root_session_id),
-                None,
-            )
-            if (
-                final_root_session is None
-                or final_root_session.status is not AgentSessionStatus.ARCHIVED
-            ):
-                raise RuntimeError("Purge root session is no longer archived")
-            model_files = await self.model_file_repository.list_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            artifacts = await self.artifact_repository.list_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            exchange_files = (
-                await self.exchange_file_repository.list_for_retention_root(
-                    session,
-                    retention_root_session_id=job.root_session_id,
-                )
-            )
-            if any(
-                file.status is not ModelFileStatus.DELETED
-                or file.blob_deleted_at is None
-                for file in model_files
-            ):
-                raise RuntimeError("ModelFile purge cleanup is incomplete")
-            if any(
-                artifact.status is not ArtifactStatus.EXPIRED
-                or artifact.blob_deleted_at is None
-                for artifact in artifacts
-            ):
-                raise RuntimeError("Artifact purge cleanup is incomplete")
-            if any(
-                file.status is not ExchangeFileStatus.EXPIRED
-                or file.blob_deleted_at is None
-                for file in exchange_files
-            ):
-                raise RuntimeError("ExchangeFile purge cleanup is incomplete")
-            if await self.agent_run_repository.has_active_for_session_ids(
-                session,
-                session_ids=session_ids,
-            ):
-                raise RuntimeError("AgentRun became active during purge cleanup")
-            participant_executions = (
-                await self.retention_repository.list_purge_participant_executions(
-                    session,
-                    job_id=job.id,
-                )
-            )
-            scheduled_task_execution = next(
-                (
-                    execution
-                    for execution in participant_executions
-                    if execution.participant_key == "session.scheduled-task"
-                ),
-                None,
-            )
-            if scheduled_task_execution is not None:
-                scheduled_task_participant = (
-                    self.lifecycle_orchestrator.registry.require_policy_version(
-                        key=scheduled_task_execution.participant_key,
-                        policy_version=scheduled_task_execution.policy_version,
-                    )
-                )
-                await self.scheduled_task_lifecycle_service.finalize_purge_participant(
-                    session,
-                    scheduled_task_participant,
-                    context,
-                )
-            external_channel_execution = next(
-                (
-                    execution
-                    for execution in participant_executions
-                    if execution.participant_key == "session.external-channel"
-                ),
-                None,
-            )
-            if external_channel_execution is not None:
-                external_channel_participant = (
-                    self.lifecycle_orchestrator.registry.require_policy_version(
-                        key=external_channel_execution.participant_key,
-                        policy_version=external_channel_execution.policy_version,
-                    )
-                )
-                await (
-                    self.external_channel_lifecycle_service.finalize_purge_participant(
-                        session,
-                        external_channel_participant,
-                        context,
-                    )
-                )
-            await self.model_file_repository.delete_purged_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            await self.artifact_repository.delete_purged_for_session_ids(
-                session,
-                session_ids=session_ids,
-            )
-            await self.exchange_file_repository.delete_purged_for_retention_root(
-                session,
-                retention_root_session_id=job.root_session_id,
-            )
-            await self.lifecycle_finalizer_repository.finalize_purged_root_tree(
-                session,
-                root_session_id=job.root_session_id,
-                session_ids=session_ids,
-            )
-            completed = await self.retention_repository.complete_purge_job(
-                session,
-                job_id=job.id,
-                lease_owner=lease_owner,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            if not completed:
-                raise RuntimeError("Archived-session purge lease was lost")
-
-        return _ArchivedSessionPurgeJobSummary(
-            completed=True,
-            retry_scheduled=False,
-            model_file_count=len(model_files),
-            artifact_count=len(artifacts),
-            exchange_file_count=len(exchange_files),
+        return await self.operations.finalize(
+            job=job,
+            lease_owner=lease_owner,
+            session_ids=session_ids,
+            context=context,
             worktree_count=worktree_count,
         )
 
@@ -780,32 +378,8 @@ class ArchivedSessionPurgeService:
         *,
         context: SessionLifecyclePurgeContext,
     ) -> dict[str, object] | None:
-        """Record that a fenced participant is ready for cleanup."""
-        if participant.key == "session.scheduled-task":
-            async with self.session_manager() as session:
-                summary = await (
-                    self.scheduled_task_lifecycle_service.prepare_purge_participant(
-                        session,
-                        participant,
-                        context,
-                    )
-                )
-            return (
-                self.scheduled_task_lifecycle_service.summary_dict(summary)
-                if summary is not None
-                else None
-            )
-        if participant.key != "session.external-channel":
-            return None
-        async with self.session_manager() as session:
-            summary = (
-                await self.external_channel_lifecycle_service.prepare_purge_participant(
-                    session,
-                    participant,
-                    context,
-                )
-            )
-        return summary.model_dump() if summary is not None else None
+        """Sequence one completed participant preparation before cleanup."""
+        return await self.operations.prepare_participant(participant, context=context)
 
     async def _delete_file_blobs(
         self,
@@ -824,12 +398,10 @@ class ArchivedSessionPurgeService:
                 bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=item.storage_key,
             )
-            async with self.session_manager() as session:
-                await self.model_file_repository.mark_blob_deleted(
-                    session,
-                    model_file_id=item.id,
-                    blob_deleted_at=datetime.datetime.now(datetime.UTC),
-                )
+            await self.file_operations.settle_model_file(
+                model_file_id=item.id,
+                blob_deleted_at=datetime.datetime.now(datetime.UTC),
+            )
         for item in artifacts:
             if (
                 item.status is not ArtifactStatus.EXPIRED
@@ -840,12 +412,10 @@ class ArchivedSessionPurgeService:
                 bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=item.storage_key,
             )
-            async with self.session_manager() as session:
-                await self.artifact_repository.mark_blob_deleted(
-                    session,
-                    artifact_id=item.id,
-                    blob_deleted_at=datetime.datetime.now(datetime.UTC),
-                )
+            await self.file_operations.settle_artifact(
+                artifact_id=item.id,
+                blob_deleted_at=datetime.datetime.now(datetime.UTC),
+            )
         for item in exchange_files:
             if (
                 item.status is not ExchangeFileStatus.EXPIRED
@@ -856,12 +426,10 @@ class ArchivedSessionPurgeService:
                 bucket=require_workspace_s3_bucket(self.config.workspace_s3),
                 key=item.object_key,
             )
-            async with self.session_manager() as session:
-                await self.exchange_file_repository.mark_blob_deleted(
-                    session,
-                    file_id=item.id,
-                    blob_deleted_at=datetime.datetime.now(datetime.UTC),
-                )
+            await self.file_operations.settle_exchange_file(
+                file_id=item.id,
+                blob_deleted_at=datetime.datetime.now(datetime.UTC),
+            )
 
     async def _retry(
         self,
@@ -874,18 +442,13 @@ class ArchivedSessionPurgeService:
         error_participant_key: str | None,
         error_phase: ArchivedSessionPurgeParticipantPhase | None,
     ) -> None:
-        now = datetime.datetime.now(datetime.UTC)
-        delay_minutes = min(2 ** max(0, attempt_count - 1), 30)
-        delay = min(datetime.timedelta(minutes=delay_minutes), _MAX_RETRY_DELAY)
-        async with self.session_manager() as session:
-            await self.retention_repository.mark_purge_retry(
-                session,
-                job_id=job_id,
-                lease_owner=lease_owner,
-                next_attempt_at=now + delay,
-                error_kind=error_kind,
-                error_summary=error_summary,
-                error_participant_key=error_participant_key,
-                error_phase=error_phase,
-                now=now,
-            )
+        """Sequence a completed lease-bound retry operation."""
+        await self.operations.retry(
+            job_id=job_id,
+            lease_owner=lease_owner,
+            attempt_count=attempt_count,
+            error_kind=error_kind,
+            error_summary=error_summary,
+            error_participant_key=error_participant_key,
+            error_phase=error_phase,
+        )

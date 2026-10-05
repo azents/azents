@@ -1,15 +1,13 @@
 """PasswordLogin repository."""
 
-from typing import Any, cast
-
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 
 from azents.rdb.models.password_login import RDBPasswordLogin
 from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.repos.mutation_result import mutation_result
 
 from .data import AlreadyExists, NotFound, PasswordLogin, PasswordLoginCreate
 
@@ -99,11 +97,10 @@ class PasswordLoginRepository:
         :param user_id: User ID
         :return: Success or error
         """
-        result = cast(
-            CursorResult[Any],
+        result = mutation_result(
             await session.write_session.execute(
                 sa.delete(RDBPasswordLogin).where(RDBPasswordLogin.user_id == user_id)
-            ),
+            )
         )
         if result.rowcount == 0:
             return Failure(NotFound(user_id=user_id))

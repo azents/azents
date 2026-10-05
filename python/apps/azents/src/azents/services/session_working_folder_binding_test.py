@@ -185,8 +185,8 @@ async def test_pending_context_binds_from_current_runner_workspace() -> None:
 
 
 @pytest.mark.asyncio
-async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
-    """Existing BOUND authority uses the caller scope without mutation locks."""
+async def test_repository_resolution_uses_caller_owned_session() -> None:
+    """Existing BOUND authority uses the repository caller scope without locks."""
     service = _service()
     repository = require_instance(
         service.repository.agent_session_repository,
@@ -207,11 +207,12 @@ async def test_in_transaction_resolution_uses_caller_owned_session() -> None:
     )
     transaction = AsyncMock(spec=AsyncSession)
 
-    authority = await service.resolve_bound_authority_in_transaction(
+    authority = await service.repository.resolve_authority_in_session(
         transaction,
         agent_id="agent-1",
         session_id="session-1",
-        runtime_target=_target(),
+        target=service.target_evidence(_target()),
+        bind_pending=False,
     )
 
     assert authority.working_folder_path == expected_path

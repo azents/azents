@@ -96,10 +96,9 @@ class TestOAuthState:
         state = create_oauth_state("tk-1", "user-1", "secret")
         result = verify_oauth_state(state, "secret")
         assert result is not None
-        toolkit_id, user_id, code_verifier = result
-        assert toolkit_id == "tk-1"
-        assert user_id == "user-1"
-        assert code_verifier is None
+        assert result.toolkit_id == "tk-1"
+        assert result.user_id == "user-1"
+        assert result.code_verifier is None
 
     def test_roundtrip_with_pkce(self) -> None:
         """Decrypt state containing PKCE code_verifier."""
@@ -108,10 +107,9 @@ class TestOAuthState:
         )
         result = verify_oauth_state(state, "secret")
         assert result is not None
-        toolkit_id, user_id, code_verifier = result
-        assert toolkit_id == "tk-2"
-        assert user_id == "user-2"
-        assert code_verifier == "verifier123"
+        assert result.toolkit_id == "tk-2"
+        assert result.user_id == "user-2"
+        assert result.code_verifier == "verifier123"
 
     def test_invalid_key(self) -> None:
         """Return None when decrypting with wrong key."""

@@ -1,6 +1,7 @@
 """delete_file tool tests."""
 
 import json
+from typing import NamedTuple
 
 import pytest
 
@@ -13,17 +14,24 @@ from azents.engine.tools.testing import FakeSharedStorage
 # ---------------------------------------------------------------------------
 
 
+class _DeleteFixture(NamedTuple):
+    """Delete tool paired with its storage fixture."""
+
+    tool: FunctionTool
+    storage: FakeSharedStorage
+
+
 def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
-) -> tuple[FunctionTool, FakeSharedStorage]:
+) -> _DeleteFixture:
     """Create delete_file tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
     tool = make_delete_file_tool(
         session_storage=storage,
         agent_id="",
     )
-    return tool, storage
+    return _DeleteFixture(tool=tool, storage=storage)
 
 
 # ---------------------------------------------------------------------------
@@ -37,9 +45,11 @@ class TestDeleteFileFromSessionData:
     async def test_delete_existing_file(self) -> None:
         """Delete existing file."""
         # Given: file exists in session data
-        tool, storage = _make_tool(
+        fixture = _make_tool(
             files={"/workspace/agent/report.csv": b"data"},
         )
+        tool = fixture.tool
+        storage = fixture.storage
 
         # When: call delete_file
         result = await tool.handler(json.dumps({"path": "/workspace/agent/report.csv"}))
@@ -54,9 +64,11 @@ class TestDeleteFileFromSessionData:
     async def test_delete_nested_path(self) -> None:
         """Delete file in nested path."""
         # Given: file under tool_outputs
-        tool, storage = _make_tool(
+        fixture = _make_tool(
             files={"/workspace/agent/tool_outputs/call_123.txt": b"content"},
         )
+        tool = fixture.tool
+        storage = fixture.storage
 
         # When: call delete_file
         result = await tool.handler(
@@ -80,12 +92,12 @@ class TestDeleteFileErrors:
 
     async def test_unsupported_path(self) -> None:
         """Disallowed path raises FunctionToolError."""
-        tool, _ = _make_tool()
+        tool = _make_tool().tool
         with pytest.raises(FunctionToolError, match="File not found"):
             await tool.handler(json.dumps({"path": "/tmp/file.txt"}))
 
     async def test_file_not_found(self) -> None:
         """Nonexistent file raises FunctionToolError."""
-        tool, _ = _make_tool(files={})
+        tool = _make_tool(files={}).tool
         with pytest.raises(FunctionToolError, match="File not found"):
             await tool.handler(json.dumps({"path": "/workspace/agent/nonexistent.txt"}))

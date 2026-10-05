@@ -130,13 +130,16 @@ class SessionContextResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "session": SessionContextSessionResponse.from_dict(obj["session"]) if obj.get("session") is not None else None,
             "usage": obj.get("usage"),
             "stats": SessionContextStatsResponse.from_dict(obj["stats"]) if obj.get("stats") is not None else None,
             "breakdown": [SessionContextBreakdownSegmentResponse.from_dict(_item) for _item in obj["breakdown"]] if obj.get("breakdown") is not None else None,
             "system_prompt": SessionContextSystemPromptResponse.from_dict(obj["system_prompt"]) if obj.get("system_prompt") is not None else None,
             "raw_events": [SessionContextRawEventResponse.from_dict(_item) for _item in obj["raw_events"]] if obj.get("raw_events") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
