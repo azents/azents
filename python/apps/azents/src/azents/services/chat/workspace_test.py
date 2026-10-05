@@ -22,6 +22,7 @@ from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, Write
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
+from azents.repos.agent_workspace_access import AgentWorkspaceAccessRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.control_protocol.runner_operations import (
@@ -513,11 +514,13 @@ async def test_get_workspace_applies_runner_file_operation_timeout(
     monkeypatch.setattr(workspace_module, "_utc_now", lambda: _NOW)
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=datetime.timedelta(seconds=timeout_seconds),
     )
 
@@ -536,11 +539,13 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
     target_resolver = _FakeRuntimeTargetResolver(runtime)
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=target_resolver,
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -576,11 +581,13 @@ async def test_get_workspace_keeps_ready_runner_when_host_controls_disconnect() 
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -610,11 +617,13 @@ async def test_get_workspace_keeps_ready_runner_during_provider_transition() -> 
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -643,11 +652,13 @@ async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> Non
     target_resolver = _FakeRuntimeTargetResolver(runtime)
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=target_resolver,
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -670,11 +681,13 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -699,11 +712,13 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -726,11 +741,13 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
     )
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -751,11 +768,13 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
     )
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -777,11 +796,13 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
     )
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=_FakeRunnerOperations(),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -801,11 +822,13 @@ async def test_read_path_returns_file_preview_without_preliminary_stat() -> None
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -832,11 +855,13 @@ async def test_text_preview_uses_character_limit_not_file_byte_size() -> None:
     runner_operations.files[file_path] = ("가" * (64 * 1024 + 1)).encode()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -857,11 +882,13 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
     transfer = _FakeRuntimeWorkspaceDownloadService()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
         runtime_workspace_download_service=transfer,
     )
@@ -900,11 +927,13 @@ async def test_download_ticket_uses_small_limit_before_runtime_staging(
     runner_operations.files[file_path] = b"x" * size
     service = AgentWorkspaceFileService(
         config=Config.model_construct(general_file_maximum_bytes=16),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
         runtime_workspace_download_service=transfer,
     )
@@ -930,11 +959,13 @@ async def test_download_ticket_preserves_filename_and_media_metadata() -> None:
     transfer = _FakeRuntimeWorkspaceDownloadService()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
         runtime_workspace_download_service=transfer,
     )
@@ -966,11 +997,13 @@ async def test_read_path_returns_nonempty_directory_with_one_runner_operation() 
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1002,11 +1035,13 @@ async def test_read_path_stats_only_after_an_empty_directory_listing() -> None:
     runner_operations.directories.add(empty_directory_path.as_posix())
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1047,11 +1082,13 @@ async def test_read_path_does_not_probe_child_repository_metadata() -> None:
     ] = b"gitdir: ../.git/worktrees/repo-worktree\n"
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1085,11 +1122,13 @@ async def test_repository_type_inspects_only_selected_directory() -> None:
     )
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1114,11 +1153,13 @@ async def test_repository_type_returns_none_when_git_marker_is_missing() -> None
     runner_operations.directories.add(plain_directory_path.as_posix())
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1143,11 +1184,13 @@ async def test_repository_type_propagates_runner_unavailability() -> None:
     )
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1167,11 +1210,13 @@ async def test_stat_path_returns_inspector_metadata() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -1195,11 +1240,13 @@ async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1218,11 +1265,13 @@ async def test_delete_path_rejects_workspace_root() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1243,11 +1292,13 @@ async def test_move_path_rejects_destination_outside_workspace_root() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
 
@@ -1269,11 +1320,13 @@ async def test_move_path_calls_runner_for_rename() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     source = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -1301,11 +1354,13 @@ async def test_bulk_delete_paths_calls_runner() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -1328,11 +1383,13 @@ async def test_bulk_move_paths_calls_runner() -> None:
     runner_operations = _FakeRunnerOperations()
     service = AgentWorkspaceFileService(
         config=Config.model_construct(),
-        agent_repository=_FakeAgentRepository(),
-        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        access_repository=AgentWorkspaceAccessRepository(
+            agent_repository=_FakeAgentRepository(),
+            workspace_user_repository=_FakeWorkspaceUserRepository(),
+            session_manager=_session_manager,
+        ),
         runner_operations=runner_operations,
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
-        session_manager=_session_manager,
         runner_file_operation_timeout=_RUNNER_FILE_OPERATION_TIMEOUT,
     )
     first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()

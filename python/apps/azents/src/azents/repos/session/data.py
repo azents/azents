@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 import enum
-from typing import Self
+from typing import NamedTuple, Self
 
 from azcommon.datetime import tznow
 from pydantic import BaseModel, Field
@@ -74,6 +74,13 @@ class Session(BaseModel):
     def is_expired(self) -> bool:
         """Check whether session is expired."""
         return self.revoked_at is None and self.expires_at <= tznow()
+
+
+class RefreshTokenSessionMatch(NamedTuple):
+    """Session and the refresh-token generation that matched it."""
+
+    session: Session
+    token_match: TokenMatch
 
 
 class SessionCreate(BaseModel):

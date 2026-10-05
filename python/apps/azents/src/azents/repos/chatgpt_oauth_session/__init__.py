@@ -25,7 +25,7 @@ class ChatGPTOAuthSessionRepository:
         """
         :param cipher: Credential encryption/decryption object
         """
-        self._cipher = cipher
+        self.cipher = cipher
 
     async def create(
         self,
@@ -44,10 +44,10 @@ class ChatGPTOAuthSessionRepository:
             integration_id=create.integration_id,
             method=create.method,
             state=create.state,
-            encrypted_code_verifier=self._cipher.encrypt(create.code_verifier),
+            encrypted_code_verifier=self.cipher.encrypt(create.code_verifier),
             redirect_uri=create.redirect_uri,
             encrypted_device_auth_id=(
-                self._cipher.encrypt(create.device_auth_id)
+                self.cipher.encrypt(create.device_auth_id)
                 if create.device_auth_id is not None
                 else None
             ),
@@ -197,12 +197,12 @@ class ChatGPTOAuthSessionRepository:
         """Convert RDB model to domain model including secret."""
         base = self._build(rdb)
         device_auth_id = (
-            self._cipher.decrypt(rdb.encrypted_device_auth_id)
+            self.cipher.decrypt(rdb.encrypted_device_auth_id)
             if rdb.encrypted_device_auth_id is not None
             else None
         )
         return ChatGPTOAuthSessionWithSecrets(
             **base.model_dump(),
-            code_verifier=self._cipher.decrypt(rdb.encrypted_code_verifier),
+            code_verifier=self.cipher.decrypt(rdb.encrypted_code_verifier),
             device_auth_id=device_auth_id,
         )

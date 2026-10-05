@@ -2,12 +2,12 @@
 
 import pytest
 
-from azents.rdb.models.event import JSONValue
-from azents.services.session_git_worktree import (
-    _cleanup_candidate,
+from azents.core.session_git_worktree_results import (
     _cleanup_result,
     _decode_cleanup_candidates,
 )
+from azents.rdb.models.event import JSONValue
+from azents.services.session_git_worktree import _cleanup_candidate
 
 
 def test_new_cleanup_result_preserves_wire_shape_and_counts() -> None:

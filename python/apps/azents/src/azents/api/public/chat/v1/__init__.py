@@ -90,6 +90,10 @@ from azents.core.exchange_file_errors import (
 )
 from azents.core.exchange_upload import ExchangeUploadError
 from azents.core.mailbox_data import MailboxItem
+from azents.core.model_availability_operations import (
+    SessionModelAvailabilityNotFound,
+    SessionModelReservationConflict,
+)
 from azents.core.session_workspace_paths import (
     InvalidProjectPath,
 )
@@ -146,11 +150,7 @@ from azents.services.exchange_file import (
     ExchangeFileService,
     FileTooLarge,
 )
-from azents.services.model_availability import (
-    SessionModelAvailabilityNotFound,
-    SessionModelAvailabilityService,
-    SessionModelReservationConflict,
-)
+from azents.services.model_availability import SessionModelAvailabilityService
 from azents.services.model_file import ModelFileService
 from azents.services.project_browser_manifest import (
     ProjectBrowserAccessDenied,

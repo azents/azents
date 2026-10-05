@@ -6,6 +6,14 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/external_channel_interaction.py
+  - python/apps/azents/src/azents/core/external_channel_selection.py
+  - python/apps/azents/src/azents/core/external_channel_participation.py
+  - python/apps/azents/src/azents/core/external_channel_shortcut_source.py
+  - python/apps/azents/src/azents/repos/external_channel/interaction_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/selector_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/participation_operations.py
+  - python/apps/azents/src/azents/repos/external_channel/shortcut_source_operations.py
   - python/apps/azents/src/azents/core/agent_automatic_project.py
   - python/apps/azents/src/azents/core/external_channel_access.py
   - python/apps/azents/src/azents/core/external_channel_conversation_data.py
@@ -16,7 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/core/mailbox_errors.py
   - python/apps/azents/src/azents/repos/external_channel/access_operations.py
   - python/apps/azents/src/azents/repos/mailbox_runtime_operations.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
@@ -35,7 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_account_link.py
   - python/apps/azents/src/azents/services/external_channel/participation.py
   - python/apps/azents/src/azents/services/external_channel/management.py
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
+  - python/apps/azents/src/azents/repos/root_agent_session_creation.py
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/model_settings.py
@@ -54,12 +62,27 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-10-05
-spec_version: 29
+spec_version: 30
 ---
 
 # External Channel Authorization
 
 ## Principal Boundary
+
+Selector catalog projection and Discord component scope checks complete native
+PostgreSQL read-only operations before returning detached authorized data.
+Immutable route selection, setup-route assignment, default creation and related
+interaction/claim changes remain repository-owned writable atomic groups with the
+existing actor, active Agent, connection, resource, selection and terminal-state
+predicates. Participation settings use completed repository operations:
+independent settings, claim and thread-scope reads finish before external
+coordination or provider work; parent, thread and location mutations retain
+their exact generation or timestamp conditional updates and database lock order.
+Provider cleanup intents and setup replay execute after commit. Descriptive reads
+may observe previously committed state while a writer holds a row lock; they do
+not authorize a future mutation without that mutation's existing revalidation.
+No provider actor becomes an execution User and no route/access or response-mode
+fallback is introduced by this ownership boundary.
 
 An External Channel participant is an `ExternalChannelPrincipal`, not an Azents User
 or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human,
@@ -314,6 +337,14 @@ Binding before Edit or Delete. A valid provider principal for another Binding or
 Session cannot mutate the Task.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 30) — Completed selector and participation repository
+  ownership with native read-only descriptive operations, writable atomic
+  authorization/selection groups and post-commit replay/cleanup intents; retained
+  existing actor, generation, timestamp and immutable-route fences.
+
+- **2026-10-05** (spec_version 30) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 29) — Clarified ordinary model-editor authorization versus final Apply/security guards and the exact Agent/principal absent-block/grant-revocation protocol.
 

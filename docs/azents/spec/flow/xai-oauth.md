@@ -26,6 +26,7 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/subscription_usage/**
+  - python/apps/azents/src/azents/repos/subscription_usage_read.py
   - python/apps/azents/src/azents/repos/xai_oauth_session/**
   - python/apps/azents/src/azents/repos/xai_oauth_runtime/**
   - python/apps/azents/src/azents/repos/oauth_persistence_errors.py
@@ -37,8 +38,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-04
-spec_version: 12
+last_verified_at: 2026-10-05
+spec_version: 13
 ---
 
 # xAI OAuth Flow
@@ -213,6 +214,14 @@ An enabled `xai_oauth` integration exposes a live subscription-usage snapshot th
 child endpoint. The read is integration-scoped and read-through: Azents does not persist usage
 snapshots, collect history, poll in the background, aggregate workspaces, or use usage to change Agent
 execution entitlement.
+
+The integration and decrypted typed secrets are loaded by one completed native
+PostgreSQL read-only repository operation. Missing integration is classified
+before foreign-Workspace access, preserving the existing error and privacy
+contract. Provider OAuth freshness/refresh, one-retry handling and usage-client
+calls run only after that read closes; existing OAuth persistence operations own
+their separate writes. Usage persistence, financial-field authorization and
+provider/secrets redaction retain their existing contracts.
 
 The endpoint requires `LLM_INTEGRATIONS_READ`. It returns operational limit and reset metadata to
 readers. Prepaid balance, pay-as-you-go values, and auto top-up configuration are included only when the

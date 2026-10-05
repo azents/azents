@@ -24,8 +24,14 @@ from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
+from azents.repos.agent_project_catalog.operations import (
+    AgentProjectCatalogOperationsRepository,
+)
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.project_browser_manifest_read import (
+    ProjectBrowserManifestReadRepository,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_working_folder_binding.data import (
@@ -224,21 +230,26 @@ def _service(session: WriteSession) -> ProjectBrowserManifestService:
         )
     )
     return ProjectBrowserManifestService(
-        agent_repository=AgentRepository(),
-        agent_session_repository=AgentSessionRepository(),
-        project_repository=SessionWorkspaceProjectRepository(),
-        worktree_repository=SessionGitWorktreeRepository(),
-        catalog_repository=catalog_repository,
-        workspace_user_repository=WorkspaceUserRepository(),
-        catalog_service=AgentProjectCatalogService(
+        repository=ProjectBrowserManifestReadRepository(
+            agent_repository=AgentRepository(),
+            session_repository=AgentSessionRepository(),
+            project_repository=SessionWorkspaceProjectRepository(),
+            worktree_repository=SessionGitWorktreeRepository(),
             catalog_repository=catalog_repository,
-            session_manager=session_manager,
+            workspace_user_repository=WorkspaceUserRepository(),
+            read_session_manager=session_manager,
+        ),
+        catalog_service=AgentProjectCatalogService(
+            repository=AgentProjectCatalogOperationsRepository(
+                catalog_repository=catalog_repository,
+                session_manager=session_manager,
+                read_session_manager=session_manager,
+            ),
             runtime_target_resolver=runtime_target_resolver,
             runner_operations=None,
         ),
         runtime_target_resolver=runtime_target_resolver,
         session_working_folder_binding_service=binding_service,
-        session_manager=session_manager,
     )
 
 

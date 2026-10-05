@@ -6,27 +6,11 @@ from typing import Annotated, NoReturn
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.management import (
-    ExternalChannelManagementRepository,
-)
-from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.mailbox import MailboxRepository
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.services.scheduled_task.channel import (
-    ScheduledTaskChannelService,
-    get_scheduled_task_channel_service,
-)
+from azents.core.scheduled_task_management import ScheduledTaskManagementUnavailable
 from azents.services.scheduled_task.management import (
     ScheduledTaskManagementService,
-    ScheduledTaskManagementUnavailable,
+    get_scheduled_task_management_service,
 )
-from azents.services.scheduled_task.service import RDBScheduledTaskAuthorityValidator
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -39,44 +23,6 @@ from .data import (
 )
 
 router = APIRouter()
-
-
-def get_scheduled_task_management_service(
-    session_manager: Annotated[
-        SessionManager[WriteSession],
-        Depends(get_session_manager),
-    ],
-    agent_repository: Annotated[AgentRepository, Depends()],
-    agent_session_repository: Annotated[AgentSessionRepository, Depends()],
-    task_repository: Annotated[ScheduledTaskRepository, Depends()],
-    cycle_repository: Annotated[ScheduledTaskCycleRepository, Depends()],
-    mailbox_repository: Annotated[MailboxRepository, Depends()],
-    external_channel_repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository.create),
-    ],
-    external_channel_management_repository: Annotated[
-        ExternalChannelManagementRepository,
-        Depends(ExternalChannelManagementRepository.create),
-    ],
-    channel_service: Annotated[
-        ScheduledTaskChannelService,
-        Depends(get_scheduled_task_channel_service),
-    ],
-) -> ScheduledTaskManagementService:
-    """Compose the user-authorized Scheduled Task management service."""
-    return ScheduledTaskManagementService(
-        session_manager=session_manager,
-        agent_repository=agent_repository,
-        agent_session_repository=agent_session_repository,
-        task_repository=task_repository,
-        cycle_repository=cycle_repository,
-        mailbox_repository=mailbox_repository,
-        external_channel_repository=external_channel_repository,
-        external_channel_management_repository=(external_channel_management_repository),
-        channel_service=channel_service,
-        authority_validator=RDBScheduledTaskAuthorityValidator(),
-    )
 
 
 @router.get("/workspaces/{handle}/agents/{agent_id}/scheduled-tasks")

@@ -27,6 +27,12 @@ from azents.core.external_account_link import (
     ExternalAccountLinkView,
     ExternalAccountNativeLinkState,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationSessionNavigation,
+    ExternalChannelParticipationSettings,
+    ExternalChannelParticipationSettingsMutation,
+)
 from azents.core.external_model_settings import (
     ExternalModelRejected,
     ExternalModelSettingsRejectionCode,
@@ -60,11 +66,7 @@ from azents.services.external_channel.discord_settings_scope import (
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
-    ExternalChannelParticipationError,
     ExternalChannelParticipationService,
-    ExternalChannelParticipationSessionNavigation,
-    ExternalChannelParticipationSettings,
-    ExternalChannelParticipationSettingsMutation,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 

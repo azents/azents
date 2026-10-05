@@ -12,7 +12,7 @@ code_paths:
   - python/apps/azents/src/azents/core/github_auth.py
   - python/apps/azents/src/azents/core/github_installation.py
   - python/apps/azents/src/azents/core/historical_memory_settings.py
-  - python/apps/azents/src/azents/core/historical_memory_snapshot_policy.py
+  - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/core/mailbox_errors.py
   - python/apps/azents/src/azents/core/memory_scope.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
@@ -21,12 +21,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/engine_tool_repositories.py
   - python/apps/azents/src/azents/repos/engine_runtime_tool_read.py
-  - python/apps/azents/src/azents/repos/historical_memory/context_snapshot_operations.py
+  - python/apps/azents/src/azents/repos/memory_context_snapshot.py
   - python/apps/azents/src/azents/repos/historical_memory/source_events.py
   - python/apps/azents/src/azents/repos/skill_state_store.py
   - python/apps/azents/src/azents/repos/vfs_projection_operations.py
   - python/apps/azents/src/azents/repos/vfs_read_authority.py
-  - python/apps/azents/src/azents/repos/worker_run_operations.py
   - python/apps/azents/src/azents/repos/worker_toolkit_repositories.py
   - python/apps/azents/src/azents/core/tools.py
   - python/apps/azents/src/azents/core/runtime_profile.py
@@ -50,7 +49,7 @@ code_paths:
   - python/apps/azents/src/azents/services/historical_memory/**
   - python/apps/azents/src/azents/repos/memory_vfs/**
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
-  - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
+  - python/apps/azents/src/azents/repos/github_platform_system_setting/binding.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
   - python/apps/azents/src/azents/rdb/models/toolkit.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/cda14157c46c_allow_duplicate_toolkit_slugs.py
@@ -111,7 +110,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-10-05
-spec_version: 136
+spec_version: 137
 ---
 
 # Toolkit
@@ -1322,6 +1321,9 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 137) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 136) — Separated harmless private state and descriptive scopes from exact critical Session mutation fences; retained immutable Toolkit owner identity, precise effect admission, VFS/Memory-boundary publication and credential finalization.
 
