@@ -1,6 +1,7 @@
 ---
 title: "Normalized Usage Retention Design"
 created: 2026-10-05
+implemented: 2026-10-05
 tags: [engine, usage, performance]
 document_role: primary
 document_type: design
