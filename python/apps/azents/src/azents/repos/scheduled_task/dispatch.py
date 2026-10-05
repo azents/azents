@@ -142,12 +142,13 @@ class ScheduledTaskDispatchRepository:
                     )
                     return ScheduledTaskDispatchOutcome(skipped=True)
                 cron_expression, timezone = _cron_values(task)
-                _, future = advance_cron_cursor(
+                cursor_advance = advance_cron_cursor(
                     expression=cron_expression,
                     timezone=timezone,
                     cursor=task.next_eligible_at,
                     now=now,
                 )
+                future = cursor_advance.first_future
                 pending = task.pending_scheduled_for or task.next_eligible_at
                 await self._complete_claim(
                     session,
@@ -169,12 +170,14 @@ class ScheduledTaskDispatchRepository:
                 next_eligible_at = task.next_eligible_at
             else:
                 cron_expression, timezone = _cron_values(task)
-                scheduled_for, next_eligible_at = advance_cron_cursor(
+                cursor_advance = advance_cron_cursor(
                     expression=cron_expression,
                     timezone=timezone,
                     cursor=task.next_eligible_at,
                     now=now,
                 )
+                scheduled_for = cursor_advance.first_due
+                next_eligible_at = cursor_advance.first_future
             cycle_id = uuid7().hex
             snapshot = ScheduledTaskCycleSnapshot(
                 cycle_id=cycle_id,

@@ -24,6 +24,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_provider.py
   - python/apps/azents/src/azents/core/external_channel_provider_effect.py
+  - python/apps/azents/src/azents/core/external_channel_effect_intent.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/discord_external_channel_presentation.py
@@ -55,7 +56,7 @@ code_paths:
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/repos/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
-  - python/apps/azents/src/azents/repos/external_channel/management_data.py
+  - python/apps/azents/src/azents/core/external_channel_management.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
@@ -179,6 +180,18 @@ before each effect, then settle its outcome through native projection CAS.
 Awaiting-input settlement and Discord delivery-channel retention also complete
 inside repository-owned scopes. Provider, Runtime, and file I/O begin only after
 each scope closes; the service receives no live database handles.
+
+Effect operations decode the current payload's consumed application metadata into
+an immutable intent before authority, settlement, and presentation decisions. The
+intent carries Work identity/revision/part, access/setup identity, retained message
+identity, Tracker kind/host, and presence state; opaque provider extensions remain
+available only to the provider adapter. Decoding occurs at the operation boundary,
+not target construction, so permitted payload assembly cannot leave cached stale
+metadata. An omitted part keeps the historical zero default; explicit null or a
+non-integer part remains ineligible for settlement, and existing integer/boolean
+and string predicates are preserved. Reply planning carries validated conversation
+scope alongside each provider payload, and Discord target retention decodes its
+consumed provider/delivery identity before a reuse or mutation decision.
 
 For an Agent execution, effect admission observes the exact PostgreSQL Session
 owner generation without a root-tree lock. An observed stale Worker cannot begin
@@ -670,6 +683,9 @@ already-committed terminal result does not replay provider publication.
 - **2026-10-05** (spec_version 66) — Moved Channel Action and Scheduled Channel
   presentation transaction ownership into completed repository operations, retaining
   native read-only descriptions, atomic terminal preparation, and post-scope provider I/O.
+
+- **2026-10-05** (spec_version 66) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 65) — Documented short nonlocking effect admission and Work cycle/revision CAS settlement independently of exact critical Session output fencing; control delete capture does not claim execution.
 

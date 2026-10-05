@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_event_repositories.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/image_generation_catalog_operations.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/1c42cc5ce89f_align_repository_index_names_and_source_.py
@@ -705,6 +705,7 @@ Only Workspace Owners receive the explicit image sync action.
 | Date | Version | Change |
 |---|---:|---|
 | 2026-10-05 | 48 | Moved integration CRUD and atomic account-catalog materialization into completed repository operations; kept provider validation in services. |
+| 2026-10-05 | 48 | Reconciled code-path discovery with current defining modules; system behavior is unchanged. |
 | 2026-10-05 | 47 | Removed redundant source/conversation/image key-enumeration locks while retaining exact publisher claims, credential/work-token guards and final accepted-input exclusion. |
 | 2026-10-03 | 42 | Replaced catalog/source revisions with current exact rows and sync state, embedded normalized saved prices, exact context reads, image usability, and destructive history-free transition. |
 | 2026-10-03 | 41 | Completed existing top-k request transport and sampling codec preservation without changing model support authority. |

@@ -1,6 +1,7 @@
 """Event tool catalog tests."""
 
 import asyncio
+import logging
 
 import pytest
 from pydantic import BaseModel
@@ -19,6 +20,7 @@ from azents.engine.events.tools import (
     ToolCatalog,
     ToolCatalogClientToolExecutor,
     ToolCatalogClientToolInvoker,
+    _call_cancel_handler,
     build_tool_catalog,
     extend_prepared_tool_catalog_with_json_functions,
     project_tool_catalog_for_client_compatibility,
@@ -1034,6 +1036,60 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
             arguments='{"pid":123}',
         )
     ]
+
+
+async def test_cancel_handler_failure_is_observed_once_without_blocking_stop(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Cancellation isolation keeps stop moving and logs a content-safe failure."""
+    secret = "synthetic-provider-token-do-not-log"
+    requests: list[FunctionToolCancelRequest] = []
+
+    async def cancel_handler(request: FunctionToolCancelRequest) -> None:
+        requests.append(request)
+        raise RuntimeError(secret)
+
+    tool = FunctionTool(
+        spec=FunctionToolSpec(
+            name="slow", description="Slow tool.", input_schema={"type": "object"}
+        ),
+        handler=_echo,
+        cancel_handler=cancel_handler,
+    )
+    request = FunctionToolCancelRequest(call_id="call-1", name="slow", arguments=secret)
+    with caplog.at_level(logging.WARNING, logger="azents.engine.events.tools"):
+        await _call_cancel_handler(tool, request)
+    assert requests == [request]
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.getMessage() == "Tool cancellation handler failed"
+    assert record.exc_info is not None
+    assert record.exc_info[2] is not None
+    assert secret not in caplog.text
+    assert secret not in repr(record.__dict__)
+
+
+async def test_cancel_handler_outer_cancellation_remains_cancellation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An execution cancellation is not converted to a handler failure."""
+
+    async def cancel_handler(_request: FunctionToolCancelRequest) -> None:
+        raise asyncio.CancelledError
+
+    tool = FunctionTool(
+        spec=FunctionToolSpec(
+            name="slow", description="Slow tool.", input_schema={"type": "object"}
+        ),
+        handler=_echo,
+        cancel_handler=cancel_handler,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await _call_cancel_handler(
+            tool,
+            FunctionToolCancelRequest(call_id="call-1", name="slow", arguments="{}"),
+        )
+    assert caplog.records == []
 
 
 async def test_client_tool_executor_migrates_function_tool_result_parts() -> None:

@@ -117,6 +117,14 @@ class MailboxPromotionResult:
     deferred: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class MailboxEventAppendResult:
+    """All ordered events and the events newly inserted by this promotion."""
+
+    ordered: list[Event]
+    inserted: list[Event]
+
+
 @dataclasses.dataclass
 class MailboxPromotionRepository:
     """Compose the final database-only Mailbox promotion transaction."""
@@ -253,7 +261,7 @@ class MailboxPromotionRepository:
                     ),
                 )
 
-            ordered_events, inserted_events = await self._append_events(
+            appended = await self._append_events(
                 session,
                 session_id=plan.session_id,
                 buffer=buffer,
@@ -261,7 +269,7 @@ class MailboxPromotionRepository:
             )
             event_by_external_id = {
                 event.external_id: event
-                for event in ordered_events
+                for event in appended.ordered
                 if event.external_id is not None
             }
             for prepared in prepared_events:
@@ -308,12 +316,12 @@ class MailboxPromotionRepository:
                 )
             return MailboxPromotionResult(
                 buffer=buffer,
-                events=inserted_events,
+                events=appended.inserted,
                 promoted_event_ids=promoted_event_ids,
                 deleted_buffer_ids=[buffer.id],
                 changed_session_agent_ids=changed_session_agent_ids,
                 action_execution=action_execution,
-                deduped_count=len(ordered_events) - len(inserted_events),
+                deduped_count=len(appended.ordered) - len(appended.inserted),
                 handled_failure=handled_failure,
                 deferred=False,
             )
@@ -325,7 +333,7 @@ class MailboxPromotionRepository:
         session_id: str,
         buffer: MailboxItem,
         prepared: list[MailboxPromotionEvent],
-    ) -> tuple[list[Event], list[Event]]:
+    ) -> MailboxEventAppendResult:
         """Append prepared events and recover idempotent conflicts."""
         events_by_external_id: dict[str, Event] = {}
         inserted: list[Event] = []
@@ -368,7 +376,10 @@ class MailboxPromotionRepository:
         ]
         if missing:
             raise RuntimeError("Conflicted input buffer event was not found")
-        return [events_by_external_id[item.external_id] for item in prepared], inserted
+        return MailboxEventAppendResult(
+            ordered=[events_by_external_id[item.external_id] for item in prepared],
+            inserted=inserted,
+        )
 
     async def _acknowledge_agent_results(
         self,

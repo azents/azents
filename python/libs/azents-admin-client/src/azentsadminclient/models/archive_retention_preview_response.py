@@ -92,12 +92,15 @@ class ArchiveRetentionPreviewResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "affected_count": obj.get("affected_count"),
             "immediately_eligible_count": obj.get("immediately_eligible_count"),
             "cancelled_count": obj.get("cancelled_count"),
             "scheduled_count": obj.get("scheduled_count"),
             "excluded_count": obj.get("excluded_count")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

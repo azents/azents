@@ -1,11 +1,8 @@
-"""aiodocker 타입 stub.
+"""Type stubs for aiodocker.
 
-aiodocker 0.x 는 type stub 을 제공하지 않아 strict type checking 이 import 자체와
-모든 멤버 호출을 unknown 으로 분류한다. 이 stub 은 azents 의 Docker provider
-코드가 실제로 사용하는 멤버만 정의 — aiodocker 의 전체 API 가
-아님. 새 멤버를 쓰게 되면 추가한다.
-
-azents Docker runtime 경로에서 필요한 최소 surface 만 둔다.
+aiodocker 0.x does not provide type stubs, so strict type checking classifies
+imports and member calls as unknown. Declare the minimal surface used by the
+Azents Docker Runtime provider and extend it when new members are needed.
 """
 
 from typing import Any, List

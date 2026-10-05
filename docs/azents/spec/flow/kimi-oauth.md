@@ -11,7 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/core/model_provider_declarations.py
   - python/apps/azents/src/azents/engine/events/effective_model_request.py
   - python/apps/azents/src/azents/repos/engine_resolve.py
-  - python/apps/azents/src/azents/repos/kimi_oauth_runtime/**
+  - python/apps/azents/src/azents/repos/kimi_oauth_runtime.py
   - python/apps/azents/src/azents/repos/llm_catalog_operations.py
   - python/apps/azents/src/azents/core/kimi_oauth.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -321,6 +321,7 @@ message submission, or integration management.
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
 | 2026-10-05 | 9 | Completed Device OAuth session and atomic integration-save repository ownership | Preserve existing provider flow, consume predicates and credential outcomes |
+| 2026-10-05 | 8 | Reconciled code-path discovery with current defining modules | Keep implementation discovery aligned with the current source tree; system behavior is unchanged |
 | 2026-10-03 | 6 | Adopted current catalog entries/latest sync without snapshot history | Retain Kimi account visibility and existing synchronization policy |
 | 2026-10-01 | 5 | Removed the former metadata-source compatibility path while retaining direct account catalog projection | Keep Kimi model visibility independent of optional generic metadata |
 | 2026-09-30 | 4 | Documented public Pydantic AI Chat Completions/SDK execution with raw model IDs | Retain Kimi OAuth device identity and existing engine ownership without the executable shared package |

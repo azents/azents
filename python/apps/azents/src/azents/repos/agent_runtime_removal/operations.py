@@ -1,0 +1,561 @@
+"""Completed atomic Agent Runtime removal database operations."""
+
+import dataclasses
+import datetime
+from typing import Annotated
+
+from fastapi import Depends
+
+from azents.core.agent_runtime_removal import (
+    AgentRuntimeRemovalConfirmationRequest,
+    AgentRuntimeRemovalConfirmationResult,
+    AgentRuntimeRemovalUnavailable,
+)
+from azents.core.enums import (
+    AgentRuntimeCapability,
+    AgentRuntimeRemovalStage,
+    AgentRuntimeRemovalStatus,
+    RuntimeTerminalDeleteAcknowledgementKind,
+)
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
+from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
+from azents.repos.agent_runtime_removal_finalizer import (
+    AgentRuntimeRemovalFinalizerRepository,
+)
+from azents.repos.agent_runtime_removal_scope import (
+    AgentRuntimeRemovalScopeRepository,
+)
+from azents.repos.agent_runtime_removal_scope.data import (
+    AgentRuntimeRemovalImpact,
+    AgentRuntimeRemovalInterruption,
+)
+
+_DESTRUCTIVE_SCOPE_VERSION = 1
+_CLEANUP_BATCH_SIZE = 100
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentRuntimeRemovalCleanupProgress:
+    """Reloaded operation and completion state after one cleanup page."""
+
+    operation: AgentRuntimeRemovalOperation
+    completed: bool
+
+
+@dataclasses.dataclass
+class AgentRuntimeRemovalOperationsRepository:
+    """Own admission, lease, cleanup and exact deletion acceptance scopes."""
+
+    session_manager: Annotated[
+        SessionManager[WriteSession], Depends(get_session_manager)
+    ]
+    agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    runtime_repository: Annotated[
+        AgentRuntimeRepository, Depends(AgentRuntimeRepository)
+    ]
+    removal_repository: Annotated[
+        AgentRuntimeRemovalRepository, Depends(AgentRuntimeRemovalRepository)
+    ]
+    scope_repository: Annotated[
+        AgentRuntimeRemovalScopeRepository, Depends(AgentRuntimeRemovalScopeRepository)
+    ]
+    finalizer_repository: Annotated[
+        AgentRuntimeRemovalFinalizerRepository,
+        Depends(AgentRuntimeRemovalFinalizerRepository),
+    ]
+
+    async def confirm(
+        self,
+        request: AgentRuntimeRemovalConfirmationRequest,
+    ) -> AgentRuntimeRemovalConfirmationResult:
+        """Commit the irreversible Agent work fence and durable operation."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.lock_by_id(session, request.agent_id)
+            if agent is None or agent.workspace_id != request.workspace_id:
+                raise AgentRuntimeRemovalUnavailable(
+                    code="agent_not_found",
+                    message="Agent is unavailable for Runtime removal.",
+                )
+            active = await self.removal_repository.get_active_by_agent_id(
+                session,
+                request.agent_id,
+            )
+            if active is not None:
+                self._require_replay(
+                    request=request,
+                    operation=active,
+                    agent=agent,
+                )
+                return AgentRuntimeRemovalConfirmationResult(
+                    operation=active,
+                    impact=self._impact_from_operation(active),
+                    replayed=True,
+                )
+            if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
+                raise AgentRuntimeRemovalUnavailable(
+                    code="runtime_remove_not_available",
+                    message="Runtime removal is available only for managed Agents.",
+                )
+            if (
+                agent.runtime_capability_version != request.expected_capability_version
+                or agent.runtime_profile_selection_version
+                != request.expected_runtime_profile_selection_version
+            ):
+                raise AgentRuntimeRemovalUnavailable(
+                    code="runtime_capability_version_conflict",
+                    message="Agent Runtime capability changed concurrently.",
+                )
+            historical = await self.removal_repository.get_by_agent_idempotency_key(
+                session,
+                agent_id=request.agent_id,
+                idempotency_key=request.idempotency_key,
+            )
+            if historical is not None:
+                raise AgentRuntimeRemovalUnavailable(
+                    code="runtime_remove_conflict",
+                    message="Runtime removal idempotency key was already used.",
+                )
+
+            impact = await self.scope_repository.get_impact(
+                session,
+                agent_id=agent.id,
+            )
+            runtime = await self.runtime_repository.get_by_agent_id_for_update(
+                session,
+                agent.id,
+            )
+            updated_agent = (
+                await self.agent_repository.compare_and_set_runtime_capability(
+                    session,
+                    agent_id=agent.id,
+                    expected_capability=AgentRuntimeCapability.MANAGED,
+                    expected_capability_version=request.expected_capability_version,
+                    expected_runtime_profile_selection_version=(
+                        request.expected_runtime_profile_selection_version
+                    ),
+                    capability=AgentRuntimeCapability.REMOVING,
+                    runtime_profile_id=None,
+                )
+            )
+            if updated_agent is None:
+                raise AgentRuntimeRemovalUnavailable(
+                    code="runtime_capability_version_conflict",
+                    message="Agent Runtime capability changed concurrently.",
+                )
+            created = await self.removal_repository.create_or_get_active(
+                session,
+                agent_id=agent.id,
+                workspace_id=agent.workspace_id,
+                requested_by_workspace_user_id=(request.requested_by_workspace_user_id),
+                idempotency_key=request.idempotency_key,
+                expected_capability_version=request.expected_capability_version,
+                committed_capability_version=(updated_agent.runtime_capability_version),
+                agent_runtime_id=None if runtime is None else runtime.id,
+                confirmed_at=datetime.datetime.now(datetime.UTC),
+                destructive_scope_version=_DESTRUCTIVE_SCOPE_VERSION,
+                active_root_session_count=impact.active_root_session_count,
+                active_subagent_count=impact.active_subagent_count,
+                active_run_count=impact.active_run_count,
+                queued_runtime_action_count=impact.queued_runtime_action_count,
+            )
+            if not created.idempotency_match:
+                raise AgentRuntimeRemovalUnavailable(
+                    code="runtime_remove_conflict",
+                    message="Another Runtime removal operation is already active.",
+                )
+            return AgentRuntimeRemovalConfirmationResult(
+                operation=created.operation,
+                impact=impact,
+                replayed=False,
+            )
+
+    async def cleanup_product_state(
+        self,
+        *,
+        operation: AgentRuntimeRemovalOperation,
+        lease_owner: str,
+    ) -> AgentRuntimeRemovalCleanupProgress:
+        """Process and checkpoint one root-context cleanup page."""
+        now = datetime.datetime.now(datetime.UTC)
+        async with self.session_manager() as session:
+            current = await self._require_owned(
+                session,
+                operation_id=operation.id,
+                lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
+            )
+            batch = await self.scope_repository.cleanup_batch(
+                session,
+                agent_id=current.agent_id,
+                agent_runtime_id=current.agent_runtime_id,
+                operation_id=current.id,
+                after_context_id=current.cleanup_cursor_context_id,
+                limit=_CLEANUP_BATCH_SIZE,
+                now=now,
+            )
+            recorded = await self.removal_repository.record_cleanup_progress(
+                session,
+                operation_id=current.id,
+                lease_owner=lease_owner,
+                expected_attempt=current.attempt_count,
+                expected_cursor_context_id=current.cleanup_cursor_context_id,
+                cursor_context_id=batch.cursor_context_id,
+                scanned_count=batch.scanned_count,
+                invalidated_count=batch.invalidated_count,
+                completed=batch.completed,
+                now=now,
+            )
+            if not recorded:
+                raise RuntimeError("Agent Runtime removal cleanup lease was lost")
+            refreshed = await self.removal_repository.get_by_id(session, current.id)
+            if refreshed is None:
+                raise RuntimeError("Agent Runtime removal operation is missing")
+            return AgentRuntimeRemovalCleanupProgress(
+                operation=refreshed,
+                completed=batch.completed,
+            )
+
+    async def delete_runtime(
+        self,
+        *,
+        operation: AgentRuntimeRemovalOperation,
+        lease_owner: str,
+    ) -> bool:
+        """Observe pending deletion without locking; fence actual target/ack writes."""
+        async with self.session_manager() as session:
+            current = await self.removal_repository.get_by_id(session, operation.id)
+            if (
+                current is None
+                or current.status is not AgentRuntimeRemovalStatus.RUNNING
+                or current.lease_owner != lease_owner
+                or current.attempt_count != operation.attempt_count
+            ):
+                raise RuntimeError("Agent Runtime removal lease was lost")
+            if current.physical_deletion_required is not None:
+                if current.physical_deletion_required is False:
+                    return True
+                runtime = await self.runtime_repository.get_by_agent_id(
+                    session, current.agent_id
+                )
+                if not self._delete_ack_matches(current, runtime):
+                    return False
+                if current.physical_delete_acknowledged_at is not None:
+                    return True
+
+        async with self.session_manager() as session:
+            current = await self._require_owned(
+                session,
+                operation_id=operation.id,
+                lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
+            )
+            runtime = await self._lock_operation_runtime(session, current)
+            if current.physical_deletion_required is None:
+                current = await self._record_delete_target(
+                    session,
+                    operation=current,
+                    lease_owner=lease_owner,
+                    runtime=runtime,
+                    now=datetime.datetime.now(datetime.UTC),
+                )
+                runtime = await self._lock_operation_runtime(session, current)
+            if current.physical_deletion_required is False:
+                return True
+            if not self._delete_ack_matches(current, runtime):
+                return False
+            assert runtime is not None
+            assert runtime.terminal_delete_acknowledgement_kind is not None
+            assert runtime.terminal_delete_acknowledged_at is not None
+            if current.physical_delete_acknowledged_at is None:
+                record_ack = (
+                    self.removal_repository.record_physical_delete_acknowledgement
+                )
+                recorded = await record_ack(
+                    session,
+                    operation_id=current.id,
+                    lease_owner=lease_owner,
+                    expected_attempt=current.attempt_count,
+                    acknowledgement_kind=runtime.terminal_delete_acknowledgement_kind,
+                    acknowledged_at=runtime.terminal_delete_acknowledged_at,
+                )
+                if not recorded:
+                    raise RuntimeError(
+                        "Runtime deletion acknowledgement lease was lost"
+                    )
+            return True
+
+    @staticmethod
+    def _delete_ack_matches(
+        operation: AgentRuntimeRemovalOperation, runtime: AgentRuntime | None
+    ) -> bool:
+        """Match only the immutable admitted Runtime and current target generation."""
+        target = operation.target_terminal_delete_generation
+        return (
+            runtime is not None
+            and runtime.id == operation.agent_runtime_id
+            and target is not None
+            and runtime.desired_generation == target
+            and runtime.terminal_delete_requested_generation == target
+            and runtime.terminal_delete_acknowledged_generation == target
+            and runtime.terminal_delete_acknowledgement_kind is not None
+            and runtime.terminal_delete_acknowledged_at is not None
+        )
+
+    async def _record_delete_target(
+        self,
+        session: WriteSession,
+        *,
+        operation: AgentRuntimeRemovalOperation,
+        lease_owner: str,
+        runtime: AgentRuntime | None,
+        now: datetime.datetime,
+    ) -> AgentRuntimeRemovalOperation:
+        """Persist immutable physical-deletion requirement and generation."""
+        if runtime is None:
+            required = False
+            target_generation = None
+            requested_at = None
+        elif (
+            runtime.terminal_delete_acknowledgement_kind
+            is RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
+            and runtime.terminal_delete_acknowledged_generation
+            == runtime.desired_generation
+        ):
+            required = False
+            target_generation = None
+            requested_at = None
+        elif runtime.terminal_delete_requested_generation is not None:
+            required = True
+            target_generation = runtime.terminal_delete_requested_generation
+            requested_at = now
+        elif runtime.runtime_provider_resource_id is None:
+            runtime_repository = self.runtime_repository
+            runtime = await (
+                runtime_repository.request_terminal_delete_without_physical_binding(
+                    session, runtime.id
+                )
+            )
+            if runtime is None:
+                raise RuntimeError(
+                    "AgentRuntime cannot prove absence of a physical binding"
+                )
+            required = False
+            target_generation = None
+            requested_at = None
+        else:
+            runtime = await self.runtime_repository.request_terminal_delete(
+                session,
+                runtime.id,
+            )
+            if runtime is None or runtime.terminal_delete_requested_generation is None:
+                raise RuntimeError("AgentRuntime terminal deletion request failed")
+            required = True
+            target_generation = runtime.terminal_delete_requested_generation
+            requested_at = now
+        recorded = await self.removal_repository.record_physical_delete_target(
+            session,
+            operation_id=operation.id,
+            lease_owner=lease_owner,
+            expected_attempt=operation.attempt_count,
+            required=required,
+            target_generation=target_generation,
+            requested_at=requested_at,
+            now=now,
+        )
+        if not recorded:
+            raise RuntimeError("Runtime deletion target lease was lost")
+        refreshed = await self.removal_repository.get_by_id(session, operation.id)
+        if refreshed is None:
+            raise RuntimeError("Agent Runtime removal operation is missing")
+        return refreshed
+
+    async def _lock_operation_runtime(
+        self,
+        session: WriteSession,
+        operation: AgentRuntimeRemovalOperation,
+    ) -> AgentRuntime | None:
+        """Lock and validate the operation's exact logical Runtime."""
+        runtime = await self.runtime_repository.get_by_agent_id_for_update(
+            session,
+            operation.agent_id,
+        )
+        if operation.agent_runtime_id is None:
+            if runtime is not None:
+                raise RuntimeError(
+                    "AgentRuntime appeared after Runtime removal confirmation"
+                )
+            return None
+        if runtime is None or runtime.id != operation.agent_runtime_id:
+            raise RuntimeError("Removal target AgentRuntime changed")
+        return runtime
+
+    async def set_stage(
+        self,
+        *,
+        operation_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        stage: AgentRuntimeRemovalStage,
+    ) -> AgentRuntimeRemovalOperation:
+        """Advance one owned stage and reload its durable evidence."""
+        async with self.session_manager() as session:
+            now = datetime.datetime.now(datetime.UTC)
+            updated = await self.removal_repository.set_stage(
+                session,
+                operation_id=operation_id,
+                lease_owner=lease_owner,
+                expected_attempt=expected_attempt,
+                stage=stage,
+                now=now,
+            )
+            if not updated:
+                raise RuntimeError("Agent Runtime removal lease was lost")
+            operation = await self.removal_repository.get_by_id(
+                session,
+                operation_id,
+            )
+            if operation is None:
+                raise RuntimeError("Agent Runtime removal operation is missing")
+            return operation
+
+    async def _require_owned(
+        self,
+        session: WriteSession,
+        *,
+        operation_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+    ) -> AgentRuntimeRemovalOperation:
+        """Lock one running operation and validate lease ownership."""
+        operation = await self.removal_repository.lock_by_id(session, operation_id)
+        if (
+            operation is None
+            or operation.status is not AgentRuntimeRemovalStatus.RUNNING
+            or operation.lease_owner != lease_owner
+            or operation.attempt_count != expected_attempt
+        ):
+            raise RuntimeError("Agent Runtime removal lease was lost")
+        return operation
+
+    def _require_replay(
+        self,
+        *,
+        request: AgentRuntimeRemovalConfirmationRequest,
+        operation: AgentRuntimeRemovalOperation,
+        agent: Agent,
+    ) -> None:
+        """Reject idempotency reuse or a competing active operation."""
+        if (
+            operation.idempotency_key != request.idempotency_key
+            or operation.workspace_id != request.workspace_id
+            or operation.requested_by_workspace_user_id
+            != request.requested_by_workspace_user_id
+            or operation.expected_capability_version
+            != request.expected_capability_version
+            or operation.committed_capability_version
+            != agent.runtime_capability_version
+            or agent.runtime_capability is not AgentRuntimeCapability.REMOVING
+            or agent.runtime_profile_selection_version
+            != request.expected_runtime_profile_selection_version + 1
+            or agent.runtime_profile_id is not None
+        ):
+            raise AgentRuntimeRemovalUnavailable(
+                code="runtime_remove_conflict",
+                message="Another Runtime removal operation is already active.",
+            )
+
+    @staticmethod
+    def _impact_from_operation(
+        operation: AgentRuntimeRemovalOperation,
+    ) -> AgentRuntimeRemovalImpact:
+        """Rebuild the privacy-safe impact stored with an operation."""
+        return AgentRuntimeRemovalImpact(
+            active_root_session_count=operation.active_root_session_count,
+            active_subagent_count=operation.active_subagent_count,
+            active_run_count=operation.active_run_count,
+            queued_runtime_action_count=operation.queued_runtime_action_count,
+        )
+
+    async def interrupt_work(
+        self,
+        *,
+        operation: AgentRuntimeRemovalOperation,
+        lease_owner: str,
+    ) -> AgentRuntimeRemovalInterruption:
+        """Record durable stop fences and send best-effort wake signals."""
+        async with self.session_manager() as session:
+            await self._require_owned(
+                session,
+                operation_id=operation.id,
+                lease_owner=lease_owner,
+                expected_attempt=operation.attempt_count,
+            )
+            interrupted = await self.scope_repository.interrupt_work(
+                session,
+                agent_id=operation.agent_id,
+                operation_id=operation.id,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+        return interrupted
+
+    async def claim_due(
+        self,
+        *,
+        now: datetime.datetime,
+        lease_owner: str,
+        lease_until: datetime.datetime,
+    ) -> AgentRuntimeRemovalOperation | None:
+        """Claim one due removal before coordinator I/O."""
+        async with self.session_manager() as session:
+            return await self.removal_repository.claim_due(
+                session, now=now, lease_owner=lease_owner, lease_until=lease_until
+            )
+
+    async def finalize(
+        self,
+        *,
+        operation_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        now: datetime.datetime,
+    ) -> bool:
+        """Commit final product cleanup under the exact running attempt."""
+        async with self.session_manager() as session:
+            return await self.finalizer_repository.finalize(
+                session,
+                operation_id=operation_id,
+                lease_owner=lease_owner,
+                expected_attempt=expected_attempt,
+                now=now,
+            )
+
+    async def mark_retry(
+        self,
+        *,
+        operation_id: str,
+        lease_owner: str,
+        expected_attempt: int,
+        next_attempt_at: datetime.datetime,
+        error_kind: str,
+        error_summary: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Set retry state without retaining the transaction in the scheduler."""
+        async with self.session_manager() as session:
+            await self.removal_repository.mark_retry(
+                session,
+                operation_id=operation_id,
+                lease_owner=lease_owner,
+                expected_attempt=expected_attempt,
+                next_attempt_at=next_attempt_at,
+                error_kind=error_kind,
+                error_summary=error_summary,
+                now=now,
+            )

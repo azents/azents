@@ -113,12 +113,15 @@ class AgentRuntimeSystemMetricCurrentResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "state": obj.get("state"),
             "measured_at": obj.get("measured_at"),
             "used": obj.get("used"),
             "total": obj.get("total"),
             "percentage": obj.get("percentage")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

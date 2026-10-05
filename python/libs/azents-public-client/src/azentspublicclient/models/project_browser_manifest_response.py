@@ -130,7 +130,9 @@ class ProjectBrowserManifestResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "agent_id": obj.get("agent_id"),
             "session_id": obj.get("session_id"),
             "root": obj.get("root"),
@@ -138,6 +140,7 @@ class ProjectBrowserManifestResponse(BaseModel):
             "modes": [ProjectBrowserModeResponse.from_dict(_item) for _item in obj["modes"]] if obj.get("modes") is not None else None,
             "entries": [ProjectBrowserEntryResponse.from_dict(_item) for _item in obj["entries"]] if obj.get("entries") is not None else None,
             "empty_state": ProjectBrowserEmptyStateResponse.from_dict(obj["empty_state"]) if obj.get("empty_state") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
