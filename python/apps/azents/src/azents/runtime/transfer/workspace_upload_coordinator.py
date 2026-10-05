@@ -407,7 +407,7 @@ class WorkspaceUploadCoordinator:
                 await delete(handle)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except BotoConnectionError, ClientError, HTTPClientError:
                 return (
                     "failed"
                     if await self._record_cleanup_failure(current, artifact) is not None

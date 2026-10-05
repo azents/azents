@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -24,7 +25,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.scheduled_task_control import ScheduledTaskProviderControlResult
-from azents.rdb.session_capabilities import ReadSession, WriteSession
+from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteractionAdmission,
@@ -35,6 +36,7 @@ from azents.repos.external_channel.data import (
 from azents.repos.external_channel.http_admission_read import (
     ExternalChannelHTTPAdmissionReadRepository,
 )
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionService,
@@ -112,7 +114,7 @@ def test_scheduled_task_cancel_confirmation_is_ephemeral() -> None:
     ]
 
 
-class _RepositoryDouble:
+class _RepositoryDouble(ExternalChannelRepository):
     """Return one selector-scoped active connection."""
 
     def __init__(self, configuration: ExternalChannelConnectionConfiguration) -> None:
@@ -380,7 +382,8 @@ def _service(
 ) -> _DiscordHTTPServiceFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
+        async with AsyncSession() as session:
+            yield ReadWriteSession(session)
 
     repository = _RepositoryDouble(configuration)
     shortcut_source = _ShortcutSourceDouble()
@@ -391,7 +394,7 @@ def _service(
         service=DiscordHTTPAdmissionService(
             configuration_repository=ExternalChannelHTTPAdmissionReadRepository(
                 session_manager=session_manager,
-                repository=repository,  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+                repository=repository,
             ),
             admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
             shortcut_source_service=shortcut_source,  # ty: ignore[invalid-argument-type] # Focused shortcut double implements ensure().
@@ -423,14 +426,15 @@ def _ingress_service(
 ) -> _DiscordHTTPIngressFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[WriteSession, None]:
-        yield object()  # ty: ignore[invalid-yield] # The tested service does not access the placeholder session.
+        async with AsyncSession() as session:
+            yield ReadWriteSession(session)
 
     resolver = _DispatcherResolverDouble(dispatcher)
     return _DiscordHTTPIngressFixture(
         service=DiscordHTTPIngressService(
             configuration_repository=ExternalChannelHTTPAdmissionReadRepository(
                 session_manager=session_manager,
-                repository=_RepositoryDouble(configuration),  # ty: ignore[invalid-argument-type] # Focused repository double implements the exercised lookup.
+                repository=_RepositoryDouble(configuration),
             ),
             admission_service=admission,  # ty: ignore[invalid-argument-type] # Focused admission double implements the exercised lifecycle.
             config=SimpleNamespace(

@@ -1,5 +1,6 @@
 """Pure participation contracts and detached navigation/lock scopes."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, NamedTuple
 
@@ -97,6 +98,38 @@ def _discord_delivery_channel_id(
     return delivery_channel_id
 
 
+@dataclass(frozen=True)
+class _ParticipationThreadLabels:
+    """Consumed retained-label decisions for signed participation controls."""
+
+    discord: bool
+    guild_id: str | None
+    slack_thread_key: str | None
+    discord_thread_key: str | None
+
+    @classmethod
+    def decode(cls, value: Mapping[str, object] | None) -> "_ParticipationThreadLabels":
+        """Preserve unknown labels and legacy fallback before string validation."""
+        labels = value or {}
+        guild = labels.get("guild_id")
+        slack_thread = labels.get("thread_ts")
+        # A truthy malformed delivery coordinate blocks the historical fallback;
+        # null, empty and other falsy values permit the retained thread ID.
+        discord_thread = labels.get("delivery_channel_id") or labels.get("thread_id")
+        return cls(
+            discord=labels.get("provider") == ExternalChannelProvider.DISCORD.value,
+            guild_id=guild if isinstance(guild, str) else None,
+            slack_thread_key=(
+                slack_thread if isinstance(slack_thread, str) and slack_thread else None
+            ),
+            discord_thread_key=(
+                discord_thread
+                if isinstance(discord_thread, str) and discord_thread
+                else None
+            ),
+        )
+
+
 def _thread_resource_matches(
     *,
     connection_provider: ExternalChannelProvider,
@@ -118,15 +151,12 @@ def _thread_resource_matches(
     delivery_channel_id = _discord_delivery_channel_id(
         provider_thread_resource_key, guild_id=provider_tenant_id
     )
-    labels = resource.labels or {}
-    retained_delivery_channel_id = labels.get("delivery_channel_id") or labels.get(
-        "thread_id"
-    )
+    labels = _ParticipationThreadLabels.decode(resource.labels)
     return (
         delivery_channel_id is not None
-        and labels.get("provider") == ExternalChannelProvider.DISCORD.value
-        and (labels.get("guild_id") == provider_tenant_id)
-        and (retained_delivery_channel_id == delivery_channel_id)
+        and labels.discord
+        and labels.guild_id == provider_tenant_id
+        and labels.discord_thread_key == delivery_channel_id
     )
 
 
@@ -138,24 +168,17 @@ def _thread_conversation_scope(
     resource: ExternalChannelResource,
 ) -> ExternalChannelConversationScope:
     """Build the canonical provider thread identity used by ingestion locks."""
-    labels = resource.labels or {}
+    labels = _ParticipationThreadLabels.decode(resource.labels)
     if connection_provider is ExternalChannelProvider.SLACK:
         provider_channel_id = provider_parent_channel_id
-        provider_thread_key = labels.get("thread_ts")
+        provider_thread_key = labels.slack_thread_key
     elif connection_provider is ExternalChannelProvider.DISCORD:
-        provider_thread_key = labels.get("delivery_channel_id") or labels.get(
-            "thread_id"
-        )
+        provider_thread_key = labels.discord_thread_key
         provider_channel_id = provider_thread_key
     else:
         provider_channel_id = None
         provider_thread_key = None
-    if (
-        not isinstance(provider_channel_id, str)
-        or not provider_channel_id
-        or (not isinstance(provider_thread_key, str))
-        or (not provider_thread_key)
-    ):
+    if not provider_channel_id or not provider_thread_key:
         raise ExternalChannelParticipationError(
             "External Channel thread settings are unavailable."
         )

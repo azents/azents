@@ -1,7 +1,7 @@
 """Tests for bounded S3 object and multipart age listings."""
 
 from datetime import UTC, datetime
-from typing import cast
+from unittest.mock import create_autospec
 
 import pytest
 from types_aiobotocore_s3.client import S3Client
@@ -62,11 +62,20 @@ class _ListingClient:
         }
 
 
+def _service(client: _ListingClient) -> S3Service:
+    """Bind listing responses to the SDK's declared client interface."""
+    sdk_client = create_autospec(S3Client, instance=True, spec_set=True)
+    sdk_client.list_objects_v2.side_effect = client.list_objects_v2
+    sdk_client.list_multipart_uploads.side_effect = client.list_multipart_uploads
+    assert isinstance(sdk_client, S3Client)
+    return S3Service(sdk_client)
+
+
 @pytest.mark.asyncio
 async def test_list_object_summaries_preserves_age_and_cursor() -> None:
     """Only complete timezone-aware object summaries are returned."""
     client = _ListingClient()
-    service = S3Service(cast(S3Client, client))
+    service = _service(client)
 
     page = await service.list_object_summaries_page(
         bucket="bucket",
@@ -94,7 +103,7 @@ async def test_list_object_summaries_preserves_age_and_cursor() -> None:
 async def test_list_multipart_uploads_preserves_age_and_markers() -> None:
     """Only complete timezone-aware multipart summaries are returned."""
     client = _ListingClient()
-    service = S3Service(cast(S3Client, client))
+    service = _service(client)
 
     page = await service.list_multipart_uploads_page(
         bucket="bucket",
@@ -125,7 +134,7 @@ async def test_list_multipart_uploads_preserves_age_and_markers() -> None:
 @pytest.mark.asyncio
 async def test_listing_rejects_invalid_bounds_and_markers() -> None:
     """Listing requires bounded pages and valid multipart marker pairs."""
-    service = S3Service(cast(S3Client, _ListingClient()))
+    service = _service(_ListingClient())
 
     with pytest.raises(ValueError, match="between 1 and 1000"):
         await service.list_object_summaries_page(

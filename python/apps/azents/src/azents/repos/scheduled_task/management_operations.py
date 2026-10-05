@@ -47,6 +47,14 @@ class ScheduledTaskManagementMutation:
     task: ScheduledTask
 
 
+@dataclasses.dataclass(frozen=True)
+class _AuthorizedTask:
+    """Exact Task and its authorized owning Session."""
+
+    task: ScheduledTask
+    agent_session: AgentSession
+
+
 class ScheduledTaskManagementRepository:
     """Manage Scheduled Tasks for one authenticated Workspace member."""
 
@@ -219,13 +227,15 @@ class ScheduledTaskManagementRepository:
     ) -> ScheduledTaskManagementProjection:
         """Get one exact authorized Task."""
         async with self.read_session_manager() as session:
-            task, agent_session = await self._require_task(
+            authorized = await self._require_task(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 user_id=user_id,
                 task_id=task_id,
             )
+            task = authorized.task
+            agent_session = authorized.agent_session
             bindings = await self._binding_map(
                 session,
                 workspace_id=workspace_id,
@@ -255,13 +265,15 @@ class ScheduledTaskManagementRepository:
     ) -> ScheduledTaskManagementMutation:
         """Replace future Task definition fields under deterministic Binding locks."""
         async with self.session_manager() as session:
-            candidate, agent_session = await self._lock_and_require_task(
+            authorized = await self._lock_and_require_task(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 user_id=user_id,
                 task_id=task_id,
             )
+            candidate = authorized.task
+            agent_session = authorized.agent_session
             await self._lock_bindings(
                 session,
                 binding_ids=[candidate.binding_id, channel_id],
@@ -327,13 +339,15 @@ class ScheduledTaskManagementRepository:
     ) -> ScheduledTask:
         """Permanently delete one exact authorized Task."""
         async with self.session_manager() as session:
-            candidate, agent_session = await self._lock_and_require_task(
+            authorized = await self._lock_and_require_task(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 user_id=user_id,
                 task_id=task_id,
             )
+            candidate = authorized.task
+            agent_session = authorized.agent_session
             await self._lock_bindings(
                 session,
                 binding_ids=[candidate.binding_id],
@@ -377,14 +391,14 @@ class ScheduledTaskManagementRepository:
     ) -> ScheduledTaskCurrentCycleProjection | None:
         """Read the sanitized current-cycle projection for one exact Task."""
         async with self.read_session_manager() as session:
-            task, _ = await self._require_task(
+            authorized = await self._require_task(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 user_id=user_id,
                 task_id=task_id,
             )
-            cycle = await self._cycle(session, task)
+            cycle = await self._cycle(session, authorized.task)
             if cycle is None:
                 return None
             return _current_cycle_projection(cycle)
@@ -397,7 +411,7 @@ class ScheduledTaskManagementRepository:
         agent_id: str,
         user_id: str,
         task_id: str,
-    ) -> tuple[ScheduledTask, AgentSession]:
+    ) -> _AuthorizedTask:
         task = await self.task_repository.get_by_id(session, task_id)
         if (
             task is None
@@ -412,7 +426,7 @@ class ScheduledTaskManagementRepository:
             user_id=user_id,
             session_id=task.session_id,
         )
-        return task, agent_session
+        return _AuthorizedTask(task=task, agent_session=agent_session)
 
     async def _require_agent(
         self,
@@ -438,7 +452,7 @@ class ScheduledTaskManagementRepository:
         agent_id: str,
         user_id: str,
         task_id: str,
-    ) -> tuple[ScheduledTask, AgentSession]:
+    ) -> _AuthorizedTask:
         """Read one exact Task, then lock and revalidate its current authority."""
         task = await self.task_repository.get_by_id(session, task_id)
         if (
@@ -454,7 +468,7 @@ class ScheduledTaskManagementRepository:
             user_id=user_id,
             session_id=task.session_id,
         )
-        return task, agent_session
+        return _AuthorizedTask(task=task, agent_session=agent_session)
 
     async def _lock_and_require_session(
         self,

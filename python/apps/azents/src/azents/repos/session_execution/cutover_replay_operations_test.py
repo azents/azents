@@ -3,7 +3,6 @@
 import dataclasses
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,7 +30,7 @@ async def test_fence_settles_whole_transaction_before_return(drift: bool) -> Non
     """One rejected member rolls back the batch before caller-side effects."""
     trace: list[str] = []
 
-    class Session:
+    class Session(AsyncSession):
         async def commit(self) -> None:
             trace.append("commit")
 
@@ -42,7 +41,7 @@ async def test_fence_settles_whole_transaction_before_return(drift: bool) -> Non
     async def manager() -> AsyncGenerator[WriteSession, None]:
         trace.append("enter")
         try:
-            yield ReadWriteSession(cast(AsyncSession, Session()))
+            yield ReadWriteSession(Session())
         finally:
             trace.append("exit")
 
