@@ -100,7 +100,9 @@ class RuntimeTerminalSummaryResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "terminal_id": obj.get("terminal_id"),
             "lifecycle": obj.get("lifecycle"),
             "attached": obj.get("attached"),
@@ -110,6 +112,7 @@ class RuntimeTerminalSummaryResponse(BaseModel):
             "input_bytes": obj.get("input_bytes"),
             "output_bytes": obj.get("output_bytes"),
             "replay_truncated": obj.get("replay_truncated")
+            }.items() if _key in obj
         })
         return _obj
 

@@ -119,12 +119,15 @@ class PlatformGitHubAppPatchRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_version": obj.get("expected_version"),
             "app_id": obj.get("app_id"),
             "client_id": obj.get("client_id"),
             "private_key": SystemSettingSecretActionRequest.from_dict(obj["private_key"]) if obj.get("private_key") is not None else None,
             "client_secret": SystemSettingSecretActionRequest.from_dict(obj["client_secret"]) if obj.get("client_secret") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

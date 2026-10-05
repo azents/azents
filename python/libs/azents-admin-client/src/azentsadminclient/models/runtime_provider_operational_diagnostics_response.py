@@ -115,12 +115,15 @@ class RuntimeProviderOperationalDiagnosticsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "available": obj.get("available"),
             "generation": obj.get("generation"),
             "protocol_version": obj.get("protocol_version"),
             "checked_at": obj.get("checked_at"),
             "warnings": [RuntimeProviderOperationalWarningResponse.from_dict(_item) for _item in obj["warnings"]] if obj.get("warnings") is not None else None
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

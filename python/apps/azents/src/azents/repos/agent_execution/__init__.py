@@ -327,7 +327,7 @@ class EventTranscriptRepository:
 
     async def list_model_file_gc_range(
         self,
-        session: WriteSession,
+        session: ReadSession,
         session_id: str,
         *,
         after_event_id: str | None,
@@ -342,7 +342,7 @@ class EventTranscriptRepository:
         ]
         if after_event_id is not None:
             predicates.append(RDBEvent.id > after_event_id)
-        result = await session.write_session.execute(
+        result = await session.read_session.execute(
             sa.select(RDBEvent)
             .where(*predicates)
             .order_by(RDBEvent.id.asc())

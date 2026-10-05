@@ -100,10 +100,13 @@ class SelectableModelSettings(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "context_window_tokens": obj.get("context_window_tokens"),
             "max_output_tokens": obj.get("max_output_tokens"),
             "builtin_tools": [BuiltinToolConfig.from_dict(_item) for _item in obj["builtin_tools"]] if obj.get("builtin_tools") is not None else None
+            }.items() if _key in obj
         })
         return _obj
 

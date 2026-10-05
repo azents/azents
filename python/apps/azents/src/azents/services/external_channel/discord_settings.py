@@ -20,6 +20,10 @@ from azents.core.external_account_link import (
     ExternalAccountNativeLinkState,
     VerifiedExternalAccountActor,
 )
+from azents.core.external_channel_participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationSettings,
+)
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
@@ -76,9 +80,7 @@ from azents.services.external_channel.model_execution_controls import (
 )
 from azents.services.external_channel.model_settings import ExternalModelSettingsService
 from azents.services.external_channel.participation import (
-    ExternalChannelParticipationError,
     ExternalChannelParticipationService,
-    ExternalChannelParticipationSettings,
 )
 
 

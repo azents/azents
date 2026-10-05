@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 from datetime import UTC
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -16,6 +17,7 @@ from azents.rdb.models.runtime_connection_generation import (
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 
 from .data import (
+    RuntimeConnectionGeneration,
     RuntimeConnectionGenerationExhausted,
     RuntimeConnectionGenerationIntegrityError,
 )
@@ -64,6 +66,73 @@ async def _activate_subject(
         )
     )
     await session.write_session.flush()
+
+
+async def _activate_owned_subject(
+    repository: RuntimeConnectionGenerationRepository,
+    session: WriteSession,
+    *,
+    subject_id: str,
+) -> datetime.datetime | None:
+    """Remember whether this fixture created the shared immutable marker."""
+    previous = await repository.get_cutover(session)
+    await _activate_subject(
+        repository,
+        session,
+        connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
+        subject_id=subject_id,
+    )
+    current = await repository.get_cutover(session)
+    assert current is not None
+    return current.cutover_at if previous is None else None
+
+
+async def _cleanup_owned_subject(
+    session: WriteSession,
+    *,
+    subject_id: str,
+    created_cutover_at: datetime.datetime | None,
+) -> None:
+    """Remove fixture-owned state without erasing authority reused by others."""
+    await session.write_session.execute(
+        sa.delete(RDBRuntimeConnectionGeneration).where(
+            RDBRuntimeConnectionGeneration.connection_kind
+            == RuntimeConnectionAuthorityKind.RUNNER,
+            RDBRuntimeConnectionGeneration.subject_id == subject_id,
+        )
+    )
+    if created_cutover_at is not None:
+        await session.write_session.execute(
+            sa.delete(RDBRuntimeConnectionGenerationCutover).where(
+                RDBRuntimeConnectionGenerationCutover.allocator_version == 1,
+                RDBRuntimeConnectionGenerationCutover.cutover_at == created_cutover_at,
+                ~sa.exists(sa.select(RDBRuntimeConnectionGeneration.subject_id)),
+            )
+        )
+
+
+async def _generation_snapshot(
+    repository: RuntimeConnectionGenerationRepository,
+    session: WriteSession,
+) -> tuple[RuntimeConnectionGeneration, ...]:
+    """Capture exact ambient subjects, counters and timestamps for preservation."""
+    result = await session.read_session.execute(
+        sa.select(
+            RDBRuntimeConnectionGeneration.connection_kind,
+            RDBRuntimeConnectionGeneration.subject_id,
+        ).order_by(
+            RDBRuntimeConnectionGeneration.connection_kind,
+            RDBRuntimeConnectionGeneration.subject_id,
+        )
+    )
+    states = []
+    for kind, subject_id in result:
+        state = await repository.get_generation(
+            session, connection_kind=kind, subject_id=subject_id
+        )
+        assert state is not None
+        states.append(state)
+    return tuple(states)
 
 
 class TestRuntimeConnectionGenerationRepository:
@@ -207,16 +276,17 @@ class TestRuntimeConnectionGenerationRepository:
     async def test_concurrent_first_allocations_are_serialized(
         self,
         rdb_engine: AsyncEngine,
+        latest_db_schema: None,
     ) -> None:
         repository = RuntimeConnectionGenerationRepository()
-        subject_id = "concurrent-generation-runtime"
+        subject_id = uuid4().hex
         async with AsyncSession(rdb_engine, expire_on_commit=False) as _raw_session:
             session = ReadWriteSession(_raw_session)
             async with session.write_session.begin():
-                await _activate_subject(
+                previous_cutover = await repository.get_cutover(session)
+                created_cutover_at = await _activate_owned_subject(
                     repository,
                     session,
-                    connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
                     subject_id=subject_id,
                 )
 
@@ -238,15 +308,161 @@ class TestRuntimeConnectionGenerationRepository:
             async with AsyncSession(rdb_engine) as _raw_session:
                 session = ReadWriteSession(_raw_session)
                 async with session.write_session.begin():
-                    await session.write_session.execute(
-                        sa.delete(RDBRuntimeConnectionGeneration).where(
-                            RDBRuntimeConnectionGeneration.connection_kind
-                            == RuntimeConnectionAuthorityKind.RUNNER,
-                            RDBRuntimeConnectionGeneration.subject_id == subject_id,
-                        )
+                    await _cleanup_owned_subject(
+                        session,
+                        subject_id=subject_id,
+                        created_cutover_at=created_cutover_at,
                     )
-                    await session.write_session.execute(
-                        sa.delete(RDBRuntimeConnectionGenerationCutover).where(
-                            RDBRuntimeConnectionGenerationCutover.allocator_version == 1
-                        )
-                    )
+                    if previous_cutover is not None:
+                        assert await repository.get_cutover(session) == previous_cutover
+
+
+@pytest.mark.parametrize("preexisting", [False, True])
+async def test_owned_subject_cleanup_restores_cutover_baseline(
+    rdb_session: WriteSession, preexisting: bool
+) -> None:
+    """Cleanup retains exact authority when ambient subjects need the marker."""
+    repository = RuntimeConnectionGenerationRepository()
+    foreign_states = await _generation_snapshot(repository, rdb_session)
+    # This fixture rolls back the marker scenario; committed migration state survives.
+    await rdb_session.write_session.execute(
+        sa.delete(RDBRuntimeConnectionGenerationCutover).where(
+            RDBRuntimeConnectionGenerationCutover.allocator_version == 1
+        )
+    )
+    if preexisting:
+        await _post_cutover_time(repository, rdb_session)
+    previous = await repository.get_cutover(rdb_session)
+    subject_id = uuid4().hex
+    created_at = await _activate_owned_subject(
+        repository, rdb_session, subject_id=subject_id
+    )
+    activated_cutover = await repository.get_cutover(rdb_session)
+    assert activated_cutover is not None
+    assert (created_at is None) is preexisting
+    await _cleanup_owned_subject(
+        rdb_session, subject_id=subject_id, created_cutover_at=created_at
+    )
+    expected = (
+        previous if preexisting else activated_cutover if foreign_states else None
+    )
+    assert await repository.get_cutover(rdb_session) == expected
+    assert await _generation_snapshot(repository, rdb_session) == foreign_states
+    assert (
+        await repository.get_generation(
+            rdb_session,
+            connection_kind=RuntimeConnectionAuthorityKind.RUNNER,
+            subject_id=subject_id,
+        )
+        is None
+    )
+
+
+async def test_owned_marker_cleanup_restores_absence_in_isolated_authority_tables(
+    rdb_session: WriteSession,
+) -> None:
+    """Exercise real absence without deleting any ambient public authority rows."""
+    repository = RuntimeConnectionGenerationRepository()
+    public_cutover = await repository.get_cutover(rdb_session)
+    public_generations = await _generation_snapshot(repository, rdb_session)
+    for table in (
+        "runtime_connection_generation_cutovers",
+        "runtime_connection_generations",
+    ):
+        # Temporary schema copies shadow public only on this rollback-owned connection.
+        await rdb_session.write_session.execute(
+            sa.text(
+                f"CREATE TEMP TABLE {table} (LIKE public.{table} INCLUDING ALL) "
+                "ON COMMIT DROP"
+            )
+        )
+    assert await repository.get_cutover(rdb_session) is None
+    assert await _generation_snapshot(repository, rdb_session) == ()
+    subject_id = uuid4().hex
+    created_at = await _activate_owned_subject(
+        repository, rdb_session, subject_id=subject_id
+    )
+    assert created_at is not None
+    await _cleanup_owned_subject(
+        rdb_session, subject_id=subject_id, created_cutover_at=created_at
+    )
+    assert await repository.get_cutover(rdb_session) is None
+    assert await _generation_snapshot(repository, rdb_session) == ()
+    await rdb_session.write_session.execute(
+        sa.text(
+            "DROP TABLE pg_temp.runtime_connection_generations, "
+            "pg_temp.runtime_connection_generation_cutovers"
+        )
+    )
+    assert await repository.get_cutover(rdb_session) == public_cutover
+    assert await _generation_snapshot(repository, rdb_session) == public_generations
+
+
+async def test_cleanup_preserves_preexisting_marker_and_foreign_sentinel(
+    rdb_session: WriteSession,
+) -> None:
+    """Explicit nonzero foreign authority survives cleanup of another owned subject."""
+    repository = RuntimeConnectionGenerationRepository()
+    other_subject = uuid4().hex
+    await _activate_subject(
+        repository,
+        rdb_session,
+        connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
+        subject_id=other_subject,
+        high_water_generation=31,
+        accepted_generation=17,
+    )
+    previous_cutover = await repository.get_cutover(rdb_session)
+    foreign_states = await _generation_snapshot(repository, rdb_session)
+    own_subject = uuid4().hex
+    created_at = await _activate_owned_subject(
+        repository, rdb_session, subject_id=own_subject
+    )
+    assert created_at is None
+    await _cleanup_owned_subject(
+        rdb_session, subject_id=own_subject, created_cutover_at=created_at
+    )
+    assert await repository.get_cutover(rdb_session) == previous_cutover
+    assert await _generation_snapshot(repository, rdb_session) == foreign_states
+
+
+async def test_owned_marker_cleanup_preserves_other_subject_authority(
+    rdb_session: WriteSession,
+) -> None:
+    """A marker created by this fixture remains when another subject has reused it."""
+    repository = RuntimeConnectionGenerationRepository()
+    await rdb_session.write_session.execute(
+        sa.delete(RDBRuntimeConnectionGenerationCutover).where(
+            RDBRuntimeConnectionGenerationCutover.allocator_version == 1
+        )
+    )
+    own_subject = uuid4().hex
+    other_subject = uuid4().hex
+    created_at = await _activate_owned_subject(
+        repository, rdb_session, subject_id=own_subject
+    )
+    assert created_at is not None
+    await _activate_subject(
+        repository,
+        rdb_session,
+        connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
+        subject_id=other_subject,
+    )
+    previous = await repository.get_cutover(rdb_session)
+    other_state = await repository.get_generation(
+        rdb_session,
+        connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
+        subject_id=other_subject,
+    )
+    await _cleanup_owned_subject(
+        rdb_session, subject_id=own_subject, created_cutover_at=created_at
+    )
+    assert await repository.get_cutover(rdb_session) == previous
+    assert (
+        await repository.get_generation(
+            rdb_session,
+            connection_kind=RuntimeConnectionAuthorityKind.PROVIDER,
+            subject_id=other_subject,
+        )
+        == other_state
+    )

@@ -635,14 +635,14 @@ async def connect_agent_oauth(
                 ),
             )
 
-    code_verifier, code_challenge = generate_pkce_pair()
+    pkce = generate_pkce_pair()
     oauth_state = create_agent_toolkit_oauth_state(
         toolkit_id=toolkit_config_id,
         workspace_id=member.workspace_id,
         agent_id=agent_id,
         user_id=member.user_id,
         redirect_uri=redirect_uri,
-        code_verifier=code_verifier,
+        code_verifier=pkce.code_verifier,
         callback_target=_AGENT_TOOLKIT_CALLBACK_TARGET,
         secret_key=config.credential_encryption.key,
     )
@@ -684,7 +684,7 @@ async def connect_agent_oauth(
             redirect_uri=redirect_uri,
             scopes=mcp_config.scopes,
             state=oauth_state,
-            code_challenge=code_challenge,
+            code_challenge=pkce.code_challenge,
             resource=mcp_config.server_url,
         )
     )

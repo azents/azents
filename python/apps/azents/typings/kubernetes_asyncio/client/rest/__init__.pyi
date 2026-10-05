@@ -1,4 +1,4 @@
-"""kubernetes_asyncio.client.rest — ApiException 타입 정의."""
+"""kubernetes_asyncio.client.rest — ApiException type definitions."""
 
 class ApiException(Exception):
     status: int

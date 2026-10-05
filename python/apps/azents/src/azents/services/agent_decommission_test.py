@@ -4,12 +4,13 @@ import datetime
 from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionStopSignal
+from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
@@ -22,8 +23,12 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
+from azents.core.upload_images import StoredImage
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent_decommission.data import AgentDecommissionJob
+from azents.repos.agent_decommission_operations import (
+    AgentDecommissionOperationsRepository,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
     ExternalChannelArchiveTermination,
@@ -32,17 +37,12 @@ from azents.services.agent_decommission import (
     AgentDecommissionAdvanceResult,
     AgentDecommissionService,
 )
-from azents.services.session_lifecycle.orchestrator import (
-    TransitionOperation,
-    TransitionParticipantOperation,
-)
-from azents.services.uploads.schema import StoredImage
 
 
 @asynccontextmanager
 async def _session_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield a placeholder session for repository doubles."""
-    yield ReadWriteSession(cast(AsyncSession, object()))
+    yield ReadWriteSession(AsyncMock(spec=AsyncSession))
 
 
 def _job(*, job_id: str, attempt_count: int = 1) -> AgentDecommissionJob:
@@ -97,7 +97,7 @@ class _DecommissionRepositoryDouble:
         now: datetime.datetime,
     ) -> bool:
         """Accept status updates outside the retry-focused test path."""
-        del session, job_id, lease_owner, status, now
+        del session, job_id, lease_owner, expected_attempt, status, now
         return True
 
     async def mark_retry(
@@ -113,7 +113,7 @@ class _DecommissionRepositoryDouble:
         now: datetime.datetime,
     ) -> bool:
         """Record retry attribution."""
-        del session, lease_owner, next_attempt_at, error_summary, now
+        del session, lease_owner, expected_attempt, next_attempt_at, error_summary, now
         self.retries.append((job_id, error_kind))
         return True
 
@@ -144,8 +144,10 @@ async def test_decommission_continues_after_one_job_retries() -> None:
         [_job(job_id="failed"), _job(job_id="ok")]
     )
     service = object.__new__(_FailureIsolatingCoordinator)
-    service.session_manager = _session_manager
-    service.decommission_repository = repository
+    operations = object.__new__(AgentDecommissionOperationsRepository)
+    service.operation_repository = operations
+    operations.session_manager = _session_manager
+    operations.decommission_repository = repository
 
     summary = await service.decommission_once(
         lease_owner="scheduler-1",
@@ -158,10 +160,11 @@ async def test_decommission_continues_after_one_job_retries() -> None:
     assert repository.retries == [("failed", "RuntimeError")]
 
 
-class _TransactionDouble:
+class _TransactionDouble(AsyncSession):
     """Minimal transaction double used to prove archive callback ordering."""
 
     def __init__(self) -> None:
+        super().__init__()
         self.committed = False
 
     async def commit(self) -> None:
@@ -172,7 +175,7 @@ class _TransactionDouble:
 @asynccontextmanager
 async def _transaction_manager() -> AsyncGenerator[WriteSession, None]:
     """Yield one stable transaction object to all lifecycle collaborators."""
-    yield ReadWriteSession(cast(AsyncSession, _TransactionDouble()))
+    yield ReadWriteSession(_TransactionDouble())
 
 
 @dataclass(frozen=True)
@@ -304,24 +307,6 @@ class _RetentionRepositoryDouble:
         del session, root_session_id, eligible_at, policy_revision, now
 
 
-class _LifecycleOrchestratorDouble:
-    """Execute the supplied participant operation before root mutation."""
-
-    def __init__(self, participant: SessionLifecycleParticipantDefinition) -> None:
-        self.participant = participant
-
-    async def archive(
-        self,
-        *,
-        context: SessionLifecycleTransitionContext,
-        participant_operation: TransitionParticipantOperation,
-        transition: TransitionOperation,
-    ) -> None:
-        """Apply the participant and root operations in production order."""
-        await participant_operation(self.participant, context)
-        await transition()
-
-
 class _ExternalChannelLifecycleDouble:
     """Record the transaction-bound External Channel archive dispatch."""
 
@@ -380,34 +365,6 @@ class _ExternalChannelLifecycleDouble:
         return 0
 
 
-class _ScheduledTaskLifecycleDouble:
-    """Ignore non-Scheduled participants in the archive-focused test."""
-
-    def __init__(self, *, allows_active_runs: bool = False) -> None:
-        self.allows_active_runs = allows_active_runs
-
-    async def archive_allows_active_runs(
-        self,
-        session: ReadSession,
-        *,
-        session_ids: Sequence[str],
-        running_session_ids: Sequence[str],
-    ) -> bool:
-        """Return configured Scheduled archive eligibility."""
-        del session, session_ids, running_session_ids
-        return self.allows_active_runs
-
-    async def archive_participant(
-        self,
-        session: ReadSession,
-        definition: SessionLifecycleParticipantDefinition,
-        context: SessionLifecycleTransitionContext,
-    ) -> None:
-        """Return no Scheduled result for the External Channel participant."""
-        del session, definition, context
-        return None
-
-
 class _DecommissionStatusRepositoryDouble:
     """Always retain the scheduler-owned job lease."""
 
@@ -434,7 +391,7 @@ class _DecommissionStatusRepositoryDouble:
         now: datetime.datetime,
     ) -> bool:
         """Accept phase progress for the owned job."""
-        del session, job_id, lease_owner, status, now
+        del session, job_id, lease_owner, expected_attempt, status, now
         return True
 
     async def mark_retry(
@@ -454,6 +411,7 @@ class _DecommissionStatusRepositoryDouble:
             session,
             job_id,
             lease_owner,
+            expected_attempt,
             next_attempt_at,
             error_kind,
             error_summary,
@@ -488,14 +446,21 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
     )
     external_channel_lifecycle = _ExternalChannelLifecycleDouble(events)
     service = object.__new__(AgentDecommissionService)
-    service.session_manager = _transaction_manager
-    service.agent_session_repository = _RootSessionRepositoryDouble(events)
-    service.agent_run_repository = _AgentRunRepositoryDouble()
-    service.retention_repository = _RetentionRepositoryDouble()
-    service.lifecycle_orchestrator = _LifecycleOrchestratorDouble(participant)
+    operations = object.__new__(AgentDecommissionOperationsRepository)
+    service.operation_repository = operations
+    operations.session_manager = _transaction_manager
+    operations.read_session_manager = _transaction_manager
+    operations.agent_session_repository = _RootSessionRepositoryDouble(events)
+    operations.agent_run_repository = _AgentRunRepositoryDouble()
+    operations.retention_repository = _RetentionRepositoryDouble()
     service.external_channel_lifecycle_service = external_channel_lifecycle
-    service.scheduled_task_lifecycle_service = _ScheduledTaskLifecycleDouble()
-    service.decommission_repository = _DecommissionStatusRepositoryDouble()
+    operations.lifecycle_repository = _RetirementLifecycleDouble(
+        roots=_RootSessionRepositoryDouble(events),
+        external=external_channel_lifecycle,
+        participant=participant,
+        allows_active_runs=False,
+    )
+    operations.decommission_repository = _DecommissionStatusRepositoryDouble()
     service.broker = _BrokerDouble()
 
     retired = (
@@ -536,19 +501,24 @@ async def test_retire_tree_preserves_started_scheduled_run_without_stop() -> Non
     external_channel_lifecycle = _ExternalChannelLifecycleDouble(events)
     broker = _BrokerDouble()
     service = object.__new__(AgentDecommissionService)
-    service.session_manager = _transaction_manager
-    service.agent_session_repository = _RootSessionRepositoryDouble(
+    operations = object.__new__(AgentDecommissionOperationsRepository)
+    service.operation_repository = operations
+    operations.session_manager = _transaction_manager
+    operations.read_session_manager = _transaction_manager
+    operations.agent_session_repository = _RootSessionRepositoryDouble(
         events,
         run_state=AgentSessionRunState.RUNNING,
     )
-    service.agent_run_repository = _AgentRunRepositoryDouble(active=True)
-    service.retention_repository = _RetentionRepositoryDouble()
-    service.lifecycle_orchestrator = _LifecycleOrchestratorDouble(participant)
+    operations.agent_run_repository = _AgentRunRepositoryDouble(active=True)
+    operations.retention_repository = _RetentionRepositoryDouble()
     service.external_channel_lifecycle_service = external_channel_lifecycle
-    service.scheduled_task_lifecycle_service = _ScheduledTaskLifecycleDouble(
-        allows_active_runs=True
+    operations.lifecycle_repository = _RetirementLifecycleDouble(
+        roots=_RootSessionRepositoryDouble(events),
+        external=external_channel_lifecycle,
+        participant=participant,
+        allows_active_runs=True,
     )
-    service.decommission_repository = _DecommissionStatusRepositoryDouble()
+    operations.decommission_repository = _DecommissionStatusRepositoryDouble()
     service.broker = broker
 
     retired = await service._retire_root_tree(
@@ -774,13 +744,19 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
     """Direct External Channel roots are cleaned before finalizer eligibility."""
     events: list[str] = []
     service = object.__new__(AgentDecommissionService)
+    operations = object.__new__(AgentDecommissionOperationsRepository)
+    service.operation_repository = operations
     cleanup_lifecycle = _ExternalChannelDecommissionCleanupDouble(events)
-    service.session_manager = _transaction_manager
-    service.agent_repository = _AgentRepositoryDouble()
+    operations.session_manager = _transaction_manager
+    operations.read_session_manager = _transaction_manager
+    operations.agent_repository = _AgentRepositoryDouble()
     service.external_channel_lifecycle_service = cleanup_lifecycle
-    service.exchange_file_repository = _ExchangeFileRepositoryDouble(events)
-    service.runtime_repository = _RuntimeRepositoryDouble()
-    service.decommission_repository = _DecommissionStatusRepositoryDouble()
+    operations.external_channel_repository = _ExternalCleanupRepositoryDouble(
+        cleanup_lifecycle
+    )
+    operations.exchange_file_repository = _ExchangeFileRepositoryDouble(events)
+    operations.runtime_repository = _RuntimeRepositoryDouble()
+    operations.decommission_repository = _DecommissionStatusRepositoryDouble()
 
     await service._cleanup_agent_external_roots(  # Pin finalizer precondition cleanup.
         job=_job(job_id="decommission"),
@@ -801,14 +777,20 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
     events: list[str] = []
     runtime_service = _AgentRuntimeServiceDouble()
     service = object.__new__(AgentDecommissionService)
+    operations = object.__new__(AgentDecommissionOperationsRepository)
+    service.operation_repository = operations
     cleanup_lifecycle = _ExternalChannelDecommissionCleanupDouble(events)
-    service.session_manager = _transaction_manager
-    service.agent_repository = _AgentRepositoryDouble()
+    operations.session_manager = _transaction_manager
+    operations.read_session_manager = _transaction_manager
+    operations.agent_repository = _AgentRepositoryDouble()
     service.external_channel_lifecycle_service = cleanup_lifecycle
-    service.exchange_file_repository = _ExchangeFileRepositoryDouble(events)
-    service.runtime_repository = _BoundRuntimeRepositoryDouble()
+    operations.external_channel_repository = _ExternalCleanupRepositoryDouble(
+        cleanup_lifecycle
+    )
+    operations.exchange_file_repository = _ExchangeFileRepositoryDouble(events)
+    operations.runtime_repository = _BoundRuntimeRepositoryDouble()
     service.agent_runtime_service = runtime_service
-    service.decommission_repository = _DecommissionStatusRepositoryDouble()
+    operations.decommission_repository = _DecommissionStatusRepositoryDouble()
 
     await service._cleanup_agent_external_roots(  # Pin terminal deletion fencing.
         job=_job(job_id="decommission"),
@@ -816,3 +798,75 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
     )
 
     assert runtime_service.calls == [{"agent_id": "agent-decommission"}]
+
+
+class _RetirementLifecycleDouble:
+    """Database-only archive composition; never invokes application callbacks."""
+
+    def __init__(
+        self,
+        *,
+        roots: _RootSessionRepositoryDouble,
+        external: _ExternalChannelLifecycleDouble,
+        participant: SessionLifecycleParticipantDefinition,
+        allows_active_runs: bool,
+    ) -> None:
+        self.roots = roots
+        self.external = external
+        self.participant = participant
+        self.allows_active_runs = allows_active_runs
+
+    async def archive_allows_active_runs(
+        self,
+        session: ReadSession,
+        *,
+        session_ids: Sequence[str],
+        running_session_ids: Sequence[str],
+    ) -> bool:
+        del session, session_ids, running_session_ids
+        return self.allows_active_runs
+
+    async def archive(
+        self, session: WriteSession, command: ChatArchiveMutation
+    ) -> tuple[ProviderEffectPlan, ...]:
+        result = await self.external.archive_participant(
+            session, self.participant, command.context
+        )
+        await self.roots.archive_tree(
+            session,
+            root_session_id=command.context.root_session_id,
+            session_ids=command.context.subtree_session_ids,
+            archived_at=command.archived_at,
+            purge_after=command.purge_after,
+            policy_revision=command.policy_revision,
+            retention_days=command.retention_days,
+        )
+        return result.cleanup_plans
+
+
+class _ExternalCleanupRepositoryDouble:
+    """Expose test persistence records through the canonical repository API."""
+
+    def __init__(self, delegate: _ExternalChannelDecommissionCleanupDouble) -> None:
+        self.delegate = delegate
+
+    async def cleanup_decommissioned_agent(
+        self,
+        session: WriteSession,
+        *,
+        agent_id: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelAgentDecommissionCleanup:
+        return await self.delegate.cleanup_decommissioned_agent(
+            session, agent_id=agent_id, now=now
+        )
+
+    async def purge_disconnected_connection_provider_state(
+        self,
+        session: WriteSession,
+        *,
+        connection_ids: Sequence[str],
+    ) -> int:
+        return await self.delegate.purge_decommissioned_provider_state(
+            session, connection_ids
+        )

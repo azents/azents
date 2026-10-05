@@ -99,7 +99,9 @@ class AuthMethod(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "enabled": obj.get("enabled"),
             "configured": obj.get("configured"),
@@ -108,6 +110,7 @@ class AuthMethod(BaseModel):
             "can_elevate": obj.get("can_elevate"),
             "can_remove": obj.get("can_remove"),
             "unavailable_reason": obj.get("unavailable_reason")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

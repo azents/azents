@@ -62,6 +62,12 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfileCreate,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_profile_reconciliation_operations import (
+    RuntimeProfileReconciliationOperationRepository,
+)
+from azents.repos.runtime_profile_resolution_operations import (
+    RuntimeProfileResolutionOperationRepository,
+)
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
@@ -434,12 +440,14 @@ def _service(
     session_manager: SessionManager[WriteSession],
 ) -> RuntimeProfileResolutionService:
     return RuntimeProfileResolutionService(
-        session_manager=session_manager,
-        agent_repository=AgentRepository(),
-        runtime_repository=AgentRuntimeRepository(),
-        profile_repository=RuntimeProfileRepository(),
-        provider_repository=RuntimeProviderRepository(),
-        provider_policy_repository=RuntimeProviderPolicyRepository(),
+        operations=RuntimeProfileResolutionOperationRepository(
+            session_manager=session_manager,
+            agent_repository=AgentRepository(),
+            runtime_repository=AgentRuntimeRepository(),
+            profile_repository=RuntimeProfileRepository(),
+            provider_repository=RuntimeProviderRepository(),
+            provider_policy_repository=RuntimeProviderPolicyRepository(),
+        )
     )
 
 
@@ -650,11 +658,11 @@ async def test_resolution_reads_sources_without_row_locks(
 
     source_read_count = [0]
     service = _service(rdb_session_manager)
-    service.agent_repository = _LockFreeAgentRepository()
-    service.profile_repository = _LockFreeRuntimeProfileRepository(
+    service.operations.agent_repository = _LockFreeAgentRepository()
+    service.operations.profile_repository = _LockFreeRuntimeProfileRepository(
         source_read_count=source_read_count
     )
-    service.provider_repository = _LockFreeRuntimeProviderRepository()
+    service.operations.provider_repository = _LockFreeRuntimeProviderRepository()
 
     resolution = await service.ensure_for_agent(agent_id)
 
@@ -941,7 +949,7 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
             independent_session_manager,
             replacement.id,
         )
-        service.runtime_repository = racing_repository
+        service.operations.runtime_repository = racing_repository
 
         resolution = await service.ensure_for_agent(agent_id)
 
@@ -965,9 +973,11 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
             assert task is not None
 
         reconciliation = RuntimeProfileReconciliationService(
-            session_manager=independent_session_manager,
-            profile_repository=RuntimeProfileRepository(),
-            resolution_service=_service(independent_session_manager),
+            operations=RuntimeProfileReconciliationOperationRepository(
+                session_manager=independent_session_manager,
+                profile_repository=RuntimeProfileRepository(),
+                resolution_operations=_service(independent_session_manager).operations,
+            )
         )
         outcome = await reconciliation.reconcile_once(task_limit=1, page_size=1)
 

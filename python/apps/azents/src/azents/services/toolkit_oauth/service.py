@@ -207,13 +207,13 @@ class ToolkitOAuthService:
                     "OAuth2 client credentials are not configured "
                     "and server does not support DCR.",
                 )
-        code_verifier, code_challenge = generate_pkce_pair()
+        pkce = generate_pkce_pair()
         oauth_state = create_toolkit_oauth_state(
             toolkit_id=toolkit_id,
             workspace_id=workspace_id,
             user_id=user_id,
             redirect_uri=redirect_uri,
-            code_verifier=code_verifier,
+            code_verifier=pkce.code_verifier,
             secret_key=self.config.credential_encryption.key,
         )
         result = await self.repository.store_shared_connection(
@@ -248,7 +248,7 @@ class ToolkitOAuthService:
             redirect_uri=redirect_uri,
             scopes=mcp_config.scopes,
             state=oauth_state,
-            code_challenge=code_challenge,
+            code_challenge=pkce.code_challenge,
             resource=mcp_config.server_url,
         )
 
@@ -271,10 +271,7 @@ class ToolkitOAuthService:
                 ToolkitOAuthFailureReason.INVALID_REQUEST,
                 "Invalid state parameter.",
             )
-        state_toolkit_id, state_workspace_id, _user_id, redirect_uri, code_verifier = (
-            verified
-        )
-        if state_toolkit_id != toolkit_id or state_workspace_id != workspace_id:
+        if verified.toolkit_id != toolkit_id or verified.workspace_id != workspace_id:
             raise ToolkitOAuthError(
                 ToolkitOAuthFailureReason.INVALID_REQUEST,
                 "OAuth state does not match toolkit.",
@@ -305,8 +302,8 @@ class ToolkitOAuthService:
             client_id=connection.client_id,
             client_secret=connection.client_secret,
             code=code,
-            redirect_uri=redirect_uri,
-            code_verifier=code_verifier,
+            redirect_uri=verified.redirect_uri,
+            code_verifier=verified.code_verifier,
             resource=connection.resource or mcp_config.server_url,
             proxy_url=self.config.mcp_proxy_url,
             toolkit_id=toolkit_id,

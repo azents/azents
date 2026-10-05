@@ -136,7 +136,9 @@ class ScheduledTaskResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "title": obj.get("title"),
             "objective": obj.get("objective"),
@@ -150,6 +152,7 @@ class ScheduledTaskResponse(BaseModel):
             "target": ScheduledTaskTargetResponse.from_dict(obj["target"]) if obj.get("target") is not None else None,
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
