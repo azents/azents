@@ -118,7 +118,9 @@ class PlatformGitHubAppCandidateResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "id": obj.get("id"),
             "base_version": obj.get("base_version"),
             "validation_status": obj.get("validation_status"),
@@ -129,6 +131,7 @@ class PlatformGitHubAppCandidateResponse(BaseModel):
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at"),
             "expires_at": obj.get("expires_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

@@ -13,6 +13,9 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.runtime_web.gateway_auth_operations import (
+    RuntimeWebGatewayAuthOperationsRepository,
+)
 from azents.repos.runtime_web.gateway_data import RuntimeWebDesiredConfiguration
 from azents.repos.runtime_web.gateway_repository import (
     RuntimeWebGatewayRepository,
@@ -86,11 +89,13 @@ def get_runtime_web_gateway_auth_service(
         ),
     )
     return RuntimeWebGatewayAuthService(
-        session_manager=session_manager,
-        repository=repository,
-        agent_repository=agent_repository,
-        agent_admin_repository=agent_admin_repository,
-        workspace_user_repository=workspace_user_repository,
+        operations=RuntimeWebGatewayAuthOperationsRepository(
+            session_manager=session_manager,
+            repository=repository,
+            agent_repository=agent_repository,
+            agent_admin_repository=agent_admin_repository,
+            workspace_user_repository=workspace_user_repository,
+        ),
         identity_lifetime=datetime.timedelta(
             seconds=settings.runtime_web_gateway_identity_lifetime_seconds
         ),

@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from azcommon.uuid import uuid7
+from botocore.exceptions import ClientError, HTTPClientError
+from botocore.exceptions import ConnectionError as BotoConnectionError
 
 from azents.runtime.transfer.workspace_upload import (
     WorkspaceUploadAdmission,
@@ -24,6 +26,7 @@ from azents.runtime.transfer.workspace_upload import (
     workspace_upload_terminal_expiry,
 )
 from azents.runtime.transfer.workspace_upload_object import (
+    WorkspaceUploadObjectError,
     WorkspaceUploadObjectStore,
     WorkspaceUploadUploadTicket,
 )
@@ -201,7 +204,12 @@ class WorkspaceUploadCoordinator:
                 WorkspaceUploadFailure.INTEGRITY,
             )
             return None
-        except Exception:
+        except (
+            BotoConnectionError,
+            ClientError,
+            HTTPClientError,
+            WorkspaceUploadObjectError,
+        ):
             await self._mark_finalize_failure(prepared, WorkspaceUploadFailure.INGRESS)
             return None
         current = await self.store.get(

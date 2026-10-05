@@ -23,6 +23,10 @@ class ConsolidationOutputError(ValueError):
     """A private authored artifact cannot become a published overview."""
 
 
+class ConsolidationPublicationUncertainError(RuntimeError):
+    """A completed publication scope failed to confirm its database outcome."""
+
+
 class ConsolidationWorkDisposition(BaseModel):
     """An explicit exact work choice, never an acknowledgement inferred from reads."""
 

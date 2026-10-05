@@ -27,8 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
   - python/apps/azents/src/azents/repos/external_channel/slack_presence_operations.py
   - python/apps/azents/src/azents/repos/external_channel/slack_socket_operations.py
-  - python/apps/azents/src/azents/repos/worker_session_lifecycle.py
-  - python/apps/azents/src/azents/repos/worker_user_stop.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
+  - python/apps/azents/src/azents/repos/user_stop.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/core/external_account_link.py
   - python/apps/azents/src/azents/core/external_account_oauth.py
@@ -72,7 +72,6 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/progress_data.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/**
-  - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/api/public/external_channel/**
   - python/apps/azents/specs/public/openapi.json
@@ -715,6 +714,9 @@ history, queue, retry, or fallback target is part of this boundary.
 - **2026-10-05** (spec_version 85) — Completed Slack presence/Socket lease
   repository operations, preserving lease fencing, CAS and health bookkeeping
   before SDK and ingestion effects.
+
+- **2026-10-05** (spec_version 85) — Reconciled code-path discovery with current
+  defining modules; system behavior is unchanged.
 
 - **2026-10-05** (spec_version 84) — Separated plain Work descriptions/private CAS and short effect-owner admission from critical finalization; made bounded OAuth cleanup and interaction projection/mode metadata writes independent of read gates.
 
