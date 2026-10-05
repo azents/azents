@@ -99,13 +99,16 @@ class SystemSettingInventoryItemResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "section": obj.get("section"),
             "display_name": obj.get("display_name"),
             "effective_status": obj.get("effective_status"),
             "admin_version": obj.get("admin_version"),
             "environment_managed_field_count": obj.get("environment_managed_field_count"),
             "candidate_status": obj.get("candidate_status")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

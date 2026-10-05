@@ -83,8 +83,8 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         self,
         *,
         store: TodoStateStore,
-        agent_id: str = "",
-        session_id: str = "",
+        agent_id: str | None,
+        session_id: str | None,
     ) -> None:
         """Create Todo Toolkit."""
         self.store = store
@@ -97,6 +97,8 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         owner: SessionExecutionOwner,
     ) -> None:
         """Bind this resolved Toolkit to one immutable Session owner."""
+        if self._session_id is None:
+            raise ValueError("Execution owner Session does not match Toolkit")
         if accepts_execution_owner(
             self._execution_owner,
             owner,
@@ -130,7 +132,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         context: CompactionSummaryHookContext,
     ) -> CompactionSummaryReplace | None:
         """Append current Todo state to compaction summary."""
-        if not self._agent_id or not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return None
         state = await self.store.load(self._agent_id, self._session_id)
         snapshot = render_todo_snapshot(state)
@@ -144,7 +146,7 @@ class TodoToolkit(Toolkit[TodoToolkitConfig]):
         """Return current todo prompt and update_todo tool."""
         if context.resource_authority is not None:
             self.bind_execution_authority(context.resource_authority)
-        if not self._session_id:
+        if self._agent_id is None or self._session_id is None:
             return ToolkitState(
                 status=ToolkitStatus.ENABLED,
                 tools=[],
@@ -187,7 +189,7 @@ class TodoToolkitProvider(ToolkitProvider[TodoToolkitConfig]):
         context: ResolveContext,
     ) -> Toolkit[TodoToolkitConfig]:
         """Return executable Todo Toolkit."""
-        return TodoToolkit(store=self.store)
+        return TodoToolkit(store=self.store, agent_id=None, session_id=None)
 
 
 def render_todo_prompt(state: TodoState | None = None) -> str:

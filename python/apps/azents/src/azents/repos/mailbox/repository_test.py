@@ -1,6 +1,5 @@
 """MailboxRepository tests."""
 
-from types import SimpleNamespace
 from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
@@ -8,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -179,7 +179,9 @@ class TestMailboxRepository:
     async def test_detach_sender_user_id_clears_retained_rows(self) -> None:
         """Detach one deleted User from retained MailboxItems."""
         session = MagicMock(spec=AsyncSession)
-        session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=3))
+        result = MagicMock(spec=CursorResult)
+        result.rowcount = 3
+        session.execute = AsyncMock(return_value=result)
         session.flush = AsyncMock()
 
         detached = await MailboxRepository().detach_sender_user_id(

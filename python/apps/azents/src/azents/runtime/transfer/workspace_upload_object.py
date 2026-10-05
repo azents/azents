@@ -20,6 +20,11 @@ from azcommon.infra.s3.service import (
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
+from botocore.exceptions import (
+    ClientError,
+    HTTPClientError,
+)
+from botocore.exceptions import ConnectionError as BotoConnectionError
 
 from azents.runtime.transfer.workspace_upload import (
     WorkspaceUploadRecord,
@@ -434,7 +439,7 @@ class WorkspaceUploadObjectOrphanRepair:
                     )
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except BotoConnectionError, ClientError, HTTPClientError:
                     failed_cleanups += 1
                 else:
                     deleted_objects += 1
@@ -465,7 +470,7 @@ class WorkspaceUploadObjectOrphanRepair:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except BotoConnectionError, ClientError, HTTPClientError:
                 failed_cleanups += 1
             else:
                 aborted_multipart_uploads += 1

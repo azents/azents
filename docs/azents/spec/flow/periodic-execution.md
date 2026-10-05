@@ -45,6 +45,16 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/archived_session_retention_operations.py
+  - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
+  - python/apps/azents/src/azents/repos/scheduled_task_lifecycle_participant.py
+  - python/apps/azents/src/azents/repos/external_channel_lifecycle_participant.py
+  - python/apps/azents/src/azents/core/archived_session_purge_data.py
+  - python/apps/azents/src/azents/core/archived_session_retention_data.py
+  - python/apps/azents/src/azents/core/file_lifecycle_cleanup_data.py
+  - python/apps/azents/src/azents/core/session_lifecycle_purge.py
   - python/apps/azents/src/azents/services/chat/__init__.py
   - python/apps/azents/src/azents/services/agent_decommission.py
   - python/apps/azents/src/azents/services/agent_runtime_removal/**
@@ -59,6 +69,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task/**
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/services/scheduled_task/service.py
+  - python/apps/azents/src/azents/services/scheduled_task/management.py
+  - python/apps/azents/src/azents/services/scheduled_task/control.py
+  - python/apps/azents/src/azents/core/scheduled_task_management.py
+  - python/apps/azents/src/azents/core/scheduled_task_control.py
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/cli/scheduler.py
   - python/apps/azents/src/cli/devserver.py
@@ -66,7 +80,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-05
-spec_version: 29
+spec_version: 31
 ---
 
 # Periodic Execution Flow Spec
@@ -132,6 +146,27 @@ Scheduled Task domain service to claim a bounded set of due `scheduled_tasks`
 rows, admit typed Session Mailbox work, and return aggregate claimed, admitted,
 coalesced, skipped, and wake-failure counters. The Scheduler Job Runtime waits
 only for that bounded admission pass, not for Agent work to finish.
+
+`ScheduledTaskDispatcher` sequences completed database-only
+`ScheduledTaskDispatchRepository` claim and admission operations. Claims retain
+the exact lease owner, token, and expiry fence. Admission atomically writes the
+cycle snapshot, typed Mailbox trigger, Session recovery wake state, and Task
+cursor; a lost final claim fence rolls back all admission writes. Each operation
+closes its database scope before returning. Broker wake follows admission commit,
+and a wake failure increments the existing counter without undoing admitted work.
+The injected pure clock retains expiry checks during admission; provider, broker,
+and Runtime I/O remain outside the repository transaction.
+
+Management and provider-control services likewise call completed owner operations.
+Independent management list, get, and current-cycle reads use native PostgreSQL
+read-only scopes. Management mutations preserve Session, Agent, and Binding
+authority checks followed by the shared Mailbox → cycle → Task lock order.
+Provider controls authorize the claimed actor and Binding and mutate the Task in
+one atomic owner operation. Registration and deletion presentation follows
+completed create and delete operations; replacement retains its existing
+no-provider-effect path. Repository-only definition composition shares the
+transaction without exposing live sessions to services. Detached management and
+control contracts are defined in their corresponding core modules.
 
 ## Execution backend
 
@@ -420,6 +455,30 @@ read cannot archive a newly active or newly pinned tree. The task result reports
 `archived`, and `skipped`; skipped candidates are expected races or no-longer-eligible roots rather
 than batch failure.
 
+## Archive and file maintenance database ownership
+
+Archive retention, purge, and file cleanup services sequence completed repository
+operations. Retention revision replacement and optional application creation share one
+transaction; recalculation batch effects and cursor advancement remain atomic under
+the exact durable application lease. First-use settings initialization remains a
+write operation, while independent application/impact observations use native
+PostgreSQL read-only scopes.
+
+Purge claim and immutable participant materialization commit together. Root-tree
+fencing and stop requests complete before broker signals. Participant attempts,
+failure attribution, and checkpoints each finish their database scope before the
+service runs the participant. Database-only Scheduled and External Channel
+participants are composed below services, including restrictive final verification
+and root deletion in the same finalization transaction. Pure participant policy
+validation and external participant ordering remain service-side. Broker, blob,
+provider and Runtime I/O never run inside those database scopes.
+
+File cleanup captures its preexisting terminal-blob IDs before current expiration
+and GC mutations. Independent metadata/transcript reads use native read-only scopes;
+terminal marking and cursor advancement preserve their existing conditional writes.
+Avatar claim and post-delete settlement use the exact cleanup lease. Object deletion
+runs after preparation closes and before its completed metadata settlement.
+
 ## Archived-session retention recalculation task
 
 `archived_session_retention_recalculation` runs every minute with a two-minute task timeout and
@@ -505,6 +564,15 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-05** (spec_version 31) — Moved archive retention, purge participant
+  checkpoints/finalization, and file cleanup database lifetimes into completed
+  repository operations, preserving leases, policy snapshots, cursor CAS, and
+  transaction-free external cleanup.
+
+- **2026-10-05** (spec_version 30) — Recorded completed Scheduled claim,
+  admission, management, and provider-control ownership with native read-only
+  inspection and preserved post-commit effect boundaries.
 
 - **2026-10-05** (spec_version 29) — Removed candidate freshness locks from
   expired OAuth housekeeping while preserving exact claim/consumption authority.

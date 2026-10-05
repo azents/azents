@@ -89,9 +89,12 @@ class AutomaticSessionProjectsReplaceRequest(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "expected_revision": obj.get("expected_revision"),
             "project_paths": obj.get("project_paths")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

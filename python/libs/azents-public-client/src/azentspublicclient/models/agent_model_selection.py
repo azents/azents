@@ -130,7 +130,9 @@ class AgentModelSelection(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "llm_provider_integration_id": obj.get("llm_provider_integration_id"),
             "provider": obj.get("provider"),
             "model_identifier": obj.get("model_identifier"),
@@ -143,6 +145,7 @@ class AgentModelSelection(BaseModel):
             "supported_execution_options": obj.get("supported_execution_options"),
             "source_metadata": obj.get("source_metadata"),
             "last_refreshed_at": obj.get("last_refreshed_at")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

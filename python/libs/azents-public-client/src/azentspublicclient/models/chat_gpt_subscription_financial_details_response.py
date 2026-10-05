@@ -143,7 +143,9 @@ class ChatGPTSubscriptionFinancialDetailsResponse(BaseModel):
         if not isinstance(obj, dict):
             return cls.model_validate(obj)
 
+        # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
+            _key: _value for _key, _value in {
             "type": obj.get("type"),
             "has_credits": obj.get("has_credits"),
             "unlimited": obj.get("unlimited"),
@@ -153,6 +155,7 @@ class ChatGPTSubscriptionFinancialDetailsResponse(BaseModel):
             "spend_remaining_percent": obj.get("spend_remaining_percent"),
             "spend_resets_at": obj.get("spend_resets_at"),
             "reached_type": obj.get("reached_type")
+            }.items() if _key in obj
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
