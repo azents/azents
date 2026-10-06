@@ -453,6 +453,15 @@ class MemoryListResponse(BaseModel):
     """Memory list response."""
 
     items: list[MemoryResponse]
+    next_cursor: str | None
+
+
+class ConsolidatedMemoryResponse(BaseModel):
+    """Current integrated Memory settings overview for one exact scope."""
+
+    scope: HistoricalMemorySettingsScope
+    markdown: str | None
+    published_at: datetime.datetime | None
 
 
 class HistoricalMemoryResponse(BaseModel):

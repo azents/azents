@@ -22,6 +22,7 @@ from azents.services.agent.data import (
 from azents.services.memory import MemoryService
 
 from .settings_data import (
+    ConsolidatedMemorySettingsOutput,
     HistoricalMemorySettingsCursorInvalid,
     HistoricalMemorySettingsListOutput,
     HistoricalMemorySettingsNotFound,
@@ -38,6 +39,41 @@ class HistoricalMemorySettingsService:
         Depends(HistoricalMemorySettingsRepository),
     ]
     memory_service: Annotated[MemoryService, Depends(MemoryService)]
+
+    async def get_consolidated(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        user_id: str,
+        role: WorkspaceUserRole,
+        scope: HistoricalMemorySettingsScope,
+    ) -> Result[
+        ConsolidatedMemorySettingsOutput,
+        NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied,
+    ]:
+        """Inspect current Memory under human visibility, including when disabled."""
+        access = await self.memory_service.get_visible_agent(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        match access:
+            case Success():
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(access)
+        record = await self.repository.get_consolidated(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            scope=scope,
+        )
+        return Success(ConsolidatedMemorySettingsOutput.convert_from(record))
 
     async def list(
         self,

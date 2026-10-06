@@ -3,13 +3,14 @@
 /** Agent Memory settings container. */
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
   AgentResponse,
   HistoricalMemoryResponse,
   MemoryResponse,
 } from "@azents/public-client";
+import type { RefCallback } from "react";
 
 export type MemoryKindValue = "saved" | "historical";
 export type SavedMemoryScopeValue = "agent" | "user";
@@ -31,6 +32,19 @@ export type SavedMemoryListState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; memories: MemoryResponse[] };
+
+export type ConsolidatedMemoryState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "LOADED"; markdown: string | null; publishedAt: string | null };
+
+export type MemoryPaginationState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "END" };
+
+export type HistoricalMemoryView = "overview" | "sessions";
 
 export type HistoricalMemoryListState =
   | { type: "LOADING" }
@@ -62,13 +76,18 @@ export interface AgentMemorySettingsContainerOutput {
   saving: boolean;
   deletingId: string | null;
   togglingMemory: boolean;
-  loadingMoreHistorical: boolean;
+  historicalView: HistoricalMemoryView;
+  consolidatedState: ConsolidatedMemoryState;
+  paginationState: MemoryPaginationState;
+  scrollRootRef: RefCallback<HTMLDivElement>;
+  scrollEndRef: RefCallback<HTMLDivElement>;
+  onHistoricalViewChange: (view: HistoricalMemoryView) => void;
+  onRetryNextPage: () => void;
   onKindChange: (kind: MemoryKindValue) => void;
   onSavedScopeChange: (scope: SavedMemoryScopeValue) => void;
   onHistoricalScopeChange: (scope: HistoricalMemoryScopeValue) => void;
   onSavedQueryChange: (query: string) => void;
   onHistoricalQueryChange: (query: string) => void;
-  onLoadMoreHistorical: () => void;
   onMemoryEnabledChange: (enabled: boolean) => void;
   onStartCreate: () => void;
   onStartEdit: (memory: MemoryResponse) => void;
@@ -101,6 +120,52 @@ function normalizeError(error: unknown): string {
   return "Unknown error";
 }
 
+/** Observe the active list inside its real scrolling container. */
+export function useMemoryScrollPagination({
+  enabled,
+  pageKey,
+  listKey,
+  onNextPage,
+}: {
+  enabled: boolean;
+  pageKey: string;
+  listKey: string;
+  onNextPage: () => void;
+}): {
+  scrollRootRef: RefCallback<HTMLDivElement>;
+  scrollEndRef: RefCallback<HTMLDivElement>;
+} {
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
+  const [end, setEnd] = useState<HTMLDivElement | null>(null);
+  const nextPage = useRef(onNextPage);
+  useEffect(() => {
+    if (root !== null) {
+      root.scrollTop = 0;
+    }
+  }, [root, listKey]);
+  useEffect(() => {
+    nextPage.current = onNextPage;
+  }, [onNextPage]);
+  useEffect(() => {
+    if (!enabled || root === null || end === null) {
+      return;
+    }
+    let requested = false;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!requested && entries.some((entry) => entry.isIntersecting)) {
+          requested = true;
+          nextPage.current();
+        }
+      },
+      { root },
+    );
+    observer.observe(end);
+    return () => observer.disconnect();
+  }, [enabled, root, end, pageKey]);
+  return { scrollRootRef: setRoot, scrollEndRef: setEnd };
+}
+
 export function useAgentMemorySettingsContainer({
   handle,
   agent,
@@ -113,20 +178,26 @@ export function useAgentMemorySettingsContainer({
     useState<HistoricalMemoryScopeValue>("team");
   const [savedQuery, setSavedQuery] = useState("");
   const [historicalQuery, setHistoricalQuery] = useState("");
+  const [historicalView, setHistoricalView] =
+    useState<HistoricalMemoryView>("overview");
   const [draftState, setDraftState] = useState<DraftState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [memoryEnabled, setMemoryEnabled] = useState(agent.memory_enabled);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const savedListQuery = trpc.agent.listMemories.useQuery(
+  const savedListQuery = trpc.agent.listMemories.useInfiniteQuery(
     {
       handle,
       agentId: agent.id,
       scope: savedScope,
       type: null,
       query: savedQuery.trim() === "" ? null : savedQuery.trim(),
+      limit: 20,
     },
-    { enabled: kind === "saved" },
+    {
+      enabled: kind === "saved",
+      getNextPageParam: (lastPage) => lastPage.next_cursor,
+    },
   );
 
   const historicalListQuery =
@@ -139,10 +210,15 @@ export function useAgentMemorySettingsContainer({
         limit: 20,
       },
       {
-        enabled: kind === "historical",
+        enabled: kind === "historical" && historicalView === "sessions",
         getNextPageParam: (lastPage) => lastPage.next_cursor,
       },
     );
+
+  const consolidatedQuery = trpc.agent.getConsolidatedMemory.useQuery(
+    { handle, agentId: agent.id, scope: historicalScope },
+    { enabled: kind === "historical" && historicalView === "overview" },
+  );
 
   const createMutation = trpc.agent.createMemory.useMutation({
     onSuccess: () => {
@@ -195,16 +271,22 @@ export function useAgentMemorySettingsContainer({
     },
   });
 
+  const savedData = savedListQuery.data ?? null;
+  const historicalData = historicalListQuery.data ?? null;
   const savedListState: SavedMemoryListState = savedListQuery.isLoading
     ? { type: "LOADING" }
-    : savedListQuery.isError
+    : savedListQuery.isError && savedData === null
       ? { type: "ERROR", message: normalizeError(savedListQuery.error) }
-      : { type: "LOADED", memories: savedListQuery.data?.items ?? [] };
+      : {
+          type: "LOADED",
+          memories:
+            savedListQuery.data?.pages.flatMap((page) => page.items) ?? [],
+        };
 
   const historicalListState: HistoricalMemoryListState =
     historicalListQuery.isLoading
       ? { type: "LOADING" }
-      : historicalListQuery.isError
+      : historicalListQuery.isError && historicalData === null
         ? {
             type: "ERROR",
             message: normalizeError(historicalListQuery.error),
@@ -216,6 +298,39 @@ export function useAgentMemorySettingsContainer({
               [],
             hasMore: historicalListQuery.hasNextPage,
           };
+
+  const consolidatedState: ConsolidatedMemoryState = consolidatedQuery.isLoading
+    ? { type: "LOADING" }
+    : consolidatedQuery.isError
+      ? { type: "ERROR", message: normalizeError(consolidatedQuery.error) }
+      : {
+          type: "LOADED",
+          markdown: consolidatedQuery.data?.markdown ?? null,
+          publishedAt: consolidatedQuery.data?.published_at ?? null,
+        };
+  const activeList = kind === "saved" ? savedListQuery : historicalListQuery;
+  const paginationState: MemoryPaginationState = activeList.isFetchingNextPage
+    ? { type: "LOADING" }
+    : activeList.isFetchNextPageError
+      ? { type: "ERROR", message: normalizeError(activeList.error) }
+      : activeList.hasNextPage
+        ? { type: "IDLE" }
+        : { type: "END" };
+  const fetchNextPage = useCallback((): void => {
+    if (activeList.hasNextPage && !activeList.isFetching) {
+      void activeList.fetchNextPage();
+    }
+  }, [activeList]);
+  const scrollRefs = useMemoryScrollPagination({
+    enabled:
+      (kind === "saved" || historicalView === "sessions") &&
+      activeList.hasNextPage &&
+      !activeList.isFetching &&
+      !activeList.isFetchNextPageError,
+    listKey: `${kind}:${savedScope}:${historicalScope}:${savedQuery}:${historicalQuery}:${historicalView}`,
+    pageKey: `${activeList.data?.pages.length ?? 0}`,
+    onNextPage: fetchNextPage,
+  });
 
   return {
     handle,
@@ -233,9 +348,15 @@ export function useAgentMemorySettingsContainer({
     saving: createMutation.isPending || updateMutation.isPending,
     deletingId,
     togglingMemory: toggleMutation.isPending,
-    loadingMoreHistorical: historicalListQuery.isFetchingNextPage,
+    historicalView,
+    consolidatedState,
+    paginationState,
+    ...scrollRefs,
+    onHistoricalViewChange: setHistoricalView,
+    onRetryNextPage: fetchNextPage,
     onKindChange: (nextKind) => {
       setKind(nextKind);
+      setHistoricalView("overview");
       setDraftState(null);
       setActionError(null);
     },
@@ -244,12 +365,12 @@ export function useAgentMemorySettingsContainer({
       setDraftState(null);
       setActionError(null);
     },
-    onHistoricalScopeChange: setHistoricalScope,
+    onHistoricalScopeChange: (scope) => {
+      setHistoricalScope(scope);
+      setHistoricalView("overview");
+    },
     onSavedQueryChange: setSavedQuery,
     onHistoricalQueryChange: setHistoricalQuery,
-    onLoadMoreHistorical: () => {
-      void historicalListQuery.fetchNextPage();
-    },
     onMemoryEnabledChange: (enabled) => {
       setMemoryEnabled(enabled);
       toggleMutation.mutate({

@@ -8,9 +8,29 @@ from typing_extensions import Self
 
 from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.repos.historical_memory.settings_data import (
+    ConsolidatedMemorySettingsRecord,
     HistoricalMemorySettingsPage,
     HistoricalMemorySettingsRecord,
 )
+
+
+class ConsolidatedMemorySettingsOutput(BaseModel):
+    """The currently inspectable integrated Memory document, or an empty scope."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope: HistoricalMemorySettingsScope
+    markdown: str | None
+    published_at: datetime.datetime | None
+
+    @classmethod
+    def convert_from(cls, data: ConsolidatedMemorySettingsRecord) -> Self:
+        """Detach the integrated settings repository result."""
+        return cls(
+            scope=data.scope,
+            markdown=data.markdown,
+            published_at=data.published_at,
+        )
 
 
 class HistoricalMemorySettingsOutput(BaseModel):

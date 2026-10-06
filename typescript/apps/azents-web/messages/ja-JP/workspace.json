@@ -842,7 +842,6 @@
       "openConversation": "元の会話を開く",
       "openConversationLabel": "元の会話を開く: {title}",
       "untitledConversation": "タイトルのない会話",
-      "loadMore": "さらに表示",
       "create": "メモリを追加",
       "createTitle": "メモリを追加",
       "editTitle": "メモリを編集",
@@ -858,7 +857,14 @@
       "savedEmptyDescription": "メモリを作成するか、検索条件を調整してください。",
       "historicalEmptyTitle": "過去の会話が見つかりません",
       "historicalEmptyDescription": "別の範囲や検索語をお試しください。アーカイブ済みまたはアクセスできない会話は表示されません。",
-      "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。"
+      "deleteConfirm": "メモリ「{name}」を削除しますか？この操作は元に戻せません。",
+      "integratedTitle": "統合メモリ",
+      "integratedEmpty": "この範囲の統合メモリはまだありません。",
+      "integratedDate": "更新日: {date}",
+      "viewSessionMemories": "セッション別メモリを表示",
+      "backToIntegrated": "統合メモリに戻る",
+      "loadingMore": "メモリを読み込み中",
+      "retry": "再試行"
     },
     "subagentsSectionLabel": "サブエージェント",
     "subagentMaxSubagentsLabel": "最大サブエージェント数",

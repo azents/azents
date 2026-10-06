@@ -91,6 +91,7 @@ Class | Method | HTTP request | Description
 *AgentV1Api* | [**agent_v1_delete_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
 *AgentV1Api* | [**agent_v1_finalize_avatar**](azentspublicclient/docs/AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 *AgentV1Api* | [**agent_v1_get_agent**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
+*AgentV1Api* | [**agent_v1_get_agent_consolidated_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_consolidated_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory | Get Agent Consolidated Memory
 *AgentV1Api* | [**agent_v1_get_agent_historical_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_historical_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id} | Get Agent Historical Memory
 *AgentV1Api* | [**agent_v1_get_agent_memory**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 *AgentV1Api* | [**agent_v1_get_automatic_session_projects**](azentspublicclient/docs/AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
@@ -515,6 +516,7 @@ Class | Method | HTTP request | Description
  - [CleanupSessionGitWorktreeRequest](azentspublicclient/docs/CleanupSessionGitWorktreeRequest.md)
  - [CommandAction](azentspublicclient/docs/CommandAction.md)
  - [ConnectionAccessPolicyRequest](azentspublicclient/docs/ConnectionAccessPolicyRequest.md)
+ - [ConsolidatedMemoryResponse](azentspublicclient/docs/ConsolidatedMemoryResponse.md)
  - [CreateGitWorktreeAction](azentspublicclient/docs/CreateGitWorktreeAction.md)
  - [CreateInvitationRequest](azentspublicclient/docs/CreateInvitationRequest.md)
  - [CreateJoinRequestRequest](azentspublicclient/docs/CreateJoinRequestRequest.md)

@@ -842,7 +842,6 @@
       "openConversation": "원본 대화 열기",
       "openConversationLabel": "원본 대화 열기: {title}",
       "untitledConversation": "제목 없는 대화",
-      "loadMore": "더 보기",
       "create": "메모리 추가",
       "createTitle": "메모리 추가",
       "editTitle": "메모리 수정",
@@ -858,7 +857,14 @@
       "savedEmptyDescription": "메모리를 만들거나 검색 조건을 조정하세요.",
       "historicalEmptyTitle": "과거 대화가 없습니다",
       "historicalEmptyDescription": "다른 범위나 검색어를 사용해 보세요. 보관되었거나 접근할 수 없는 대화는 표시되지 않습니다.",
-      "deleteConfirm": "메모리 \"{name}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다."
+      "deleteConfirm": "메모리 \"{name}\"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.",
+      "integratedTitle": "통합 메모리",
+      "integratedEmpty": "아직 이 범위의 통합 메모리가 없습니다.",
+      "integratedDate": "업데이트: {date}",
+      "viewSessionMemories": "세션별 메모리 보기",
+      "backToIntegrated": "통합 메모리로 돌아가기",
+      "loadingMore": "메모리 추가 로딩 중",
+      "retry": "다시 시도"
     },
     "subagentsSectionLabel": "서브에이전트",
     "subagentMaxSubagentsLabel": "최대 서브에이전트 수",

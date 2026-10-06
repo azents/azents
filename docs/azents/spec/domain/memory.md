@@ -64,6 +64,9 @@ code_paths:
   - python/apps/azents/src/azents/job_runtime/local.py
   - python/apps/azents/src/azents/api/public/agent/v1/__init__.py
   - python/apps/azents/src/azents/api/public/agent/v1/data.py
+  - python/apps/azents/src/azents/repos/memory/ui_paging.py
+  - python/apps/azents/src/azents/repos/memory/ui_operations.py
+  - python/apps/azents/src/azents/services/historical_memory/settings.py
   - typescript/apps/azents-web/src/features/agents/AgentMemorySettingsPage.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.stories.tsx
@@ -74,8 +77,9 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
+  - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
 last_verified_at: 2026-10-06
-spec_version: 21
+spec_version: 22
 ---
 
 # Memory
@@ -546,16 +550,21 @@ canonical Session event store and repositories remain source evidence.
 
 Existing Saved CRUD remains under
 `/agent/v1/workspaces/{handle}/agents/{agent_id}/memories` and `/{memory_id}`.
-List requires exact `scope=agent|user` with optional `type`/`query`. Non-empty
+List requires exact `scope=agent|user` with optional `type`/`query`, opaque cursor,
+and `limit` from 1 to 100 (default 20). It returns `items` and `next_cursor`;
+the exclusive keyset is `(type, name, id)`, with one-row lookahead rather than a
+whole-list limit. Cursor identity binds Agent, associated User, type and query;
+malformed or mismatched cursors return a non-content-echoing `422`. Non-empty
 Saved query uses lexical case-insensitive all-term matching. Human create/update
 uses duplicate-name conflicts rather than runtime upsert. Agent mutations require
 Agent admin or Workspace owner; User mutations affect only the current user's own
 visible entries.
 
-Historical settings adds only:
+Read-only Historical settings endpoints:
 
 - `GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories`
 - `GET /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}`
+- `GET /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory`
 
 List requires exact `scope=team|user` and accepts an optional escaped lexical
 substring query over current source title/available summary, opaque cursor, and
@@ -568,12 +577,26 @@ use the existing non-enumerating `404` mapping. Every request checks Agent
 visibility, Workspace membership, active root source, and exact Team or current
 User scope. Inspection remains available while Agent Memory is disabled.
 
-The existing settings page provides Saved/Historical kind selection. Saved keeps
-Agent/User scopes, search, create/edit modal, and delete confirmation. Historical
-offers Team/current-User grouping, search, pagination, summary inspection, and
-links to original conversations without edit/delete controls. One existing toggle
-remains; there is no additional Historical toggle, badge, notification, or
-per-answer usage claim. The inventory is not the exact set used by a response.
+The integrated endpoint requires `scope=team|user` and derives the personal User
+from the authenticated Workspace member. It returns current `markdown` and
+`published_at`, both null when no current document is visible, without generation
+or source-packing fallback. Human Agent visibility and current membership apply
+even while Memory is disabled. Current publication storage retains its existing
+own-manifest read checks until its consolidation replacement is implemented.
+
+The settings page provides Saved/Historical kind selection. Its responsive header
+puts the explanation below the title/control row, using the full available width.
+Saved keeps Agent/User scopes, search, create/edit modal and delete confirmation,
+and fetches cursor pages through an automatic scroll sentinel. Historical defaults
+to selected Team/current-User integrated Markdown; a one-level in-page detail view
+contains per-session search, summaries, dates and original-conversation links.
+Its per-session list also fetches automatically, with no Load more button.
+The sentinel uses the actual overflow scrolling container, avoids concurrent
+next-page fetches, stops at exhaustion, and preserves loaded entries on a
+next-page error with explicit retry. Scope/query/navigation changes do not mix
+pages. One existing toggle remains; there is no additional Historical toggle,
+badge, notification or per-answer usage claim. The inventory is not the exact set
+used by a response.
 
 ## Invariants
 
@@ -616,6 +639,7 @@ never replayed merely because durable conversation remains.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-06 | 22 | Added Saved cursor paging and integrated Historical overview, one-level session details, automatic scroll pagination and full-width header description |
 | 2026-10-06 | 19 | Replace nonwaiting producer/source/handover fences with exact waiting admission, renewable-lease-safe participant planning and whole-operation/page recovery |
 | 2026-10-05 | 16 | Make uncertain publication inspection read-only and unfenced; condition revision GC on exact current/reference exclusions without candidate locks |
 | 2026-10-04 | 14 | Make consumer/foreground descriptions read-only and unfenced while retaining exact own-manifest denial and producer mutation authority |

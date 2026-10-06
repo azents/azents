@@ -842,7 +842,6 @@
       "openConversation": "Open conversation",
       "openConversationLabel": "Open conversation: {title}",
       "untitledConversation": "Untitled conversation",
-      "loadMore": "Load more",
       "create": "Add memory",
       "createTitle": "Add memory",
       "editTitle": "Edit memory",
@@ -858,7 +857,14 @@
       "savedEmptyDescription": "Create a memory or adjust the search filter.",
       "historicalEmptyTitle": "No historical conversations found",
       "historicalEmptyDescription": "Try another scope or search. Archived and inaccessible conversations are not shown.",
-      "deleteConfirm": "Delete memory \"{name}\"? This cannot be undone."
+      "deleteConfirm": "Delete memory \"{name}\"? This cannot be undone.",
+      "integratedTitle": "Integrated memory",
+      "integratedEmpty": "No integrated memory is available for this scope yet.",
+      "integratedDate": "Updated {date}",
+      "viewSessionMemories": "View session memories",
+      "backToIntegrated": "Back to integrated memory",
+      "loadingMore": "Loading more memories",
+      "retry": "Retry"
     },
     "subagentsSectionLabel": "Subagents",
     "subagentMaxSubagentsLabel": "Max subagents",

@@ -31,3 +31,13 @@ class HistoricalMemorySettingsPage(BaseModel):
 
 class HistoricalMemorySettingsCursorError(ValueError):
     """The supplied opaque Historical Memory settings cursor is invalid."""
+
+
+class ConsolidatedMemorySettingsRecord(BaseModel):
+    """The selected scope's current human-visible integrated document."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scope: HistoricalMemorySettingsScope
+    markdown: str | None
+    published_at: datetime.datetime | None

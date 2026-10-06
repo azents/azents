@@ -652,6 +652,73 @@
         }
       }
     },
+    "/agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory": {
+      "get": {
+        "tags": [
+          "Agent v1"
+        ],
+        "summary": "Get Agent Consolidated Memory",
+        "description": "Inspect the current integrated Memory without starting consolidation.",
+        "operationId": "agent_v1_get_agent_consolidated_memory",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/HistoricalMemorySettingsScope",
+              "description": "Integrated Memory scope"
+            },
+            "description": "Integrated Memory scope"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidatedMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/workspaces/{handle}/agents/{agent_id}/memories": {
       "get": {
         "tags": [
@@ -729,6 +796,38 @@
               "title": "Query"
             },
             "description": "Search query"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque page cursor",
+              "title": "Cursor"
+            },
+            "description": "Opaque page cursor"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Page size",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "Page size"
           }
         ],
         "responses": {
@@ -23464,6 +23563,44 @@
         "title": "ConnectionAccessPolicyRequest",
         "description": "Dedicated External Channel ingress policy request."
       },
+      "ConsolidatedMemoryResponse": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/HistoricalMemorySettingsScope"
+          },
+          "markdown": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Markdown"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "markdown",
+          "published_at"
+        ],
+        "title": "ConsolidatedMemoryResponse",
+        "description": "Current integrated Memory settings overview for one exact scope."
+      },
       "CreateGitWorktreeAction": {
         "properties": {
           "type": {
@@ -28682,11 +28819,23 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "next_cursor"
         ],
         "title": "MemoryListResponse",
         "description": "Memory list response."

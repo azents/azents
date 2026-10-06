@@ -15,18 +15,32 @@ from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionStatus,
 )
+from azents.core.historical_memory_consolidation import (
+    ConsolidationScope,
+    ConsolidationUnitKey,
+)
+from azents.core.historical_memory_publication import validate_consolidation_overview
 from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.core.vfs import VFS_FILE_MAX_BYTES
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
+from azents.rdb.models.historical_memory_consolidation import (
+    RDBConsolidationRevision,
+    RDBConsolidationUnit,
+)
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory.settings_data import (
+    ConsolidatedMemorySettingsRecord,
     HistoricalMemorySettingsCursorError,
     HistoricalMemorySettingsPage,
     HistoricalMemorySettingsRecord,
+)
+from azents.repos.historical_memory_consolidation.authority import unit_predicate
+from azents.repos.historical_memory_consolidation.foreground import (
+    denied_revision_manifest,
 )
 
 
@@ -48,6 +62,66 @@ class HistoricalMemorySettingsRepository:
         SessionManager[WriteSession],
         Depends(get_session_manager),
     ]
+
+    async def get_consolidated(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        user_id: str,
+        scope: HistoricalMemorySettingsScope,
+    ) -> ConsolidatedMemorySettingsRecord:
+        """Read the current publication without generation or a foreground Session."""
+        key = ConsolidationUnitKey(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            scope=(
+                ConsolidationScope.TEAM
+                if scope is HistoricalMemorySettingsScope.TEAM
+                else ConsolidationScope.USER
+            ),
+            associated_user_id=(
+                user_id if scope is HistoricalMemorySettingsScope.USER else None
+            ),
+        )
+        membership = sa.exists(
+            sa.select(RDBWorkspaceUser.id).where(
+                RDBWorkspaceUser.workspace_id == workspace_id,
+                RDBWorkspaceUser.user_id == user_id,
+            )
+        )
+        statement = (
+            sa.select(RDBConsolidationRevision)
+            .join(
+                RDBConsolidationUnit,
+                sa.and_(
+                    RDBConsolidationUnit.id == RDBConsolidationRevision.unit_id,
+                    RDBConsolidationUnit.published_revision_id
+                    == RDBConsolidationRevision.id,
+                ),
+            )
+            .where(
+                unit_predicate(key),
+                membership,
+                ~denied_revision_manifest(key),
+            )
+        )
+        async with self.session_manager() as session:
+            row = await session.write_session.scalar(statement)
+            if row is None:
+                return ConsolidatedMemorySettingsRecord(
+                    scope=scope, markdown=None, published_at=None
+                )
+            overview = validate_consolidation_overview(key=key, markdown=row.markdown)
+            if overview.rendered_block != row.rendered_block:
+                raise ValueError(
+                    "Consolidated Memory publication bytes are inconsistent."
+                )
+            return ConsolidatedMemorySettingsRecord(
+                scope=scope,
+                markdown=overview.markdown,
+                published_at=row.published_at,
+            )
 
     async def list(
         self,

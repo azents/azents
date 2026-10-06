@@ -13,6 +13,7 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import Memory, MemoryCreate, MemoryUpdate
+from azents.repos.memory.ui_paging import MemoryUIPage, list_memory_page
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,14 +34,19 @@ class MemoryUIOperations:
         user_id: str | None,
         type: str | None,
         query: str | None,
-    ) -> list[Memory]:
+        cursor: str | None,
+        limit: int,
+    ) -> MemoryUIPage:
         async with self.session_manager() as session:
-            if query is None or query.strip() == "":
-                return await self.repository.list(
-                    session, agent_id=agent_id, user_id=user_id, type=type
-                )
-            return await self.repository.search_full(
-                session, agent_id=agent_id, user_id=user_id, query=query, type=type
+            return await list_memory_page(
+                session,
+                repository=self.repository,
+                agent_id=agent_id,
+                user_id=user_id,
+                type=type,
+                query=query,
+                cursor=cursor,
+                limit=limit,
             )
 
     async def create_if_name_available(

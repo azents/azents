@@ -7,6 +7,7 @@ Memory list response.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **items** | [**List[MemoryResponse]**](MemoryResponse.md) |  | 
+**next_cursor** | **str** |  | 
 
 ## Example
 
