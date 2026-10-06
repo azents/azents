@@ -1,7 +1,7 @@
 """Structured logging integration tests."""
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from azcommon.logging import (
     SensitiveQueryParameterFilter,
@@ -14,13 +14,10 @@ if TYPE_CHECKING:
 
 def test_applies_provider_failure_fingerprint_with_release() -> None:
     """Provider fingerprint and release define one Sentry incident group."""
-    event = cast(
-        "Event",
-        {
-            "extra": {"provider_failure_fingerprint": "fingerprint-001"},
-            "release": "azents@2026.07.17",
-        },
-    )
+    event: Event = {
+        "extra": {"provider_failure_fingerprint": "fingerprint-001"},
+        "release": "azents@2026.07.17",
+    }
 
     result = apply_structured_sentry_fingerprint(event, {})
 
@@ -33,7 +30,7 @@ def test_applies_provider_failure_fingerprint_with_release() -> None:
 
 def test_ignores_events_without_approved_fingerprint() -> None:
     """Unrelated logging events retain normal Sentry grouping."""
-    event = cast("Event", {"extra": {"request_id": "request-001"}})
+    event: Event = {"extra": {"request_id": "request-001"}}
 
     result = apply_structured_sentry_fingerprint(event, {})
 
