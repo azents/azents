@@ -213,6 +213,7 @@ from azents.services.session_git_worktree import (
 from azents.services.turn_action import TurnActionCapabilityRegistry
 from azents.testing.model_metadata import make_test_model_metadata_service
 from azents.testing.model_selection import (
+    make_test_model_candidate,
     make_test_model_selection,
     make_test_model_settings,
     make_test_selectable_model_options,
@@ -2623,7 +2624,7 @@ async def _resolve_success(*args: object, **kwargs: object) -> object:
         RunRequest(
             top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-001",
             user_messages=[],
@@ -2654,7 +2655,7 @@ async def _resolve_existing_success(*args: object, **kwargs: object) -> object:
         RunRequest(
             top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-001",
             user_messages=[],
@@ -3034,7 +3035,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
             RunRequest(
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
@@ -3259,7 +3260,7 @@ async def test_execute_recovers_activated_command_run(
             RunRequest(
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-001",
                 user_messages=[],
@@ -3478,7 +3479,7 @@ async def test_execute_recovers_unclassified_provider_retry_with_current_profile
             RunRequest(
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=requested_profile.enabled_execution_options,
                 session_id="session-001",
                 user_messages=[],
@@ -3926,13 +3927,14 @@ async def test_prepare_fresh_turn_materializes_the_frozen_compaction_candidate(
     assert prepared.value.run_request.compaction_credential_kwargs == {
         "api_key": "frozen"
     }
-    metadata = prepared.value.run_request.compaction_assembly_metadata
-    assert metadata is not None
+    captured = prepared.value.run_request.compaction_candidate.model_selection
     frozen_selection = frozen_compaction_selections[0]
-    assert metadata.model_developer is frozen_selection.model_developer
-    assert metadata.model_family == frozen_selection.model_family
-    assert metadata.capabilities == frozen_selection.normalized_capabilities
-    assert metadata.capabilities is not frozen_selection.normalized_capabilities
+    assert captured.model_developer is frozen_selection.model_developer
+    assert captured.model_family == frozen_selection.model_family
+    assert captured.normalized_capabilities == frozen_selection.normalized_capabilities
+    assert (
+        captured.normalized_capabilities is not frozen_selection.normalized_capabilities
+    )
 
 
 @pytest.mark.asyncio
@@ -6841,7 +6843,7 @@ async def test_quota_progresses_candidate_before_generic_retry(
         return RunRequest(
             top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             session_id="session-001",
             user_messages=[],
             agent_prompt=None,
@@ -7082,7 +7084,7 @@ async def test_execute_refreshes_session_profile_before_model_retry(
             RunRequest(
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=requested_profile.enabled_execution_options,
                 session_id="session-001",
                 user_messages=[],

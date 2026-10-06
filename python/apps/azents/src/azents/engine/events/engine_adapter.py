@@ -15,8 +15,11 @@ from azcommon.uuid import uuid7
 from fastapi import Depends
 from openai import AsyncOpenAI
 
+from azents.core.agent import SelectableModelCandidate
 from azents.core.builtin_tools import builtin_tool_configurable
+from azents.core.config import Config
 from azents.core.credentials import ChatGPTOAuthSecrets, XaiOAuthSecrets
+from azents.core.deps import get_config
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -167,7 +170,8 @@ from azents.engine.run.client_tool_compatibility import (
 )
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit, durable, ephemeral
-from azents.engine.run.model_transport import ModelTransportKey
+from azents.engine.run.model_transport import ModelTransportKey, ModelTransportState
+from azents.engine.run.resolve import effective_model_output_tokens
 from azents.engine.run.tool_budget import (
     ProviderHostedToolDeclarationCounts,
     ToolRequestCompatibilityKey,
@@ -278,34 +282,32 @@ def _xai_imagine_client_factory() -> XaiImagineClientFactory:
 def _summary_model_call(
     watchdog: Annotated[ModelStreamWatchdog, Depends(get_model_stream_watchdog)],
     sdk_factories: Annotated[ModelSDKFactories, Depends(get_model_sdk_factories)],
+    config: Annotated[Config, Depends(get_config)],
 ) -> SummaryModelCall:
     """Bind the process-owned watchdog to compaction model calls."""
 
     async def call_summary(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         return await summarize_text_with_model(
             sdk_factories=sdk_factories,
             watchdog=watchdog,
-            provider=provider,
-            provider_integration_id=provider_integration_id,
-            model=model,
+            candidate=candidate,
             credential_kwargs=credential_kwargs,
-            assembly_metadata=assembly_metadata,
+            effective_input_tokens=effective_input_tokens,
+            websocket_enabled=config.openai_responses_websocket_enabled,
+            transport_state=transport_state,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             conversation_text=conversation_text,
-            max_output_tokens=max_output_tokens,
             session_id=session_id,
         )
 
@@ -595,6 +597,7 @@ class AgentEngineAdapter:
             summarize=_event_summary_generator(
                 lambda: compaction_request,
                 summarize=self.summary_model_call,
+                transport_state=context.model_transport_state,
             ),
             on_started=on_compaction_started,
             summary_context_window_tokens=(
@@ -1128,6 +1131,7 @@ class AgentEngineAdapter:
             summarize=_event_summary_generator(
                 lambda: compaction_request,
                 summarize=self.summary_model_call,
+                transport_state=context.model_transport_state,
             ),
             max_input_tokens=lambda: compaction_request.effective_max_input_tokens,
             auto_compaction_threshold_tokens=request.auto_compaction_threshold_tokens,
@@ -1652,6 +1656,7 @@ def _event_summary_generator(
     request_provider: Callable[[], RunRequest],
     *,
     summarize: SummaryModelCall,
+    transport_state: ModelTransportState,
 ) -> SummaryGenerator:
     """Create an event summary generator bound to the latest compaction request."""
 
@@ -1660,9 +1665,12 @@ def _event_summary_generator(
         summary_budget: CompactionSummaryBudget,
     ) -> str:
         request = request_provider()
+        candidate = request.compaction_candidate
         input_char_budget = _summary_input_char_budget(
             request.effective_max_input_tokens,
-            summary_budget,
+            effective_model_output_tokens(
+                candidate.model_selection, candidate.settings
+            ),
         )
         conversation_text = _render_events_for_summary(
             events,
@@ -1670,30 +1678,17 @@ def _event_summary_generator(
         )
         if not conversation_text.strip():
             return ""
-        provider = request.compaction_provider or request.provider
-        model = request.compaction_model or request.model
         credential_kwargs = (
             request.compaction_credential_kwargs or request.credential_kwargs
         )
-        provider_integration_id = request.compaction_provider_integration_id
-        if request.compaction_provider is None and request.inference_state is not None:
-            provider_integration_id = (
-                request.inference_state.model_selection.llm_provider_integration_id
-            )
         summary = await summarize(
-            provider=provider,
-            provider_integration_id=provider_integration_id,
-            model=model,
+            candidate=candidate,
             credential_kwargs=dict(credential_kwargs),
-            assembly_metadata=(
-                request.compaction_assembly_metadata
-                if request.compaction_provider is not None
-                else request.model_assembly_metadata
-            ),
+            effective_input_tokens=request.effective_max_input_tokens,
+            transport_state=transport_state,
             system_prompt=SUMMARY_SYSTEM_PROMPT,
             user_prompt=SUMMARY_USER_TEMPLATE,
             conversation_text=conversation_text,
-            max_output_tokens=summary_budget.max_output_tokens,
             session_id=request.session_id,
         )
         return enforce_summary_char_budget(summary, summary_budget)
@@ -1822,13 +1817,13 @@ def _fit_summary_line(line: str, max_chars: int) -> str:
 
 def _summary_input_char_budget(
     max_input_tokens: int,
-    summary_budget: CompactionSummaryBudget,
+    selected_output_tokens: int | None,
 ) -> int:
     """Conservatively calculate summary model input char budget."""
     usable_tokens = max(
         0,
         max_input_tokens
-        - summary_budget.max_output_tokens
+        - (selected_output_tokens or 0)
         - _SUMMARY_INPUT_OVERHEAD_TOKENS,
     )
     budget = int(usable_tokens * _SUMMARY_INPUT_CHAR_PER_TOKEN)

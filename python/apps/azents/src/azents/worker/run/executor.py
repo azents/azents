@@ -1724,9 +1724,7 @@ class RunExecutor:
                     compaction_model=value.model,
                     compaction_provider=value.provider,
                     compaction_credential_kwargs=value.credential_kwargs,
-                    compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                        candidate.model_selection
-                    ),
+                    compaction_candidate=candidate.model_copy(deep=True),
                     compaction_max_input_tokens=value.effective_input_tokens,
                 ),
                 context_source=context_source,
@@ -2854,9 +2852,7 @@ class RunExecutor:
                 )
             resolved_request = dataclasses.replace(
                 resolved_request,
-                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                    compaction_candidate.model_selection
-                ),
+                compaction_candidate=compaction_candidate.model_copy(deep=True),
             )
             effective_context_window_tokens = (
                 resolved_request.effective_max_input_tokens
@@ -2961,9 +2957,7 @@ class RunExecutor:
                 compaction_model=value.model,
                 compaction_provider=value.provider,
                 compaction_credential_kwargs=value.credential_kwargs,
-                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                    candidate.model_selection
-                ),
+                compaction_candidate=candidate.model_copy(deep=True),
                 compaction_max_input_tokens=value.effective_input_tokens,
             ),
             context_source=context_source,

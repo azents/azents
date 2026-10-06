@@ -20,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 from azents.core.agent import (
     AgentModelSelection,
     ModelParameters,
+    SelectableModelCandidate,
     SelectableModelSettings,
 )
 from azents.core.builtin_tools import (
@@ -371,7 +372,7 @@ def _resolve_reasoning_effort(
     return params.reasoning_effort
 
 
-def _effective_max_output_tokens(
+def effective_model_output_tokens(
     selection: AgentModelSelection,
     settings: SelectableModelSettings,
 ) -> int | None:
@@ -843,8 +844,9 @@ async def resolve_invoke_input_with_model_source(
                 model_assembly_metadata=ModelAssemblyMetadata.from_selection(
                     main_selection
                 ),
-                compaction_assembly_metadata=ModelAssemblyMetadata.from_selection(
-                    lightweight_selection
+                compaction_candidate=SelectableModelCandidate(
+                    model_selection=lightweight_selection,
+                    settings=lightweight_settings,
                 ),
                 credential_kwargs=credential_kwargs,
                 workspace_id=agent.workspace_id,
@@ -857,7 +859,7 @@ async def resolve_invoke_input_with_model_source(
                     lightweight_selection.llm_provider_integration_id
                 ),
                 temperature=params.temperature if params else None,
-                max_output_tokens=_effective_max_output_tokens(
+                max_output_tokens=effective_model_output_tokens(
                     main_selection,
                     main_settings,
                 ),

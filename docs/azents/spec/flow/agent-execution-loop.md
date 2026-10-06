@@ -80,6 +80,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - python/apps/azents/src/azents/repos/idle_continuation.py
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py
   - python/apps/azents/src/azents/engine/model_assembly.py
@@ -186,7 +187,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
 last_verified_at: 2026-10-06
-spec_version: 217
+spec_version: 218
 ---
 
 # Agent Execution Loop
@@ -259,6 +260,11 @@ Main steps:
    profiles take precedence. The metadata does not authorize tools, modalities, reasoning options,
    version-specific features or new routes, and never changes the raw model/ARN or compatibility
    identity. No mutable catalog or source lookup is performed to fill missing family authority.
+   Compaction also carries the complete captured candidate settings into the
+   shared provider operation; output intent uses the same explicit-setting
+   clamp as foreground. Its SDK lifetime is operation-scoped while transport
+   fallback policy remains owned by the enclosing Run. Historical Memory
+   preparation and consolidation reuse this same request/adapter composition.
 9. The matching `AdapterOutputNormalizer` incrementally processes native output into typed,
    provider-neutral UI stream projections while retaining only the state needed to build durable
    output at completion. Provider-native hosted-tool stages are adapter-local and become canonical

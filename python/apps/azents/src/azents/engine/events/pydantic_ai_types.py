@@ -73,6 +73,18 @@ class PydanticAIRequest:
             )
         )
 
+    def native_request_input_bytes(self) -> int:
+        """Measure UTF-8 logical request framing for source input fitting."""
+        return (
+            len(ModelMessagesTypeAdapter.dump_json(self.messages))
+            + len(
+                json.dumps(self.settings, ensure_ascii=False, default=str).encode(
+                    "utf-8"
+                )
+            )
+            + len(_REQUEST_PARAMETERS_ADAPTER.dump_json(self.parameters))
+        )
+
 
 @dataclasses.dataclass(frozen=True, repr=False)
 class NativeErrorEvidence:

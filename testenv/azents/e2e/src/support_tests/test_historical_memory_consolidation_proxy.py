@@ -162,18 +162,10 @@ def test_stage1_keeps_only_this_request_synthetic_scope_markers() -> None:
         "input": [
             {"role": "user", "content": f"Historical Memory E2E source {_MARKER}"}
         ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "historical_memory",
-                "strict": True,
-                "schema": {
-                    "additionalProperties": False,
-                    "required": ["summary"],
-                    "properties": {"summary": {"type": "string"}},
-                },
-            }
-        },
+        "instructions": (
+            "Create a bounded, self-contained historical account "
+            "from the source Session."
+        ),
     }
     response = historical_memory_summary_response(request)
     assert response is not None and _MARKER in response

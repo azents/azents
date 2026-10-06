@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.engine.events.engine_adapter as engine_adapter_module
+from azents.core.agent import SelectableModelCandidate
 from azents.core.agent_session_data import AgentSession, SessionAgent
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.credentials import XaiOAuthSecrets
@@ -131,14 +132,16 @@ from azents.engine.hooks.types import (
     TurnStartHookContext,
     TurnStartResult,
 )
-from azents.engine.model_assembly import ModelAssemblyMetadata
 from azents.engine.model_factories import get_model_sdk_factories
 from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
-from azents.engine.run.model_transport import InMemoryModelTransportState
+from azents.engine.run.model_transport import (
+    InMemoryModelTransportState,
+    ModelTransportState,
+)
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
@@ -210,6 +213,7 @@ from azents.testing.model_metadata import (
     make_test_source_payload,
 )
 from azents.testing.model_selection import (
+    make_test_model_candidate,
     make_test_model_selection,
     make_test_model_settings,
 )
@@ -1278,7 +1282,7 @@ async def test_assembled_tool_chain_rechecks_owner_after_before_hook() -> None:
         ),
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1342,7 +1346,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -1399,7 +1403,7 @@ async def test_disabled_tool_search_exposes_complete_catalog() -> None:
         ),
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1603,7 +1607,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
         ),
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1725,7 +1729,7 @@ async def test_runtime_provider_adds_run_tool_to_file_as_direct_tool() -> None:
         ),
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -1801,7 +1805,7 @@ async def _prepare_profiled_model_call(
         ),
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=enabled_execution_options or [],
         session_id="session-1",
         user_messages=[],
@@ -1921,7 +1925,7 @@ async def test_openai_image_generation_is_bound_as_client_function_tool(
             RunRequest(
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2153,7 +2157,7 @@ async def test_actual_engine_builtin_admission_and_condition_gate_before_sdk_wir
     request = RunRequest(
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -2250,7 +2254,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
             RunRequest(
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2346,7 +2350,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
     request = RunRequest(
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -2453,7 +2457,7 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         ),
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],
@@ -2498,7 +2502,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             ),
             top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -2556,7 +2560,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2616,7 +2620,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             ),
             top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -2671,7 +2675,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2733,7 +2737,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2841,7 +2845,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -2918,7 +2922,7 @@ async def test_openrouter_model_binding_keeps_responses_and_exact_model_id() -> 
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -3004,7 +3008,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -3098,6 +3102,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     )
     captured_prompts: dict[str, str] = {}
     prepared_requests: list[RunRequest] = []
+    summary_context = _run_context()
 
     async def prepare_compaction_request(request: RunRequest) -> RunRequest:
         """Replace the compaction route before summary dispatch."""
@@ -3109,27 +3114,40 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
             compaction_model="claude-prepared",
             compaction_credential_kwargs={"api_key": "prepared"},
             compaction_max_input_tokens=8_000,
+            compaction_candidate=SelectableModelCandidate(
+                model_selection=make_test_model_selection(
+                    provider=LLMProvider.ANTHROPIC,
+                    model_identifier="claude-prepared",
+                    integration_id="integration-prepared",
+                ),
+                settings=make_test_model_settings().model_copy(
+                    update={"max_output_tokens": 1600}
+                ),
+            ),
         )
 
     async def summarize(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Replace summary model call."""
-        captured_prompts["provider"] = provider.value
-        captured_prompts["provider_integration_id"] = provider_integration_id or ""
-        captured_prompts["model"] = model
+        assert transport_state is summary_context.model_transport_state
+        captured_prompts["provider"] = candidate.model_selection.provider.value
+        captured_prompts["provider_integration_id"] = (
+            candidate.model_selection.llm_provider_integration_id
+        )
+        captured_prompts["model"] = candidate.model_selection.model_identifier
         captured_prompts["api_key"] = str(credential_kwargs["api_key"])
-        captured_prompts["max_output_tokens"] = str(max_output_tokens)
+        captured_prompts["max_output_tokens"] = str(
+            candidate.settings.max_output_tokens
+        )
         del session_id
         captured_prompts["system_prompt"] = system_prompt
         captured_prompts["user_prompt"] = user_prompt
@@ -3158,7 +3176,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -3174,7 +3192,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
                 compaction_provider_integration_id=None,
             ),
             dataclasses.replace(
-                _run_context(),
+                summary_context,
                 prepare_compaction_request=prepare_compaction_request,
             ),
         )
@@ -3198,7 +3216,7 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert captured_prompts["provider_integration_id"] == "integration-prepared"
     assert captured_prompts["model"] == "claude-prepared"
     assert captured_prompts["api_key"] == "prepared"
-    assert captured_prompts["max_output_tokens"] == "4000"
+    assert captured_prompts["max_output_tokens"] == "1600"
     assert compactor.commit_context == CompactionCommitContext(
         workspace_id="workspace-1",
         agent_id="agent-1",
@@ -3223,27 +3241,24 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
 
     async def summarize(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Return compact summary."""
         del (
-            provider,
-            provider_integration_id,
-            model,
+            candidate,
             credential_kwargs,
+            effective_input_tokens,
             system_prompt,
             user_prompt,
         )
-        del conversation_text, max_output_tokens, session_id
+        del conversation_text, session_id
         return "summary"
 
     adapter = _agent_engine_adapter(
@@ -3268,7 +3283,7 @@ async def test_manual_compact_runs_compaction_summary_hook() -> None:
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -3355,27 +3370,24 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
 
     async def summarize(
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
+        transport_state: ModelTransportState,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> str:
         """Capture summary input."""
         del (
-            provider,
-            provider_integration_id,
-            model,
+            candidate,
             credential_kwargs,
+            effective_input_tokens,
             system_prompt,
             user_prompt,
         )
-        del max_output_tokens, session_id
+        del session_id
         captured["conversation_text"] = conversation_text
         return "summary"
 
@@ -3401,7 +3413,7 @@ async def test_manual_compact_trims_summary_input_to_checkpoint_and_tail() -> No
                 ),
                 top_k=None,
                 model_assembly_metadata=None,
-                compaction_assembly_metadata=None,
+                compaction_candidate=make_test_model_candidate(),
                 enabled_execution_options=[],
                 session_id="session-1",
                 user_messages=[],
@@ -3469,7 +3481,7 @@ async def test_manual_compact_propagates_compaction_failure() -> None:
             ),
             top_k=None,
             model_assembly_metadata=None,
-            compaction_assembly_metadata=None,
+            compaction_candidate=make_test_model_candidate(),
             enabled_execution_options=[],
             session_id="session-1",
             user_messages=[],
@@ -3732,6 +3744,7 @@ def _agent_engine_adapter(
             summarize_text_with_model,
             watchdog=watchdog,
             sdk_factories=get_model_sdk_factories(),
+            websocket_enabled=False,
         ),
     )
 
@@ -3752,7 +3765,7 @@ async def test_engine_adapter_forwards_top_k_to_native_codec_denial() -> None:
         ),
         top_k=37,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],

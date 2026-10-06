@@ -326,20 +326,17 @@ def consolidation_fixture_plan(
 
 
 def historical_memory_summary_response(request: _ModelRequestInput) -> str | None:
-    """Match isolated Historical fixtures and enforce the real strict schema."""
+    """Match the source-preparation task and return its deterministic result."""
     request = _decode_model_request(request)
-    format_value = request.historical_format
-    if format_value is None or format_value.name != "historical_memory":
+    instructions = request.instructions
+    if instructions is None or (
+        "Create a bounded, self-contained historical account from the source Session."
+        not in instructions
+    ):
         return None
     source = request.input_json
     if _HISTORICAL_MEMORY_PREFIX not in source:
         return None
-    if (
-        format_value.kind != "json_schema"
-        or not format_value.strict
-        or not format_value.summary_schema
-    ):
-        raise ValueError("Historical fixture requires the strict one-field schema.")
     if f"{_HISTORICAL_MEMORY_PREFIX}empty" in source:
         return '{"summary":""}'
     if f"{_HISTORICAL_MEMORY_PREFIX}malformed" in source:
@@ -484,14 +481,6 @@ class _NamedTool:
 
 
 @dataclass(frozen=True)
-class _HistoricalSummaryFormat:
-    name: str | None
-    kind: str | None
-    strict: bool
-    summary_schema: bool
-
-
-@dataclass(frozen=True)
 class _PreparedMatcherContext:
     """Local matcher fields are explicit and independent of provider wire data."""
 
@@ -521,7 +510,6 @@ class _ModelRequest:
     named_tools: tuple[_NamedTool, ...]
     tools_json: str
     tool_outputs: tuple[_ToolOutputObservation, ...]
-    historical_format: _HistoricalSummaryFormat | None
     context: _PreparedMatcherContext | None
     matching_text: str
     matching_ascii_text: str
@@ -609,29 +597,6 @@ def _decode_model_input_item(value: object) -> _ModelInputItem:
     )
 
 
-def _decode_historical_format(value: object) -> _HistoricalSummaryFormat | None:
-    if not isinstance(value, dict):
-        return None
-    text = _object(value)
-    raw_format = text.get("format")
-    if not isinstance(raw_format, dict):
-        return None
-    format_value = _object(raw_format)
-    raw_schema = format_value.get("schema")
-    schema = _object(raw_schema) if isinstance(raw_schema, dict) else {}
-    return _HistoricalSummaryFormat(
-        name=_optional_string(format_value.get("name")),
-        kind=_optional_string(format_value.get("type")),
-        strict=format_value.get("strict") is True,
-        summary_schema=(
-            schema.get("additionalProperties") is False
-            and schema.get("required") == ["summary"]
-            and isinstance(schema.get("properties"), dict)
-            and set(_object(schema["properties"])) == {"summary"}
-        ),
-    )
-
-
 def _decode_matcher_context(
     payload: dict[str, object],
 ) -> _PreparedMatcherContext | None:
@@ -709,7 +674,6 @@ def _decode_model_request(value: object) -> _ModelRequest:
         named_tools=tuple(named_tools),
         tools_json=json.dumps(payload.get("tools", [])),
         tool_outputs=_decode_tool_outputs(payload),
-        historical_format=_decode_historical_format(payload.get("text")),
         context=_decode_matcher_context(payload),
         # Existing inert selectors match the full serialized provider request.
         # Decode those textual selector projections once, independently of the

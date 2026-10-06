@@ -51,6 +51,9 @@ from azents.engine.model_stream import (
     InternalModelStreamCallContext,
     admit_model_dispatch,
 )
+from azents.engine.provider_model_operation import (
+    PreparedModelOperation,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.historical_memory_consolidation import (
@@ -88,9 +91,6 @@ from azents.services.historical_memory.consolidation_host import (
     ConsolidationAdmission,
     ConsolidationIterationHost,
     ConsolidationPreparedTurn,
-)
-from azents.services.historical_memory.consolidation_model import (
-    PreparedConsolidationRequest,
 )
 from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
@@ -153,7 +153,7 @@ class _ScriptedModel:
         *,
         system_prompt: str,
         output_tokens: int | None,
-    ) -> PreparedConsolidationRequest:
+    ) -> PreparedModelOperation:
         self.names.update(catalog.tools)
         self.feedback = [
             message.payload
@@ -193,11 +193,11 @@ class _ScriptedModel:
             if self.hard_input
             else math.ceil(request.native_request_input_chars() / 0.75)
         )
-        return PreparedConsolidationRequest(request, estimate, output_tokens)
+        return PreparedModelOperation(request, estimate, output_tokens)
 
     async def invoke(
         self,
-        prepared: PreparedConsolidationRequest,
+        prepared: PreparedModelOperation,
         *,
         context: InternalModelStreamCallContext,
     ) -> NormalizedAdapterOutput[TransientModelMessage]:
