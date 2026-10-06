@@ -7,7 +7,6 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentRunParentResultDeliveryState,
     AgentRunPhase,
@@ -15,6 +14,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
@@ -30,6 +30,7 @@ from azents.repos.session_execution.ownership import (
     fence_owned_session_mutation,
     validate_session_execution_owner,
 )
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.worker_session_data import (
     CanonicalExecutionWorkDriftError,
@@ -53,6 +54,9 @@ class WorkerSessionOperationRepository:
     terminal_finalization_repository: Annotated[
         TerminalRunFinalizationRepository, Depends(TerminalRunFinalizationRepository)
     ]
+    execution_record_repository: Annotated[
+        SessionExecutionRecordRepository, Depends(SessionExecutionRecordRepository)
+    ]
 
     async def _lock_owned_session(
         self,
@@ -60,7 +64,7 @@ class WorkerSessionOperationRepository:
         *,
         session_id: str,
         owner_generation: int,
-    ) -> AgentSession:
+    ) -> SessionExecutionRecord:
         """Fence critical writes with the existing missing/stale errors."""
         return await fence_owned_session_mutation(
             session, SessionExecutionOwner(session_id, owner_generation)
@@ -95,7 +99,7 @@ class WorkerSessionOperationRepository:
     async def claim_owner_generation(self, session_id: str) -> int:
         """Claim the next generation with the existing explicit commit boundary."""
         async with self.session_manager() as session:
-            generation = await self.agent_session_repository.claim_owner_generation(
+            generation = await self.execution_record_repository.claim_owner_generation(
                 session, session_id
             )
             await session.write_session.commit()
@@ -126,7 +130,7 @@ class WorkerSessionOperationRepository:
     async def mark_session_running(self, session_id: str) -> None:
         """Apply the existing recovery running/heartbeat transition atomically."""
         async with self.session_manager() as session:
-            await self.agent_session_repository.mark_running(session, session_id)
+            await self.execution_record_repository.mark_running(session, session_id)
 
     async def mark_session_idle(
         self,
@@ -136,15 +140,18 @@ class WorkerSessionOperationRepository:
     ) -> WorkerIdleTransition:
         """Keep command, wake-producing input, active Run and idle mutation atomic."""
         async with self.session_manager() as session:
-            current = await self._lock_owned_session(
+            await self._lock_owned_session(
                 session,
                 session_id=session_id,
                 owner_generation=owner_generation,
             )
-            if current.pending_command_id is not None:
+            conversation = await self.agent_session_repository.get_by_id(
+                session, session_id
+            )
+            if conversation is not None and conversation.pending_command_id is not None:
                 return WorkerIdleTransition(
                     disposition=WorkerIdleDisposition.COMMAND_PENDING,
-                    command_id=current.pending_command_id,
+                    command_id=conversation.pending_command_id,
                     run_id=None,
                 )
             mailbox = self.mailbox_item_repository
@@ -168,7 +175,7 @@ class WorkerSessionOperationRepository:
                     command_id=None,
                     run_id=active_run.id,
                 )
-            await self.agent_session_repository.mark_idle(session, session_id)
+            await self.execution_record_repository.mark_idle(session, session_id)
             return WorkerIdleTransition(
                 disposition=WorkerIdleDisposition.IDLE,
                 command_id=None,
@@ -184,9 +191,16 @@ class WorkerSessionOperationRepository:
     ) -> None:
         """Compare the same five command fields against the observed current owner."""
         async with self.session_manager() as session:
-            current_session = await validate_session_execution_owner(
+            await validate_session_execution_owner(
                 session, SessionExecutionOwner(session_id, owner_generation)
             )
+            current_session = await self.agent_session_repository.get_by_id(
+                session, session_id
+            )
+            if current_session is None:
+                raise CanonicalExecutionWorkDriftError(
+                    "Canonical Conversation is unavailable before command execution"
+                )
             current = (
                 current_session.pending_command_id,
                 current_session.pending_command_name,
@@ -220,7 +234,10 @@ class WorkerSessionOperationRepository:
                 session_id=session_id,
                 owner_generation=owner_generation,
             )
-            if current.pending_command_id != command_id:
+            conversation = await self.agent_session_repository.get_by_id(
+                session, current.id
+            )
+            if conversation is None or conversation.pending_command_id != command_id:
                 raise CanonicalExecutionWorkDriftError(
                     "Canonical pending command changed before cleanup"
                 )
@@ -266,12 +283,14 @@ class WorkerSessionOperationRepository:
             await validate_session_execution_owner(
                 session, SessionExecutionOwner(session_id, owner_generation)
             )
-            await self.agent_session_repository.heartbeat_running(session, session_id)
+            await self.execution_record_repository.heartbeat_running(
+                session, session_id
+            )
 
     async def has_stop_request(self, session_id: str) -> bool:
         """Read the existing durable Stop intent without new authority policy."""
         async with self.session_manager() as session:
-            return await self.agent_session_repository.has_stop_request(
+            return await self.execution_record_repository.has_stop_request(
                 session, session_id
             )
 
@@ -381,7 +400,7 @@ class WorkerSessionOperationRepository:
             await self.assert_owner_generation_in_session(
                 session, session_id=session_id, owner_generation=owner_generation
             )
-            return await self.agent_session_repository.claim_lifecycle_start(
+            return await self.execution_record_repository.claim_lifecycle_start(
                 session, session_id, now=now
             )
 

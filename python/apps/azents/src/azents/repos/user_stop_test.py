@@ -38,6 +38,7 @@ from azents.repos.engine_tool_result_operation import (
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.user_stop import UserStopOperationRepository
 from azents.repos.user_stop_data import (
@@ -128,7 +129,9 @@ async def stop_fixture(
             MailboxAdmissionRepository(observed, mailbox, sessions), sessions
         ),
     )
-    worker = _ObservedWorker(observed, sessions, runs, mailbox, terminal)
+    worker = _ObservedWorker(
+        observed, sessions, runs, mailbox, terminal, SessionExecutionRecordRepository()
+    )
     async with manager() as session:
         workspace_id = await _create_workspace(session, name)
         agent_id = await _create_agent(session, workspace_id, name)

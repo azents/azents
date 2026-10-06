@@ -54,6 +54,7 @@ from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
@@ -1455,6 +1456,22 @@ class TestAgentSessionRepository:
 
         assert first.handle == "abandon-ability-able"
         assert second.handle == "about-above-absent"
+        assert (
+            await rdb_session.read_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBAgentSession)
+                .where(RDBAgentSession.agent_id == agent_id)
+            )
+            == 2
+        )
+        assert (
+            await rdb_session.read_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBConversation)
+                .where(RDBConversation.agent_id == agent_id)
+            )
+            == 2
+        )
 
     async def test_create_assigns_pending_root_context_working_folder(
         self,
@@ -2900,13 +2917,14 @@ class TestAgentSessionRepository:
         for session, pinned, day in ordered_updates:
             changed_at = datetime.datetime(2026, 1, day, tzinfo=datetime.UTC)
             await rdb_session.write_session.execute(
+                sa.update(RDBConversation)
+                .where(RDBConversation.session_id == session.id)
+                .values(pinned=pinned, last_user_input_at=changed_at)
+            )
+            await rdb_session.write_session.execute(
                 sa.update(RDBAgentSession)
                 .where(RDBAgentSession.id == session.id)
-                .values(
-                    pinned=pinned,
-                    last_user_input_at=changed_at,
-                    updated_at=changed_at,
-                )
+                .values(updated_at=changed_at)
             )
         await rdb_session.write_session.flush()
 

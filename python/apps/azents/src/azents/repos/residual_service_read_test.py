@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent_session_data import AgentSession
 from azents.core.enums import AgentSessionStatus
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.rdb.session_capabilities import ReadSession, ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
@@ -26,6 +27,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.idle_continuation import IdleContinuationRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 
 
@@ -144,6 +146,24 @@ async def test_residual_mutation_and_idle_read_finish_before_returning(
         )
 
     monkeypatch.setattr(AgentSessionRepository, "get_by_id", get_current_owner)
+
+    async def get_common_owner(
+        self: SessionExecutionRecordRepository,
+        current_session: ReadSession,
+        session_id: str,
+    ) -> SessionExecutionRecord:
+        del self
+        assert transaction_active
+        assert current_session is session
+        assert session_id == "session-1"
+        return SessionExecutionRecord.model_construct(
+            id=session_id,
+            owner_generation=1,
+            status=AgentSessionStatus.ACTIVE,
+            agent_id="agent-1",
+        )
+
+    monkeypatch.setattr(SessionExecutionRecordRepository, "get_by_id", get_common_owner)
     eligibility = await IdleContinuationRepository(
         session_manager=session_manager,
         agent_session_repository=AgentSessionRepository(),

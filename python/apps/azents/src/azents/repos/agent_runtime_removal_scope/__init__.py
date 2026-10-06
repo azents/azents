@@ -26,6 +26,7 @@ from azents.rdb.models.agent_project_default import RDBAgentProjectDefault
 from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.git_worktree_cleanup_claim import RDBGitWorktreePathClaim
 from azents.rdb.models.runtime_web import RDBRuntimeWebService
 from azents.rdb.models.session_agent_context import (
@@ -407,9 +408,11 @@ class AgentRuntimeRemovalScopeRepository:
         """Count active Sessions of one kind without reading private metadata."""
         return int(
             await session.read_session.scalar(
-                sa.select(sa.func.count(RDBAgentSession.id)).where(
+                sa.select(sa.func.count(RDBAgentSession.id))
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+                .where(
                     RDBAgentSession.agent_id == agent_id,
-                    RDBAgentSession.session_kind == session_kind,
+                    RDBConversation.session_kind == session_kind,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 )
             )

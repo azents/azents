@@ -39,6 +39,7 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_run_input_event import RDBAgentRunInputEvent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -240,14 +241,19 @@ class EventTranscriptRepository:
     ) -> None:
         """Advance the Session user-input projection monotonically."""
         await session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == session_id)
             .values(
                 last_user_input_at=sa.func.greatest(
-                    RDBAgentSession.last_user_input_at,
+                    RDBConversation.last_user_input_at,
                     created_at,
                 )
             )
+        )
+        await session.write_session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(updated_at=sa.func.now())
         )
         await session.write_session.flush()
 
@@ -279,24 +285,32 @@ class EventTranscriptRepository:
             ),
             default=None,
         )
-        values: dict[str, object] = {}
         if latest_user_input_at is not None:
-            values["last_user_input_at"] = sa.func.greatest(
-                RDBAgentSession.last_user_input_at,
-                latest_user_input_at,
+            await session.write_session.execute(
+                sa.update(RDBConversation)
+                .where(RDBConversation.session_id == session_id)
+                .values(
+                    last_user_input_at=sa.func.greatest(
+                        RDBConversation.last_user_input_at, latest_user_input_at
+                    )
+                )
             )
         if latest_activity_at is not None:
-            values["last_activity_at"] = sa.func.greatest(
-                RDBAgentSession.last_activity_at,
-                latest_activity_at,
+            await session.write_session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session_id)
+                .values(
+                    last_activity_at=sa.func.greatest(
+                        RDBAgentSession.last_activity_at, latest_activity_at
+                    )
+                )
             )
-        if not values:
-            return
-        await session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
-            .values(**values)
-        )
+        elif latest_user_input_at is not None:
+            await session.write_session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session_id)
+                .values(updated_at=sa.func.now())
+            )
         await session.write_session.flush()
 
     async def list_for_model_input(
@@ -1296,8 +1310,8 @@ class AgentRunRepository:
     ) -> None:
         """Discard an older idle boundary when new Run work starts."""
         await session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == session_id)
             .values(pending_idle_continuation_run_id=None)
         )
         await session.write_session.flush()
@@ -1324,8 +1338,8 @@ class AgentRunRepository:
     ) -> None:
         """Record the completed Run that must close the next idle boundary."""
         await session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == run.session_id)
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == run.session_id)
             .values(pending_idle_continuation_run_id=run.id)
         )
         await session.write_session.flush()
@@ -1359,9 +1373,11 @@ class AgentRunRepository:
     ) -> None:
         """Record the latest unread boundary for an eligible root Session."""
         eligible_session_id = await session.read_session.scalar(
-            sa.select(RDBAgentSession.id).where(
+            sa.select(RDBAgentSession.id)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(
                 RDBAgentSession.id == run.session_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
         )

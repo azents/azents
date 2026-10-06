@@ -40,6 +40,27 @@ class TestDebugV1Api(unittest.TestCase):
         """
         pass
 
+    def test_debug_v1_get_session_diagnostic_events(self) -> None:
+        """Test case for debug_v1_get_session_diagnostic_events
+
+        Get Session Diagnostic Events
+        """
+        pass
+
+    def test_debug_v1_get_session_diagnostic_file(self) -> None:
+        """Test case for debug_v1_get_session_diagnostic_file
+
+        Get Session Diagnostic File
+        """
+        pass
+
+    def test_debug_v1_get_session_diagnostics(self) -> None:
+        """Test case for debug_v1_get_session_diagnostics
+
+        Get Session Diagnostics
+        """
+        pass
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -33,6 +33,7 @@ from azents.engine.events.types import AgentRunState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -48,6 +49,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.data import PendingCommandSnapshot
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.terminal_finalization_data import TerminalFinalizationOutcome
 from azents.repos.worker_session import WorkerSessionOperationRepository
@@ -115,7 +117,9 @@ def worker_repository(
                 MailboxAdmissionRepository(manager, mailbox, sessions), sessions
             ),
         )
-    return WorkerSessionOperationRepository(manager, sessions, runs, mailbox, terminal)
+    return WorkerSessionOperationRepository(
+        manager, sessions, runs, mailbox, terminal, SessionExecutionRecordRepository()
+    )
 
 
 async def worker_fixture(
@@ -803,8 +807,8 @@ async def test_idle_continuation_read_preserves_missing_error(
     run = await create_run(rdb_session_manager, fixture.session_id)
     async with rdb_session_manager() as session:
         await session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == fixture.session_id)
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == fixture.session_id)
             .values(pending_idle_continuation_run_id=run.id)
         )
     assert (

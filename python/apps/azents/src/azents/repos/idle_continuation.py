@@ -6,7 +6,6 @@ from typing import Annotated
 
 from fastapi import Depends
 
-from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
@@ -17,6 +16,7 @@ from azents.core.mailbox_data import (
     MailboxItem,
     MailboxItemCreate,
 )
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -183,10 +183,15 @@ class IdleContinuationRepository:
         session_id: str,
         run_id: str,
         *,
-        current: AgentSession,
+        current: SessionExecutionRecord,
     ) -> IdleBoundaryEligibility:
         """Evaluate true-idle state after observation or mutation admission."""
         locked = current
+        conversation = await self.agent_session_repository.get_by_id(
+            session, session_id
+        )
+        if conversation is None:
+            return IdleBoundaryEligibility(False, None)
         archived_cycle_id: str | None = None
         if locked.status is not AgentSessionStatus.ACTIVE:
             if locked.status is not AgentSessionStatus.ARCHIVED:
@@ -204,9 +209,9 @@ class IdleContinuationRepository:
             if cycle is None or cycle.state.current_run_id != run_id:
                 return IdleBoundaryEligibility(False, None)
             archived_cycle_id = cycle_id
-        if locked.pending_idle_continuation_run_id != run_id:
+        if conversation.pending_idle_continuation_run_id != run_id:
             return IdleBoundaryEligibility(False, None)
-        if locked.pending_command_id is not None:
+        if conversation.pending_command_id is not None:
             return IdleBoundaryEligibility(False, None)
         pending_wake_input = (
             await self.mailbox_repository.has_by_session_id_and_scheduling_mode(

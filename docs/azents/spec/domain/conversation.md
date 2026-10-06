@@ -66,6 +66,17 @@ code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
+  - python/apps/azents/src/azents/rdb/models/conversation.py
+  - python/apps/azents/src/azents/rdb/models/session_execution_file.py
+  - python/apps/azents/src/azents/core/session_execution_data.py
+  - python/apps/azents/src/azents/core/session_diagnostics.py
+  - python/apps/azents/src/azents/repos/session_execution_record.py
+  - python/apps/azents/src/azents/repos/lifecycle_target.py
+  - python/apps/azents/src/azents/repos/session_archive_operations.py
+  - python/apps/azents/src/azents/repos/session_diagnostics.py
+  - python/apps/azents/src/azents/services/session_diagnostics.py
+  - python/apps/azents/src/azents/api/admin/debug/v1/**
+  - python/apps/azents/db-schemas/rdb/migrations/versions/6a05f4a01f6f_extract_common_execution_sessions_and_.py
   - python/apps/azents/src/azents/rdb/models/agent_session_unread_run.py
   - python/apps/azents/src/azents/rdb/models/session_agent.py
   - python/apps/azents/src/azents/rdb/models/session_agent_context.py
@@ -185,19 +196,21 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-06
-spec_version: 185
+last_verified_at: 2026-10-07
+spec_version: 186
 ---
 
 # Conversation & Events
 
-The `conversation` domain owns `AgentSession`, event transcript events, durable
-`agent_runs`, mailbox items, and exchange files.
+The `conversation` domain owns the public Conversation profile and participant
+tree over the common `AgentSession` execution identity. Event transcripts,
+durable `agent_runs`, mailbox items, and execution lifecycle remain keyed to
+that common Session identity.
 
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
 raw `runtime/llm.py` are not production conversation state.
 
-Root `AgentSession` rows have an explicit product mode of Team or User. Team roots keep shared
+Root Conversation profiles have an explicit product mode of Team or User. Team roots keep shared
 Workspace-member visibility and Team primary behavior. User roots are private to one associated User,
 never carry a primary role, and authorize only that owner while the owner remains a Workspace member.
 Subagent sessions derive product identity from their root and do not store an independent product mode
@@ -214,7 +227,9 @@ erDiagram
     Agent ||--o| AgentRuntime : "may have runtime"
     Agent ||--o{ AgentSession : "has sessions"
     AgentRuntime }o--|| Workspace : "scoped to"
-    AgentSession ||--|| SessionAgent : "linked participant"
+    AgentSession ||--o| Conversation : "optional public profile"
+    AgentSession ||--o| SessionAgent : "conversation participant"
+    AgentSession ||--o{ SessionExecutionFile : "current retained files"
     SessionAgent ||--o{ SessionAgent : "child participants"
     SessionAgent }o--|| SessionAgentContext : "shares"
     SessionAgentContext ||--o{ SessionWorkspaceProject : "owns working projects"
@@ -227,10 +242,49 @@ erDiagram
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
 ```
 
-`AgentSession` is the conversation boundary. Direct session write routes target the requested session.
+`AgentSession` is the common execution boundary; its optional `Conversation`
+profile is the public conversation boundary. Direct session write routes target the requested session.
 The default team conversation is the agent's team primary session, represented by
-`agent_sessions.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
+`conversations.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
 redirect direct session writes or default team session lookup to another session.
+
+### Common execution and public profile
+
+`agent_sessions` retains Agent/Workspace identity, owner generation, inference and
+model-input state, activity, run/stop control, and archive/retention metadata.
+`conversations` owns the handle, root/subagent kind, primary/product/user identity,
+title and title-model metadata, pin, last user input, primary model reservation,
+and pending public command/idle-continuation fields. Public DTOs and discovery,
+History, and Historical Memory source reads require a Conversation relation.
+An internal Session has no fabricated handle, title, public profile or
+`SessionAgent`; it is excluded even from exact-ID public source discovery.
+
+Creation and conditional profile mutations are atomic with their common Session
+row. Profile compare-and-set predicates are rechecked by the actual profile
+UPDATE after the common row gate, including reservation, title and command
+conditions. A composite cascading FK materializes common Agent/status in the
+Conversation's active Team-primary index; this projection is not a second
+status authority. Archive preserves the primary role, while restore remains
+subject to the same active-primary uniqueness constraint.
+
+The nullable `lifecycle_root_session_id` identifies common lifecycle membership:
+null denotes the root itself, while conversation descendants reference their
+actual root Session. The indexed group lookup validates one exact root and all
+members under the same Agent/Workspace before archive or purge. Internal
+executions are singleton targets without public tree prerequisites. Archive
+policy interpretation and shared purge-job registration occur once in the common
+lifecycle transaction. Existing account-removal immediate purge uses that same
+pipeline; it adds no Session-kind retention option.
+
+Current private working files use one `(session_id, path)` row with content and
+writability, without file history. Canonical events and these files survive
+archive for the configured retention period and cascade only at final purge.
+Public Conversation visibility is not extended to internal execution. Existing
+system-admin diagnostics can inspect exact Workspace/Session metadata, bounded
+safe event pages, and retained current file pages. Hidden reasoning, native model
+artifacts and arbitrary tool arguments are excluded. File redaction precedes
+paging, whose offsets address the safe projection rather than raw credential
+fragments.
 
 `AgentRuntime` is an optional long-lived shared managed-execution identity and lifecycle owner.
 Runtime-free Agents execute model and compatible server/remote work without creating this row.
@@ -1491,7 +1545,7 @@ remain as an unbounded raw tail or storage JSON dump.
 - A broker wake-up and stop signal are routing-only `session_id` notifications. They do not carry or
   override requester, sender, User, Agent, Workspace, prompt, interface, capability, or resource
   authority.
-- A canonical Postgres snapshot is loaded only after the Session owner-generation claim. It validates
+- A Conversation's canonical Postgres snapshot is loaded only after the Session owner-generation claim. It validates
   the active Session, Agent, Workspace, current/root `SessionAgent` tree and context, exact owner
   generation, and expected FIFO mailbox item, pending command, recoverable Run, or idle continuation.
   Mutable promotion and control paths re-lock their exact durable rows before commit.
@@ -1557,6 +1611,11 @@ identify trigger and continuation work with dedicated Scheduled Task
 presentations.
 
 ## 13. Changelog
+
+- **2026-10-07** — v186. Extracted public Conversation profiles from common
+  execution Sessions, preserved primary uniqueness and conditional profile
+  mutation fences, generalized retained lifecycle targets, and added protected
+  canonical audit reads without exposing internal Sessions publicly.
 
 - **2026-10-06** (spec_version 185) — Replaced partial NOWAIT hierarchy admission
   with complete waiting/recovery operations and both-victim terminal closure;

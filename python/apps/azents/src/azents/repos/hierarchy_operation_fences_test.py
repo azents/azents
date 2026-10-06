@@ -23,6 +23,7 @@ from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionProductMode,
 )
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -43,6 +44,7 @@ from azents.repos.scheduled_task.tool_operations import (
 )
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.subagent_coordination.repository import SubagentCoordinationRepository
 from azents.repos.subagent_tool_operations import SubagentToolOperationRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
@@ -87,7 +89,7 @@ class _PausedTerminalOwner(WorkerSessionOperationRepository):
         *,
         session_id: str,
         owner_generation: int,
-    ) -> AgentSession:
+    ) -> SessionExecutionRecord:
         current = await super()._lock_owned_session(
             session, session_id=session_id, owner_generation=owner_generation
         )
@@ -324,6 +326,7 @@ async def test_real_deadlock_retries_whole_parent_or_terminal_operation_once(
         runs,
         MailboxRepository(),
         terminal,
+        SessionExecutionRecordRepository(),
         child_fenced,
         child_release,
     )

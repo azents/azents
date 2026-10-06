@@ -28,6 +28,7 @@ from azents.engine.events.types import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.user import RDBUser
 from azents.rdb.models.workspace import RDBWorkspace
@@ -287,8 +288,8 @@ async def test_snapshot_finishes_while_writer_holds_authority_and_prompt(
     async def holder() -> None:
         async with writes() as session:
             await session.write_session.execute(
-                sa.update(RDBAgentSession)
-                .where(RDBAgentSession.id == context_rows.session_id)
+                sa.update(RDBConversation)
+                .where(RDBConversation.session_id == context_rows.session_id)
                 .values(title="uncommitted title")
             )
             await session.write_session.execute(

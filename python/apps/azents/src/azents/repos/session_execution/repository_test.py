@@ -273,10 +273,12 @@ class TestSessionExecutionRepository:
             rdb_session,
             handle="execution-partial-command",
         )
-        agent_session.pending_command_id = "command-001"
-        agent_session.pending_command_name = "compact"
-        agent_session.pending_command_payload = {}
-        agent_session.pending_command_created_at = None
+        conversation = agent_session.conversation
+        assert conversation is not None
+        conversation.pending_command_id = "command-001"
+        conversation.pending_command_name = "compact"
+        conversation.pending_command_payload = {}
+        conversation.pending_command_created_at = None
         await rdb_session.write_session.flush()
 
         with pytest.raises(

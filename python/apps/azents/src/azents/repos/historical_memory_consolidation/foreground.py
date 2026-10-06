@@ -20,6 +20,7 @@ from azents.core.historical_memory_snapshot import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationRevision,
@@ -114,16 +115,21 @@ async def read_foreground_revision(
         .exists()
     )
     consumer_root = aliased(RDBAgentSession)
+    consumer_conversation = aliased(RDBConversation)
     consumer_allowed = (
         sa.select(consumer_root.id)
+        .join(
+            consumer_conversation,
+            consumer_conversation.session_id == consumer_root.id,
+        )
         .where(
             consumer_root.id == consumer.session_id,
             consumer_root.agent_id == consumer.agent_id,
             consumer_root.workspace_id == consumer.workspace_id,
-            consumer_root.session_kind == AgentSessionKind.ROOT,
+            consumer_conversation.session_kind == AgentSessionKind.ROOT,
             consumer_root.status == AgentSessionStatus.ACTIVE,
-            consumer_root.product_mode == consumer.product_mode,
-            consumer_root.associated_user_id.is_not_distinct_from(
+            consumer_conversation.product_mode == consumer.product_mode,
+            consumer_conversation.associated_user_id.is_not_distinct_from(
                 consumer.associated_user_id
             ),
         )

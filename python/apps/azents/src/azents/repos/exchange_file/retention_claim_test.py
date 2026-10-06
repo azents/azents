@@ -12,9 +12,11 @@ from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStartReason,
+    AgentSessionStatus,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.exchange_file import RDBExchangeFile
 from azents.rdb.models.exchange_upload_operation import RDBExchangeUploadOperation
 from azents.rdb.models.user import RDBUser
@@ -61,11 +63,18 @@ async def test_competing_retention_roots_bind_source_and_preview_to_one_winner(
                         id=root,
                         workspace_id=harness.workspace_id,
                         agent_id=harness.agent_id,
+                        start_reason=AgentSessionStartReason.INITIAL,
+                    )
+                )
+                await session.write_session.execute(
+                    sa.insert(RDBConversation).values(
+                        session_id=root,
+                        agent_id=harness.agent_id,
+                        session_status=AgentSessionStatus.ACTIVE,
                         handle=f"retention-{uuid4().hex}",
                         session_kind=AgentSessionKind.ROOT,
                         product_mode=AgentSessionProductMode.TEAM,
                         associated_user_id=None,
-                        start_reason=AgentSessionStartReason.INITIAL,
                     )
                 )
         repository = ExchangeFileRepository()

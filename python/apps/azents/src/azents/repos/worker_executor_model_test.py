@@ -90,6 +90,7 @@ from azents.repos.model_candidate_health.data import (
 )
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.session_execution.repository_test import _create_execution_subject
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.worker_executor_model import WorkerExecutorModelOperationRepository
 from azents.repos.worker_executor_model_data import FreshModelPreparation
@@ -509,7 +510,15 @@ async def model_fixture(
             MailboxAdmissionRepository(observed, mailbox, sessions), sessions
         ),
     )
-    guard = ModelGuard(observed, sessions, runs, mailbox, terminal, fault)
+    guard = ModelGuard(
+        observed,
+        sessions,
+        runs,
+        mailbox,
+        terminal,
+        SessionExecutionRecordRepository(),
+        fault,
+    )
     repository = WorkerExecutorModelOperationRepository(
         observed,
         agents,

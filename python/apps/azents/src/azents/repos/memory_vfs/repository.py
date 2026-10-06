@@ -36,6 +36,7 @@ from azents.engine.events.types import (
 from azents.rdb.deps import get_read_only_session_manager
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.memory import RDBAgentMemory
@@ -358,8 +359,8 @@ class MemoryVfsRepository:
         statement = (
             sa.select(
                 RDBHistoricalMemorySource.source_session_id,
-                RDBAgentSession.product_mode,
-                RDBAgentSession.title,
+                RDBConversation.product_mode,
+                RDBConversation.title,
                 RDBHistoricalMemorySource.completed_source_activity_at,
                 RDBHistoricalMemorySource.prepared_at,
                 RDBHistoricalMemorySource.summary,
@@ -368,13 +369,14 @@ class MemoryVfsRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 self._agent_gate(authority),
                 RDBHistoricalMemorySource.source_session_id == source_session_id,
                 RDBAgentSession.agent_id == authority.agent_id,
                 RDBAgentSession.workspace_id == authority.workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgent.id == authority.agent_id,
                 RDBAgent.workspace_id == authority.workspace_id,
@@ -385,7 +387,7 @@ class MemoryVfsRepository:
                 RDBHistoricalMemorySource.summary.is_not(None),
                 RDBHistoricalMemorySource.summary != "",
                 self._text_byte_size(
-                    RDBAgentSession.title,
+                    RDBConversation.title,
                     RDBHistoricalMemorySource.summary,
                 )
                 <= max_bytes,
@@ -684,7 +686,7 @@ class MemoryVfsRepository:
                 ),
                 RDBEvent.schema_version,
                 RDBEvent.created_at,
-                RDBAgentSession.product_mode,
+                RDBConversation.product_mode,
                 sa.func.lag(RDBEvent.id)
                 .over(
                     partition_by=RDBEvent.session_id,
@@ -700,6 +702,7 @@ class MemoryVfsRepository:
                 event_fits.label("fits"),
             )
             .join(RDBAgentSession, RDBAgentSession.id == RDBEvent.session_id)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 self._agent_gate(authority),
@@ -707,7 +710,7 @@ class MemoryVfsRepository:
                 RDBEvent.kind.in_(_VISIBLE_EVENT_KINDS),
                 RDBAgentSession.agent_id == authority.agent_id,
                 RDBAgentSession.workspace_id == authority.workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgent.id == authority.agent_id,
                 RDBAgent.workspace_id == authority.workspace_id,
@@ -808,13 +811,17 @@ class MemoryVfsRepository:
                         RDBAgentSession,
                         RDBAgentSession.id == RDBEvent.session_id,
                     )
+                    .join(
+                        RDBConversation,
+                        RDBConversation.session_id == RDBAgentSession.id,
+                    )
                     .where(
                         self._agent_gate(authority),
                         RDBEvent.kind == EventKind.CLIENT_TOOL_RESULT,
                         RDBEvent.reverted.is_(False),
                         RDBAgentSession.agent_id == authority.agent_id,
                         RDBAgentSession.workspace_id == authority.workspace_id,
-                        RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                        RDBConversation.session_kind == AgentSessionKind.ROOT,
                         RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                         scope_filter,
                         pair_filter,
@@ -1134,18 +1141,19 @@ class MemoryVfsRepository:
         statement = (
             sa.select(
                 RDBHistoricalMemorySource.source_session_id,
-                RDBAgentSession.product_mode,
+                RDBConversation.product_mode,
             )
             .join(
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 self._agent_gate(authority),
                 RDBAgentSession.agent_id == authority.agent_id,
                 RDBAgentSession.workspace_id == authority.workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgent.id == authority.agent_id,
                 RDBAgent.workspace_id == authority.workspace_id,
@@ -1189,14 +1197,15 @@ class MemoryVfsRepository:
         statement = (
             sa.select(
                 RDBAgentSession.id,
-                RDBAgentSession.product_mode,
+                RDBConversation.product_mode,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 self._agent_gate(authority),
                 RDBAgentSession.agent_id == authority.agent_id,
                 RDBAgentSession.workspace_id == authority.workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgent.id == authority.agent_id,
                 RDBAgent.workspace_id == authority.workspace_id,
@@ -1239,12 +1248,13 @@ class MemoryVfsRepository:
                 sa.select(
                     RDBEvent.id,
                     RDBEvent.session_id,
-                    RDBAgentSession.product_mode,
+                    RDBConversation.product_mode,
                 )
                 .join(
                     RDBAgentSession,
                     RDBAgentSession.id == RDBEvent.session_id,
                 )
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
                 .where(
                     self._agent_gate(authority),
@@ -1252,7 +1262,7 @@ class MemoryVfsRepository:
                     RDBEvent.kind.in_(kinds),
                     RDBAgentSession.agent_id == authority.agent_id,
                     RDBAgentSession.workspace_id == authority.workspace_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgent.id == authority.agent_id,
                     RDBAgent.workspace_id == authority.workspace_id,
@@ -1293,7 +1303,7 @@ class MemoryVfsRepository:
             return MemoryVfsRecordPage((), False)
         fits = (
             self._text_byte_size(
-                RDBAgentSession.title,
+                RDBConversation.title,
                 RDBHistoricalMemorySource.summary,
             )
             <= budget.per_row_bytes
@@ -1301,8 +1311,8 @@ class MemoryVfsRepository:
         statement = (
             sa.select(
                 RDBHistoricalMemorySource.source_session_id,
-                RDBAgentSession.product_mode,
-                sa.case((fits, RDBAgentSession.title), else_=None).label("title"),
+                RDBConversation.product_mode,
+                sa.case((fits, RDBConversation.title), else_=None).label("title"),
                 RDBHistoricalMemorySource.completed_source_activity_at,
                 RDBHistoricalMemorySource.prepared_at,
                 sa.case(
@@ -1315,12 +1325,13 @@ class MemoryVfsRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 self._agent_gate(authority),
                 RDBAgentSession.agent_id == authority.agent_id,
                 RDBAgentSession.workspace_id == authority.workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgent.id == authority.agent_id,
                 RDBAgent.workspace_id == authority.workspace_id,
@@ -1399,28 +1410,29 @@ class MemoryVfsRepository:
         )
         fits = (
             self._text_byte_size(
-                RDBAgentSession.title,
-                RDBAgentSession.handle,
+                RDBConversation.title,
+                RDBConversation.handle,
             )
             <= budget.per_row_bytes
         )
         statement = (
             sa.select(
                 RDBAgentSession.id,
-                RDBAgentSession.product_mode,
-                sa.case((fits, RDBAgentSession.title), else_=None).label("title"),
-                sa.case((fits, RDBAgentSession.handle), else_=None).label("handle"),
+                RDBConversation.product_mode,
+                sa.case((fits, RDBConversation.title), else_=None).label("title"),
+                sa.case((fits, RDBConversation.handle), else_=None).label("handle"),
                 RDBAgentSession.last_activity_at,
                 latest_event.label("latest_event_id"),
                 summary_exists.label("summary_available"),
                 fits.label("fits"),
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 self._agent_gate(authority),
                 RDBAgentSession.agent_id == authority.agent_id,
                 RDBAgentSession.workspace_id == authority.workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgent.id == authority.agent_id,
                 RDBAgent.workspace_id == authority.workspace_id,
@@ -1469,13 +1481,14 @@ class MemoryVfsRepository:
             await session.read_session.scalar(
                 sa.select(sa.literal(True))
                 .select_from(RDBAgentSession)
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
                 .where(
                     self._agent_gate(authority),
                     RDBAgentSession.id == session_id,
                     RDBAgentSession.agent_id == authority.agent_id,
                     RDBAgentSession.workspace_id == authority.workspace_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgent.id == authority.agent_id,
                     RDBAgent.workspace_id == authority.workspace_id,
@@ -1598,26 +1611,28 @@ class MemoryVfsRepository:
     @staticmethod
     def _agent_gate(authority: MemoryVfsAuthority) -> sa.ColumnElement[bool]:
         root_session = aliased(RDBAgentSession)
+        root_conversation = aliased(RDBConversation)
         agent = aliased(RDBAgent)
         if authority.associated_user_id is None:
             consumer_gate = sa.and_(
-                root_session.product_mode == AgentSessionProductMode.TEAM,
-                root_session.associated_user_id.is_(None),
+                root_conversation.product_mode == AgentSessionProductMode.TEAM,
+                root_conversation.associated_user_id.is_(None),
             )
         else:
             consumer_gate = sa.and_(
-                root_session.product_mode == AgentSessionProductMode.USER,
-                root_session.associated_user_id == authority.associated_user_id,
+                root_conversation.product_mode == AgentSessionProductMode.USER,
+                root_conversation.associated_user_id == authority.associated_user_id,
                 MemoryVfsRepository._consumer_membership(authority),
             )
         return sa.exists(
             sa.select(root_session.id)
+            .join(root_conversation, root_conversation.session_id == root_session.id)
             .join(agent, agent.id == root_session.agent_id)
             .where(
                 root_session.id == authority.root_session_id,
                 root_session.agent_id == authority.agent_id,
                 root_session.workspace_id == authority.workspace_id,
-                root_session.session_kind == AgentSessionKind.ROOT,
+                root_conversation.session_kind == AgentSessionKind.ROOT,
                 root_session.status == AgentSessionStatus.ACTIVE,
                 agent.id == authority.agent_id,
                 agent.workspace_id == authority.workspace_id,
@@ -1647,12 +1662,12 @@ class MemoryVfsRepository:
     ) -> sa.ColumnElement[bool] | None:
         filters: list[sa.ColumnElement[bool]] = []
         if "team" in scopes:
-            filters.append(RDBAgentSession.product_mode == AgentSessionProductMode.TEAM)
+            filters.append(RDBConversation.product_mode == AgentSessionProductMode.TEAM)
         if "user" in scopes and authority.associated_user_id is not None:
             filters.append(
                 sa.and_(
-                    RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-                    RDBAgentSession.associated_user_id == authority.associated_user_id,
+                    RDBConversation.product_mode == AgentSessionProductMode.USER,
+                    RDBConversation.associated_user_id == authority.associated_user_id,
                     cls._consumer_membership(authority),
                 )
             )

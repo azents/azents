@@ -49,7 +49,6 @@ from azents.core.chat_data import (
 )
 from azents.core.chat_operation_data import (
     ChatArchiveDatabaseResult,
-    ChatArchiveMutation,
     ChatLiveDatabaseSnapshot,
 )
 from azents.core.chat_projection import (
@@ -84,6 +83,7 @@ from azents.core.root_agent_session_creation import (
     ExplicitRootWorkspaceIntent,
 )
 from azents.core.session_lifecycle import (
+    SessionArchiveMutation,
     SessionLifecycleTransitionContext,
 )
 from azents.core.session_workspace_items import (
@@ -1755,28 +1755,15 @@ class ChatOperationsRepository:
                     > archived_at
                 ):
                     return Failure(SessionNotFound())
-            settings = await self.archived_session_retention_repository.get_settings(
-                session
-            )
-            purge_after = (
-                None
-                if settings.archived_session_retention_days is None
-                else archived_at
-                + datetime.timedelta(days=settings.archived_session_retention_days)
-            )
-
             archive_cleanup_plans = await self.lifecycle_operations.archive(
                 session,
-                ChatArchiveMutation(
+                SessionArchiveMutation(
                     context=SessionLifecycleTransitionContext(
                         transition_id=f"{session_id}:archive",
                         root_session_id=session_id,
                         subtree_session_ids=tuple(session_ids),
                     ),
                     archived_at=archived_at,
-                    purge_after=purge_after,
-                    policy_revision=settings.revision,
-                    retention_days=settings.archived_session_retention_days,
                 ),
             )
             working_folder_context = (
@@ -1788,14 +1775,6 @@ class ChatOperationsRepository:
             if working_folder_context is None:
                 raise RuntimeError(
                     "Root Session working-folder cleanup state is unavailable"
-                )
-            if purge_after is not None:
-                await self.archived_session_retention_repository.schedule_purge_job(
-                    session,
-                    root_session_id=session_id,
-                    eligible_at=purge_after,
-                    policy_revision=settings.revision,
-                    now=archived_at,
                 )
             await session.write_session.commit()
             return Success(

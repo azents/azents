@@ -40,6 +40,7 @@ from azents.rdb.models.agent_project_preset import RDBAgentProjectPreset
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.git_worktree_cleanup_claim import RDBGitWorktreePathClaim
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.runtime_web import RDBRuntimeWebService
@@ -154,17 +155,24 @@ async def _insert_session(
             id=session_id,
             workspace_id=workspace_id,
             agent_id=agent_id,
+            status=AgentSessionStatus.ACTIVE,
+            start_reason=AgentSessionStartReason.INITIAL,
+            run_state=run_state,
+        )
+    )
+    await session.write_session.execute(
+        sa.insert(RDBConversation).values(
+            session_id=session_id,
+            agent_id=agent_id,
+            session_status=AgentSessionStatus.ACTIVE,
             handle=f"session-{uuid4().hex[:8]}",
             session_kind=session_kind,
-            status=AgentSessionStatus.ACTIVE,
             product_mode=(
                 AgentSessionProductMode.TEAM
                 if session_kind is AgentSessionKind.ROOT
                 else None
             ),
             associated_user_id=None,
-            start_reason=AgentSessionStartReason.INITIAL,
-            run_state=run_state,
         )
     )
     return session_id
@@ -607,3 +615,32 @@ async def test_cleanup_completion_rejects_remaining_runtime_web_service(
             agent_id=agent.id,
             agent_runtime_id=runtime.id,
         )
+
+
+async def test_public_session_impact_requires_conversation_profile(
+    rdb_session: WriteSession,
+) -> None:
+    """Root/subagent counts exclude private execution without hiding active work."""
+    workspace, agent, _ = await _seed_agent(rdb_session)
+    await _insert_session(
+        rdb_session,
+        workspace_id=workspace.id,
+        agent_id=agent.id,
+        session_kind=AgentSessionKind.ROOT,
+        run_state=AgentSessionRunState.IDLE,
+    )
+    await rdb_session.write_session.execute(
+        sa.insert(RDBAgentSession).values(
+            id=uuid4().hex,
+            workspace_id=workspace.id,
+            agent_id=agent.id,
+            lifecycle_root_session_id=None,
+            status=AgentSessionStatus.ACTIVE,
+            run_state=AgentSessionRunState.RUNNING,
+        )
+    )
+    repository = AgentRuntimeRemovalScopeRepository()
+    impact = await repository.get_impact(rdb_session, agent_id=agent.id)
+    assert impact.active_root_session_count == 1
+    assert impact.active_subagent_count == 0
+    assert await repository.has_active_work(rdb_session, agent_id=agent.id)

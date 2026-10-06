@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from azcommon.types import JSONValue
 from fastapi import Depends
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import selectinload
 
 from azents.core.enums import (
     AgentSessionKind,
@@ -30,6 +31,7 @@ from azents.core.model_operation import ModelOperationSnapshot
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
@@ -55,6 +57,7 @@ class _LockedHistoricalSource:
 
     source: RDBHistoricalMemorySource
     root: RDBAgentSession
+    conversation: RDBConversation
 
 
 class HistoricalMemoryRepository:
@@ -83,14 +86,15 @@ class HistoricalMemoryRepository:
                     RDBAgentSession.id,
                     RDBAgentSession.agent_id,
                     RDBAgentSession.workspace_id,
-                    RDBAgentSession.product_mode,
-                    RDBAgentSession.associated_user_id,
+                    RDBConversation.product_mode,
+                    RDBConversation.associated_user_id,
                     RDBAgentSession.model_input_head_event_id,
                 )
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
                 .where(
                     RDBAgentSession.id == session_id,
-                    RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBConversation.session_kind == AgentSessionKind.ROOT,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgent.memory_enabled.is_(True),
                     HistoricalMemoryRepository._authorized_source(),
@@ -149,9 +153,10 @@ class HistoricalMemoryRepository:
         authorized_source = self._authorized_source()
         candidates = (
             sa.select(RDBAgentSession.id)
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state == AgentSessionRunState.IDLE,
                 RDBAgentSession.last_activity_at >= oldest_activity_at,
@@ -276,9 +281,10 @@ class HistoricalMemoryRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state == AgentSessionRunState.IDLE,
                 RDBAgentSession.last_activity_at <= inactive_before,
@@ -330,17 +336,18 @@ class HistoricalMemoryRepository:
                 RDBAgentSession.agent_id,
                 RDBAgentSession.workspace_id,
                 RDBAgentSession.last_activity_at,
-                RDBAgentSession.title,
+                RDBConversation.title,
                 tail_event_id.label("source_tail_event_id"),
             )
             .join(
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
             .where(
                 RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.run_state == AgentSessionRunState.IDLE,
                 RDBAgentSession.last_activity_at <= inactive_before,
@@ -409,6 +416,7 @@ class HistoricalMemoryRepository:
         if locked is None:
             return None
         row, source = locked.source, locked.root
+        conversation = locked.conversation
         if (
             source.run_state is not AgentSessionRunState.IDLE
             or source.last_activity_at > inactive_before
@@ -427,7 +435,7 @@ class HistoricalMemoryRepository:
                 RDBEvent.reverted.is_(False),
             )
         )
-        if source_tail_event_id is None or source.product_mode is None:
+        if source_tail_event_id is None or conversation.product_mode is None:
             return None
         return HistoricalMemoryPreparationAdmission(
             source=HistoricalMemoryDueSource(
@@ -436,7 +444,7 @@ class HistoricalMemoryRepository:
                 workspace_id=source.workspace_id,
                 source_activity_at=source.last_activity_at,
                 source_tail_event_id=source_tail_event_id,
-                source_title=source.title,
+                source_title=conversation.title,
                 admitted_at=row.admitted_at,
                 prepared_at=row.prepared_at,
                 completed_source_activity_at=row.completed_source_activity_at,
@@ -444,8 +452,8 @@ class HistoricalMemoryRepository:
                 failure_count=row.failure_count,
                 model_operation_state=self._operation(row.model_operation_state),
             ),
-            product_mode=source.product_mode,
-            associated_user_id=source.associated_user_id,
+            product_mode=conversation.product_mode,
+            associated_user_id=conversation.associated_user_id,
         )
 
     async def persist_preparation_operation_in_session(
@@ -579,9 +587,11 @@ class HistoricalMemoryRepository:
                 sa.select(
                     RDBAgentSession.agent_id,
                     RDBAgentSession.workspace_id,
-                    RDBAgentSession.product_mode,
-                    RDBAgentSession.associated_user_id,
-                ).where(RDBAgentSession.id == source_session_id)
+                    RDBConversation.product_mode,
+                    RDBConversation.associated_user_id,
+                )
+                .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+                .where(RDBAgentSession.id == source_session_id)
             )
         ).one_or_none()
         if identity is None:
@@ -621,18 +631,22 @@ class HistoricalMemoryRepository:
         root = (
             await session.write_session.execute(
                 sa.select(RDBAgentSession)
+                .options(selectinload(RDBAgentSession.conversation))
                 .where(RDBAgentSession.id == source_session_id)
-                .with_for_update()
+                .with_for_update(of=RDBAgentSession)
                 .execution_options(populate_existing=True)
             )
         ).scalar_one_or_none()
+        if root is None:
+            return None
+        conversation = root.conversation
         if (
-            root is None
+            conversation is None
             or root.agent_id != agent.id
             or root.workspace_id != agent.workspace_id
-            or root.product_mode != identity.product_mode
-            or root.associated_user_id != identity.associated_user_id
-            or root.session_kind is not AgentSessionKind.ROOT
+            or conversation.product_mode != identity.product_mode
+            or conversation.associated_user_id != identity.associated_user_id
+            or conversation.session_kind is not AgentSessionKind.ROOT
             or root.status is not AgentSessionStatus.ACTIVE
         ):
             return None
@@ -646,22 +660,24 @@ class HistoricalMemoryRepository:
         )
         if source is None:
             return None
-        return _LockedHistoricalSource(source=source, root=root)
+        return _LockedHistoricalSource(
+            source=source, root=root, conversation=conversation
+        )
 
     @staticmethod
     def _authorized_source() -> sa.ColumnElement[bool]:
         membership_exists = sa.exists(
             sa.select(RDBWorkspaceUser.id).where(
                 RDBWorkspaceUser.workspace_id == RDBAgentSession.workspace_id,
-                RDBWorkspaceUser.user_id == RDBAgentSession.associated_user_id,
+                RDBWorkspaceUser.user_id == RDBConversation.associated_user_id,
             )
         )
         return sa.and_(
             RDBAgent.workspace_id == RDBAgentSession.workspace_id,
             sa.or_(
-                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
+                RDBConversation.product_mode == AgentSessionProductMode.TEAM,
                 sa.and_(
-                    RDBAgentSession.product_mode == AgentSessionProductMode.USER,
+                    RDBConversation.product_mode == AgentSessionProductMode.USER,
                     membership_exists,
                 ),
             ),

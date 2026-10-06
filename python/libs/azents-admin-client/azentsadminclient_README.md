@@ -85,6 +85,9 @@ Class | Method | HTTP request | Description
 *AuthV1Api* | [**auth_v1_revoke_signup_token**](azentsadminclient/docs/AuthV1Api.md#auth_v1_revoke_signup_token) | **DELETE** /auth/v1/signup-tokens/{token_id} | Revoke Signup Token
 *DebugV1Api* | [**debug_v1_fire_exception**](azentsadminclient/docs/DebugV1Api.md#debug_v1_fire_exception) | **POST** /debug/v1/fire-exception | Fire Exception
 *DebugV1Api* | [**debug_v1_fire_log**](azentsadminclient/docs/DebugV1Api.md#debug_v1_fire_log) | **POST** /debug/v1/fire-log | Fire Log
+*DebugV1Api* | [**debug_v1_get_session_diagnostic_events**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostic_events) | **GET** /debug/v1/sessions/{session_id}/events | Get Session Diagnostic Events
+*DebugV1Api* | [**debug_v1_get_session_diagnostic_file**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostic_file) | **GET** /debug/v1/sessions/{session_id}/file | Get Session Diagnostic File
+*DebugV1Api* | [**debug_v1_get_session_diagnostics**](azentsadminclient/docs/DebugV1Api.md#debug_v1_get_session_diagnostics) | **GET** /debug/v1/sessions/{session_id} | Get Session Diagnostics
 *HealthV1Api* | [**health_v1_liveness**](azentsadminclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentsadminclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_delete_invitation**](azentsadminclient/docs/InvitationV1Api.md#invitation_v1_delete_invitation) | **DELETE** /invitation/v1/invitations/{invitation_id} | Delete Invitation
@@ -169,6 +172,8 @@ Class | Method | HTTP request | Description
 ## Documentation For Models
 
  - [AdminWorkspaceRuntimeProfileDetailResponse](azentsadminclient/docs/AdminWorkspaceRuntimeProfileDetailResponse.md)
+ - [AgentSessionRunState](azentsadminclient/docs/AgentSessionRunState.md)
+ - [AgentSessionStatus](azentsadminclient/docs/AgentSessionStatus.md)
  - [ArchiveRetentionApplicationResponse](azentsadminclient/docs/ArchiveRetentionApplicationResponse.md)
  - [ArchiveRetentionPreviewRequest](azentsadminclient/docs/ArchiveRetentionPreviewRequest.md)
  - [ArchiveRetentionPreviewResponse](azentsadminclient/docs/ArchiveRetentionPreviewResponse.md)
@@ -185,6 +190,7 @@ Class | Method | HTTP request | Description
  - [EmailVerificationListResponse](azentsadminclient/docs/EmailVerificationListResponse.md)
  - [EmailVerificationResponse](azentsadminclient/docs/EmailVerificationResponse.md)
  - [ErrorLevel](azentsadminclient/docs/ErrorLevel.md)
+ - [EventKind](azentsadminclient/docs/EventKind.md)
  - [ExternalAccountOAuthDetailResponse](azentsadminclient/docs/ExternalAccountOAuthDetailResponse.md)
  - [ExternalAccountOAuthFieldResponse](azentsadminclient/docs/ExternalAccountOAuthFieldResponse.md)
  - [ExternalAccountOAuthHealthResponse](azentsadminclient/docs/ExternalAccountOAuthHealthResponse.md)
@@ -270,6 +276,10 @@ Class | Method | HTTP request | Description
  - [RuntimeRecreationOperationStatus](azentsadminclient/docs/RuntimeRecreationOperationStatus.md)
  - [RuntimeRecreationTargetKind](azentsadminclient/docs/RuntimeRecreationTargetKind.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
+ - [SessionDiagnosticEvent](azentsadminclient/docs/SessionDiagnosticEvent.md)
+ - [SessionDiagnosticEventPage](azentsadminclient/docs/SessionDiagnosticEventPage.md)
+ - [SessionDiagnosticFile](azentsadminclient/docs/SessionDiagnosticFile.md)
+ - [SessionDiagnosticMetadata](azentsadminclient/docs/SessionDiagnosticMetadata.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
  - [SignupTokenResponse](azentsadminclient/docs/SignupTokenResponse.md)

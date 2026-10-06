@@ -204,18 +204,20 @@ async def test_snapshot_preserves_command_recoverable_run_and_completed_idle_sta
     async with rdb_session_manager() as session:
         row = await session.read_session.get(RDBAgentSession, subject.session_id)
         assert row is not None
-        row.pending_command_id = "command-001"
-        row.pending_command_name = "compact"
+        conversation = row.conversation
+        assert conversation is not None
+        conversation.pending_command_id = "command-001"
+        conversation.pending_command_name = "compact"
         payload: dict[str, object] = {"reason": "manual", "requested": True}
-        row.pending_command_payload = payload
-        row.pending_command_requester_user_id = None
-        row.pending_command_created_at = now
+        conversation.pending_command_payload = payload
+        conversation.pending_command_requester_user_id = None
+        conversation.pending_command_created_at = now
         recoverable = _run(subject.session_id, 1, status)
         completed = _run(subject.session_id, 2, AgentRunStatus.COMPLETED)
         other_root_run = _run(subject.root_session_id, 1, AgentRunStatus.PENDING)
         session.write_session.add_all([recoverable, completed, other_root_run])
         await session.write_session.flush()
-        row.pending_idle_continuation_run_id = completed.id
+        conversation.pending_idle_continuation_run_id = completed.id
         await session.write_session.flush()
         recoverable_id, completed_id = recoverable.id, completed.id
     observed = ObservedReadManager(rdb_session_manager)
@@ -297,12 +299,14 @@ async def test_snapshot_wrapper_preserves_bounded_canonical_errors_and_read_clea
         elif failure == "idle":
             row.run_state = AgentSessionRunState.IDLE
         elif failure == "command":
-            row.pending_command_id = "incomplete-command"
+            assert row.conversation is not None
+            row.conversation.pending_command_id = "incomplete-command"
         elif failure == "idle-run":
             run = _run(session_id, 1, AgentRunStatus.RUNNING)
             session.write_session.add(run)
             await session.write_session.flush()
-            row.pending_idle_continuation_run_id = run.id
+            assert row.conversation is not None
+            row.conversation.pending_idle_continuation_run_id = run.id
         else:
             node = await session.read_session.get(
                 RDBSessionAgent, subject.session_agent_id

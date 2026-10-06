@@ -40,6 +40,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
 )
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -61,6 +62,7 @@ from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.goal.store import GoalStateStore
+from azents.repos.lifecycle_target import LifecycleTargetRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
@@ -600,6 +602,8 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
     lifecycle = SessionLifecycleOperationsRepository(
         registry=registry,
         agent_session_repository=database["agent_session_repository"],
+        lifecycle_target_repository=LifecycleTargetRepository(),
+        retention_repository=database["archived_session_retention_repository"],
         external_channel_repository=ExternalChannelLifecycleRepository(),
         scheduled_task_repository=scheduled.repository,
     )
@@ -1799,8 +1803,8 @@ class TestChatSessionTeamSessions:
         assert primary.auto_archive_after is None
 
         await rdb_session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == root_session.id)
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == root_session.id)
             .values(pinned=True)
         )
         await rdb_session.write_session.commit()
@@ -1909,32 +1913,40 @@ class TestChatSessionTeamSessions:
             ),
         )
         first_last_user_input_at = await rdb_session.read_session.scalar(
-            sa.select(RDBAgentSession.last_user_input_at).where(
-                RDBAgentSession.id == first_session.id
+            sa.select(RDBConversation.last_user_input_at).where(
+                RDBConversation.session_id == first_session.id
             )
         )
         second_last_user_input_at = await rdb_session.read_session.scalar(
-            sa.select(RDBAgentSession.last_user_input_at).where(
-                RDBAgentSession.id == second_session.id
+            sa.select(RDBConversation.last_user_input_at).where(
+                RDBConversation.session_id == second_session.id
             )
         )
         assert first_last_user_input_at == old_user_event.created_at
         assert second_last_user_input_at == recent_user_event.created_at
         await rdb_session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == first_session.id)
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == first_session.id)
             .values(
                 last_user_input_at=datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC),
-                updated_at=datetime.datetime(2026, 1, 5, tzinfo=datetime.UTC),
+            )
+        )
+        await rdb_session.write_session.execute(
+            sa.update(RDBConversation)
+            .where(RDBConversation.session_id == second_session.id)
+            .values(
+                last_user_input_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC),
             )
         )
         await rdb_session.write_session.execute(
             sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == first_session.id)
+            .values(updated_at=datetime.datetime(2026, 1, 5, tzinfo=datetime.UTC))
+        )
+        await rdb_session.write_session.execute(
+            sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == second_session.id)
-            .values(
-                last_user_input_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC),
-                updated_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC),
-            )
+            .values(updated_at=datetime.datetime(2026, 1, 3, tzinfo=datetime.UTC))
         )
         await rdb_session.write_session.commit()
 

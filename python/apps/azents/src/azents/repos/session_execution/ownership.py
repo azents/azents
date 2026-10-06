@@ -1,24 +1,23 @@
-"""Explicit Session execution validation and exact critical mutation fencing."""
+"""Explicit common execution validation and exact critical mutation fencing."""
 
 import dataclasses
 
-import sqlalchemy as sa
-
-from azents.core.agent_session_data import AgentSession
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
-from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 
 
 async def validate_session_execution_owner(
     session: ReadSession,
     owner: SessionExecutionOwner,
-) -> AgentSession:
-    """Validate one observed owner without holding a lock across external I/O."""
-    current = await AgentSessionRepository().get_by_id(session, owner.session_id)
+) -> SessionExecutionRecord:
+    """Observe one common execution owner without locking across external I/O."""
+    current = await SessionExecutionRecordRepository().get_by_id(
+        session, owner.session_id
+    )
     if current is None:
         raise ValueError("AgentSession not found")
     if current.owner_generation != owner.owner_generation:
@@ -31,33 +30,20 @@ async def validate_session_execution_owner(
 async def fence_owned_session_mutation(
     session: WriteSession,
     owner: SessionExecutionOwner,
-) -> AgentSession:
-    """Exclude owner handover until this critical dependent write group commits.
+) -> SessionExecutionRecord:
+    """Exclude handover through this critical operation's dependent write commit.
 
-    Updating the exact owner row retains a real write fence, unlike an unrelated
-    INSERT whose MVCC EXISTS check cannot serialize an ownership handover.
-    This primitive belongs only at critical operation mutation boundaries.
+    The common record does not require a public Conversation. Only the exact
+    owner-row mutation, not a descriptive read or an unrelated INSERT, admits
+    dependent writes against ownership handover.
     """
-    result = await session.write_session.execute(
-        sa.update(RDBAgentSession)
-        .where(
-            RDBAgentSession.id == owner.session_id,
-            RDBAgentSession.owner_generation == owner.owner_generation,
-        )
-        .values(
-            owner_generation=RDBAgentSession.owner_generation,
-            updated_at=RDBAgentSession.updated_at,
-        )
-        .returning(RDBAgentSession)
-        .execution_options(populate_existing=True)
-    )
-    current = result.scalar_one_or_none()
+    current = await SessionExecutionRecordRepository().fence_owner(session, owner)
     if current is None:
         await validate_session_execution_owner(session, owner)
         raise CanonicalExecutionOwnerGenerationStaleError(
             "Session owner generation is stale"
         )
-    return AgentSessionRepository()._build(current)
+    return current
 
 
 @dataclasses.dataclass(frozen=True)

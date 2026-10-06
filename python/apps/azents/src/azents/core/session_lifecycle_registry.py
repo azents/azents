@@ -216,6 +216,16 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                         "test_session_lifecycle_conversation_data",
                     ),
                     _database_resource(
+                        "conversations",
+                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
+                        "test_session_lifecycle_conversation_data",
+                    ),
+                    _database_resource(
+                        "session_execution_files",
+                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
+                        "test_session_lifecycle_conversation_data",
+                    ),
+                    _database_resource(
                         "agent_runs",
                         SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
                         "test_session_lifecycle_conversation_data",

@@ -1,6 +1,7 @@
 """Session lifecycle participant contracts and immutable registry."""
 
 import dataclasses
+import datetime
 import enum
 from collections.abc import Iterable
 from types import MappingProxyType
@@ -78,6 +79,14 @@ class SessionLifecyclePurgeContext:
     lease_owner: str
     root_session_id: str
     subtree_session_ids: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class SessionArchiveMutation:
+    """Exact common archive transition supplied after target admission."""
+
+    context: SessionLifecycleTransitionContext
+    archived_at: datetime.datetime
 
 
 class SessionLifecycleParticipant(Protocol):

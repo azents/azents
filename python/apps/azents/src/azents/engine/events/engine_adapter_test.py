@@ -62,6 +62,7 @@ from azents.core.model_catalog_source import CatalogFact
 from azents.core.model_execution_options import ModelExecutionOptionId
 from azents.core.openai_client_config import OpenAIResponsesClientConfig
 from azents.core.openrouter import OPENROUTER_API_BASE_URL, OPENROUTER_APP_TITLE
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.context.compaction import (
@@ -187,6 +188,7 @@ from azents.repos.provider_output_operation import ProviderOutputOperationReposi
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.toolkit import ToolkitRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
@@ -271,8 +273,10 @@ def _fake_execution_owner_operations(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def fence_owner(
         session: WriteSession, owner: SessionExecutionOwner
-    ) -> AgentSession:
-        current = await get_owner(AgentSessionRepository(), session, owner.session_id)
+    ) -> SessionExecutionRecord:
+        current = await get_common_owner(
+            SessionExecutionRecordRepository(), session, owner.session_id
+        )
         if current is None:
             raise ValueError("AgentSession not found")
         if current.owner_generation != owner.owner_generation:
@@ -281,7 +285,25 @@ def _fake_execution_owner_operations(monkeypatch: pytest.MonkeyPatch) -> None:
             )
         return current
 
+    async def get_common_owner(
+        self: SessionExecutionRecordRepository,
+        session: ReadSession,
+        session_id: str,
+    ) -> SessionExecutionRecord | None:
+        del self
+        public = await get_owner(AgentSessionRepository(), session, session_id)
+        if public is None:
+            return None
+        return SessionExecutionRecord.model_validate(
+            {
+                **public.model_dump(),
+                "lifecycle_root_session_id": None,
+                "model_file_gc_updated_at": None,
+            }
+        )
+
     monkeypatch.setattr(AgentSessionRepository, "get_by_id", get_owner)
+    monkeypatch.setattr(SessionExecutionRecordRepository, "get_by_id", get_common_owner)
     for module in (
         "engine_event_operation",
         "engine_execution_operation",

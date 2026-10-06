@@ -29,14 +29,17 @@ async def enroll_source_in_session(
     creates nor locks a consolidation unit. A null return means the same
     evidence/change identity was already enrolled, not a swallowed failure.
     """
+    conversation = root.conversation
+    if conversation is None:
+        raise ValueError("Historical source has no Conversation.")
     membership_id: str | None = None
-    match root.product_mode:
+    match conversation.product_mode:
         case AgentSessionProductMode.TEAM:
             scope = ConsolidationScope.TEAM
             user_id = None
         case AgentSessionProductMode.USER:
             scope = ConsolidationScope.USER
-            user_id = root.associated_user_id
+            user_id = conversation.associated_user_id
             if user_id is None:
                 raise ValueError("Personal source has no associated User.")
             membership_id = await session.write_session.scalar(

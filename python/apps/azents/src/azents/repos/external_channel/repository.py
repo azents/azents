@@ -3400,7 +3400,8 @@ class ExternalChannelRepository:
             or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
             or agent_session.workspace_id != agent.workspace_id
             or agent_session.agent_id != agent.id
-            or agent_session.session_kind is not AgentSessionKind.ROOT
+            or agent_session.conversation is None
+            or agent_session.conversation.session_kind is not AgentSessionKind.ROOT
         ):
             raise ValueError("External Channel binding owners are incompatible.")
         if expected_access_request_id is not None:

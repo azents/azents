@@ -11,7 +11,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionStopSignal
-from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
@@ -21,6 +20,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
+    SessionArchiveMutation,
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
 )
@@ -251,7 +251,8 @@ class _SessionRepositoryDouble:
             policy_revision,
             retention_days,
         )
-        self.archived.append(root_session_id)
+        if root_session_id not in self.archived:
+            self.archived.append(root_session_id)
 
 
 class _RunRepositoryDouble:
@@ -300,6 +301,7 @@ class _RetentionRepositoryDouble:
     ) -> None:
         """Record purge scheduling."""
         del session, policy_revision, now
+        self.scheduled = [item for item in self.scheduled if item[0] != root_session_id]
         self.scheduled.append((root_session_id, eligible_at))
 
 
@@ -467,7 +469,6 @@ def _service(
         owner_lifecycle_repository=lifecycle_repo,
         agent_session_repository=sessions,
         agent_run_repository=runs or _RunRepositoryDouble(),
-        retention_repository=retention_repo,
         memory_repository=memory_repo,
         user_repository=user_repo,
         chat_write_request_repository=retained_repo,
@@ -476,6 +477,7 @@ def _service(
         external_channel_repository=retained_repo,
         lifecycle_repository=_RetirementLifecycleDouble(
             sessions=sessions,
+            retention=retention_repo,
             allows_active_runs=(
                 scheduled_lifecycle.allows_active_runs
                 if scheduled_lifecycle is not None
@@ -729,9 +731,14 @@ class _RetirementLifecycleDouble:
     """Database-only root archive with explicit Scheduled preservation evidence."""
 
     def __init__(
-        self, *, sessions: _SessionRepositoryDouble, allows_active_runs: bool
+        self,
+        *,
+        sessions: _SessionRepositoryDouble,
+        retention: _RetentionRepositoryDouble,
+        allows_active_runs: bool,
     ) -> None:
         self.sessions = sessions
+        self.retention = retention
         self.allows_active_runs = allows_active_runs
 
     async def archive_allows_active_runs(
@@ -745,18 +752,60 @@ class _RetirementLifecycleDouble:
         return self.allows_active_runs
 
     async def archive(
-        self, session: WriteSession, command: ChatArchiveMutation
+        self, session: WriteSession, command: SessionArchiveMutation
     ) -> tuple[ProviderEffectPlan, ...]:
+        policy = await self.retention.get_settings(session)
+        days = policy.archived_session_retention_days
+        purge_after = (
+            None
+            if days is None
+            else command.archived_at + datetime.timedelta(days=days)
+        )
         await self.sessions.archive_tree(
             session,
             root_session_id=command.context.root_session_id,
             session_ids=command.context.subtree_session_ids,
             archived_at=command.archived_at,
-            purge_after=command.purge_after,
-            policy_revision=command.policy_revision,
-            retention_days=command.retention_days,
+            purge_after=purge_after,
+            policy_revision=policy.revision,
+            retention_days=days,
         )
+        if purge_after is not None:
+            await self.retention.schedule_purge_job(
+                session,
+                root_session_id=command.context.root_session_id,
+                eligible_at=purge_after,
+                policy_revision=policy.revision,
+                now=command.archived_at,
+            )
         return ()
+
+    async def accelerate_account_purge(
+        self,
+        session: WriteSession,
+        *,
+        root_session_id: str,
+        session_ids: Sequence[str],
+        archived_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> None:
+        policy = await self.retention.get_settings(session)
+        await self.sessions.archive_tree(
+            session,
+            root_session_id=root_session_id,
+            session_ids=session_ids,
+            archived_at=archived_at,
+            purge_after=now,
+            policy_revision=policy.revision,
+            retention_days=0,
+        )
+        await self.retention.schedule_purge_job(
+            session,
+            root_session_id=root_session_id,
+            eligible_at=now,
+            policy_revision=policy.revision,
+            now=now,
+        )
 
 
 @dataclass
