@@ -15,6 +15,7 @@ import {
   agentV1DeleteAgentMemory,
   agentV1FinalizeAvatar,
   agentV1GetAgent,
+  agentV1GetAgentConsolidatedMemory,
   agentV1GetAgentHistoricalMemory,
   agentV1GetAgentMemory,
   agentV1GetAutomaticSessionProjects,
@@ -265,6 +266,8 @@ export const agentRouter = router({
         scope: memoryScopeEnum,
         type: z.string().min(1).nullable().optional(),
         query: z.string().nullable().optional(),
+        cursor: z.string().nullable().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
       }),
     )
     .query(async ({ ctx, input }) => {
@@ -276,7 +279,37 @@ export const agentRouter = router({
             scope: input.scope,
             type: input.type ?? null,
             query: input.query ?? null,
+            cursor: input.cursor ?? null,
+            limit: input.limit ?? 20,
           },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  /** Current integrated Historical Memory for the selected visible scope. */
+  getConsolidatedMemory: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        scope: historicalMemoryScopeEnum,
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentV1GetAgentConsolidatedMemory({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          query: { scope: input.scope },
           throwOnError: true,
         });
         return data;

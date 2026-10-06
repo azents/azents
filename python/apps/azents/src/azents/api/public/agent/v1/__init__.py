@@ -55,6 +55,7 @@ from azents.services.memory import MemoryService
 from azents.services.memory.data import (
     DuplicateMemory,
     MemoryCreateInput,
+    MemoryCursorInvalid,
     MemoryNotFound,
     MemoryUpdateInput,
 )
@@ -77,6 +78,7 @@ from .data import (
     AvatarFinalizeRequest,
     AvatarUploadRequest,
     AvatarUploadTicketResponse,
+    ConsolidatedMemoryResponse,
     HistoricalMemoryListResponse,
     HistoricalMemoryResponse,
     MemoryCreateRequest,
@@ -683,6 +685,39 @@ async def get_agent_historical_memory(
             assert_never(error)
 
 
+@router.get("/workspaces/{handle}/agents/{agent_id}/consolidated-memory")
+async def get_agent_consolidated_memory(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[HistoricalMemorySettingsService, Depends()],
+    *,
+    agent_id: str,
+    scope: Annotated[
+        HistoricalMemorySettingsScope, Query(description="Integrated Memory scope")
+    ],
+) -> ConsolidatedMemoryResponse:
+    """Inspect the current integrated Memory without starting consolidation."""
+    result = await service.get_consolidated(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        user_id=member.user_id,
+        role=member.role,
+        scope=scope,
+    )
+    if result.success:
+        value = result.value
+        return ConsolidatedMemoryResponse(
+            scope=value.scope,
+            markdown=value.markdown,
+            published_at=value.published_at,
+        )
+    match result.error:
+        case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+            _raise_memory_agent_not_found()
+        case _:
+            assert_never(result.error)
+
+
 @router.get("/workspaces/{handle}/agents/{agent_id}/memories")
 async def list_agent_memories(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
@@ -692,6 +727,8 @@ async def list_agent_memories(
     scope: Annotated[MemoryScope, Query(description="Memory scope")],
     type: Annotated[str | None, Query(description="Memory type filter")] = None,
     query: Annotated[str | None, Query(description="Search query")] = None,
+    cursor: Annotated[str | None, Query(description="Opaque page cursor")] = None,
+    limit: Annotated[int, Query(ge=1, le=100, description="Page size")] = 20,
 ) -> MemoryListResponse:
     """List memories for one Agent and scope.
 
@@ -707,17 +744,25 @@ async def list_agent_memories(
         scope=scope,
         type=type,
         query=query,
+        cursor=cursor,
+        limit=limit,
     )
     if result.success:
         value = result.value
         return MemoryListResponse(
-            items=[MemoryResponse.convert_from(a) for a in value.items]
+            items=[MemoryResponse.convert_from(a) for a in value.items],
+            next_cursor=value.next_cursor,
         )
     else:
         error = result.error
         match error:
             case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
                 _raise_memory_agent_not_found()
+            case MemoryCursorInvalid():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Memory cursor is invalid.",
+                )
             case _:
                 assert_never(error)
 

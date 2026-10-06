@@ -1,6 +1,8 @@
-import { rem } from "@mantine/core";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { Box, rem } from "@mantine/core";
+import { useState } from "react";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { useMemoryScrollPagination } from "../containers/useAgentMemorySettingsContainer";
 import { AgentMemorySettings } from "./AgentMemorySettings";
 import type {
   AgentResponse,
@@ -130,13 +132,23 @@ const meta = {
     saving: false,
     deletingId: null,
     togglingMemory: false,
-    loadingMoreHistorical: false,
+    historicalView: "overview",
+    consolidatedState: {
+      type: "LOADED",
+      markdown:
+        "## Release context\n\nCI must pass before release. Verify the rollback note.",
+      publishedAt: "2026-10-01T15:00:00Z",
+    },
+    paginationState: { type: "END" },
+    scrollRootRef: noop,
+    scrollEndRef: noop,
+    onHistoricalViewChange: noop,
+    onRetryNextPage: noop,
     onKindChange: noop,
     onSavedScopeChange: noop,
     onHistoricalScopeChange: noop,
     onSavedQueryChange: noop,
     onHistoricalQueryChange: noop,
-    onLoadMoreHistorical: noop,
     onMemoryEnabledChange: noop,
     onStartCreate: noop,
     onStartEdit: noop,
@@ -252,9 +264,10 @@ export const SavedEditing = {
   },
 } satisfies Story;
 
-export const HistoricalLoaded = {
+export const HistoricalSessions = {
   args: {
     kind: "historical",
+    historicalView: "sessions",
     memoryEnabled: false,
   },
   play: async ({ canvasElement }) => {
@@ -279,6 +292,7 @@ export const HistoricalLoaded = {
 export const HistoricalEmpty = {
   args: {
     kind: "historical",
+    historicalView: "sessions",
     historicalScope: "user",
     historicalListState: {
       type: "LOADED",
@@ -291,6 +305,7 @@ export const HistoricalEmpty = {
 export const HistoricalLoading = {
   args: {
     kind: "historical",
+    historicalView: "sessions",
     historicalListState: { type: "LOADING" },
   },
 } satisfies Story;
@@ -298,6 +313,7 @@ export const HistoricalLoading = {
 export const HistoricalError = {
   args: {
     kind: "historical",
+    historicalView: "sessions",
     historicalListState: {
       type: "ERROR",
       message: "Historical Memory is temporarily unavailable.",
@@ -305,20 +321,194 @@ export const HistoricalError = {
   },
 } satisfies Story;
 
-export const HistoricalLoadMore = {
+export const HistoricalOverview = {
+  args: { kind: "historical", onHistoricalViewChange: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Integrated memory")).toBeVisible();
+    await expect(
+      canvas.getByText(
+        "CI must pass before release. Verify the rollback note.",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText("October release readiness"),
+    ).not.toBeInTheDocument();
+    await userEvent.click(
+      canvas.getByRole("button", { name: "View session memories" }),
+    );
+    await expect(args.onHistoricalViewChange).toHaveBeenCalledWith("sessions");
+  },
+} satisfies Story;
+
+export const HistoricalOverviewEmpty = {
   args: {
     kind: "historical",
-    historicalListState: {
-      type: "LOADED",
-      memories: historicalMemories,
-      hasMore: true,
+    consolidatedState: { type: "LOADED", markdown: null, publishedAt: null },
+  },
+} satisfies Story;
+
+export const HistoricalOverviewLoading = {
+  args: { kind: "historical", consolidatedState: { type: "LOADING" } },
+} satisfies Story;
+
+export const HistoricalOverviewError = {
+  args: {
+    kind: "historical",
+    consolidatedState: {
+      type: "ERROR",
+      message: "Integrated memory is unavailable.",
     },
-    onLoadMoreHistorical: fn(),
+  },
+} satisfies Story;
+
+export const HistoricalBack = {
+  args: {
+    kind: "historical",
+    historicalView: "sessions",
+    onHistoricalViewChange: fn(),
   },
   play: async ({ canvasElement, args }) => {
     await userEvent.click(
-      within(canvasElement).getByRole("button", { name: "Load more" }),
+      within(canvasElement).getByRole("button", {
+        name: "Back to integrated memory",
+      }),
     );
-    await expect(args.onLoadMoreHistorical).toHaveBeenCalledTimes(1);
+    await expect(args.onHistoricalViewChange).toHaveBeenCalledWith("overview");
+  },
+} satisfies Story;
+
+export const NextPageError = {
+  args: {
+    paginationState: {
+      type: "ERROR",
+      message: "The next page could not be loaded.",
+    },
+    onRetryNextPage: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("release-checklist")).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Retry" }));
+    await expect(args.onRetryNextPage).toHaveBeenCalledTimes(1);
+    await expect(
+      canvas.queryByRole("button", { name: "Load more" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+function InfiniteScrollHarness(
+  props: React.ComponentProps<typeof AgentMemorySettings>,
+): React.ReactElement {
+  const [loaded, setLoaded] = useState(false);
+  const [view, setView] = useState(props.historicalView);
+  const refs = useMemoryScrollPagination({
+    enabled: !loaded && (props.kind === "saved" || view === "sessions"),
+    pageKey: `${props.kind}:${loaded}`,
+    listKey: `${props.kind}:${view}`,
+    onNextPage: () => setLoaded(true),
+  });
+  const savedSeed = memories.at(0);
+  const savedNext = memories.at(1);
+  const historicalSeed = historicalMemories.at(0);
+  const historicalNext = historicalMemories.at(1);
+  if (!savedSeed || !savedNext || !historicalSeed || !historicalNext) {
+    throw new Error("Infinite scroll story fixtures are missing.");
+  }
+  const savedItems = Array.from({ length: 12 }, (_, i) => ({
+    ...savedSeed,
+    id: `long-saved-${i}`,
+    name: `Saved entry ${i}`,
+  }));
+  const historicalItems = Array.from({ length: 12 }, (_, i) => ({
+    ...historicalSeed,
+    source_session_id: `long-session-${i}`,
+    source_title: `Session entry ${i}`,
+  }));
+  return (
+    <Box h={rem(420)} style={{ display: "flex", flexDirection: "column" }}>
+      <AgentMemorySettings
+        {...props}
+        {...refs}
+        historicalView={view}
+        onHistoricalViewChange={setView}
+        savedListState={{
+          type: "LOADED",
+          memories: loaded
+            ? [...savedItems, { ...savedNext, name: "Next saved page" }]
+            : savedItems,
+        }}
+        historicalListState={{
+          type: "LOADED",
+          memories: loaded
+            ? [
+                ...historicalItems,
+                { ...historicalNext, source_title: "Next session page" },
+              ]
+            : historicalItems,
+          hasMore: !loaded,
+        }}
+        paginationState={loaded ? { type: "END" } : { type: "IDLE" }}
+      />
+    </Box>
+  );
+}
+
+export const SavedInfiniteScroll = {
+  render: (args) => <InfiniteScrollHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByText("Next saved page")).not.toBeInTheDocument();
+    const root = canvas.getByTestId("memory-scroll-root");
+    root.scrollTop = root.scrollHeight;
+    await waitFor(() =>
+      expect(canvas.getByText("Next saved page")).toBeInTheDocument(),
+    );
+    root.scrollTop = root.scrollHeight;
+    await expect(canvas.getAllByText("Next saved page")).toHaveLength(1);
+    await expect(
+      canvas.queryByRole("button", { name: "Load more" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const HistoricalInfiniteScroll = {
+  args: { kind: "historical", historicalView: "sessions" },
+  render: (args) => <InfiniteScrollHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.queryByText("Next session page"),
+    ).not.toBeInTheDocument();
+    const root = canvas.getByTestId("memory-scroll-root");
+    root.scrollTop = root.scrollHeight;
+    await waitFor(() =>
+      expect(canvas.getByText("Next session page")).toBeInTheDocument(),
+    );
+    await expect(
+      canvas.queryByRole("button", { name: "Load more" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const MobileHeader = {
+  decorators: [
+    (Story) => (
+      <Box w={rem(320)}>
+        <Story />
+      </Box>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const description = canvas.getByTestId("memory-description");
+    const control = canvas.getByRole("switch", { name: "Enable Memory" });
+    await expect(description).toBeVisible();
+    await expect(
+      description.getBoundingClientRect().top,
+    ).toBeGreaterThanOrEqual(control.getBoundingClientRect().bottom);
+    await expect(description.getBoundingClientRect().width).toBeGreaterThan(
+      200,
+    );
   },
 } satisfies Story;

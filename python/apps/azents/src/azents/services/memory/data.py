@@ -46,6 +46,14 @@ class MemoryListOutput(BaseModel):
     """Memory list output."""
 
     items: list[MemoryOutput] = Field(description="Memory list")
+    next_cursor: str | None = Field(description="Next page cursor, if available")
+
+
+@dataclasses.dataclass(frozen=True)
+class MemoryCursorInvalid:
+    """The list cursor is malformed or belongs to another query."""
+
+    message: str
 
 
 class MemoryCreateInput(BaseModel):

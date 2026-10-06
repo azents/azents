@@ -842,7 +842,6 @@
       "openConversation": "Ouvrir la conversation",
       "openConversationLabel": "Ouvrir la conversation : {title}",
       "untitledConversation": "Conversation sans titre",
-      "loadMore": "Afficher plus",
       "create": "Ajouter une mémoire",
       "createTitle": "Ajouter une mémoire",
       "editTitle": "Modifier la mémoire",
@@ -858,7 +857,14 @@
       "savedEmptyDescription": "Créez une mémoire ou ajustez le filtre de recherche.",
       "historicalEmptyTitle": "Aucune conversation historique trouvée",
       "historicalEmptyDescription": "Essayez une autre portée ou recherche. Les conversations archivées ou inaccessibles ne sont pas affichées.",
-      "deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible."
+      "deleteConfirm": "Supprimer la mémoire « {name} » ? Cette action est irréversible.",
+      "integratedTitle": "Mémoire intégrée",
+      "integratedEmpty": "Aucune mémoire intégrée n’est encore disponible pour ce périmètre.",
+      "integratedDate": "Mis à jour le {date}",
+      "viewSessionMemories": "Voir les mémoires par session",
+      "backToIntegrated": "Retour à la mémoire intégrée",
+      "loadingMore": "Chargement de mémoires supplémentaires",
+      "retry": "Réessayer"
     },
     "subagentsSectionLabel": "Sous-agents",
     "subagentMaxSubagentsLabel": "Nombre maximal de sous-agents",

@@ -202,6 +202,7 @@ __all__ = [
     "CleanupSessionGitWorktreeRequest",
     "CommandAction",
     "ConnectionAccessPolicyRequest",
+    "ConsolidatedMemoryResponse",
     "CreateGitWorktreeAction",
     "CreateInvitationRequest",
     "CreateJoinRequestRequest",
@@ -792,6 +793,7 @@ from azentspublicclient.models.cleanup_orphan_git_worktrees_action import Cleanu
 from azentspublicclient.models.cleanup_session_git_worktree_request import CleanupSessionGitWorktreeRequest as CleanupSessionGitWorktreeRequest
 from azentspublicclient.models.command_action import CommandAction as CommandAction
 from azentspublicclient.models.connection_access_policy_request import ConnectionAccessPolicyRequest as ConnectionAccessPolicyRequest
+from azentspublicclient.models.consolidated_memory_response import ConsolidatedMemoryResponse as ConsolidatedMemoryResponse
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest
 from azentspublicclient.models.create_join_request_request import CreateJoinRequestRequest as CreateJoinRequestRequest

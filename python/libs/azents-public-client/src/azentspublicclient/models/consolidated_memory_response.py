@@ -17,20 +17,22 @@ import pprint
 import re  # noqa: F401
 import json
 
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.memory_response import MemoryResponse
+from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope
 from typing import Optional, Set
 from typing_extensions import Self
 
-class MemoryListResponse(BaseModel):
+class ConsolidatedMemoryResponse(BaseModel):
     """
-    Memory list response.
+    Current integrated Memory settings overview for one exact scope.
     """ # noqa: E501
-    items: List[MemoryResponse]
-    next_cursor: Optional[StrictStr]
+    scope: HistoricalMemorySettingsScope
+    markdown: Optional[StrictStr]
+    published_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items", "next_cursor"]
+    __properties: ClassVar[List[str]] = ["scope", "markdown", "published_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -50,7 +52,7 @@ class MemoryListResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of MemoryListResponse from a JSON string"""
+        """Create an instance of ConsolidatedMemoryResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -73,28 +75,26 @@ class MemoryListResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
-        _items = []
-        if self.items:
-            for _item_items in self.items:
-                if _item_items:
-                    _items.append(_item_items.to_dict())
-            _dict['items'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if next_cursor (nullable) is None
+        # set to None if markdown (nullable) is None
         # and model_fields_set contains the field
-        if self.next_cursor is None and "next_cursor" in self.model_fields_set:
-            _dict['next_cursor'] = None
+        if self.markdown is None and "markdown" in self.model_fields_set:
+            _dict['markdown'] = None
+
+        # set to None if published_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.published_at is None and "published_at" in self.model_fields_set:
+            _dict['published_at'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of MemoryListResponse from a dict"""
+        """Create an instance of ConsolidatedMemoryResponse from a dict"""
         if obj is None:
             return None
 
@@ -104,8 +104,9 @@ class MemoryListResponse(BaseModel):
         # Preserve omission while retaining generated nested-field conversion.
         _obj = cls.model_validate({
             _key: _value for _key, _value in {
-            "items": [MemoryResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
-            "next_cursor": obj.get("next_cursor")
+            "scope": obj.get("scope"),
+            "markdown": obj.get("markdown"),
+            "published_at": obj.get("published_at")
             }.items() if _key in obj
         })
         # store additional fields in additional_properties

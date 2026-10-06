@@ -16,10 +16,12 @@ from azents.core.historical_memory_settings import (
 from azents.repos.historical_memory.settings import (
     HistoricalMemorySettingsRepository,
 )
+from azents.services.agent.data import PrivateAgentAccessDenied
 from azents.services.historical_memory.settings import (
     HistoricalMemorySettingsService,
 )
 from azents.services.historical_memory.settings_data import (
+    ConsolidatedMemorySettingsOutput,
     HistoricalMemorySettingsCursorInvalid,
     HistoricalMemorySettingsListOutput,
     HistoricalMemorySettingsNotFound,
@@ -194,3 +196,67 @@ def test_openapi_exposes_read_only_historical_operations() -> None:
 
     assert set(collection) == {"get"}
     assert set(detail) == {"get"}
+
+
+@pytest.mark.parametrize("scope", list(HistoricalMemorySettingsScope))
+def test_integrated_overview_binds_requester_scope(
+    scope: HistoricalMemorySettingsScope,
+) -> None:
+    """Current integrated read is scoped by the authenticated caller, not model IDs."""
+    service = AsyncMock(spec=HistoricalMemorySettingsService)
+    service.get_consolidated.return_value = Success(
+        ConsolidatedMemorySettingsOutput(
+            scope=scope, markdown="Current integrated result", published_at=_NOW
+        )
+    )
+    response = _client(service).get(
+        "/agent/v1/workspaces/workspace/agents/agent-1/consolidated-memory",
+        params={"scope": scope.value},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "scope": scope.value,
+        "markdown": "Current integrated result",
+        "published_at": "2026-10-01T12:00:00Z",
+    }
+    service.get_consolidated.assert_awaited_once_with(
+        "agent-1",
+        workspace_id="workspace-1",
+        workspace_user_id="workspace-user-1",
+        user_id="user-1",
+        role=WorkspaceUserRole.MEMBER,
+        scope=scope,
+    )
+    service.list.assert_not_awaited()
+
+
+def test_integrated_overview_returns_empty_without_generation() -> None:
+    """Missing current publication is an empty settings state."""
+    service = AsyncMock(spec=HistoricalMemorySettingsService)
+    service.get_consolidated.return_value = Success(
+        ConsolidatedMemorySettingsOutput(
+            scope=HistoricalMemorySettingsScope.TEAM,
+            markdown=None,
+            published_at=None,
+        )
+    )
+    response = _client(service).get(
+        "/agent/v1/workspaces/workspace/agents/agent-1/consolidated-memory",
+        params={"scope": "team"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"scope": "team", "markdown": None, "published_at": None}
+
+
+def test_integrated_overview_hides_invisible_agent() -> None:
+    """Current publication reads preserve the Agent non-enumerating boundary."""
+    service = AsyncMock(spec=HistoricalMemorySettingsService)
+    service.get_consolidated.return_value = Failure(
+        PrivateAgentAccessDenied(agent_id="agent-1")
+    )
+    response = _client(service).get(
+        "/agent/v1/workspaces/workspace/agents/agent-1/consolidated-memory",
+        params={"scope": "team"},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Agent not found."}

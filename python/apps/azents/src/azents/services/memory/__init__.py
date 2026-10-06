@@ -12,6 +12,7 @@ from azents.core.memory_scope import MemoryScope
 from azents.repos.agent.data import Agent
 from azents.repos.memory.data import Memory, MemoryCreate, MemoryUpdate
 from azents.repos.memory.ui_operations import MemoryUIOperations
+from azents.repos.memory.ui_paging import MemoryUICursorError
 from azents.services.agent.data import (
     NotAdmin,
     NotBelongToWorkspace,
@@ -21,6 +22,7 @@ from azents.services.agent.data import (
 from .data import (
     DuplicateMemory,
     MemoryCreateInput,
+    MemoryCursorInvalid,
     MemoryListOutput,
     MemoryNotFound,
     MemoryOutput,
@@ -45,9 +47,14 @@ class MemoryService:
         scope: MemoryScope,
         type: str | None,
         query: str | None,
+        cursor: str | None,
+        limit: int,
     ) -> Result[
         MemoryListOutput,
-        NotFound | NotBelongToWorkspace | PrivateAgentAccessDenied,
+        NotFound
+        | NotBelongToWorkspace
+        | PrivateAgentAccessDenied
+        | MemoryCursorInvalid,
     ]:
         """List memories for one visible Agent and one exact scope."""
         access = await self.get_visible_agent(
@@ -65,14 +72,22 @@ class MemoryService:
                 assert_never(access)
 
         effective_user_id = self._scope_user_id(scope, user_id)
-        memories = await self.operations.list_memories(
-            agent_id=agent_id,
-            user_id=effective_user_id,
-            type=type,
-            query=query,
-        )
+        try:
+            page = await self.operations.list_memories(
+                agent_id=agent_id,
+                user_id=effective_user_id,
+                type=type,
+                query=query,
+                cursor=cursor,
+                limit=limit,
+            )
+        except MemoryUICursorError as error:
+            return Failure(MemoryCursorInvalid(message=str(error)))
         return Success(
-            MemoryListOutput(items=[MemoryOutput.convert_from(m) for m in memories])
+            MemoryListOutput(
+                items=[MemoryOutput.convert_from(m) for m in page.items],
+                next_cursor=page.next_cursor,
+            )
         )
 
     async def get_by_id(

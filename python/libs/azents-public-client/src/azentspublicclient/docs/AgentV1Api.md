@@ -11,6 +11,7 @@ Method | HTTP request | Description
 [**agent_v1_delete_agent_memory**](AgentV1Api.md#agent_v1_delete_agent_memory) | **DELETE** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Delete Agent Memory
 [**agent_v1_finalize_avatar**](AgentV1Api.md#agent_v1_finalize_avatar) | **POST** /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar/finalize | Finalize Avatar
 [**agent_v1_get_agent**](AgentV1Api.md#agent_v1_get_agent) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id} | Get Agent
+[**agent_v1_get_agent_consolidated_memory**](AgentV1Api.md#agent_v1_get_agent_consolidated_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory | Get Agent Consolidated Memory
 [**agent_v1_get_agent_historical_memory**](AgentV1Api.md#agent_v1_get_agent_historical_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id} | Get Agent Historical Memory
 [**agent_v1_get_agent_memory**](AgentV1Api.md#agent_v1_get_agent_memory) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id} | Get Agent Memory
 [**agent_v1_get_automatic_session_projects**](AgentV1Api.md#agent_v1_get_automatic_session_projects) | **GET** /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects | Get Automatic Session Projects
@@ -616,6 +617,90 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **agent_v1_get_agent_consolidated_memory**
+> ConsolidatedMemoryResponse agent_v1_get_agent_consolidated_memory(agent_id, handle, scope)
+
+Get Agent Consolidated Memory
+
+Inspect the current integrated Memory without starting consolidation.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.consolidated_memory_response import ConsolidatedMemoryResponse
+from azentspublicclient.models.historical_memory_settings_scope import HistoricalMemorySettingsScope
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    scope = azentspublicclient.HistoricalMemorySettingsScope() # HistoricalMemorySettingsScope | Integrated Memory scope
+
+    try:
+        # Get Agent Consolidated Memory
+        api_response = api_instance.agent_v1_get_agent_consolidated_memory(agent_id, handle, scope)
+        print("The response of AgentV1Api->agent_v1_get_agent_consolidated_memory:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentV1Api->agent_v1_get_agent_consolidated_memory: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **scope** | [**HistoricalMemorySettingsScope**](.md)| Integrated Memory scope | 
+
+### Return type
+
+[**ConsolidatedMemoryResponse**](ConsolidatedMemoryResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **agent_v1_get_agent_historical_memory**
 > HistoricalMemoryResponse agent_v1_get_agent_historical_memory(handle, agent_id, source_session_id)
 
@@ -1039,7 +1124,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **agent_v1_list_agent_memories**
-> MemoryListResponse agent_v1_list_agent_memories(agent_id, handle, scope, type=type, query=query)
+> MemoryListResponse agent_v1_list_agent_memories(agent_id, handle, scope, type=type, query=query, cursor=cursor, limit=limit)
 
 List Agent Memories
 
@@ -1084,10 +1169,12 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     scope = azentspublicclient.MemoryScope() # MemoryScope | Memory scope
     type = 'type_example' # str | Memory type filter (optional)
     query = 'query_example' # str | Search query (optional)
+    cursor = 'cursor_example' # str | Opaque page cursor (optional)
+    limit = 20 # int | Page size (optional) (default to 20)
 
     try:
         # List Agent Memories
-        api_response = api_instance.agent_v1_list_agent_memories(agent_id, handle, scope, type=type, query=query)
+        api_response = api_instance.agent_v1_list_agent_memories(agent_id, handle, scope, type=type, query=query, cursor=cursor, limit=limit)
         print("The response of AgentV1Api->agent_v1_list_agent_memories:\n")
         pprint(api_response)
     except Exception as e:
@@ -1106,6 +1193,8 @@ Name | Type | Description  | Notes
  **scope** | [**MemoryScope**](.md)| Memory scope | 
  **type** | **str**| Memory type filter | [optional] 
  **query** | **str**| Search query | [optional] 
+ **cursor** | **str**| Opaque page cursor | [optional] 
+ **limit** | **int**| Page size | [optional] [default to 20]
 
 ### Return type
 
