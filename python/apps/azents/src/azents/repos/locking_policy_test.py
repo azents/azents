@@ -6,7 +6,7 @@ from pathlib import Path
 _REPOSITORIES = Path(__file__).parent
 
 
-_EXPECTED_HIERARCHY_OWNERS = {
+_EXPECTED_TRANSACTION_OWNERS = {
     "subagent_tool_operations.py": {
         "spawn",
         "send_message",
@@ -37,6 +37,21 @@ _EXPECTED_HIERARCHY_OWNERS = {
     "terminal_finalization.py": {"finalize_run"},
     "session_archive_operations.py": {"archive"},
     "subagent_terminal_result.py": {"deliver_one"},
+    "historical_memory_consolidation/execution.py": {
+        "ensure_execution",
+        "recover_worker_execution",
+        "open_run",
+        "finish_unaccepted",
+        "start_turn",
+        "provision_inputs",
+        "_submit_invocation",
+        "release_unfinished_work",
+    },
+    "historical_memory_consolidation/operations.py": {
+        "begin",
+        "replace_after_quota",
+    },
+    "session_execution_file.py": {"write", "atomic_patch"},
 }
 
 
@@ -56,17 +71,14 @@ def test_hierarchy_retry_is_limited_to_complete_owning_operation_closure() -> No
                 observed.setdefault(str(path.relative_to(_REPOSITORIES)), set()).add(
                     node.name
                 )
-    assert observed == _EXPECTED_HIERARCHY_OWNERS
-    assert sum(len(entries) for entries in observed.values()) == 26
+    assert observed == _EXPECTED_TRANSACTION_OWNERS
+    assert sum(len(entries) for entries in observed.values()) == 38
 
 
 def test_inventoried_nonwaiting_acquisition_surfaces_are_removed() -> None:
     paths = [
         "agent_session/__init__.py",
-        "historical_memory_consolidation/authority.py",
-        "historical_memory_consolidation/drafts.py",
         "historical_memory_consolidation/lifecycle.py",
-        "historical_memory_consolidation/cutover.py",
         "external_account_link/__init__.py",
         "external_account_oauth/repository.py",
         "external_channel/model_settings.py",

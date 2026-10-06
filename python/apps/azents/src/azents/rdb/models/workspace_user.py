@@ -54,12 +54,6 @@ class RDBWorkspaceUser(RDBModel):
         workspace_user_role_enum, nullable=False
     )
 
-    memory_grant_identity: Mapped[str] = mapped_column(
-        sa.String(32),
-        init=False,
-        nullable=False,
-        server_default=sa.text("replace(gen_random_uuid()::text, '-', '')"),
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -76,9 +70,6 @@ class RDBWorkspaceUser(RDBModel):
     UQ_WORKSPACE_USER = sa.UniqueConstraint(
         "workspace_id", "user_id", name="uq_workspace_users_workspace_user"
     )
-    UQ_MEMORY_GRANT_IDENTITY = sa.UniqueConstraint(
-        "memory_grant_identity", name="uq_workspace_users_memory_grant_identity"
-    )
     IX_WORKSPACE_ID = sa.Index("ix_workspace_users_workspace_id", "workspace_id")
 
-    __table_args__ = (UQ_WORKSPACE_USER, UQ_MEMORY_GRANT_IDENTITY, IX_WORKSPACE_ID)
+    __table_args__ = (UQ_WORKSPACE_USER, IX_WORKSPACE_ID)

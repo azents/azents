@@ -27,6 +27,7 @@ from azents.core.enums import (
     AgentSessionKind,
     EventKind,
 )
+from azents.core.historical_memory_consolidation import MemoryExecutionBinding
 from azents.core.inference_profile import (
     RequestedInferenceProfile,
     SessionInferenceState,
@@ -52,6 +53,9 @@ from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.types import (
     CheckStop,
     PollMessages,
+)
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
 )
 from azents.repos.live_projection_authority import LiveProjectionAuthorityRepository
 from azents.repos.session_execution import (
@@ -82,6 +86,7 @@ from azents.worker.run.helpers import (
     apply_active_tool_call_event,
     observed_terminal_run_event,
 )
+from azents.worker.run.memory_execution import MemoryRunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.contracts import PrepareToolkits
 from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
@@ -1060,6 +1065,24 @@ class _ScriptedSessionRunnerWaiter(SessionRunnerWaiter):
         return self.results.pop(0)
 
 
+class _ConversationMemoryRepository(MemoryExecutionRepository):
+    """Public Worker fixtures have no internal Memory execution association."""
+
+    def __init__(self) -> None:
+        """Use only the read projection supplied by this fixture."""
+
+    async def load_binding(self, session_id: str) -> MemoryExecutionBinding | None:
+        del session_id
+        return None
+
+
+class _UnusedMemoryRunExecutor(MemoryRunExecutor):
+    """The public execution lane must not prepare a private Memory host."""
+
+    def __init__(self) -> None:
+        """Bypass unrelated production collaborators for public fixture coverage."""
+
+
 def _make_session_runner(host: _Host) -> SessionRunner:
     """Create session runner with event publisher injected for tests."""
     return SessionRunner(
@@ -1072,6 +1095,8 @@ def _make_session_runner(host: _Host) -> SessionRunner:
         idle_continuation_service=_IdleContinuationService(host),
         user_stop_finalizer=_UserStopFinalizer(host),
         run_executor=_RunExecutor(host),
+        memory_execution_repository=_ConversationMemoryRepository(),
+        memory_run_executor=_UnusedMemoryRunExecutor(),
         engine=host,
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
     )
@@ -2302,7 +2327,7 @@ async def test_durable_stop_request_cancels_blocked_engine_task(
     """durable stop intent cancels execution task even without Broker signal."""
     monkeypatch.setattr(
         session_runner_supervisor_module,
-        "_EXPLICIT_STOP_POLL_INTERVAL",
+        "EXPLICIT_STOP_POLL_INTERVAL",
         0.01,
     )
     host = _Host()

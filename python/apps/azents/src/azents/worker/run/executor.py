@@ -145,6 +145,7 @@ from azents.engine.run.resolve import (
     resolve_invoke_input_with_resolved_profile,
     resolve_model_candidate_runtime,
 )
+from azents.engine.run.task_supervision import SESSION_OWNER_HEARTBEAT_INTERVAL
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
@@ -268,7 +269,7 @@ from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
-_RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
+_RUN_HEARTBEAT_INTERVAL_SECONDS = SESSION_OWNER_HEARTBEAT_INTERVAL
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
 _FAILED_RUN_NO_FIXTURE_MATCH_CODE = "no_fixture_match"
 _OWNERSHIP_LOSS_CANCEL_MESSAGE = "Session ownership was revoked."

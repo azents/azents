@@ -30,6 +30,9 @@ code_paths:
   - python/apps/azents/src/azents/core/historical_memory_snapshot.py
   - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/services/historical_memory/context_snapshot.py
+  - python/apps/azents/src/azents/services/historical_memory/execution_context.py
+  - python/apps/azents/src/azents/repos/memory_execution_events.py
+  - python/apps/azents/src/azents/worker/run/memory_execution.py
   - python/apps/azents/src/azents/repos/memory_context_snapshot.py
   - python/apps/azents/src/azents/repos/historical_memory_consolidation/foreground.py
   - python/apps/azents/src/azents/repos/historical_memory/**
@@ -50,7 +53,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-10-07
-spec_version: 54
+spec_version: 55
 ---
 
 # Context Compaction
@@ -125,47 +128,46 @@ from current durable history.
 
 ## Memory Context Boundary
 
-Memory context selection is independent of transcript summary generation.
-Enabled root execution reselects its Saved index and whole authorized Team/
-personal consolidated documents in `on_run_start` preparation before entering
-the Run loop. Independently,
-`on_session_compact` marks a pending Memory refresh. Since that hook runs before
-compaction commits, the following model-context reconstruction refreshes only
-when a new committed `compaction_summary` becomes the model-input head. This
-includes auto-compaction inside an ongoing Run, without waiting for a new Run.
-The compaction transaction itself does not write `memory/context_snapshot`.
-Identical selection reuses existing content; a changed compaction head is
-persisted without replacing unchanged summary text or its creation time.
+Conversation Memory selection is independent of transcript summary generation.
+Root Run-start preparation selects a Saved index and whole current Team/personal
+scope results. `on_session_compact` marks pending refresh, and reconstruction
+refreshes only after a committed summary head; failed/stale compaction admits no
+new selection. The compaction transaction does not write the Memory snapshot.
+Unchanged content reuses its text and creation time. Child executions inherit
+the root selection rather than independently selecting new results.
 
-Compaction does not generate Historical Memory or supply a source-ranking
-signal. Each independent background-generated document is selected whole within
-its own 10,000-byte framed UTF-8 budget; foreground may compose both authorized
-units for up to 20,000 bytes. No lexical ranking, packing, peer-budget transfer or
-per-source summary fallback occurs. Saved entries remain an index rather than
-copied full content. Historical text is explicitly source-linked and potentially
-stale; it is neither a fresh instruction nor independent corroboration.
+Each integrated result is a whole independently framed 10,000-byte document.
+User context may compose Team and personal documents for up to 20,000 bytes;
+there is no ranking, packing or source-summary fallback. Other turns reauthorize
+current scope permission while preserving frozen selected bytes. Original source
+versions, archive state and full manifests are not aggregate-access authority.
+An independently permitted peer remains available when one scope is denied.
 
-Other model/tool turns retain the selected text and paths while filtering deleted,
-archived, inaccessible, or disabled entries. They do not reselect replacements,
-refresh edited Saved descriptions, or include newly published documents.
-Historical filtering checks each selected immutable revision's own complete
-manifest and removes the whole affected unit, retaining the independent peer.
-This filtering uses independent read-only description scopes and a correlated
-exact-revision validity projection rather than consumer/source/revision read
-locks. Collected or disappeared selected references are unavailable; filtering
-does not borrow a newer revision's manifest or reselect a replacement document.
-Snapshot writes and critical consolidation publication retain separate mutation
-authority.
-Changed/denied context forces native opaque replay and stored-response continuation
-to use the current permitted input. Prepared text and exact admitted unit/revision
-identities bind native compatibility out-of-band; identical text on a new clean
-revision cannot restore encrypted/signed/redacted state, including across restart.
-This adds no Historical framing, changes no durable Event and preserves the
-existing unchanged-selection/creation-time reuse contract.
-Explicit generic VFS reads inspect live permitted records without refreshing
-the automatic snapshot. A failed or stale compaction cannot create a new Memory
-boundary because it does not change the model-input head. See
-[`memory.md`](../domain/memory.md) for the complete snapshot contract.
+Prompt filtering uses read-only common root/Agent/Workspace/User scope authority.
+Snapshot mutation retains owner-generation/head/CAS fences. Native opaque replay
+compatibility follows the actual permitted semantic prefix; it has no aggregate
+revision or inherited source-dependency identity. Explicit Memory VFS reads can
+observe a newer current result without changing frozen context. A failed
+compaction cannot create a new selection boundary because the head is unchanged.
+
+### Internal Memory execution compaction
+
+The summary-only Memory purpose host reconstructs dialogue and tool results from
+its common Session Event transcript and committed model-input head. It measures
+the actual lowered model/tool request against the selected resolved input window
+and uses the common EventCompactor when the normal context threshold is exceeded.
+The shared checkpoint task receives the current canonical transcript projection;
+marker/summary/head writes are fenced by the same Session owner and Run commit
+identity as conversation execution.
+
+Compaction preserves the current execution files, pending correction, provided
+summaries and useful checkpoint state in the same Session/Run. It does not
+republish an aggregate, create a fresh Memory execution or reset its deadline or
+consumed turn count. An oversized post-compaction request remains a compaction
+failure rather than receiving an invented input/output budget. Common
+physical-send admission rejects lost owner or cancellation before each SDK wire
+request and does not map admission denial into provider quota failure.
+See [`memory.md`](../domain/memory.md) for explicit submission and scope access.
 
 ## Summary Model
 
@@ -173,7 +175,7 @@ Summary generation uses the shared provider operation from
 `engine/provider_model_operation.py`. OpenAI API-key and ChatGPT OAuth use the
 foreground Responses lowerer, adapter and normalizer; other provider identities
 use the foreground Pydantic AI lowerer, adapter and official SDK boundary.
-A NEW compaction operation compiles exact authorized LOCAL metadata for the
+For Conversation execution, a new compaction operation compiles exact authorized LOCAL metadata for the
 configured Lightweight chain before normalizing controls and freezing candidates.
 An existing compaction operation resolves its current captured candidate without
 mutable metadata lookup; retries and quota progression retain that capture.
@@ -181,7 +183,10 @@ The Run request carries a deep copy of the complete selected candidate and its
 model settings through fresh resolution, recovery and quota handoff. Its context
 cap participates in the effective input window. Its explicit output setting
 receives the same saved-model maximum clamp as foreground, while an unspecified
-output cap stays unspecified. Summary calls declare no client or hosted tools.
+output cap stays unspecified. Internal Memory compaction instead uses the exact
+already captured current Lightweight host candidate, credentials and resolved
+window. Its physical compaction usage joins the common Run observations.
+Summary calls declare no client or hosted tools.
 
 Compaction summary generation is not user-facing streaming output, although the transport uses a
 stream so the common watchdog can enforce parsed-event idle and absolute attempt deadlines. The
@@ -380,9 +385,9 @@ the immediate shape of the recent interaction.
 - Manual compaction uses the command run context when dispatching session compaction and summary enrichment hooks.
 - Automatic and manual compaction expose one Run-scoped `preparing_context` live operation whose identity remains stable across retry and is removed at every terminal boundary.
 - Every classified provider-attributed compaction failure uses the common bounded failure contract and the owning Run's full retry budget; unclassified provider outcomes are internal errors and do not enter provider retry state.
-- Summary model calls use watched streaming transport without publishing user-facing deltas. OpenAI
-  API-key and ChatGPT OAuth omit API-level `max_output_tokens`; the Pydantic AI model routes receive
-  the dynamic summary budget through their supported provider SDK settings.
+- Summary model calls use watched streaming transport without publishing user-facing deltas.
+  All routes use the captured candidate settings and foreground output-cap clamp;
+  checkpoint character retention does not create a provider output ceiling.
 - Summary content is bounded by the runtime char guard after the model returns.
 - UI/audit history continues to include pre-compaction events. ModelFile GC may later delete unpinned ModelFile blobs whose single FilePart event is behind the head cursor, but it does not delete events or history metadata.
 - Legacy SDK compaction packages are not part of production compaction.
@@ -416,6 +421,10 @@ not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 55) — Describe common internal Memory Session
+  compaction, persistent files/correction continuity and scope-only aggregate
+  snapshot authority.
 
 - **2026-10-07** (spec_version 54) — Moved planning, owner fences and head
   mutation to common execution records without public Conversation prerequisites.

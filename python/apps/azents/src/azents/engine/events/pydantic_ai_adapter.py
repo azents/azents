@@ -219,6 +219,7 @@ class PydanticAIModelAdapter:
             )
             await state.emit(StreamFinished())
         except asyncio.CancelledError:
+            state.response_acquired.cancel()
             raise
         except (
             ModelProviderFailure,
@@ -230,8 +231,12 @@ class PydanticAIModelAdapter:
                 await state.emit(StreamFailure(error=error))
         except self.factory.sdk_error_types as error:
             if state.dispatch_blocked:
-                safe = state.original_failure or InternalModelExecutionError(
-                    origin_type="UnauthorizedModelDispatchError"
+                safe = (
+                    state.admission_failure
+                    or state.original_failure
+                    or InternalModelExecutionError(
+                        origin_type="UnauthorizedModelDispatchError"
+                    )
                 )
             else:
                 try:
@@ -246,7 +251,7 @@ class PydanticAIModelAdapter:
             if not state.closing:
                 await state.emit(StreamFailure(error=safe))
         except Exception as error:
-            safe = InternalModelExecutionError(
+            safe = state.admission_failure or InternalModelExecutionError(
                 origin_type=type(error).__name__
             ).with_traceback(error.__traceback__)
             state.fail_acquisition(safe)

@@ -1,115 +1,82 @@
-"""Bounded metadata-only due-unit reconciliation, independent of Redis and Runtime."""
+"""Read-only due-unit discovery for routing common Memory execution Sessions."""
 
-from dataclasses import dataclass
+import dataclasses
+from typing import Annotated
 
 import sqlalchemy as sa
+from fastapi import Depends
 
 from azents.core.enums import AgentLifecycleStatus
-from azents.core.historical_memory_consolidation import (
-    ConsolidationUnitKey,
-    ConsolidationWorkState,
-)
+from azents.core.historical_memory_consolidation import ConsolidationUnitKey
+from azents.rdb.deps import get_read_only_session_manager
 from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.historical_memory_consolidation import (
-    RDBConsolidationUnit,
-    RDBConsolidationWork,
-)
+from azents.rdb.models.historical_memory_execution import RDBMemoryUnit, RDBMemoryWork
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.historical_memory_consolidation.authority import (
-    consolidation_session,
-    database_now,
-)
+from azents.rdb.session_capabilities import ReadSession
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ConsolidationDiscoveryRepository:
-    """Eligibility before dispatch; claim and every later operation reauthorize."""
+    """Observe pending domain work without claiming an independent owner lease."""
 
-    session_manager: SessionManager[WriteSession]
+    session_manager: Annotated[
+        SessionManager[ReadSession], Depends(get_read_only_session_manager)
+    ]
 
     async def list_due(
         self, *, agent_id: str | None, limit: int
     ) -> tuple[ConsolidationUnitKey, ...]:
-        if not 1 <= limit <= 100:
-            raise ValueError("Consolidation discovery page bounds are invalid.")
-        async with consolidation_session(self.session_manager) as session:
-            now = await database_now(session)
+        async with self.session_manager() as session:
+            pending = sa.exists(
+                sa.select(RDBMemoryWork.id).where(
+                    RDBMemoryWork.unit_id == RDBMemoryUnit.id
+                )
+            )
+            membership = sa.exists(
+                sa.select(RDBWorkspaceUser.id).where(
+                    RDBWorkspaceUser.workspace_id == RDBMemoryUnit.workspace_id,
+                    RDBWorkspaceUser.user_id == RDBMemoryUnit.associated_user_id,
+                )
+            )
             query = (
                 sa.select(
-                    RDBConsolidationWork.workspace_id,
-                    RDBConsolidationWork.agent_id,
-                    RDBConsolidationWork.scope,
-                    RDBConsolidationWork.associated_user_id,
+                    RDBMemoryUnit.workspace_id,
+                    RDBMemoryUnit.agent_id,
+                    RDBMemoryUnit.scope,
+                    RDBMemoryUnit.associated_user_id,
                 )
-                .join(
-                    RDBAgent,
-                    sa.and_(
-                        RDBAgent.id == RDBConsolidationWork.agent_id,
-                        RDBAgent.workspace_id == RDBConsolidationWork.workspace_id,
-                    ),
-                )
-                .outerjoin(
-                    RDBConsolidationUnit,
-                    sa.and_(
-                        RDBConsolidationUnit.workspace_id
-                        == RDBConsolidationWork.workspace_id,
-                        RDBConsolidationUnit.agent_id == RDBConsolidationWork.agent_id,
-                        RDBConsolidationUnit.scope == RDBConsolidationWork.scope,
-                        RDBConsolidationUnit.associated_user_id.is_not_distinct_from(
-                            RDBConsolidationWork.associated_user_id
-                        ),
-                    ),
-                )
+                .join(RDBAgent, RDBAgent.id == RDBMemoryUnit.agent_id)
                 .where(
+                    pending,
+                    RDBAgent.workspace_id == RDBMemoryUnit.workspace_id,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    RDBAgent.enabled.is_(True),
                     RDBAgent.memory_enabled.is_(True),
-                    RDBConsolidationWork.state.in_(
-                        [
-                            ConsolidationWorkState.PENDING,
-                            ConsolidationWorkState.CONSIDERED,
-                        ]
-                    ),
+                    sa.or_(RDBMemoryUnit.associated_user_id.is_(None), membership),
                     sa.or_(
-                        RDBConsolidationUnit.lease_until.is_(None),
-                        RDBConsolidationUnit.lease_until <= now,
-                    ),
-                    sa.or_(
-                        RDBConsolidationUnit.retry_at.is_(None),
-                        RDBConsolidationUnit.retry_at <= now,
-                    ),
-                    sa.or_(
-                        RDBConsolidationWork.associated_user_id.is_(None),
-                        sa.select(RDBWorkspaceUser.user_id)
-                        .where(
-                            RDBWorkspaceUser.workspace_id
-                            == RDBConsolidationWork.workspace_id,
-                            RDBWorkspaceUser.user_id
-                            == RDBConsolidationWork.associated_user_id,
-                        )
-                        .exists(),
+                        RDBMemoryUnit.retry_at.is_(None),
+                        RDBMemoryUnit.retry_at <= sa.func.clock_timestamp(),
                     ),
                 )
-                .distinct()
                 .order_by(
-                    RDBConsolidationWork.workspace_id,
-                    RDBConsolidationWork.agent_id,
-                    RDBConsolidationWork.scope,
-                    RDBConsolidationWork.associated_user_id,
+                    RDBMemoryUnit.workspace_id,
+                    RDBMemoryUnit.agent_id,
+                    RDBMemoryUnit.scope,
+                    RDBMemoryUnit.associated_user_id,
                 )
                 .limit(limit)
             )
             if agent_id is not None:
-                query = query.where(RDBConsolidationWork.agent_id == agent_id)
-            rows = (await session.write_session.execute(query)).all()
-            result = tuple(
+                query = query.where(RDBMemoryUnit.agent_id == agent_id)
+            return tuple(
                 ConsolidationUnitKey(
-                    workspace_id=workspace,
-                    agent_id=agent,
+                    workspace_id=workspace_id,
+                    agent_id=current_agent_id,
                     scope=scope,
-                    associated_user_id=user,
+                    associated_user_id=user_id,
                 )
-                for workspace, agent, scope, user in rows
+                for workspace_id, current_agent_id, scope, user_id in (
+                    await session.read_session.execute(query)
+                ).all()
             )
-        return result

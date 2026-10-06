@@ -1,7 +1,9 @@
-"""Internal Lightweight route snapshots and quota-only shared candidate progression."""
+"""Lightweight model snapshots and quota progression on the common AgentRun."""
 
+import datetime
 from dataclasses import dataclass
 
+import sqlalchemy as sa
 from uuid6 import uuid7
 
 from azents.core.active_model_capabilities import (
@@ -10,142 +12,130 @@ from azents.core.active_model_capabilities import (
     identities_for_options,
     require_selection,
 )
-from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
+from azents.core.enums import AgentRunStatus, AgentSessionRunState, AgentSessionStatus
+from azents.core.historical_memory_consolidation import (
+    MemoryExecutionAuthorityError,
+    MemoryExecutionBinding,
+    MemoryExecutionPrincipal,
+)
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.model_operation import (
-    ModelOperationCandidateOutcomeStatus,
     ModelOperationChainExhaustedError,
     ModelOperationKind,
     ModelOperationSnapshot,
+    ModelOperationState,
     build_model_operation,
     mark_current_candidate_quota_and_advance,
-    mark_model_operation_succeeded,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
 )
+from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.historical_memory_execution import RDBMemoryExecution
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.agent import AgentRepository
-from azents.repos.historical_memory_consolidation.authority import (
-    ConsolidationAuthorityError,
-    LockedConsolidationOwner,
-    consolidation_job_session,
-    require_commit_owner,
-)
-from azents.repos.historical_memory_consolidation.budget import check_input_influence
-from azents.repos.historical_memory_consolidation.participant_types import (
-    DraftParticipants,
-)
-from azents.repos.historical_memory_consolidation.retry import (
-    retry_consolidation_operation,
+from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution.data import AgentRunPatch
+from azents.repos.hierarchy_contention import retry_hierarchy_operation
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
 )
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_candidate_health.data import ModelCandidateIdentity
 from azents.repos.model_candidate_selection import select_model_operation_candidate
 
 
-async def finish_consolidation_model_operation(
-    session: WriteSession,
-    *,
-    owner: LockedConsolidationOwner,
-    health_repository: ModelCandidateHealthRepository,
-) -> None:
-    """Settle the internal operation in the same validated publication transaction."""
-    if owner.attempt.model_operation_state is None:
-        return
-    operation = ModelOperationSnapshot.model_validate(
-        owner.attempt.model_operation_state
-    )
-    if operation.terminal_reason is not None:
-        raise ConsolidationAuthorityError("Consolidation model operation is exhausted.")
-    if (
-        operation.outcomes[operation.cursor].status
-        is not ModelOperationCandidateOutcomeStatus.ACTIVE
-    ):
-        raise ConsolidationAuthorityError(
-            "Consolidation model operation is not active."
-        )
-    claim = operation.transferred_probe_claim
-    if claim is not None:
-        selection = operation.current_candidate.model_selection
-        await health_repository.complete_probe_success_in_session(
-            session,
-            ModelCandidateIdentity(
-                workspace_id=owner.unit.workspace_id,
-                llm_provider_integration_id=selection.llm_provider_integration_id,
-                model_identifier=selection.model_identifier,
-            ),
-            expected_generation=claim.health_generation,
-            expected_owner_id=claim.claim_owner_id,
-            expected_claim_token=claim.claim_token,
-        )
-    succeeded = mark_model_operation_succeeded(
-        operation, recorded_at=owner.database_now
-    )
-    owner.attempt.model_operation_state = succeeded.model_dump(mode="json")
-
-
 @dataclass(frozen=True)
 class ConsolidationModelOperationRepository:
-    """Use existing Lightweight settings/health without a fabricated Session or Main."""
+    """Reuse common candidate selection, keeping only configured Lightweight intent."""
 
     session_manager: SessionManager[WriteSession]
     agent_repository: AgentRepository
     health_repository: ModelCandidateHealthRepository
     active_capabilities_repository: ActiveModelCapabilitiesRepository
+    execution_repository: MemoryExecutionRepository
+    run_repository: AgentRunRepository
 
-    @retry_consolidation_operation
+    async def archivable_predecessors(
+        self, binding: MemoryExecutionBinding
+    ) -> tuple[SessionExecutionOwner, ...]:
+        """Observe settled exact-unit predecessors without admitting abandonment."""
+        async with self.session_manager() as session:
+            active_run = sa.exists(
+                sa.select(RDBAgentRun.id).where(
+                    RDBAgentRun.session_id == RDBAgentSession.id,
+                    RDBAgentRun.status.in_(
+                        (AgentRunStatus.RUNNING, AgentRunStatus.PENDING)
+                    ),
+                )
+            )
+            rows = await session.read_session.execute(
+                sa.select(RDBAgentSession.id, RDBAgentSession.owner_generation)
+                .join(
+                    RDBMemoryExecution,
+                    RDBMemoryExecution.session_id == RDBAgentSession.id,
+                )
+                .where(
+                    RDBMemoryExecution.unit_id == binding.unit_id,
+                    RDBAgentSession.id != binding.session_id,
+                    RDBAgentSession.workspace_id == binding.unit.workspace_id,
+                    RDBAgentSession.agent_id == binding.unit.agent_id,
+                    RDBAgentSession.lifecycle_root_session_id.is_(None),
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.run_state == AgentSessionRunState.IDLE,
+                    ~active_run,
+                )
+                .order_by(RDBAgentSession.id)
+            )
+            return tuple(SessionExecutionOwner(row[0], row[1]) for row in rows)
+
+    @retry_hierarchy_operation
     async def begin(
-        self, principal: ConsolidationJobPrincipal
+        self, principal: MemoryExecutionPrincipal
     ) -> ModelOperationSnapshot:
+        """Freeze supported candidates in the actual Run before provider setup."""
         selection_error: ModelOperationChainExhaustedError | None = None
-        async with consolidation_job_session(
-            self.session_manager,
-            principal,
-            participants=DraftParticipants(recovery=False),
-        ) as job:
-            session, owner = job.session, job.owner
-            await check_input_influence(session, principal, owner)
-            # Eligibility already holds a shared Agent lock. Read its typed
-            # configuration without upgrading that lock while owning the unit.
+        async with self.session_manager() as session:
+            await self.execution_repository.authorize_in_session(session, principal)
             agent = await self.agent_repository.get_by_id(
-                session, principal.unit.agent_id
+                session, principal.binding.unit.agent_id
             )
             if (
                 agent is None
-                or agent.workspace_id != principal.unit.workspace_id
-                or not agent.memory_enabled
+                or agent.workspace_id != principal.binding.unit.workspace_id
             ):
-                raise ConsolidationAuthorityError(
-                    "Consolidation model scope is unavailable."
+                raise MemoryExecutionAuthorityError(
+                    "Memory model scope is unavailable."
                 )
-            option = next(
-                (
-                    option
-                    for option in agent.selectable_model_options
-                    if option.label == agent.lightweight_model_label
-                ),
-                None,
+            run = await self.run_repository.lock_by_id(session, principal.run_id)
+            if run is None or run.session_id != principal.owner.session_id:
+                raise MemoryExecutionAuthorityError("Memory model Run is unavailable.")
+            state = run.model_operation_state or ModelOperationState(
+                foreground=None, compaction=None
             )
-            if option is None:
-                raise ConsolidationAuthorityError(
-                    "Consolidation Lightweight option is unavailable."
-                )
-            operation = (
-                None
-                if owner.attempt.model_operation_state is None
-                else ModelOperationSnapshot.model_validate(
-                    owner.attempt.model_operation_state
-                )
-            )
-            metadata_repository = self.active_capabilities_repository
+            operation = state.foreground
+            metadata = self.active_capabilities_repository
             captured = None
             compiled = None
             if operation is None:
-                captured = await metadata_repository.capture_exact_choices_in_session(
+                option = next(
+                    (
+                        item
+                        for item in agent.selectable_model_options
+                        if item.label == agent.lightweight_model_label
+                    ),
+                    None,
+                )
+                if option is None:
+                    raise MemoryExecutionAuthorityError(
+                        "Memory Lightweight option is unavailable."
+                    )
+                captured = await metadata.capture_exact_choices_in_session(
                     session,
                     workspace_id=agent.workspace_id,
                     identities=identities_for_options([option]),
@@ -164,16 +154,13 @@ class ConsolidationModelOperationRepository:
                         reasoning_effort=None,
                         enabled_execution_options=[],
                     ),
-                    kind=ModelOperationKind.HISTORICAL_MEMORY,
+                    kind=ModelOperationKind.FOREGROUND,
                     operation_id=uuid7().hex,
-                    recorded_at=owner.database_now,
+                    recorded_at=datetime.datetime.now(datetime.UTC),
                 )
-            elif (
-                operation.kind is not ModelOperationKind.HISTORICAL_MEMORY
-                or operation.semantic_label != option.label
-            ):
-                raise ConsolidationAuthorityError(
-                    "Consolidation candidate snapshot is unavailable."
+            elif operation.kind is not ModelOperationKind.FOREGROUND:
+                raise MemoryExecutionAuthorityError(
+                    "Memory model snapshot is unavailable."
                 )
             try:
                 selected = await select_model_operation_candidate(
@@ -181,7 +168,7 @@ class ConsolidationModelOperationRepository:
                     operation=operation,
                     workspace_id=agent.workspace_id,
                     health_repository=self.health_repository,
-                    recorded_at=owner.database_now,
+                    recorded_at=datetime.datetime.now(datetime.UTC),
                     session_id=None,
                     reservation=None,
                 )
@@ -193,76 +180,81 @@ class ConsolidationModelOperationRepository:
             except ModelOperationChainExhaustedError as exhausted:
                 updated = exhausted.operation
                 selection_error = exhausted
-            if (
-                captured is not None
-                and not await metadata_repository.inputs_match_in_session(
-                    session, captured=captured
-                )
+            if captured is not None and not await metadata.inputs_match_in_session(
+                session, captured=captured
             ):
-                raise ConsolidationAuthorityError(
-                    "Consolidation model metadata changed before preparation."
+                raise MemoryExecutionAuthorityError(
+                    "Memory model metadata changed during setup."
                 )
-            owner.attempt.model_operation_state = updated.model_dump(mode="json")
-            await require_commit_owner(session, owner)
+            await self.run_repository.update(
+                session,
+                principal.run_id,
+                AgentRunPatch(
+                    model_operation_state=ModelOperationState(
+                        foreground=updated, compaction=state.compaction
+                    )
+                ),
+            )
         if selection_error is not None:
             raise selection_error
         return updated
 
-    @retry_consolidation_operation
-    async def advance_after_quota(
+    @retry_hierarchy_operation
+    async def replace_after_quota(
         self,
-        principal: ConsolidationJobPrincipal,
+        principal: MemoryExecutionPrincipal,
         *,
         failure: ModelProviderFailure,
-    ) -> ModelOperationSnapshot | None:
+    ) -> MemoryExecutionBinding | None:
+        """Advance the frozen policy into clean execution after exact provider quota."""
         if failure.category is not ModelProviderFailureCategory.QUOTA_OR_BILLING:
-            raise ValueError("Only provider quota may advance the consolidation chain.")
-        async with consolidation_job_session(
-            self.session_manager, principal, participants=None
-        ) as job:
-            session, owner = job.session, job.owner
-            if owner.attempt.model_operation_state is None:
-                raise ConsolidationAuthorityError(
-                    "Consolidation candidate snapshot is unavailable."
+            raise ValueError("Only provider quota may advance the Memory model chain.")
+        async with self.session_manager() as session:
+            await self.execution_repository.authorize_in_session(session, principal)
+            run = await self.run_repository.lock_by_id(session, principal.run_id)
+            if run is None or run.model_operation_state is None:
+                raise MemoryExecutionAuthorityError(
+                    "Memory model snapshot is unavailable."
                 )
-            operation = ModelOperationSnapshot.model_validate(
-                owner.attempt.model_operation_state
-            )
+            state = run.model_operation_state
+            operation = state.foreground
+            if operation is None or operation.kind is not ModelOperationKind.FOREGROUND:
+                raise MemoryExecutionAuthorityError(
+                    "Memory model snapshot is unavailable."
+                )
             candidate = operation.current_candidate.model_selection
             if (
                 failure.route_provider != candidate.provider.value
                 or failure.route_model != candidate.model_identifier
                 or failure.route_integration != candidate.llm_provider_integration_id
             ):
-                raise ConsolidationAuthorityError(
-                    "Consolidation quota route does not match."
+                raise MemoryExecutionAuthorityError(
+                    "Memory quota route does not match."
                 )
-            observation = await self.health_repository.renew_quota_in_session(
+            observed = await self.health_repository.renew_quota_in_session(
                 session,
                 ModelCandidateIdentity(
-                    workspace_id=principal.unit.workspace_id,
+                    workspace_id=principal.binding.unit.workspace_id,
                     llm_provider_integration_id=candidate.llm_provider_integration_id,
                     model_identifier=candidate.model_identifier,
                 ),
             )
             try:
                 advanced = mark_current_candidate_quota_and_advance(
-                    operation, recorded_at=observation.server_time
+                    operation, recorded_at=observed.server_time
                 )
                 selected = await select_model_operation_candidate(
                     session,
                     operation=advanced,
-                    workspace_id=principal.unit.workspace_id,
+                    workspace_id=principal.binding.unit.workspace_id,
                     health_repository=self.health_repository,
-                    recorded_at=observation.server_time,
+                    recorded_at=observed.server_time,
                     session_id=None,
                     reservation=None,
                 )
                 updated = selected.operation
-                result = updated
             except ModelOperationChainExhaustedError as exhausted:
                 updated = exhausted.operation
-                result = None
-            owner.attempt.model_operation_state = updated.model_dump(mode="json")
-            await require_commit_owner(session, owner)
-        return result
+            return await self.execution_repository.replace_after_quota_in_session(
+                session, principal, updated
+            )

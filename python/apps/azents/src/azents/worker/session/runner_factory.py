@@ -9,12 +9,16 @@ from fastapi import Depends
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.run.contracts import AgentEngineProtocol
 from azents.engine.run.model_transport import InMemoryModelTransportState
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
+)
 from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.services.mailbox import MailboxService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import get_worker_config
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
+from azents.worker.run.memory_execution import MemoryRunExecutor
 from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
 from azents.worker.session.idle_continuation import IdleContinuationService
 from azents.worker.session.lifecycle import SessionLifecycleService
@@ -43,6 +47,10 @@ class SessionRunnerFactory:
     ]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
     run_executor: Annotated[RunExecutor, Depends(RunExecutor)]
+    memory_execution_repository: Annotated[
+        MemoryExecutionRepository, Depends(MemoryExecutionRepository)
+    ]
+    memory_run_executor: Annotated[MemoryRunExecutor, Depends(MemoryRunExecutor)]
     engine: Annotated[AgentEngineProtocol, Depends(AgentEngineAdapter)]
 
     def create(self, *, shutdown_event: asyncio.Event) -> SessionRunner:
@@ -57,6 +65,8 @@ class SessionRunnerFactory:
             idle_continuation_service=self.idle_continuation_service,
             user_stop_finalizer=self.user_stop_finalizer,
             run_executor=self.run_executor,
+            memory_execution_repository=self.memory_execution_repository,
+            memory_run_executor=self.memory_run_executor,
             engine=self.engine,
             model_transport_state=InMemoryModelTransportState(
                 websocket_enabled=(

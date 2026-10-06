@@ -1,6 +1,3 @@
 """Historical Memory execution identity constants."""
 
 HISTORICAL_MEMORY_PREPARE_HANDLER_KEY = "historical_memory.prepare"
-HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY = "historical_memory.consolidate"
-HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY = 2
-HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY = 14

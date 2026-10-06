@@ -1,28 +1,40 @@
-"""System policy is captured coherently at each consolidation dispatch pass."""
+"""Capture admitted policy and route common Sessions after durable admission."""
 
 import datetime
-from unittest.mock import AsyncMock, Mock, create_autospec
+from unittest.mock import AsyncMock, create_autospec
 
 import pytest
+import sqlalchemy as sa
 
 import azents.services.historical_memory.consolidation_discovery as discovery_module
+from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.historical_memory_consolidation import (
     ConsolidationScope,
     ConsolidationUnitKey,
+    FreshMemoryAdmission,
+    MemoryExecutionBinding,
 )
 from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
-from azents.job_runtime.types import JobRequest
+from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
+from azents.rdb.session import SessionManager
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.discovery import (
     ConsolidationDiscoveryRepository,
+)
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
 )
 from azents.services.historical_memory.consolidation_discovery import (
     HistoricalMemoryConsolidationDiscoveryService,
 )
-from azents.services.historical_memory.constants import (
-    HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
-)
 from azents.services.historical_memory.execution_policy import (
     HistoricalMemoryExecutionPolicyService,
+)
+from azents.testing.consolidation import (
+    memory_execution_repository,
+    seed_consolidation_corpus,
 )
 
 
@@ -31,16 +43,28 @@ def _keys() -> list[ConsolidationUnitKey]:
         ConsolidationUnitKey(
             workspace_id="w" * 32,
             agent_id="a" * 32,
-            scope=ConsolidationScope.TEAM,
-            associated_user_id=None,
-        ),
-        ConsolidationUnitKey(
-            workspace_id="w" * 32,
-            agent_id="a" * 32,
-            scope=ConsolidationScope.USER,
-            associated_user_id="u" * 32,
-        ),
+            scope=scope,
+            associated_user_id=user,
+        )
+        for scope, user in [
+            (ConsolidationScope.TEAM, None),
+            (ConsolidationScope.USER, "u" * 32),
+        ]
     ]
+
+
+def _binding(
+    key: ConsolidationUnitKey, admission: FreshMemoryAdmission
+) -> MemoryExecutionBinding:
+    return MemoryExecutionBinding(
+        unit_id="b" * 32,
+        unit=key,
+        session_id=("c" if key.associated_user_id is None else "d") * 32,
+        deadline_at=admission.deadline_at,
+        execution_policy=admission.execution_policy,
+        started_turns=0,
+        accepted=None,
+    )
 
 
 def _freeze_now(monkeypatch: pytest.MonkeyPatch) -> datetime.datetime:
@@ -56,19 +80,25 @@ def _freeze_now(monkeypatch: pytest.MonkeyPatch) -> datetime.datetime:
     return now
 
 
-async def test_dispatch_captures_system_cutoffs_for_all_exact_units(
+async def test_dispatch_captures_policy_and_routes_only_common_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A seven-turn/thirteen-second policy controls both deadline and payload."""
     keys = _keys()
-    repository = create_autospec(
+    discovery = create_autospec(
         ConsolidationDiscoveryRepository, instance=True, spec_set=True
     )
-    repository.list_due = AsyncMock(return_value=keys)
-    monkeypatch.setattr(
-        discovery_module, "ConsolidationDiscoveryRepository", lambda _: repository
+    discovery.list_due = AsyncMock(return_value=keys)
+    executions = create_autospec(
+        MemoryExecutionRepository, instance=True, spec_set=True
     )
-    runtime = AsyncMock()
+
+    async def ensure(
+        key: ConsolidationUnitKey, *, admission: FreshMemoryAdmission
+    ) -> MemoryExecutionBinding:
+        return _binding(key, admission)
+
+    executions.ensure_execution = AsyncMock(side_effect=ensure)
+    broker = create_autospec(SessionBroker, instance=True, spec_set=True)
     policy = create_autospec(
         HistoricalMemoryExecutionPolicyService, instance=True, spec_set=True
     )
@@ -76,124 +106,120 @@ async def test_dispatch_captures_system_cutoffs_for_all_exact_units(
         return_value=HistoricalMemoryExecutionConfig(max_turns=7, timeout_seconds=13)
     )
     service = HistoricalMemoryConsolidationDiscoveryService(
-        session_manager=Mock(),
-        job_runtime=runtime,
-        execution_settings=policy,
+        discovery, executions, broker, policy
     )
     now = _freeze_now(monkeypatch)
-
     assert await service.dispatch_pending(agent_id="a" * 32) == 2
-
-    repository.list_due.assert_awaited_once_with(agent_id="a" * 32, limit=25)
+    discovery.list_due.assert_awaited_once_with(agent_id="a" * 32, limit=25)
     policy.resolve.assert_awaited_once_with()
-    assert runtime.submit.await_count == 2
-    for key, call in zip(keys, runtime.submit.await_args_list, strict=True):
-        request = call.args[0]
-        assert isinstance(request, JobRequest)
-        assert request.handler_key == HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY
-        owner = key.associated_user_id or "team"
-        assert (
-            request.execution_key
-            == f"historical-consolidation:{key.workspace_id}:{key.agent_id}:"
-            f"{key.scope.value}:{owner}"
+    for key, call, route in zip(
+        keys,
+        executions.ensure_execution.await_args_list,
+        broker.send_message.await_args_list,
+        strict=True,
+    ):
+        assert call.args == (key,)
+        admission = call.kwargs["admission"]
+        assert admission == FreshMemoryAdmission(
+            now + datetime.timedelta(seconds=13),
+            HistoricalMemoryExecutionConfig(max_turns=7, timeout_seconds=13),
         )
-        assert request.deadline == now + datetime.timedelta(seconds=13)
-        assert request.payload == {
-            "unit": key.model_dump(mode="json"),
-            "execution_policy": {"max_turns": 7, "timeout_seconds": 13},
-        }
-
-
-async def test_later_dispatch_observes_policy_change_without_mutating_prior_job(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Each pass resolves current policy instead of carrying a process snapshot."""
-    key = _keys()[0]
-    repository = create_autospec(
-        ConsolidationDiscoveryRepository, instance=True, spec_set=True
-    )
-    repository.list_due = AsyncMock(return_value=[key])
-    monkeypatch.setattr(
-        discovery_module, "ConsolidationDiscoveryRepository", lambda _: repository
-    )
-    policies = [
-        HistoricalMemoryExecutionConfig(max_turns=None, timeout_seconds=5),
-        HistoricalMemoryExecutionConfig(max_turns=7, timeout_seconds=13),
-    ]
-    policy = create_autospec(
-        HistoricalMemoryExecutionPolicyService, instance=True, spec_set=True
-    )
-    policy.resolve = AsyncMock(side_effect=policies)
-    runtime = AsyncMock()
-    service = HistoricalMemoryConsolidationDiscoveryService(
-        session_manager=Mock(),
-        job_runtime=runtime,
-        execution_settings=policy,
-    )
-    now = _freeze_now(monkeypatch)
-
-    assert await service.dispatch_pending(agent_id=None) == 1
-    assert await service.dispatch_pending(agent_id=None) == 1
-
-    assert policy.resolve.await_count == 2
-    for expected, call in zip(policies, runtime.submit.await_args_list, strict=True):
-        request = call.args[0]
-        assert isinstance(request, JobRequest)
-        assert request.deadline == now + datetime.timedelta(
-            seconds=expected.timeout_seconds
+        assert route.args == (
+            SessionWakeUp(session_id=_binding(key, admission).session_id),
         )
-        assert request.payload["execution_policy"] == expected.model_dump(mode="json")
-    first = runtime.submit.await_args_list[0].args[0]
-    assert first.payload["execution_policy"] == {
-        "max_turns": None,
-        "timeout_seconds": 5,
-    }
 
 
-async def test_empty_pass_submits_no_runtime_work(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repository = create_autospec(
+async def test_policy_failure_cannot_dispatch_substitute() -> None:
+    discovery = create_autospec(
         ConsolidationDiscoveryRepository, instance=True, spec_set=True
     )
-    repository.list_due = AsyncMock(return_value=[])
-    monkeypatch.setattr(
-        discovery_module, "ConsolidationDiscoveryRepository", lambda _: repository
+    discovery.list_due = AsyncMock(return_value=_keys())
+    executions = create_autospec(
+        MemoryExecutionRepository, instance=True, spec_set=True
     )
-    policy = create_autospec(
-        HistoricalMemoryExecutionPolicyService, instance=True, spec_set=True
-    )
-    policy.resolve = AsyncMock(return_value=HistoricalMemoryExecutionConfig())
-    runtime = AsyncMock()
-    service = HistoricalMemoryConsolidationDiscoveryService(
-        session_manager=Mock(),
-        job_runtime=runtime,
-        execution_settings=policy,
-    )
-    assert await service.dispatch_pending(agent_id=None) == 0
-    runtime.submit.assert_not_awaited()
-
-
-async def test_policy_failure_cannot_dispatch_default_substitute(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repository = create_autospec(
-        ConsolidationDiscoveryRepository, instance=True, spec_set=True
-    )
-    repository.list_due = AsyncMock(return_value=_keys())
-    monkeypatch.setattr(
-        discovery_module, "ConsolidationDiscoveryRepository", lambda _: repository
-    )
+    broker = create_autospec(SessionBroker, instance=True, spec_set=True)
     policy = create_autospec(
         HistoricalMemoryExecutionPolicyService, instance=True, spec_set=True
     )
     policy.resolve = AsyncMock(side_effect=RuntimeError("settings unavailable"))
-    runtime = AsyncMock()
-    service = HistoricalMemoryConsolidationDiscoveryService(
-        session_manager=Mock(),
-        job_runtime=runtime,
-        execution_settings=policy,
-    )
     with pytest.raises(RuntimeError, match="settings unavailable"):
-        await service.dispatch_pending(agent_id=None)
-    runtime.submit.assert_not_awaited()
+        await HistoricalMemoryConsolidationDiscoveryService(
+            discovery, executions, broker, policy
+        ).dispatch_pending(agent_id=None)
+    executions.ensure_execution.assert_not_awaited()
+    broker.send_message.assert_not_awaited()
+
+
+async def test_empty_pass_routes_no_work() -> None:
+    discovery = create_autospec(
+        ConsolidationDiscoveryRepository, instance=True, spec_set=True
+    )
+    discovery.list_due = AsyncMock(return_value=[])
+    executions = create_autospec(
+        MemoryExecutionRepository, instance=True, spec_set=True
+    )
+    broker = create_autospec(SessionBroker, instance=True, spec_set=True)
+    policy = create_autospec(
+        HistoricalMemoryExecutionPolicyService, instance=True, spec_set=True
+    )
+    policy.resolve = AsyncMock(return_value=HistoricalMemoryExecutionConfig())
+    assert (
+        await HistoricalMemoryConsolidationDiscoveryService(
+            discovery, executions, broker, policy
+        ).dispatch_pending(agent_id=None)
+        == 0
+    )
+    executions.ensure_execution.assert_not_awaited()
+    broker.send_message.assert_not_awaited()
+
+
+async def test_real_admission_commits_before_routing_and_creates_no_public_profile(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    corpus = await seed_consolidation_corpus(rdb_session_manager)
+    executions = memory_execution_repository(rdb_session_manager)
+    broker = create_autospec(SessionBroker, instance=True, spec_set=True)
+    policy = create_autospec(
+        HistoricalMemoryExecutionPolicyService, instance=True, spec_set=True
+    )
+    policy.resolve = AsyncMock(
+        return_value=HistoricalMemoryExecutionConfig(max_turns=7, timeout_seconds=60)
+    )
+    routed: list[str] = []
+
+    async def route(message: SessionWakeUp) -> None:
+        async with rdb_session_manager() as session:
+            row = await session.read_session.get(RDBAgentSession, message.session_id)
+            assert row is not None
+            assert (
+                await session.read_session.get(RDBConversation, message.session_id)
+                is None
+            )
+            assert (
+                await session.read_session.scalar(
+                    sa.select(RDBAgentRun.id).where(
+                        RDBAgentRun.session_id == message.session_id
+                    )
+                )
+                is None
+            )
+        binding = await executions.load_binding(message.session_id)
+        assert (
+            binding is not None
+            and binding.started_turns == 0
+            and binding.accepted is None
+        )
+        routed.append(message.session_id)
+
+    broker.send_message = AsyncMock(side_effect=route)
+    service = HistoricalMemoryConsolidationDiscoveryService(
+        ConsolidationDiscoveryRepository(rdb_session_manager),
+        executions,
+        broker,
+        policy,
+    )
+    dispatched = await service.dispatch_pending(agent_id=corpus.team.agent_id)
+    assert dispatched == len(routed) and dispatched > 0
+    prior = tuple(routed)
+    assert await service.dispatch_pending(agent_id=corpus.team.agent_id) == len(prior)
+    assert tuple(routed[len(prior) :]) == prior

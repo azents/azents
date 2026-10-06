@@ -9,9 +9,9 @@ from typing import Literal
 
 import pytest
 import sqlalchemy as sa
+from azcommon.uuid import uuid7
 
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
-from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionRunState,
@@ -19,6 +19,8 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
+from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
@@ -33,6 +35,7 @@ from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.repos.worker_session_data import StuckWorkerSession
 from azents.repos.worker_session_recovery import (
     WorkerSessionRecoveryOperationRepository,
+    WorkerSessionRecoveryQueryRepository,
 )
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.recovery import StuckSessionRecovery
@@ -70,7 +73,7 @@ class ObservedReadManager:
         )
 
 
-class _ScanningSessions(AgentSessionRepository):
+class _ScanningSessions(WorkerSessionRecoveryQueryRepository):
     """Observe the exact primitive arguments and Session while running real SQL."""
 
     def __init__(
@@ -78,11 +81,11 @@ class _ScanningSessions(AgentSessionRepository):
     ) -> None:
         self.observed = observed
         self.error = error
-        self.calls: list[tuple[WriteSession, datetime.timedelta, int]] = []
+        self.calls: list[tuple[ReadSession, datetime.timedelta, int]] = []
 
     async def find_stuck_running(
         self, session: ReadSession, *, stale_threshold: datetime.timedelta, limit: int
-    ) -> list[AgentSession]:
+    ) -> list[StuckWorkerSession]:
         assert self.observed.active and session is self.observed.sessions[-1]
         self.calls.append((session, stale_threshold, limit))
         records = await super().find_stuck_running(
@@ -326,7 +329,9 @@ async def _recovery_fixture(
     )
     recovery = StuckSessionRecovery(
         broker=broker,
-        repository=WorkerSessionRecoveryOperationRepository(scan, sessions),
+        repository=WorkerSessionRecoveryOperationRepository(
+            scan, WorkerSessionRecoveryQueryRepository()
+        ),
         session_lifecycle=lifecycle,
         stale_threshold=datetime.timedelta(minutes=3),
         limit=20,
@@ -371,6 +376,51 @@ async def test_recovery_closes_scan_before_root_child_effects_and_record_failure
     fixture.marks.assert_closed()
 
 
+async def test_recovery_scans_and_routes_profile_free_internal_singleton(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """An internal execution uses the same closed scan, durable mark and broker."""
+    fixture = await _recovery_fixture(rdb_session_manager, failure="none", cancel=False)
+    internal_id = uuid7().hex
+    async with rdb_session_manager() as session:
+        root = await session.read_session.get(RDBAgentSession, fixture.subject.root_id)
+        assert root is not None
+        await session.write_session.execute(
+            sa.insert(RDBAgentSession).values(
+                id=internal_id,
+                agent_id=fixture.subject.agent_id,
+                workspace_id=root.workspace_id,
+                lifecycle_root_session_id=None,
+                run_state=AgentSessionRunState.RUNNING,
+                run_heartbeat_at=fixture.subject.heartbeat
+                - datetime.timedelta(minutes=8),
+            )
+        )
+        assert await session.read_session.get(RDBConversation, internal_id) is None
+        assert (
+            await session.read_session.scalar(
+                sa.select(RDBSessionAgent).where(
+                    RDBSessionAgent.agent_session_id == internal_id
+                )
+            )
+            is None
+        )
+    await fixture.recovery.recover_once()
+    expected = [
+        fixture.subject.root_id,
+        fixture.subject.child_id,
+        internal_id,
+    ]
+    assert fixture.broker.sent == expected
+    assert fixture.trace == [
+        effect
+        for session_id in expected
+        for effect in (f"mark:{session_id}", f"send:{session_id}")
+    ]
+    fixture.scan.assert_closed()
+    fixture.marks.assert_closed()
+
+
 @pytest.mark.parametrize("failure", ["mark", "send"])
 async def test_recovery_cancellation_stops_before_next_record_and_retains_closed_scopes(
     rdb_session_manager: SessionManager[WriteSession], failure: FailureStage
@@ -410,7 +460,7 @@ class _PausedScan(_ScanningSessions):
 
     async def find_stuck_running(
         self, session: ReadSession, *, stale_threshold: datetime.timedelta, limit: int
-    ) -> list[AgentSession]:
+    ) -> list[StuckWorkerSession]:
         result = await super().find_stuck_running(
             session, stale_threshold=stale_threshold, limit=limit
         )

@@ -26,11 +26,17 @@ code_paths:
   - python/apps/azents/src/azents/core/historical_memory_consolidation.py
   - python/apps/azents/src/azents/core/historical_memory_context.py
   - python/apps/azents/src/azents/core/historical_memory_publication.py
-  - python/apps/azents/src/azents/core/historical_memory_cutover.py
   - python/apps/azents/src/azents/core/tools.py
   - python/apps/azents/src/azents/rdb/models/memory.py
   - python/apps/azents/src/azents/rdb/models/historical_memory.py
-  - python/apps/azents/src/azents/rdb/models/historical_memory_consolidation.py
+  - python/apps/azents/src/azents/rdb/models/historical_memory_execution.py
+  - python/apps/azents/src/azents/rdb/models/session_execution_file.py
+  - python/apps/azents/src/azents/repos/session_execution_file.py
+  - python/apps/azents/src/azents/repos/memory_execution_events.py
+  - python/apps/azents/src/azents/services/session_execution_files.py
+  - python/apps/azents/src/azents/worker/run/memory_execution.py
+  - python/apps/azents/src/azents/worker/session/runner.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
   - python/apps/azents/src/azents/repos/memory/**
   - python/apps/azents/src/azents/repos/historical_memory/**
   - python/apps/azents/src/azents/repos/historical_memory_consolidation/**
@@ -58,7 +64,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/pydantic_ai_lowering.py
   - python/apps/azents/src/azents/engine/events/pydantic_ai_output.py
   - python/apps/azents/src/azents/engine/events/openai_responses.py
-  - python/apps/azents/src/azents/cli/memory_handover.py
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/job_runtime/registry.py
   - python/apps/azents/src/azents/job_runtime/local.py
@@ -78,109 +83,107 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/consolidated-memory
-last_verified_at: 2026-10-06
-spec_version: 22
+last_verified_at: 2026-10-07
+spec_version: 23
 ---
 
 # Memory
 
 ## Overview
 
-One Agent `memory_enabled` setting governs two distinct kinds of Memory:
+One Agent `memory_enabled` setting governs Saved and Historical Memory.
+Saved Memory is independently managed Agent/User knowledge explicitly saved by
+an Agent or human. Historical Memory prepares summaries of permitted source
+conversations and integrates the supplied summary corpus into one current result
+per Team or associated-User scope. Both are potentially stale reference data;
+current instructions and verified evidence take precedence.
 
-- **Saved Memory** is independently managed Agent/User knowledge explicitly saved
-  by the Agent or human: preferences, feedback, project state, and references.
-- **Historical Memory** prepares source-linked summaries of authorized root
-  Sessions, then an isolated background Agent integrates each Team or personal
-  corpus into one compact document with source routes. Both prepared sources
-  and integrated documents may be incomplete, stale, or wrong; they are reference
-  data, not independent instructions or current proof.
-
-Preparation and consolidation never create, edit, or delete Saved Memory. There
-is no embedding index or promotion of repeated history into independent
-corroboration. Initial and post-compaction context deterministically selects
-whole published documents into a persisted boundary snapshot; explicit VFS
-reads inspect currently permitted live records without refreshing that snapshot.
+Preparation and integration never mutate Saved entries. Conversation boundaries
+select whole current integrated documents and a Saved index; explicit VFS lookup
+reads current authorized records without refreshing that boundary. Internal
+integration uses common Session/Run/Event execution without exposing a public
+Conversation. It receives prepared summary files, not original transcripts or a
+previous integrated result, and succeeds only through explicit file submission.
 
 ## Domain Model
 
 Saved entries remain in `agent_memories` with ID, Agent ID, `agent|user` scope,
-free-form type, name, description, content, optional User ID, and timestamps.
-The partial unique keys are `(agent_id, name)` for Agent scope and
-`(agent_id, user_id, name)` for User scope. Existing partial lookup indexes and
-the PostgreSQL `memory_scope` enum remain unchanged. Suggested types are `user`,
-`feedback`, `project`, and `reference`.
+free-form type, name, description, content, optional User ID and timestamps.
+Partial unique keys remain `(agent_id, name)` and `(agent_id, user_id, name)`.
 
-`historical_memory_sources` has one source-owned row per root Session. Its
-`source_session_id` primary key references `agent_sessions` with cascade deletion.
-The row contains the latest optional summary and source-title snapshot, completed
-source activity and tail-event markers, preparation time, and minimal retry
-progress: admission time, last attempt, next retry, failure count/category, and
-serialized `historical_memory` model-operation state. Completed markers are all
-present or all absent. A successful empty summary records completion without a
-usable summary. Preparation retains its existing bounded progress rather than
-copying transcripts or adding a preparation attempt ledger. Canonical prepared
-content has a monotonically increasing summary generation and evidence hash.
-Availability generation and personal enrollment grant identity track authority
-loss independently from content changes.
+`historical_memory_sources` stores each source conversation's latest optional
+summary, title/activity/tail snapshots, preparation time and bounded retry/model
+operation progress. Completion markers are all present or all absent; an empty
+summary can record preparation completion without usable content. The source row
+cascades with its canonical Session. No content-version, evidence-hash or
+availability-generation contract is used for source or aggregate authoring.
 
-Consolidation uses exact `(Agent, Workspace, team|user, associated User)` units.
-Private PostgreSQL state contains ownership/lease generation, finite pending
-work, attempt/budget journals, drafts and file identities, evidence and inherited
-dependency manifests, idempotent mutation receipts, and immutable published
-revisions. A source purge cannot cascade away the independent dependency
-identity that invalidates influenced bytes. Publication chooses the current
-revision atomically with exact work dispositions; no scalar covered watermark
-acknowledges unseen or late-committed work.
+`memory_units` binds `(Agent, Workspace, team|user, associated User)` to its current
+Markdown, complete rendered block, acceptance time, active internal Session and
+due/retry routing state. `memory_executions` binds a common internal Session to
+its scope, immutable deadline, execution policy, cumulative started turns and
+original accepted tool outcome. That accepted outcome retains content-free
+scalars independently of the Session audit lifetime. `memory_work` contains
+pending scheduling changes and exact server-owned admission associations; it is
+not a model-authored coverage ledger or source-version index.
 
-The `memory/context_snapshot` Session Toolkit State stores selected Saved index
-entries and up to two whole consolidated documents, exact unit/revision
-identities, boundary head-event ID, and creation time (schema version 2). It is
-not an independent live-access authority or a copy of the corpus inside
-`agent_runs.vfs_projection`. A schema-1/invalid snapshot contributes no automatic
-Memory until explicit boundary preparation replaces it.
+Common `session_execution_files` stores provided read-only summary files and
+writable authored files for one execution. Common Session, Run and Event rows
+store ownership, lifecycle, dialogue, tool results, compaction and scalar usage.
+There is one current aggregate per scope, not an immutable aggregate revision
+history or dependency manifest. Source/version/exposure/draft ledgers are not
+part of the integrated-result contract.
+
+The `memory/context_snapshot` Toolkit State stores the selected Saved index and
+up to two whole scope results, boundary head and creation time (schema 2).
+Historical entries contain the exact scope, rendered bytes and publication time,
+not revision identifiers or source dependencies. It is a frozen input selection,
+not independent access authority or a whole-corpus projection.
 
 ```mermaid
 erDiagram
     AGENT ||--o{ AGENT_MEMORY : owns
-    USER ||--o{ AGENT_MEMORY : "optional owner"
-    AGENT ||--o{ ROOT_SESSION : owns
-    ROOT_SESSION ||--o| HISTORICAL_MEMORY_SOURCE : "source and lifecycle"
-    ROOT_SESSION ||--o{ SESSION_TOOLKIT_STATE : "boundary snapshot"
-    AGENT ||--o{ CONSOLIDATION_UNIT : "exact corpus"
-    CONSOLIDATION_UNIT ||--o{ CONSOLIDATION_ATTEMPT : "fenced owner"
-    CONSOLIDATION_UNIT ||--o{ CONSOLIDATED_REVISION : "immutable publication"
-    CONSOLIDATED_REVISION ||--o{ SOURCE_DEPENDENCY : "independent identity"
+    AGENT ||--o{ CONVERSATION : "source context"
+    CONVERSATION ||--o| HISTORICAL_MEMORY_SOURCE : "prepared summary"
+    AGENT ||--o{ MEMORY_UNIT : "scope current result"
+    MEMORY_UNIT ||--o{ MEMORY_WORK : "pending routing"
+    MEMORY_UNIT ||--o{ MEMORY_EXECUTION : "original outcome"
+    COMMON_SESSION ||--o| MEMORY_EXECUTION : "internal binding"
+    COMMON_SESSION ||--o{ AGENT_RUN : executes
+    COMMON_SESSION ||--o{ EVENT : "retained audit"
+    COMMON_SESSION ||--o{ EXECUTION_FILE : "provided and authored"
 ```
 
 ## Authorization and Lifecycle
 
-Model-facing use is confined to the same Agent and Workspace and an active
-privacy root. Team executions see shared Agent Saved Memory and permitted Team
-sources. User executions may also see their durable associated User's Saved
-Memory and personal root Sessions while current Workspace membership exists.
-Sender/requester provenance, broker routing, viewers, and model-supplied paths
-never select another personal scope. Subagents inherit their root boundary.
+Model-facing Memory use is confined to the same Agent/Workspace and active
+Conversation root. Team conversations see Agent Saved Memory and Team current
+results; User conversations can also see their associated User's Saved Memory
+and personal result while current Workspace membership exists. Sender, broker,
+viewer and model-supplied paths cannot choose another User scope. Children
+inherit their Conversation root's selection.
 
-Preparation admission/publication, consolidation model/tool admission and
-publication, snapshot selection/use, live VFS operations,
-and human settings reads each reauthorize independently. Memory disablement
-stops new admission/preparation and automatic context and denies the Memory
-mount; it neither deletes rows nor removes retained human settings inspection.
+Source preparation and lookup check source lifecycle and access. Integration
+provisions only currently eligible same-scope summaries into read-only execution
+files. Subsequent model/tool/submission admission checks current common execution
+ownership, cancellation/deadline and scope authority, not each original source's
+version or a full influence manifest. Source lifecycle changes schedule new work;
+they do not revoke a retained aggregate by dependency lookup. Current aggregate
+and frozen snapshot reads reauthorize the scope itself. Agent disablement or
+personal membership loss denies new model-facing scope use; independently
+permitted peer scopes and Saved entries remain available.
 
-Source archive, access loss, membership removal or Memory disablement excludes
-the whole affected aggregate from the next model admission and live read. Its
-selected snapshot bytes, retained draft, draft-bound coverage and contaminated
-RAM-only execution cannot be reused. The other independently authorized unit
-and Saved entries remain available.
+Memory disablement stops admission/preparation and automatic context and denies
+the model-facing Memory mount. It does not delete retained data or prohibit
+otherwise authorized human settings inspection. Source archive/purge denies new
+source lookup and provision; restore can expose retained prepared summaries and
+schedule integration again. Ten-day source age limits first preparation
+admission, not summary retention or integration eligibility.
 
-Restore may expose retained prepared summaries again, but monotonic availability
-and fresh enrollment grant identities prevent old influenced aggregates/drafts
-from becoming authorized merely because access is currently allowed. A clean
-attempt regenerates the affected unit. Purge removes canonical source rows while
-independent manifests retain denial evidence. Content-only updates may leave an
-older authorized revision usable and create new pending work. Ten-day source age
-limits first preparation admission, not retention or consolidation eligibility.
+Internal executions are not Conversations and cannot become source conversations
+or leak into public lists, exact-ID conversation routes or public history/search.
+Their diagnostic Session/Run/Event/tool/file payload remains available through
+explicit privileged execution-audit access until the common retention purge.
 
 ## Historical Preparation
 
@@ -203,18 +206,18 @@ associated membership, root Session and canonical source in that order. Prelimin
 identities only route those acquisitions; locked relationships and eligibility
 are refreshed before acceptance. The Agent settings gate uses NO KEY UPDATE,
 preserving writer exclusion while allowing enrollment's foreign-key KEY SHARE
-references. A Memory toggle uses the same sufficient gate and records source
-availability/enrollment atomically rather than failing an ordinary source wait.
-Provider summarization remains outside these owning DB operations.
+references. A Memory toggle uses the same sufficient gate rather than failing
+an ordinary source wait. Provider summarization remains outside these owning DB
+operations.
 
 Registered `historical_memory.prepare` jobs coalesce by Agent execution key in
 process-local Job Runtime. A job attempts at most ten source operations under an
-absolute thirty-minute request deadline. Handler concurrency defaults to 12 of
-the application Runtime's 16 slots; consolidation uses at most two more, keeping
-combined Memory capacity at 14 and reserving two slots for other jobs. Configured
-preparation capacity must satisfy that combined bound. PostgreSQL progress and
-periodic rediscovery recover interrupted work;
-Redis persistence is not required and cross-process duplicate calls are possible.
+absolute thirty-minute request deadline. Preparation handler concurrency defaults
+to 12 and can be configured from 1 to 12.
+Integration is dispatched to the common Session Worker; it consumes no separate
+Job Runtime consolidation semaphore or reserved two-slot handler. PostgreSQL
+progress and periodic rediscovery recover interrupted work. Redis persistence is
+not required and cross-process duplicate calls are possible.
 
 Preparation uses the Agent Lightweight candidate chain and the truthful
 `historical_memory` operation kind, never the Main chain. Input uses bounded
@@ -250,245 +253,129 @@ atomically and clears retry progress.
 
 ## Agentic Consolidation
 
-Each Team and personal unit runs an independent internal Lightweight execution.
-Its model input, tool results, retry state and files never contain the peer
-unit's body, inventory, existence hint or pending work. This execution is an
-ephemeral host of the same model/tool iteration core as foreground conversation,
-with RAM-only dialogue and PostgreSQL-backed private files/progress. It creates
-no foreground Session/Run and requires no Runtime, Runner RPC or materialization.
+### Common execution and provided files
 
-Creating a new internal model operation captures current exact authorized local
-declarations for the configured Lightweight choices and compiles the same final
-schema-3 contract used by foreground execution. Admission uses actual encoded
-request settings and internal function declarations rather than a conservative
-historical display boolean. Missing required metadata preserves identity and
-produces a typed diagnostic, not a quota fallback or permissive support state.
-Existing attempt operations, retries and quota cursors retain their captured
-candidates; metadata refresh does not reinterpret completed or active history.
+Each due Team or personal scope is durably associated with one internal common
+Session and routed by `SessionWakeUp` to the ordinary Worker. Session owner
+generation, broker lock, heartbeat, Run activation, stop/shutdown supervision and
+Event storage are common execution infrastructure. The Session has no public
+Conversation profile, Runtime, source transcript backend, Saved mutation or
+attached Toolkit. There is no Scheduler-local integration executor, separate
+unit lease/token owner or additional Memory concurrency semaphore.
 
-The Agent reads scoped prepared-source/work inventories and summaries, then
-authors `azents://memory-draft/summary.md` and exact `coverage.json` dispositions
-over multiple ordinary tool rounds. Generic read/search/write/edit/delete/patch
-use separate registered VFS capabilities. Private mutations are draft/version/
-observation-epoch bound and owner-fenced; multi-file patches commit all-or-none.
-Repeated receipts require the same digest. Absolute paths and public/peer
-Memory mutations are unavailable in this host.
+A fresh execution provisions `azents://execution/README.md` and read-only
+`inputs/<source-session-id>.md` files from currently eligible prepared summaries.
+It does not seed original conversation/events/results, previous aggregate prose,
+previous execution dialogue or unfinished authored files. Generic read/glob/grep
+and write/edit/delete/apply_patch operate only on this execution's file backend.
+Provided files are read-only. Ordinary common file read-before-overwrite and
+atomic patch semantics apply; no aggregate draft revision/observation epoch or
+source manifest is added to file mutation authority.
 
-Every fresh consolidation host first commits a fenced clean-start operation.
-Startup discards the prior unit's private draft files, coverage, temporary notes,
-dependencies and attempt exposure/receipt payloads, irrespective of the previous
-execution's success or failure. Unpublished choices return to pending with their
-discarded draft/presentation pointers cleared. Published and superseded work
-remain in their authoritative states. Current permitted immutable publication
-bytes and their complete dependency manifest seed the new workspace; coverage
-comes only from work supplied to the new host. This applies to initial execution,
-failure retry, interrupted-owner takeover and quota-candidate handoff.
+The actual foreground model-operation kind is `FOREGROUND`, resolved through the
+Agent's Lightweight option label and captured candidates/settings. This is the
+common model-operation lifecycle, not selection of the Main route. Candidate
+capture, provider lowerers/adapters, usage and native completion use the shared
+contracts; quota handoff can advance compatible captured Lightweight candidates
+without a Main fallback. Every physical SDK send checks current owner and stop
+admission. Admission denial remains an execution admission error, not a provider
+failure or quota signal.
 
-Startup cleanup and initialization are one owner/lease/deadline-fenced database
-transaction. A rollback or cancellation preserves the previous workspace and
-work identities, and no model/tool dispatch begins without a committed startup.
-Source records, published revisions, model-operation state and durable scalar
-usage are not workspace cleanup targets.
+### Explicit submission and continuation
 
-Normal model completion is not publication evidence. The host freezes files,
-validates `Historical Context` and meaningful `Source Routes`, exact delivered
-work dispositions, independently rendered size and the complete influence
-manifest, and atomically publishes one immutable revision plus exact coverage.
-Successful publication retires its private workspace in that same transaction:
-draft files (including coverage and temporary notes), draft dependencies, and
-the completed attempt's exposure/receipt payloads are removed only after copying
-the full published dependency manifest. Unpublished considered choices tied to
-that workspace return to pending with their draft/presentation pointers cleared;
-they are not implicitly acknowledged. Immediate continuation creates a fresh
-draft from the published summary and manifest, without a prior coverage file.
-Published work remains excluded from new coverage rather than silently accepted.
-Publication/cleanup rollback or cancellation preserves the unfinished workspace
-until the next fenced clean start;
-acknowledgement loss still resolves from durable completion without needing it.
-The final model text is not parsed as a replacement document. Failed/hard-cutoff
-attempts retain the prior permitted publication. The next host reconstructs from
-that publication after current authorization and complete-manifest validation,
-rather than treating unfinished prose or coverage as its starting state.
-Successful-end cleanup is eager reclamation; start cleanup is the correctness
-boundary and does not depend on end cleanup having completed.
+The Agent authors a writable Markdown file and calls `submit_memory` with only
+its canonical `azents://execution/...` path. Scope, source/work identities and
+settlement are server-bound, not model arguments. Arbitrary useful Markdown is
+accepted without prescribed headings, routes or coverage. Validation requires a
+writable authored file, valid UTF-8/no NUL, safe model-facing framing and at most
+10,000 UTF-8 bytes for the complete rendered result. An empty authored document
+is valid and clears that scope's usable current result without filler.
 
-Short PostgreSQL claims establish one owner per exact unit with a 120-second
-lease renewed every 30 seconds. Source/file/model dispatch checks are fenced
-against stale owners and current evidence. Expired owners stop admitting work;
-late responses cannot commit. Finite-pass bounds survive productive slices;
-newer or late-committed unseen work remains pending. Publication acknowledgement
-loss inspects the durable outcome rather than publishing twice. This inspection
-uses an independent read-only manager and plain scoped authority observations:
-Agent/Workspace enablement, active status, personal grant, exact unit/attempt
-owner generation and token, and completed revision identity. It acquires no
-Agent or membership locks and does not publish or recover work. Actual claim,
-draft recovery, freezing and publication keep their mutation authority.
+Missing/read-only/wrong-domain files, invalid artifact content and rendered-size
+problems return correctable tool feedback, including size information when
+available. The same Session/Run, dialogue, files, deadline and policy remain
+active for correction and resubmission. Final prose without acceptance also
+appends a continuation prompt in that execution; normal model completion never
+publishes. Ordinary siblings finish before submitted authored bytes are read.
+Only durable accepted submission terminates the host.
 
-The generic consolidation VFS pre-I/O ownership validator is also an ordinary
-scoped read of current owner, lease/deadline and grant identity. It does not
-claim exclusion through external work. Actual source inventory/read and work
-pages persist exposure evidence or presented-work identity and retain their
-own producer mutation fences.
+Submission atomically stores current Markdown/rendered bytes/acceptance time,
+settles only work associated with the supplied corpus, records the original tool
+outcome and completes the common `FOREGROUND` operation/Run. Unseen and
+late-arriving unassociated work remains pending. Repeated acknowledgement of the
+same accepted tool identity returns the original outcome, not another
+publication or fresh work settlement. Secondary audit/transport/archive faults
+after commit are logged and do not change accepted success into failure.
 
-The `historical_memory_execution` System Settings Section supplies the only
-additional execution cutoffs: nullable `max_turns` (unlimited by default) and
-positive `timeout_seconds` (600 by default). Dispatch snapshots one policy and
-absolute deadline into the Job Runtime request; the durable claim and supervisor
-use that same deadline. Logical turns use the shared iteration core and remain
-claim-scoped across quota candidate handoff. Physical retries and tool calls
-are observations, not turns.
+### Continuity, limits and lifecycle
 
-Input/output requests use the selected model settings and shared provider/tool
-contracts. There are no memory-only cumulative token, dispatch, tool-count,
-input-window percentage or private draft file/byte/receipt capacity cutoffs.
-Requested output tokens may be unspecified. Physical dispatches and available
-actual scalar usage are recorded idempotently; unavailable usage remains unknown,
-not fabricated as zero or an exact billing ceiling. Generic text reads honor
-caller bounds. Source/work inventory pages still batch database retrieval and
-provide continuation routes. The independent 10,000-byte publication contract,
-complete manifests and atomic publication remain unchanged.
+`historical_memory_execution` supplies nullable `max_turns` (unlimited by default)
+and positive `timeout_seconds` (600 by default). Fresh admission stores one
+absolute deadline and policy. Logical turns persist across candidate handoff.
+After takeover of an interrupted owned execution, a new clean internal Session
+inherits the predecessor's original deadline/policy and consumed turn count;
+old owner submission is fenced. Restart does not grant a new execution budget.
+The Worker can finish an already accepted original outcome without rerunning the
+model. Deadline/stop/failure settlement preserves the prior current result and
+releases unfinished work for subsequent ordinary discovery; due failure backoff
+starts at one minute and caps at six hours.
 
-Temporary producer lock contention retries the complete rollback-confirmed
-database operation inside the same claim, including heartbeat, source/file
-receipts, usage, output authorization and publication. Authority and complete
-manifest fences use ordinary waiting locks. Complete-influence and new-exposure
-operations acquire exact Agent/grant/root/source participants before the unit,
-so a manifest wait does not prevent independent heartbeat renewal. Existing
-exact-scope identities are prelocked even when currently archived or denied;
-current permission remains a separate post-owner acceptance check. An ephemeral
-plan contains only exact mutation anchors and body-free distinct source IDs,
-including bounded candidate-page lookahead; it is not authority or a corpus cap.
-After exact original unit/attempt acquisition, current revision/epoch/publication
-anchors, complete source sets and candidate identities are revalidated before
-server-side full influence validation or exposure. A changed plan rolls back and
-replans that DB operation; stable missing/denied influence retains normal
-authorization failure or recovery invalidation/rebuild.
+Each model step reconstructs canonical input from the common model-input head.
+Growing dialogue uses the common EventCompactor with the selected true resolved
+window, shared checkpoint prompt and owner-fenced marker/summary/head commit.
+Compaction retains execution files and useful checkpoint state in the same
+Session/Run; it neither generates a new integration execution nor resets
+submission policy. Internal normalized output and tools are durably auditable,
+not merely a RAM-only conversation.
 
-The original immutable attempt deadline and cancellation bound waiting before
-unit acquisition, with SQL/async time scheduling installed before the first
-potential lock wait. Under the unit lock, the current renewable lease is sampled
-and the operation is bounded by that lease and the same absolute attempt cutoff.
-A valid heartbeat extension is not frozen to the initially observed lease;
-genuine lease/deadline loss still prevents acceptance.
-Nonauthoritative time observation never replaces locked current-owner/grant and
-commit-time checks. Initial claim repeats only its database admission under the
-submitted deadline. Retry does not repeat a model/tool handler, consume another
-logical turn, reset time, or add a memory-only retry-count budget.
-
-Changed participant plans replay only after the owning scope confirms rollback.
-Database contention/serialization recovery likewise requires a confirmed aborted
-transaction; uncertain connection/commit outcomes use existing idempotency and
-durable-outcome handling. Real revocation, takeover, lease/deadline
-loss and cancellation still reject stale work. Terminal metadata uses ordered
-unit/attempt waiting locks with exact current RUNNING owner identity, without
-source/publication authority or revival of expired execution.
-
-Only quota failures advance the Lightweight chain; other failures do not change
-health or use Main fallback. Persisted attempt `failure_code` is restricted to
-safe authentication, permission, quota/billing and selected-model availability
-categories. Internal faults, database/authority failures, timeouts and automatic
-cutoffs settle retry state without a user-facing code. Registered Job Runtime
-terminal failures emit one sanitized ERROR traceback with content-free execution
-identity; provider bodies, credentials, memory content and hidden reasoning are
-excluded. Migration `a332f5e0f329` removes obsolete capacity checks, permits
-unspecified output observations and clears prior nonactionable attempt codes.
-
-Five-minute rediscovery recovers due work; productive slices requeue without a
-failure delay. Failure/no-progress backoff starts at one minute and caps at six
-hours; three no-progress slices trigger backoff and an operational warning.
-Ineligible units wait for eligibility. Fenced cleanup collects terminal/
-superseded private payloads and drafts without meaningful progress for 24 hours,
-preserving active work, unfinished passes and referenced revisions. Per-process
-limits multiply with worker replicas; they are not a deployment-wide spend cap.
-
-Immutable revision collection uses a bounded ordinary candidate read, then
-rechecks the exact candidate IDs, non-current status and absence of retained
-automatic snapshot references in the DELETE statement. It does not claim
-execution ownership or lock candidate revisions for freshness. Unit/attempt
-cleanup is distinct and retains active-lease protection.
+Terminal internal executions use common archive/retention/purge participants.
+Archive does not eagerly delete dialogue, tool results, provided summaries or
+authored files. They survive for authorized audit until retention expiry, and
+Unlimited retains them indefinitely. The generic purge removes execution file
+and Event/Run/model-operation payload only after normal lifecycle fencing and
+required cleanup. Current aggregate and original accepted scalars survive audit
+purge. There is no Memory-only draft GC, revision collection or operator cutover
+CLI in the execution workflow.
 
 ## Automatic Boundary Snapshot
 
-Before each root Run loop, the existing `on_run_start` preparation hook reselects
-currently available Saved index entries and independently published Team and
-associated-personal documents.
-Selection compares entries with the persisted snapshot and retains unchanged
-content and its creation time; identical selection/head requires no state write.
-No Run ID is added to the snapshot or compared to detect this boundary.
+Enabled root Conversation Run preparation selects the current Saved index and
+whole current Team/associated-personal integrated results. The successful
+compaction-head boundary can refresh that selection inside a Run. Child
+execution inherits it. Identical selection retains content/creation time;
+unchanged content can be rebound to the new committed head. Failed/stale
+compaction or snapshot CAS contributes no new selection.
 
-Independently, the existing `on_session_compact` hook marks a pending refresh.
-Because this hook announces compaction start, the following model-context
-reconstruction reselects only after a new successful compaction-summary head has
-committed. This can occur inside the same Run and does not wait for another Run.
-Unchanged content is rebound to the new head without replacing its text or
-creation time. Failed/stale compaction leaves the head unchanged and admits no
-new Memory. Child Run/compaction hooks inherit the root selection rather than
-reselecting it.
+Other turns reauthorize selected Saved IDs and Historical scope permission
+without replacing selected bytes, refreshing descriptions or admitting newer
+results. Scope checks use independent ordinary read-only authority; source
+versions, archived source identities and dependency manifests are not consulted
+for aggregate or selected-result access. A new live current aggregate can differ
+from frozen selected bytes without changing them. Denied scope contributes no
+Historical block, and the independently authorized peer remains available.
+Snapshot writes retain the captured common Session owner-generation fence.
 
-Other model/tool turns only reauthorize and filter currently unavailable Saved
-IDs and each selected revision's exact manifest; they do not replace entries,
-update snapshot text, or admit newly published documents. Missing/corrupt state is initialized
-only by explicit lifecycle refresh, not ordinary prompt reads. A failed refresh
-or snapshot CAS conflict contributes no automatic Memory to that execution.
+Saved entries are type/name/ID sorted lookup indexes, not copied full bodies.
+Each whole Historical rendered result has its independent 10,000-byte allowance;
+authorized User context may compose Team and personal results for up to 20,000
+bytes without lending unused peer capacity. No ranking, source packing or
+per-source fallback replaces a missing current result.
 
-Consumer descriptions use scoped ordinary reads of the exact root Session,
-Agent, Workspace, product scope and durable associated User. Context prompt
-filtering has an independent database-enforced read-only manager that remains
-unfenced when the snapshot mutation manager binds to an execution owner.
-Foreground eligibility and the selected revision's own complete manifest are
-evaluated in one correlated ordinary projection; they do not acquire Agent,
-membership, source, revision or execution-tree locks to enforce newest read
-coherence. Denied, missing or collected exact references contribute no document.
-Snapshot refresh remains a write operation, and producer claims, receipts,
-draft/attempt and critical publication acceptance retain their own mutation
-authority. Descriptive lag does not replace current permission/denial filtering
-at subsequent model/tool admission or live VFS use.
-
-Root Run-start and successful-compaction refresh explicitly fences the captured
-Session owner generation through the frozen model-input selection commit.
-Toolkit version CAS alone cannot reject an obsolete worker that reads the new
-head and replacement version after handover. This protects accepted input
-selection, not access grants; ordinary prompt filtering remains independent.
-
-Saved index entries are type/name/ID sorted. Each independently framed whole
-Historical document is at most 10,000 UTF-8 bytes, including headings, scope
-framing and source routes. Authorized foreground composition may contain both
-units for up to 20,000 bytes; an absent unit lends no extra budget to its peer.
-There is no per-source ranking, lexical topic selection, candidate cap,
-deduplication, packing or source-summary fallback. Empty/missing/denied
-publication contributes no automatic Historical document.
-
-The selected revision is validated against its own manifest, not the current
-pointer's manifest. A newer live read cannot silently replace its old bytes.
-Model preparation captures visible text and exact admitted Historical unit/
-revision identities in the same authorization operation. The identities remain
-out-of-band: they add no prompt framing, byte budget or access authority.
-Native artifact compatibility binds the actual semantic instruction prefix and
-these exact identities for each prepared request and its output normalization.
-This applies to Responses encrypted reasoning and PydanticAI signed/redacted
-thinking, including opaque signatures embedded in assistant and tool-call parts.
-
-Changed/denied/unbound compatibility uses request-local canonical replay, omits
-incompatible opaque state and resets stored-response continuation. A new clean
-revision resets compatibility even if its visible bytes equal the prior result,
-including an unobserved revoke/restore interval. A fresh adapter/restart does not
-authorize old state by matching only text or the latest pointer. Durable Events
-and visible assistant/tool history remain intact; unchanged authorized selection
-retains supported native fidelity. Provider SDKs own supported wire handling for
-canonical history without old signatures, rather than application-authored
-substitute encrypted state.
-
-Prompt sections distinguish Saved and Historical Memory and include exact Saved,
-summary, and original-source VFS paths. Historical blocks are explicit data
-boundaries. Current instructions and verified current evidence take precedence;
-source inspection is optional when wording, chronology, evidence, or uncertainty
-can materially affect the answer.
+Native replay compatibility binds the actual permitted semantic prompt text.
+Changed/denied text uses current canonical history and resets incompatible opaque
+reasoning/signatures or stored-response continuation. It carries no aggregate
+revision/source-manifest identity. Durable visible Events remain intact.
+Historical blocks remain untrusted data rather than current instruction or
+independent proof. Explicit original-source inspection remains separately
+authorized and optional when evidence can materially affect the answer.
 
 ## Live Read-Only Memory VFS
 
 Generic `read`, `grep`, and `glob` route the registered Memory mount independently
 of Runtime availability. Every operation checks current root authority, Memory
-policy, Agent/Workspace, User membership/scope, and source lifecycle. The mount
+policy, Agent/Workspace, User membership/scope, and source lifecycle for source
+paths. Aggregate aliases use current scope authority rather than original-source
+manifests. The mount
 lazily renders PostgreSQL-backed files; it is not a whole-corpus immutable run
 projection and cannot be written or transferred into Runtime.
 
@@ -504,9 +391,10 @@ azents://memory/sources/{team,user}/<session-id>/tool-results/<event-id>.txt
 
 Paths use database IDs rather than labels. README provides narrow lookup patterns;
 consolidated paths are exact aliases resolved from the current root authority,
-never a model-supplied User ID. Their bodies are latest authorized immutable
-publications and may be newer than the frozen boundary selection. Private
-drafts and work inventories are absent from the foreground mount.
+never a model-supplied User ID. Their bodies are the latest scope-authorized
+current results and may be newer than the frozen boundary selection. Internal
+execution files and pending-work
+associations are absent from the foreground mount.
 Directory index files are not required. Saved files contain safe metadata,
 description, and content. Historical files contain available summary, activity
 and preparation timestamps, and exact source path. Session files link optional
@@ -581,8 +469,8 @@ The integrated endpoint requires `scope=team|user` and derives the personal User
 from the authenticated Workspace member. It returns current `markdown` and
 `published_at`, both null when no current document is visible, without generation
 or source-packing fallback. Human Agent visibility and current membership apply
-even while Memory is disabled. Current publication storage retains its existing
-own-manifest read checks until its consolidation replacement is implemented.
+even while Memory is disabled. Reads check current Agent/Workspace/personal scope permission without source
+version, aggregate revision or dependency-manifest validation.
 
 The settings page provides Saved/Historical kind selection. Its responsive header
 puts the explanation below the title/control row, using the full available width.
@@ -611,34 +499,26 @@ used by a response.
 - Logs retain counts, timing, limits, and safe usage fields, not summary/Saved/
   event/result text or credentials.
 
-## Coordinated Handover and Rollback
+## Schema Conversion and Retention
 
-Additive migrations do not activate a second writer or perform live cutover.
-Operators must separately quiesce affected API/gateway/scheduler/job/Engine
-admission, drain/stop workers and ensure old processes cannot resume before
-running `python -m azents.cli.memory_handover forward|rollback|reactivate
---confirm-execution-quiesced`. The flag records operator confirmation, not
-automatic discovery of deployed process absence.
+The schema conversion preserves Saved entries, prepared source summaries,
+current accepted results and pending changes while replacing unit attempts,
+private draft/coverage/evidence tables and immutable result revisions with common
+execution bindings and current scope results. It does not activate two writers.
+The retired Scheduler integration handler and Memory handover CLI are not live
+execution paths. Actual deployment/migration is an operator action; this spec
+records implemented behavior, not evidence that a production rollout occurred.
 
-Forward resets old automatic snapshots, fences units and enrolls existing
-prepared sources without waiting for Stage 1. Rollback resets snapshots/fences
-units while preserving Saved/source data and durable foreground Run history.
-Each DB page uses ordinary waiting locks and rechecks actual reset/participant
-preconditions after waiting; contention alone is not a quiescence violation.
-Source reconciliation acquires explicit sorted Agent/membership/root/source
-participants and refreshes the candidate page before mutation. Database-confirmed
-abort or changed page planning retries only the rolled-back page from its original
-committed cursor. Earlier committed pages and ambiguous commits are not replayed,
-and no new local timeout or retry-count limit is introduced.
-Reactivation after old-code writes conservatively reconciles canonical summaries
-and availability continuity before new admission. Interrupted root/child Runs
-reconstruct from the root after an explicit boundary; obsolete snapshots are
-never replayed merely because durable conversation remains.
+Common archived internal Session purge removes its retained audit payload through
+the same durable lifecycle/resource phases as Conversations. Detached original
+acceptance scalars and current unit result remain available after that cleanup.
+Old-code rollback after destructive removal of obsolete schema is not promised.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-10-07 | 23 | Replace integration drafts/manifests and Scheduler-local hosts with summary-only common Worker executions, explicit file submission, retained audit and scope-only current results |
 | 2026-10-06 | 22 | Added Saved cursor paging and integrated Historical overview, one-level session details, automatic scroll pagination and full-width header description |
 | 2026-10-06 | 19 | Replace nonwaiting producer/source/handover fences with exact waiting admission, renewable-lease-safe participant planning and whole-operation/page recovery |
 | 2026-10-05 | 16 | Make uncertain publication inspection read-only and unfenced; condition revision GC on exact current/reference exclusions without candidate locks |

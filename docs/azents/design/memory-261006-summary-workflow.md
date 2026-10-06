@@ -4,6 +4,7 @@ document_role: primary
 document_type: design
 snapshot_id: memory-261006
 created: 2026-10-06
+implemented: 2026-10-07
 tags: [memory, architecture, engine, lifecycle, frontend]
 ---
 

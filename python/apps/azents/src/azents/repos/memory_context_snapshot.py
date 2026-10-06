@@ -27,12 +27,8 @@ from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.historical_memory import HistoricalMemoryRepository
-from azents.repos.historical_memory_consolidation.authority import (
-    consolidation_read_session,
-    consolidation_session,
-)
 from azents.repos.historical_memory_consolidation.foreground import (
-    read_foreground_revision,
+    read_current_result,
 )
 from azents.repos.memory import MemoryRepository
 from azents.repos.message import MessageRepository
@@ -46,7 +42,7 @@ _CONTEXT_SNAPSHOT_STATE = "context_snapshot"
 
 @dataclasses.dataclass
 class MemoryContextSnapshotRepository:
-    """Compose database-only operations with independent selected-revision checks."""
+    """Compose database-only operations with independent scope checks."""
 
     historical_repository: Annotated[
         HistoricalMemoryRepository, Depends(HistoricalMemoryRepository)
@@ -104,7 +100,7 @@ class MemoryContextSnapshotRepository:
         )
 
     async def prompt_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
-        async with consolidation_read_session(self.read_session_manager) as session:
+        async with self.read_session_manager() as session:
             await session.read_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
@@ -144,19 +140,19 @@ class MemoryContextSnapshotRepository:
             }
             available = []
             for selected in snapshot.historical_entries:
-                entry = await read_foreground_revision(
+                entry = await read_current_result(
                     session,
                     consumer=consumer,
                     scope=selected.unit.scope,
                     selected=selected,
                 )
                 if entry is not None:
-                    available.append(entry.revision_id)
+                    available.append(entry.unit.scope)
             result = prepare_memory_context_prompt(
                 filter_memory_context_snapshot(
                     snapshot,
                     available_saved_ids=saved_ids,
-                    available_revision_ids=available,
+                    available_scopes=available,
                 )
             )
         return result
@@ -167,7 +163,7 @@ class MemoryContextSnapshotRepository:
         session_id: str,
         after_compaction: bool,
     ) -> bool:
-        async with consolidation_session(self.session_manager) as session:
+        async with self.session_manager() as session:
             if self.owner is not None:
                 if self.owner.session_id != session_id:
                     raise ValueError("Memory snapshot Session does not match owner")
@@ -229,7 +225,7 @@ class MemoryContextSnapshotRepository:
             )
         historical = []
         for scope in ConsolidationScope:
-            entry = await read_foreground_revision(
+            entry = await read_current_result(
                 session, consumer=consumer, scope=scope, selected=None
             )
             if entry is not None:

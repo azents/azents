@@ -2,11 +2,10 @@
 
 import dataclasses
 import datetime
-import hashlib
-import json
 from collections.abc import Collection, Sequence
 from textwrap import dedent
 
+from azents.core.historical_memory_consolidation import ConsolidationScope
 from azents.core.historical_memory_snapshot import (
     ConsolidatedMemorySnapshotEntry,
     MemoryContextSnapshotState,
@@ -19,27 +18,15 @@ class MemoryContextPrompt:
     """Atomic visible text and exact admitted Historical replay compatibility."""
 
     text: str
-    native_replay_context: str
+    native_replay_context: str = dataclasses.field(repr=False)
 
 
 def prepare_memory_context_prompt(
     snapshot: MemoryContextSnapshotState | None,
 ) -> MemoryContextPrompt:
-    """Use already authorized identities; this digest grants no source access."""
-    identities = (
-        sorted(
-            (entry.unit_id, entry.revision_id) for entry in snapshot.historical_entries
-        )
-        if snapshot is not None
-        else []
-    )
-    digest = hashlib.sha256(
-        json.dumps(identities, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    return MemoryContextPrompt(
-        text=render_memory_context_snapshot(snapshot) if snapshot is not None else "",
-        native_replay_context=f"memory-selection-{digest}",
-    )
+    """Bind native prefix compatibility to the actual authorized context text."""
+    text = render_memory_context_snapshot(snapshot) if snapshot is not None else ""
+    return MemoryContextPrompt(text=text, native_replay_context=text)
 
 
 _READ_GUIDANCE = dedent("""\
@@ -85,7 +72,7 @@ def filter_memory_context_snapshot(
     snapshot: MemoryContextSnapshotState,
     *,
     available_saved_ids: Collection[str],
-    available_revision_ids: Collection[str],
+    available_scopes: Collection[ConsolidationScope],
 ) -> MemoryContextSnapshotState:
     """Remove entire denied units without replacement, rewriting or reselection."""
     return snapshot.model_copy(
@@ -98,7 +85,7 @@ def filter_memory_context_snapshot(
             "historical_entries": [
                 entry
                 for entry in snapshot.historical_entries
-                if entry.revision_id in available_revision_ids
+                if entry.unit.scope in available_scopes
             ],
         }
     )
@@ -135,7 +122,6 @@ def render_memory_context_snapshot(snapshot: MemoryContextSnapshotState) -> str:
 def render_live_consolidated(entry: ConsolidatedMemorySnapshotEntry) -> str:
     """Explicit lookup shows current provenance without changing a boundary."""
     return (
-        f"Revision: {entry.revision_id}\n"
         f"Published: {entry.published_at.isoformat()}\n"
         f"Location: azents://memory/consolidated/{entry.unit.scope.value}/summary.md\n\n"
         f"{entry.rendered_block}"

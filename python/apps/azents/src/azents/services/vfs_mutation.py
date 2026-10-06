@@ -1,10 +1,8 @@
 """Optional native mutation contracts, separate from complete read-only backends."""
 
 import dataclasses
-import hashlib
-import json
 from collections.abc import Sequence
-from typing import Protocol, assert_never, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from azents.core.vfs import VfsLocation, parse_vfs_exact_uri, parse_vfs_search_uri
 from azents.services.vfs_read import (
@@ -65,35 +63,30 @@ class VfsAtomicPatchRequest:
 
 @dataclasses.dataclass(frozen=True)
 class VfsFileObservation:
-    """Execution-local server evidence, never model-supplied revision arguments."""
+    """Per-target actual content observed in this execution."""
 
     uri: str
-    revision_id: str | None
     content: str | None
 
 
 @dataclasses.dataclass(frozen=True)
 class VfsMutationPreconditions:
-    """Frozen at admission; an unobserved group is allowed only for creation."""
+    """Exact target observations frozen before queued operations await."""
 
-    group_revision_id: str | None
-    evidence_epoch: int
     files: tuple[VfsFileObservation, ...]
 
 
 @dataclasses.dataclass(frozen=True)
 class VfsMutationInvocation:
-    """Server tool-call identity and canonical digest preserving exact text bytes."""
+    """Canonical tool-call identity; it does not grant file access."""
 
     tool_call_id: str
-    request_digest: str
 
 
 @dataclasses.dataclass(frozen=True)
 class VfsMutationResult:
-    """Safe committed metadata; replay does not assert this revision is current."""
+    """Safe metadata for a committed current-file mutation."""
 
-    revision_id: str
     uris: tuple[str, ...]
     file_count: int
     byte_count: int
@@ -137,7 +130,7 @@ class VfsAtomicPatchBackend[PrincipalT = VfsReadContext](Protocol):
         preconditions: VfsMutationPreconditions,
         invocation: VfsMutationInvocation,
     ) -> VfsMutationResult:
-        """Commit all hunks, files, versions and influence or change nothing."""
+        """Commit all hunks and files or change nothing."""
         ...
 
 
@@ -267,9 +260,7 @@ class VfsMutationRouter[PrincipalT = VfsReadContext]:
             backend=backend,
             request=request,
             preconditions=preconditions,
-            invocation=VfsMutationInvocation(
-                tool_call_id, mutation_request_digest(request)
-            ),
+            invocation=VfsMutationInvocation(tool_call_id),
         )
 
     async def execute(
@@ -305,16 +296,7 @@ class VfsMutationRouter[PrincipalT = VfsReadContext]:
             backend=backend,
             request=request,
             preconditions=backend.freeze_patch(principal, request),
-            invocation=VfsMutationInvocation(
-                tool_call_id,
-                _digest(
-                    {
-                        "kind": "patch",
-                        "base": request.base.canonical,
-                        "patch": request.patch,
-                    }
-                ),
-            ),
+            invocation=VfsMutationInvocation(tool_call_id),
         )
 
     async def execute_patch(
@@ -327,37 +309,3 @@ class VfsMutationRouter[PrincipalT = VfsReadContext]:
             admitted.preconditions,
             admitted.invocation,
         )
-
-
-def mutation_request_digest(request: VfsMutationRequest) -> str:
-    """Canonicalize operation fields, preserving every exact Unicode/text byte."""
-    payload: dict[str, str | bool]
-    match request:
-        case VfsWriteRequest():
-            payload = {
-                "kind": "write",
-                "path": request.location.canonical,
-                "content": request.content,
-                "overwrite": request.overwrite,
-            }
-        case VfsEditRequest():
-            payload = {
-                "kind": "edit",
-                "path": request.location.canonical,
-                "old_string": request.old_string,
-                "new_string": request.new_string,
-                "replace_all": request.replace_all,
-            }
-        case VfsDeleteRequest():
-            payload = {"kind": "delete", "path": request.location.canonical}
-        case _:
-            assert_never(request)
-    return _digest(payload)
-
-
-def _digest(payload: dict[str, str | bool]) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-        ).encode("utf-8")
-    ).hexdigest()

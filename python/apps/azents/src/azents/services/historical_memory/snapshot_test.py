@@ -79,7 +79,7 @@ def test_filter_removes_whole_denied_unit_without_replacement_or_rewriting() -> 
     filtered = filter_memory_context_snapshot(
         snapshot,
         available_saved_ids={saved.memory_id},
-        available_revision_ids={user.revision_id},
+        available_scopes={user.unit.scope},
     )
     assert filtered.historical_entries == [user]
     assert filtered.saved_entries == [saved]

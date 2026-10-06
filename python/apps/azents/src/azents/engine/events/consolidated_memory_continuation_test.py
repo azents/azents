@@ -38,7 +38,7 @@ def test_changed_unit_forces_complete_replay_without_stored_response_identity(
         changed_snapshot = filter_memory_context_snapshot(
             snapshot,
             available_saved_ids=set(),
-            available_revision_ids={personal.revision_id},
+            available_scopes={personal.unit.scope},
         )
     else:
         changed_snapshot = build_memory_context_snapshot(

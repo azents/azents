@@ -5,16 +5,19 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
+from psycopg.errors import (
+    DeadlockDetected,
+    LockNotAvailable,
+    QueryCanceled,
+    SerializationFailure,
+)
+from sqlalchemy.exc import OperationalError
 
 from azents.core.historical_memory_context import (
     MemoryContextPrompt,
     prepare_memory_context_prompt,
 )
 from azents.core.session_resource_authority import SessionExecutionOwner
-from azents.repos.historical_memory_consolidation.authority import (
-    ConsolidationAuthorityBusyError,
-    ConsolidationDeadlineError,
-)
 from azents.repos.memory_context_snapshot import MemoryContextSnapshotRepository
 
 logger = logging.getLogger(__name__)
@@ -42,7 +45,17 @@ class MemoryContextSnapshotService:
         """Return text and exact selected identities from one authority check."""
         try:
             return await self.repository.prompt_for_turn(session_id=session_id)
-        except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
+        except OperationalError as error:
+            if not isinstance(
+                error.orig,
+                (
+                    DeadlockDetected,
+                    LockNotAvailable,
+                    QueryCanceled,
+                    SerializationFailure,
+                ),
+            ):
+                raise
             logger.warning(
                 "Memory context authority could not be confirmed.",
                 extra={"session_id": session_id},
@@ -61,7 +74,17 @@ class MemoryContextSnapshotService:
                 session_id=session_id,
                 after_compaction=after_compaction,
             )
-        except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
+        except OperationalError as error:
+            if not isinstance(
+                error.orig,
+                (
+                    DeadlockDetected,
+                    LockNotAvailable,
+                    QueryCanceled,
+                    SerializationFailure,
+                ),
+            ):
+                raise
             logger.warning(
                 "Memory boundary authority could not be confirmed.",
                 extra={"session_id": session_id},

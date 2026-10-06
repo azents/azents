@@ -1,62 +1,35 @@
-"""Exact-scope identities and current-source evidence for consolidation work."""
+"""Exact scope and common execution bindings for summary-only Memory work."""
 
 import datetime
 import enum
-import hashlib
-import json
+from dataclasses import dataclass
 from typing import assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from azents.core.historical_memory import HistoricalMemoryCompletion
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
+from azents.core.session_resource_authority import SessionExecutionOwner
 
 
 class ConsolidationScope(enum.StrEnum):
-    """One independent input corpus, never a combined foreground consumer view."""
+    """One independently maintained Team or personal result."""
 
     TEAM = "team"
     USER = "user"
 
 
 class ConsolidationWorkKind(enum.StrEnum):
-    """Source changes enrolled without retaining a second body history."""
+    """Scheduling changes, not source-body versions or authored dispositions."""
 
     PREPARED = "prepared"
     REMOVED = "removed"
     RESTORED = "restored"
 
 
-class ConsolidationDisposition(enum.StrEnum):
-    """Explicit private work choice, independent from evidence exposure."""
-
-    CONSIDERED = "considered"
-    OMITTED = "omitted"
-
-
-class ConsolidationWorkState(enum.StrEnum):
-    """Exact work disposition, independent of the current published overview."""
-
-    PENDING = "pending"
-    CONSIDERED = "considered"
-    PUBLISHED = "published"
-    SUPERSEDED = "superseded"
-
-
-class ConsolidationAttemptState(enum.StrEnum):
-    """Internal attempt lifecycle, not a foreground Run state."""
-
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    INVALIDATED = "invalidated"
-
-
 class ConsolidationUnitKey(BaseModel):
-    """Server-owned identity of an independently maintained overview."""
+    """Server-bound scope, never selected from model tool arguments."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-
     agent_id: str = Field(min_length=32, max_length=32)
     workspace_id: str = Field(min_length=32, max_length=32)
     scope: ConsolidationScope
@@ -64,64 +37,81 @@ class ConsolidationUnitKey(BaseModel):
 
     @model_validator(mode="after")
     def validate_scope_owner(self) -> "ConsolidationUnitKey":
-        """Require a User exactly for personal scope, without scope widening."""
         match self.scope:
             case ConsolidationScope.TEAM:
                 if self.associated_user_id is not None:
-                    raise ValueError(
-                        "Team consolidation must not have an associated User."
-                    )
+                    raise ValueError("Team Memory must not bind a personal User.")
             case ConsolidationScope.USER:
                 if self.associated_user_id is None:
-                    raise ValueError(
-                        "Personal consolidation requires an associated User."
-                    )
+                    raise ValueError("Personal Memory requires its associated User.")
             case _:
                 assert_never(self.scope)
         return self
 
 
-class ConsolidationJobPrincipal(BaseModel):
-    """Internal attempt identity, not a fabricated foreground Session or Run."""
+@dataclass(frozen=True)
+class MemoryAcceptedOutcome:
+    session_id: str
+    tool_call_id: str
+    accepted_at: datetime.datetime
+    rendered_bytes: int
+    settled_work_count: int
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
 
+@dataclass(frozen=True)
+class MemoryExecutionBinding:
+    unit_id: str
     unit: ConsolidationUnitKey
-    attempt_id: str = Field(min_length=32, max_length=32)
-    owner_generation: int = Field(ge=1)
-    owner_token: str = Field(min_length=32, max_length=32)
+    session_id: str
+    deadline_at: datetime.datetime
+    execution_policy: HistoricalMemoryExecutionConfig
+    started_turns: int
+    accepted: MemoryAcceptedOutcome | None
 
 
-class ConsolidationSourceVersion(BaseModel):
-    """Body-free evidence identity; current authority is checked separately."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    source_session_id: str = Field(min_length=32, max_length=32)
-    summary_generation: int = Field(ge=1)
-    evidence_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    availability_generation: int = Field(ge=1)
-    membership_grant_id: str | None = Field(min_length=32, max_length=32)
+@dataclass(frozen=True)
+class MemoryExecutionPrincipal:
+    binding: MemoryExecutionBinding
+    owner: SessionExecutionOwner
+    run_id: str
 
 
-def prepared_source_evidence_hash(completion: HistoricalMemoryCompletion) -> str:
-    """Hash the exact published summary and its model-visible preparation metadata.
+@dataclass(frozen=True)
+class FreshMemoryAdmission:
+    deadline_at: datetime.datetime
+    execution_policy: HistoricalMemoryExecutionConfig
 
-    Normalize aware instants to UTC and the summary to the existing repository's
-    empty-result representation. Preserve exact title/summary Unicode bytes and
-    whitespace; this is evidence identity, not semantic deduplication or a grant.
-    """
-    payload = {
-        "schema_version": 1,
-        "summary": completion.summary or None,
-        "source_title": completion.source_title_snapshot,
-        "source_activity_at": completion.source_activity_at.astimezone(
-            datetime.UTC
-        ).isoformat(),
-        "source_tail_event_id": completion.source_tail_event_id,
-        "prepared_at": completion.prepared_at.astimezone(datetime.UTC).isoformat(),
-    }
-    encoded = json.dumps(
-        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+
+@dataclass(frozen=True)
+class TakeoverMemoryAdmission:
+    predecessor_session_id: str
+    expected_owner_generation: int
+
+
+@dataclass(frozen=True)
+class CurrentMemoryResult:
+    unit: ConsolidationUnitKey
+    markdown: str
+    rendered_block: str
+    accepted_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class ProvidedSummary:
+    path: str
+    source_session_id: str
+    content: str
+
+
+@dataclass(frozen=True)
+class ProvisionedMemoryInputs:
+    binding: MemoryExecutionBinding
+    files: tuple[ProvidedSummary, ...]
+
+
+class MemoryExecutionAuthorityError(PermissionError):
+    """The exact common execution or domain binding is unavailable."""
+
+
+class MemorySubmissionUncertainError(RuntimeError):
+    """The original submission commit outcome requires independent inspection."""

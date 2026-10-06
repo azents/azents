@@ -119,7 +119,7 @@ def test_historical_sample_shares_aware_instant_and_preserves_real_deadline() ->
     sampled_at = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
     service = AsyncMock(spec=HistoricalMemorySamplingService)
     service.sample_agent.return_value = HistoricalMemorySamplingReport(
-        sampled_at, 1, 1, 1, 1, 0, 0, 0, 2, 2, 0, 0
+        sampled_at, 1, 1, 1, 1, 0, 0, 0, 2
     )
     app = _app(SimpleNamespace())
     app.dependency_overrides[HistoricalMemorySamplingService] = lambda: service
@@ -141,10 +141,7 @@ def test_historical_sample_shares_aware_instant_and_preserves_real_deadline() ->
         "empty": 0,
         "failed": 0,
         "quota_advanced": 0,
-        "consolidation_due": 2,
-        "consolidation_published": 2,
-        "consolidation_unclaimed": 0,
-        "consolidation_failed": 0,
+        "consolidation_dispatched": 2,
     }
     service.sample_agent.assert_awaited_once_with(
         now=sampled_at,
@@ -160,9 +157,6 @@ def test_historical_sample_rejects_naive_time_and_never_prepares_non_due_agent()
     service = AsyncMock(spec=HistoricalMemorySamplingService)
     service.sample_agent.return_value = HistoricalMemorySamplingReport(
         datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC),
-        0,
-        0,
-        0,
         0,
         0,
         0,

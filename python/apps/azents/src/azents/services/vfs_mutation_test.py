@@ -4,12 +4,12 @@ import dataclasses
 import re
 from collections.abc import Sequence
 
-from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
+from azents.core.historical_memory_consolidation import MemoryExecutionPrincipal
 from azents.core.vfs import VfsLocation
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.services.file_storage import GrepResult, TextReadResult
-from azents.services.historical_memory.draft_vfs import ConsolidationDraftVfsBackend
+from azents.services.session_execution_files import SessionExecutionFileBackend
 from azents.services.vfs_mutation import (
     VfsBackendRegistration,
     VfsMutationCapabilities,
@@ -26,7 +26,7 @@ from azents.testing.consolidation_vfs import bind_consolidation_test_vfs
 class _SingleFileWriter:
     """A functional read/writer delegating ordinary methods, with no patch interface."""
 
-    backend: ConsolidationDraftVfsBackend
+    backend: SessionExecutionFileBackend
 
     @property
     def mount(self) -> str:
@@ -38,7 +38,7 @@ class _SingleFileWriter:
 
     async def read_text(
         self,
-        context: ConsolidationJobPrincipal,
+        context: MemoryExecutionPrincipal,
         location: VfsLocation,
         *,
         offset: int,
@@ -51,7 +51,7 @@ class _SingleFileWriter:
 
     async def glob(
         self,
-        context: ConsolidationJobPrincipal,
+        context: MemoryExecutionPrincipal,
         location: VfsLocation,
         *,
         exclude_patterns: Sequence[str],
@@ -62,7 +62,7 @@ class _SingleFileWriter:
 
     async def grep(
         self,
-        context: ConsolidationJobPrincipal,
+        context: MemoryExecutionPrincipal,
         location: VfsLocation,
         *,
         pattern: re.Pattern[str],
@@ -86,13 +86,13 @@ class _SingleFileWriter:
         )
 
     def freeze_mutation(
-        self, principal: ConsolidationJobPrincipal, request: VfsMutationRequest
+        self, principal: MemoryExecutionPrincipal, request: VfsMutationRequest
     ) -> VfsMutationPreconditions:
         return self.backend.freeze_mutation(principal, request)
 
     async def mutate(
         self,
-        principal: ConsolidationJobPrincipal,
+        principal: MemoryExecutionPrincipal,
         request: VfsMutationRequest,
         preconditions: VfsMutationPreconditions,
         invocation: VfsMutationInvocation,
@@ -104,7 +104,7 @@ async def test_single_file_writer_is_complete_without_patch_members(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
     binding = await bind_consolidation_test_vfs(rdb_session_manager)
-    backend = _SingleFileWriter(binding.draft)
+    backend = _SingleFileWriter(binding.backend)
     registration = VfsBackendRegistration(
         backend, backend, None, VfsMutationCapabilities(True, False)
     )

@@ -166,7 +166,7 @@ class RoutedMutationTools[PrincipalT = VfsReadContext]:
                         description=(
                             "Apply strict V4A under an absolute Runtime directory "
                             "or one authorized atomic-writable VFS base. VFS changes "
-                            "all files/versions together or none; Runtime retains "
+                            "all files together or none; Runtime retains "
                             "its native staging and possible partial commit."
                         ),
                         input_schema=RoutedApplyPatchInput.model_json_schema(),
@@ -208,7 +208,7 @@ class RoutedMutationTools[PrincipalT = VfsReadContext]:
             ) from None
         return (
             f"VFS {name} committed: {', '.join(result.uris)} "
-            f"(revision {result.revision_id}; {result.file_count} draft files, "
+            f"({result.file_count} current files, "
             f"{result.byte_count} UTF-8 bytes)."
         )
 
@@ -298,12 +298,11 @@ class _RoutedPatchHandler[PrincipalT]:
         return FunctionToolResult(
             output=(
                 f"Applied atomic VFS patch: {len(result.uris)} file(s) "
-                f"(revision {result.revision_id}):\n" + "\n".join(result.uris)
+                "\n" + "\n".join(result.uris)
             ),
             metadata={
                 "kind": "apply_patch_result",
                 "backend": "vfs",
-                "revision_id": result.revision_id,
                 "files": list(result.uris),
                 "file_count": result.file_count,
                 "byte_count": result.byte_count,

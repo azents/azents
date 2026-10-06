@@ -2,7 +2,6 @@
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from concurrent.futures import CancelledError as ThreadCancelled
 
 import httpx2
 import pytest
@@ -90,6 +89,7 @@ async def test_rejected_http_admission_sends_nothing_and_retains_safe_reason() -
             await client.post("https://synthetic.invalid/responses")
     assert failure.value.reason == "budget"
     assert not sent and state.dispatch_blocked
+    assert state.admission_failure is failure.value
 
 
 async def test_sync_sdk_waits_for_event_loop_admission_before_sending() -> None:
@@ -133,7 +133,7 @@ async def test_closing_releases_thread_waiting_on_admission_without_dispatch() -
         nonlocal sent
         try:
             state.authorize_dispatch_from_thread()
-        except ThreadCancelled:
+        except asyncio.CancelledError:
             return False
         sent = True
         return True
@@ -143,4 +143,41 @@ async def test_closing_releases_thread_waiting_on_admission_without_dispatch() -
     state.begin_close()
     assert not await worker
     await finished.wait()
+    assert not sent and state.dispatch_blocked
+
+
+async def test_foreground_sync_sdk_checks_stop_before_dispatch() -> None:
+    """All synchronous providers honor common stop on the owning event loop."""
+    loop = asyncio.get_running_loop()
+    checked = asyncio.Event()
+    sent = False
+
+    async def admit() -> None:
+        raise AssertionError("Foreground calls do not use internal admission.")
+
+    async def check_stop() -> bool:
+        assert asyncio.get_running_loop() is loop
+        checked.set()
+        return True
+
+    state = _state(admit)
+    state.call_context = ModelStreamCallContext(
+        call_kind="sampling",
+        provider="aws_bedrock",
+        provider_integration_id=None,
+        model="selected-model",
+        session_id="s" * 32,
+        run_id="r" * 32,
+        attempt_number=1,
+        check_stop=check_stop,
+    )
+
+    def send() -> None:
+        nonlocal sent
+        state.authorize_dispatch_from_thread()
+        sent = True
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.to_thread(send)
+    assert checked.is_set()
     assert not sent and state.dispatch_blocked

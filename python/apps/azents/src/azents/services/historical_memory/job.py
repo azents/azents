@@ -11,16 +11,14 @@ from azents.job_runtime.types import (
     validate_job_payload,
 )
 from azents.services.historical_memory.constants import (
-    HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY,
-    HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY,
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
 )
 from azents.services.historical_memory.preparation import (
     HistoricalMemoryPreparationService,
 )
 
-_LOCAL_JOB_RUNTIME_MAX_CONCURRENCY = 16
 _DEFAULT_MAX_CONCURRENCY = 12
+_MAX_PREPARATION_CONCURRENCY = 12
 
 
 class HistoricalMemoryPreparationJobPayload(BaseModel):
@@ -35,16 +33,9 @@ def _max_concurrency() -> int:
         str(_DEFAULT_MAX_CONCURRENCY),
     )
     value = int(raw)
-    if (
-        value < 1
-        or value + HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY
-        > HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY
-        or HISTORICAL_MEMORY_COMBINED_MAX_CONCURRENCY
-        > _LOCAL_JOB_RUNTIME_MAX_CONCURRENCY - 2
-    ):
+    if value < 1 or value > _MAX_PREPARATION_CONCURRENCY:
         raise ValueError(
-            "AZ_HISTORICAL_MEMORY_MAX_CONCURRENCY plus consolidation capacity "
-            "must not exceed 14, reserving two ordinary Job Runtime slots."
+            "AZ_HISTORICAL_MEMORY_MAX_CONCURRENCY must be between 1 and 12."
         )
     return value
 
