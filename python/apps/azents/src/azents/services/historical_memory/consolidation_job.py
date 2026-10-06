@@ -299,7 +299,7 @@ class ConsolidationAttemptExecution:
                 )
             self.active_host = None
             self.active_model = None
-            await recovery.prepare(self.claim.principal)
+            checkpoint = await recovery.prepare(self.claim.principal)
             await ConsolidationWorkRepository(
                 service.session_manager
             ).retire_obsolete_pending(self.claim.principal)
@@ -332,8 +332,10 @@ class ConsolidationAttemptExecution:
             )
             self.active_model = model
             work = ConsolidationWorkRepository(service.session_manager)
+            observations = ConsolidationVfsObservations(self.claim.principal)
+            observations.record_source_epoch(checkpoint.observation_epoch)
             bindings = ConsolidationToolBindings(
-                ConsolidationVfsObservations(self.claim.principal),
+                observations,
                 ConsolidationDraftRepository(service.session_manager),
                 ConsolidationSourceRepository(service.session_manager),
                 work,

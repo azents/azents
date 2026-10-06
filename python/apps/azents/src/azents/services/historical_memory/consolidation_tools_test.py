@@ -68,9 +68,11 @@ async def _bindings(manager: SessionManager[WriteSession]) -> ConsolidationToolB
     ownership = ConsolidationOwnershipRepository(manager)
     claim = await ownership.claim(corpus.team, deadline=consolidation_deadline())
     assert claim is not None
-    await ConsolidationRecoveryRepository(manager).prepare(claim.principal)
+    checkpoint = await ConsolidationRecoveryRepository(manager).prepare(claim.principal)
+    observations = ConsolidationVfsObservations(claim.principal)
+    observations.record_source_epoch(checkpoint.observation_epoch)
     return ConsolidationToolBindings(
-        ConsolidationVfsObservations(claim.principal),
+        observations,
         ConsolidationDraftRepository(manager),
         ConsolidationSourceRepository(manager),
         ConsolidationWorkRepository(manager),
