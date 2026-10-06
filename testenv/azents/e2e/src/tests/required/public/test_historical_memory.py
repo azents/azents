@@ -659,6 +659,49 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
     }
 
 
+def test_successive_consolidation_starts_publish_current_work(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    openai_proxy_url: str,
+) -> None:
+    """Each new source runs through a fresh host and reaches live publication."""
+    server, admin = azents_public_server_url, azents_admin_server_url
+    setup = _setup(public_api_client, admin_api_client, server)
+    markers: list[str] = []
+    for _ in range(2):
+        marker = f"AGENTIC_TEAM_{unique()}_V1"
+        markers.append(marker)
+        _create_session(
+            server,
+            setup,
+            scope="team",
+            message=f"Historical Memory E2E source: {marker}; current evidence.",
+        )
+        sampled = _sample(
+            admin,
+            setup,
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=7),
+            consolidate=True,
+        )
+        assert sampled.prepared == 1 and sampled.failed == 0, sampled
+        assert sampled.consolidation_due == sampled.consolidation_published == 1, (
+            sampled
+        )
+        assert sampled.consolidation_failed == 0, sampled
+    consumer_marker = f"Historical Memory E2E continue {unique()}"
+    consumer = _create_session(server, setup, scope="team", message=consumer_marker)
+    assert markers[-1] in _foreground_instructions(openai_proxy_url, consumer_marker)
+    assert markers[-1] in _inspect(
+        server,
+        setup,
+        consumer,
+        operation="read",
+        path="azents://memory/consolidated/team/summary.md",
+    )
+
+
 def test_historical_execution_policy_roundtrip_and_custom_consolidation(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,

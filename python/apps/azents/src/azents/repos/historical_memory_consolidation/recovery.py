@@ -1,4 +1,4 @@
-"""Reauthorize retained work and rebuild whole contaminated private units cleanly."""
+"""Clean each private execution start and seed only authorized published context."""
 
 from dataclasses import dataclass
 
@@ -11,6 +11,7 @@ from azents.core.historical_memory_consolidation import (
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import (
+    RDBConsolidationAttempt,
     RDBConsolidationDraft,
     RDBConsolidationEvidence,
     RDBConsolidationMutationReceipt,
@@ -30,7 +31,6 @@ from azents.repos.historical_memory_consolidation.authority import (
 from azents.repos.historical_memory_consolidation.drafts import (
     ConsolidationDraftRepository,
     check_dependency_manifest,
-    check_draft_influence,
 )
 from azents.repos.historical_memory_consolidation.participant_types import (
     DraftParticipants,
@@ -54,7 +54,7 @@ class ConsolidationRecoveryCheckpoint:
 
 @dataclass(frozen=True)
 class ConsolidationRecoveryRepository:
-    """Keep permitted drafts and rebuild denied prose as a whole."""
+    """Make workspace cleanup a fenced prerequisite for every fresh model host."""
 
     session_manager: SessionManager[WriteSession]
 
@@ -109,58 +109,54 @@ class ConsolidationRecoveryRepository:
                     RDBConsolidationDraft.unit_id == owner.unit.id
                 )
             )
-            draft_valid = draft is not None
-            if draft is not None:
-                try:
-                    await check_draft_influence(
-                        session, principal=principal, owner=owner, draft=draft
-                    )
-                except ConsolidationAuthorityBusyError, ConsolidationDeadlineError:
-                    raise
-                except ConsolidationAuthorityError:
-                    draft_valid = False
-            rebuilt = draft is not None and not draft_valid
+            rebuilt = draft is not None
             publication_lost = (
                 owner.unit.published_revision_id is not None and not published_available
             )
             if publication_lost:
                 owner.unit.published_revision_id = None
-            if rebuilt:
-                assert draft is not None
-                await session.write_session.execute(
-                    sa.update(RDBConsolidationWork)
-                    .where(
-                        work_predicate(principal.unit),
-                        RDBConsolidationWork.state == ConsolidationWorkState.CONSIDERED,
-                        RDBConsolidationWork.considered_draft_id == draft.id,
-                    )
-                    .values(
-                        state=ConsolidationWorkState.PENDING,
-                        considered_draft_id=None,
-                        considered_draft_revision_id=None,
-                        disposition=None,
-                        consideration_reason=None,
-                        presented_attempt_id=None,
-                    )
+            # Unpublished choices are still work, never a completed receipt.
+            # Reset their private identity before discarding any workspace bytes.
+            await session.write_session.execute(
+                sa.update(RDBConsolidationWork)
+                .where(
+                    work_predicate(principal.unit),
+                    RDBConsolidationWork.state.in_(
+                        [
+                            ConsolidationWorkState.PENDING,
+                            ConsolidationWorkState.CONSIDERED,
+                        ]
+                    ),
                 )
+                .values(
+                    state=ConsolidationWorkState.PENDING,
+                    considered_draft_id=None,
+                    considered_draft_revision_id=None,
+                    disposition=None,
+                    consideration_reason=None,
+                    presented_attempt_id=None,
+                )
+            )
+            if draft is not None:
                 await session.write_session.execute(
                     sa.delete(RDBConsolidationDraft).where(
                         RDBConsolidationDraft.id == draft.id
                     )
                 )
-                await session.write_session.execute(
-                    sa.delete(RDBConsolidationEvidence).where(
-                        RDBConsolidationEvidence.attempt_id == principal.attempt_id
-                    )
+            attempts = sa.select(RDBConsolidationAttempt.id).where(
+                RDBConsolidationAttempt.unit_id == owner.unit.id
+            )
+            await session.write_session.execute(
+                sa.delete(RDBConsolidationEvidence).where(
+                    RDBConsolidationEvidence.attempt_id.in_(attempts)
                 )
-                await session.write_session.execute(
-                    sa.delete(RDBConsolidationMutationReceipt).where(
-                        RDBConsolidationMutationReceipt.attempt_id
-                        == principal.attempt_id
-                    )
+            )
+            await session.write_session.execute(
+                sa.delete(RDBConsolidationMutationReceipt).where(
+                    RDBConsolidationMutationReceipt.attempt_id.in_(attempts)
                 )
-                owner.attempt.observation_epoch += 1
-                draft = None
+            )
+            owner.attempt.observation_epoch += 1
             if publication_lost:
                 # Rebuild the permitted remainder even if its prior exact work was
                 # already covered by a now-denied overview. Missing/denied work is
@@ -204,10 +200,9 @@ class ConsolidationRecoveryRepository:
                     )
                 )
                 owner.unit.pass_upper_sequence = None
-            if draft is None:
-                draft = await ConsolidationDraftRepository(self.session_manager)._draft(
-                    session, owner
-                )
+            draft = await ConsolidationDraftRepository(self.session_manager)._draft(
+                session, owner
+            )
             await require_commit_owner(session, owner)
             result = ConsolidationRecoveryCheckpoint(
                 draft.revision_id,

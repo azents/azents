@@ -75,7 +75,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-06
-spec_version: 20
+spec_version: 21
 ---
 
 # Memory
@@ -270,6 +270,22 @@ observation-epoch bound and owner-fenced; multi-file patches commit all-or-none.
 Repeated receipts require the same digest. Absolute paths and public/peer
 Memory mutations are unavailable in this host.
 
+Every fresh consolidation host first commits a fenced clean-start operation.
+Startup discards the prior unit's private draft files, coverage, temporary notes,
+dependencies and attempt exposure/receipt payloads, irrespective of the previous
+execution's success or failure. Unpublished choices return to pending with their
+discarded draft/presentation pointers cleared. Published and superseded work
+remain in their authoritative states. Current permitted immutable publication
+bytes and their complete dependency manifest seed the new workspace; coverage
+comes only from work supplied to the new host. This applies to initial execution,
+failure retry, interrupted-owner takeover and quota-candidate handoff.
+
+Startup cleanup and initialization are one owner/lease/deadline-fenced database
+transaction. A rollback or cancellation preserves the previous workspace and
+work identities, and no model/tool dispatch begins without a committed startup.
+Source records, published revisions, model-operation state and durable scalar
+usage are not workspace cleanup targets.
+
 Normal model completion is not publication evidence. The host freezes files,
 validates `Historical Context` and meaningful `Source Routes`, exact delivered
 work dispositions, independently rendered size and the complete influence
@@ -282,11 +298,15 @@ that workspace return to pending with their draft/presentation pointers cleared;
 they are not implicitly acknowledged. Immediate continuation creates a fresh
 draft from the published summary and manifest, without a prior coverage file.
 Published work remains excluded from new coverage rather than silently accepted.
-Publication/cleanup rollback or cancellation preserves the unfinished workspace;
+Publication/cleanup rollback or cancellation preserves the unfinished workspace
+until the next fenced clean start;
 acknowledgement loss still resolves from durable completion without needing it.
 The final model text is not parsed as a replacement document. Failed/hard-cutoff
-attempts retain the prior permitted publication; safe drafts may be recovered
-after current authorization and complete-manifest validation.
+attempts retain the prior permitted publication. The next host reconstructs from
+that publication after current authorization and complete-manifest validation,
+rather than treating unfinished prose or coverage as its starting state.
+Successful-end cleanup is eager reclamation; start cleanup is the correctness
+boundary and does not depend on end cleanup having completed.
 
 Short PostgreSQL claims establish one owner per exact unit with a 120-second
 lease renewed every 30 seconds. Source/file/model dispatch checks are fenced
