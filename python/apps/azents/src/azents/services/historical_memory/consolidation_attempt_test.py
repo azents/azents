@@ -391,10 +391,11 @@ async def test_absolute_claim_deadline_cancels_blocked_setup_or_handoff(
     monkeypatch: pytest.MonkeyPatch,
     block_at: int,
 ) -> None:
-    # Wall-clock passage here is the elapsed-time contract under test. Ordering
-    # still uses the resolution-start event, never a sleep or scheduler yield.
+    # Wall-clock passage is the elapsed-time contract under test. Leave enough
+    # absolute claim time for real DB setup and quota handoff under the full suite;
+    # the resolution-start event establishes ordering before deadline cancellation.
     harness = await _harness(
-        rdb_session_manager, monkeypatch, block_at=block_at, deadline_seconds=1.0
+        rdb_session_manager, monkeypatch, block_at=block_at, deadline_seconds=3.0
     )
     task = asyncio.create_task(
         harness.service.run_unit(

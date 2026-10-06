@@ -150,16 +150,29 @@ def _seed_constraint_identity(connection: sa.Connection) -> None:
         text(
             """
             INSERT INTO agent_sessions (
-                id, workspace_id, agent_id, handle, status,
-                start_reason, session_kind, product_mode
+                id, workspace_id, agent_id, status, start_reason
             )
             VALUES (
                 'scheduled-task-constraint-se0000',
                 'scheduled-task-constraint-ws0000',
                 'scheduled-task-constraint-ag0000',
-                'scheduled-task-constraint-se0000',
                 'active',
-                'initial',
+                'initial'
+            )
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            INSERT INTO conversations (
+                session_id, agent_id, session_status, handle, session_kind, product_mode
+            )
+            VALUES (
+                'scheduled-task-constraint-se0000',
+                'scheduled-task-constraint-ag0000',
+                'active',
+                'scheduled-task-constraint-se0000',
                 'root',
                 'team'
             )

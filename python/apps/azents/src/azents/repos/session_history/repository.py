@@ -14,6 +14,7 @@ from azents.core.enums import (
 )
 from azents.core.json_value import JSONValue
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session_capabilities import ReadSession
 
@@ -127,13 +128,13 @@ class SessionHistoryRepository:
         before: tuple[datetime.datetime, str] | None,
     ) -> SearchPage[SessionSearchHit]:
         """Discover permitted active root Sessions; never scan an arbitrary tenant."""
-        visibility = RDBAgentSession.product_mode == AgentSessionProductMode.TEAM
+        visibility = RDBConversation.product_mode == AgentSessionProductMode.TEAM
         if scope.associated_user_id is not None:
             visibility = sa.or_(
                 visibility,
                 sa.and_(
-                    RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-                    RDBAgentSession.associated_user_id == scope.associated_user_id,
+                    RDBConversation.product_mode == AgentSessionProductMode.USER,
+                    RDBConversation.associated_user_id == scope.associated_user_id,
                 ),
             )
         match_id = (
@@ -148,15 +149,20 @@ class SessionHistoryRepository:
             .correlate(RDBAgentSession)
             .scalar_subquery()
         )
-        statement = sa.select(
-            RDBAgentSession,
-            match_id.label("matching_event_id") if query else sa.null(),
-        ).where(
-            RDBAgentSession.agent_id == scope.agent_id,
-            RDBAgentSession.workspace_id == scope.workspace_id,
-            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-            RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            visibility,
+        statement = (
+            sa.select(
+                RDBAgentSession,
+                RDBConversation,
+                match_id.label("matching_event_id") if query else sa.null(),
+            )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
+            .where(
+                RDBAgentSession.agent_id == scope.agent_id,
+                RDBAgentSession.workspace_id == scope.workspace_id,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                visibility,
+            )
         )
         if query:
             escaped = (
@@ -165,8 +171,8 @@ class SessionHistoryRepository:
             pattern = f"%{escaped}%"
             statement = statement.where(
                 sa.or_(
-                    RDBAgentSession.title.ilike(pattern, escape="\\"),
-                    RDBAgentSession.handle.ilike(pattern, escape="\\"),
+                    RDBConversation.title.ilike(pattern, escape="\\"),
+                    RDBConversation.handle.ilike(pattern, escape="\\"),
                     match_id.is_not(None),
                 )
             )
@@ -188,13 +194,13 @@ class SessionHistoryRepository:
         hits = [
             SessionSearchHit(
                 session_id=row.id,
-                title=row.title,
-                handle=row.handle,
-                mode=row.product_mode,
+                title=conversation.title,
+                handle=conversation.handle,
+                mode=conversation.product_mode,
                 updated_at=row.updated_at,
                 event_id=event_id,
             )
-            for row, event_id in rows[:limit]
+            for row, conversation, event_id in rows[:limit]
         ]
         return SearchPage(items=hits, has_more=len(rows) > limit)
 

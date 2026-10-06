@@ -18,6 +18,7 @@ from azents.core.historical_memory_consolidation import (
     ConsolidationUnitKey,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import RDBConsolidationEvidence
 from azents.rdb.session import SessionManager
@@ -75,9 +76,17 @@ def source_identity_predicate(key: ConsolidationUnitKey) -> sa.ColumnElement[boo
     return sa.and_(
         RDBAgentSession.agent_id == key.agent_id,
         RDBAgentSession.workspace_id == key.workspace_id,
-        RDBAgentSession.product_mode == mode,
-        RDBAgentSession.associated_user_id.is_not_distinct_from(key.associated_user_id),
-        RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+        sa.select(RDBConversation.session_id)
+        .where(
+            RDBConversation.session_id == RDBAgentSession.id,
+            RDBConversation.product_mode == mode,
+            RDBConversation.associated_user_id.is_not_distinct_from(
+                key.associated_user_id
+            ),
+            RDBConversation.session_kind == AgentSessionKind.ROOT,
+        )
+        .correlate(RDBAgentSession)
+        .exists(),
     )
 
 

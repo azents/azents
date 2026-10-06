@@ -23,6 +23,10 @@ from azents.core.enums import (
     OwnerLifecycleStatus,
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
+from azents.core.session_lifecycle import (
+    SessionArchiveMutation,
+    SessionLifecycleTransitionContext,
+)
 from azents.core.session_lifecycle_registry import get_session_lifecycle_registry
 from azents.core.workspace import WorkspaceCreate
 from azents.rdb.models.agent import RDBAgent
@@ -54,6 +58,7 @@ from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.lifecycle_target import LifecycleTargetRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
@@ -78,6 +83,8 @@ def _lifecycle() -> SessionLifecycleOperationsRepository:
     return SessionLifecycleOperationsRepository(
         registry=get_session_lifecycle_registry(),
         agent_session_repository=AgentSessionRepository(),
+        lifecycle_target_repository=LifecycleTargetRepository(),
+        retention_repository=ArchivedSessionRetentionRepository(),
         external_channel_repository=ExternalChannelLifecycleRepository.create(),
         scheduled_task_repository=ScheduledTaskLifecycleRepository.create(),
     )
@@ -93,7 +100,6 @@ def _owner(
         owner_lifecycle_repository=OwnerLifecycleRepository(),
         agent_session_repository=AgentSessionRepository(),
         agent_run_repository=AgentRunRepository(),
-        retention_repository=ArchivedSessionRetentionRepository(),
         memory_repository=MemoryRepository(),
         user_repository=UserRepository(),
         chat_write_request_repository=ChatWriteRequestRepository(),
@@ -328,6 +334,72 @@ class _FailingUser(UserRepository):
     async def delete(self, session: WriteSession, user_id: str) -> None:
         await super().delete(session, user_id)
         raise RuntimeError("injected final User deletion failure")
+
+
+@pytest.mark.parametrize("already_archived", [False, True])
+async def test_account_purge_accelerates_shared_job_and_preserves_archive_boundary(
+    rdb_session_manager: SessionManager[WriteSession],
+    already_archived: bool,
+) -> None:
+    """Keep the original archive boundary while advancing purge eligibility."""
+    subject = await _subject(rdb_session_manager)
+    original_archive_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+        days=3
+    )
+    if already_archived:
+        async with rdb_session_manager() as session:
+            await _lifecycle().archive(
+                session,
+                SessionArchiveMutation(
+                    context=SessionLifecycleTransitionContext(
+                        transition_id=uuid4().hex,
+                        root_session_id=subject.session_id,
+                        subtree_session_ids=(subject.session_id,),
+                    ),
+                    archived_at=original_archive_at,
+                ),
+            )
+    before = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        repository = OwnerLifecycleRepository()
+        created = await repository.create_or_get_account_purge(
+            session, user_id=subject.user_id
+        )
+        job = await repository.claim_due(
+            session,
+            now=before,
+            lease_owner="retirement-owner",
+            lease_until=before + datetime.timedelta(minutes=15),
+        )
+        assert job is not None and job.id == created.id
+    outcome = await _owner(rdb_session_manager, rdb_session_manager).retire_root_tree(
+        job=job,
+        lease_owner="retirement-owner",
+        root_session_id=subject.session_id,
+        immediate_purge=True,
+    )
+    assert outcome.retired
+    after = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        root = await session.read_session.get(RDBAgentSession, subject.session_id)
+        assert root is not None
+        assert root.status is AgentSessionStatus.ARCHIVED
+        assert root.archive_retention_days_snapshot == 0
+        assert root.purge_after is not None and before <= root.purge_after <= after
+        assert root.ended_at == root.archived_at
+        if already_archived:
+            assert root.archived_at == original_archive_at
+        else:
+            assert root.archived_at == root.purge_after
+        purge = (
+            await session.read_session.scalars(
+                sa.select(RDBArchivedSessionPurgeJob).where(
+                    RDBArchivedSessionPurgeJob.root_session_id == subject.session_id
+                )
+            )
+        ).one()
+        assert purge.eligible_at == root.purge_after
+        assert purge.policy_revision == root.archive_policy_revision
 
 
 async def test_account_finalization_rolls_back_job_and_actual_user_deletion(

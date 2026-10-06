@@ -29,6 +29,11 @@ async def _rows(
     for constraint in table.foreign_key_constraints:
         for element in constraint.elements:
             columns[element.parent.name] = element.parent
+    for dependent in table.metadata.tables.values():
+        for constraint in dependent.foreign_key_constraints:
+            if constraint.referred_table is table:
+                for element in constraint.elements:
+                    columns[element.column.name] = element.column
     if table.name == "runtime_connection_generations":
         columns["subject_id"] = table.c.subject_id
         columns["connection_kind"] = table.c.connection_kind

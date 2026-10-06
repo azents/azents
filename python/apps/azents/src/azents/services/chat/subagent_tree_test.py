@@ -39,6 +39,7 @@ from azents.repos.archived_session_retention import ArchivedSessionRetentionRepo
 from azents.repos.chat_operations import ChatOperationsRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.goal.store import GoalStateStore
+from azents.repos.lifecycle_target import LifecycleTargetRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.message import MessageRepository
@@ -224,6 +225,8 @@ def _make_chat_service(**kwargs: Any) -> ChatSessionService:  # noqa: ANN401
     lifecycle = SessionLifecycleOperationsRepository(
         registry=registry,
         agent_session_repository=database["agent_session_repository"],
+        lifecycle_target_repository=LifecycleTargetRepository(),
+        retention_repository=database["archived_session_retention_repository"],
         external_channel_repository=ExternalChannelLifecycleRepository(),
         scheduled_task_repository=scheduled.repository,
     )

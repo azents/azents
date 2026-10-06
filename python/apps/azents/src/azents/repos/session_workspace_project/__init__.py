@@ -22,6 +22,7 @@ from azents.core.session_workspace_project import (
 )
 from azents.rdb.models.action_execution import RDBActionExecution
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.git_worktree_cleanup_claim import (
     RDBGitWorktreePathClaim,
 )
@@ -642,9 +643,10 @@ class SessionWorkspaceProjectRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBSessionAgent.agent_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBSessionAgentContext.agent_runtime_id == runtime_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
         )

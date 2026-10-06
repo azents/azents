@@ -42,6 +42,7 @@ from azents.rdb.models.agent_runtime_removal import (
     RDBAgentRuntimeRemovalOperation,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.workspace import RDBWorkspace
@@ -179,23 +180,38 @@ async def test_confirmation_records_private_tree_aggregate_and_exact_replay(
                     "id": root_id,
                     "workspace_id": workspace_id,
                     "agent_id": agent_id,
-                    "handle": f"root-{uuid4().hex[:8]}",
-                    "session_kind": AgentSessionKind.ROOT,
                     "status": AgentSessionStatus.ACTIVE,
-                    "product_mode": AgentSessionProductMode.TEAM,
-                    "associated_user_id": None,
                     "start_reason": AgentSessionStartReason.INITIAL,
                 },
                 {
                     "id": subagent_id,
                     "workspace_id": workspace_id,
                     "agent_id": agent_id,
+                    "status": AgentSessionStatus.ACTIVE,
+                    "start_reason": AgentSessionStartReason.INITIAL,
+                },
+            ],
+        )
+        await session.write_session.execute(
+            sa.insert(RDBConversation),
+            [
+                {
+                    "session_id": root_id,
+                    "agent_id": agent_id,
+                    "handle": f"root-{uuid4().hex[:8]}",
+                    "session_kind": AgentSessionKind.ROOT,
+                    "session_status": AgentSessionStatus.ACTIVE,
+                    "product_mode": AgentSessionProductMode.TEAM,
+                    "associated_user_id": None,
+                },
+                {
+                    "session_id": subagent_id,
+                    "agent_id": agent_id,
                     "handle": f"subagent-{uuid4().hex[:8]}",
                     "session_kind": AgentSessionKind.SUBAGENT,
-                    "status": AgentSessionStatus.ACTIVE,
+                    "session_status": AgentSessionStatus.ACTIVE,
                     "product_mode": None,
                     "associated_user_id": None,
-                    "start_reason": AgentSessionStartReason.INITIAL,
                 },
             ],
         )

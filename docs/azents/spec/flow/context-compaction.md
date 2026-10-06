@@ -36,6 +36,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/goal/**
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/compaction_operation.py
+  - python/apps/azents/src/azents/repos/session_execution_record.py
+  - python/apps/azents/src/azents/core/session_execution_data.py
   - python/apps/azents/src/azents/repos/model_operation_completion.py
   - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
@@ -47,11 +49,16 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-06
-spec_version: 53
+last_verified_at: 2026-10-07
+spec_version: 54
 ---
 
 # Context Compaction
+
+Planning, owner fencing and model-input-head mutation use the common execution
+record. They require neither a public Conversation profile nor a participant
+tree, and never manufacture public fields for an internal Session. The existing
+Event/Run identities and adjacent append/head commit boundaries remain unchanged.
 
 Context compaction keeps long session history within model input limits without deleting audit/UI
 history. The event runtime uses append-only compaction.
@@ -409,6 +416,9 @@ not remove a preserved started cycle from the summary until that cycle
 terminalizes.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 54) — Moved planning, owner fences and head
+  mutation to common execution records without public Conversation prerequisites.
 
 - **2026-10-05** (spec_version 52) — Separated plain compaction planning from
   explicit execution-owned critical finalization and retained owner exclusion

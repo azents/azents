@@ -27,6 +27,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.admission import MailboxAdmissionRepository
 from azents.repos.session_execution.repository_test import _create_execution_subject
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.terminal_finalization import TerminalRunFinalizationRepository
 from azents.repos.worker_session import WorkerSessionOperationRepository
 from azents.repos.worker_session_data import StuckWorkerSession
@@ -311,7 +312,9 @@ async def _recovery_fixture(
             MailboxAdmissionRepository(marks, mailbox, sessions), sessions
         ),
     )
-    worker = WorkerSessionOperationRepository(marks, sessions, runs, mailbox, terminal)
+    worker = WorkerSessionOperationRepository(
+        marks, sessions, runs, mailbox, terminal, SessionExecutionRecordRepository()
+    )
     lifecycle = _RecoveryLifecycle(
         broker,
         worker,

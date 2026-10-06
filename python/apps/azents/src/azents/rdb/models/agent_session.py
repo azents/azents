@@ -5,20 +5,17 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from azents.core.enums import (
     AgentSessionEndReason,
-    AgentSessionKind,
-    AgentSessionPrimaryKind,
-    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
-    AgentSessionTitleSource,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.inference_profile_types import model_reasoning_effort_enum
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -37,38 +34,10 @@ def _agent_session_run_state_values(
     return [v.value for v in enum_cls]
 
 
-def _agent_session_kind_values(
-    enum_cls: type[AgentSessionKind],
-) -> list[str]:
-    """Return AgentSessionKind enum values stored in the DB."""
-    return [v.value for v in enum_cls]
-
-
-def _agent_session_primary_kind_values(
-    enum_cls: type[AgentSessionPrimaryKind],
-) -> list[str]:
-    """Return AgentSessionPrimaryKind enum values stored in the DB."""
-    return [v.value for v in enum_cls]
-
-
-def _agent_session_product_mode_values(
-    enum_cls: type[AgentSessionProductMode],
-) -> list[str]:
-    """Return AgentSessionProductMode enum values stored in the DB."""
-    return [v.value for v in enum_cls]
-
-
 def _agent_session_start_reason_values(
     enum_cls: type[AgentSessionStartReason],
 ) -> list[str]:
     """Return AgentSessionStartReason enum values stored in the DB."""
-    return [v.value for v in enum_cls]
-
-
-def _agent_session_title_source_values(
-    enum_cls: type[AgentSessionTitleSource],
-) -> list[str]:
-    """Return AgentSessionTitleSource enum values stored in the DB."""
     return [v.value for v in enum_cls]
 
 
@@ -91,35 +60,11 @@ agent_session_run_state_enum = ENUM(
     create_type=False,
     values_callable=_agent_session_run_state_values,
 )
-agent_session_kind_enum = ENUM(
-    AgentSessionKind,
-    name="agent_session_kind",
-    create_type=False,
-    values_callable=_agent_session_kind_values,
-)
-agent_session_primary_kind_enum = ENUM(
-    AgentSessionPrimaryKind,
-    name="agent_session_primary_kind",
-    create_type=False,
-    values_callable=_agent_session_primary_kind_values,
-)
-agent_session_product_mode_enum = ENUM(
-    AgentSessionProductMode,
-    name="agent_session_product_mode",
-    create_type=False,
-    values_callable=_agent_session_product_mode_values,
-)
 agent_session_start_reason_enum = ENUM(
     AgentSessionStartReason,
     name="agent_session_start_reason",
     create_type=False,
     values_callable=_agent_session_start_reason_values,
-)
-agent_session_title_source_enum = ENUM(
-    AgentSessionTitleSource,
-    name="agent_session_title_source",
-    create_type=False,
-    values_callable=_agent_session_title_source_values,
 )
 agent_session_end_reason_enum = ENUM(
     AgentSessionEndReason,
@@ -130,9 +75,19 @@ agent_session_end_reason_enum = ENUM(
 
 
 class RDBAgentSession(RDBModel):
-    """AgentSession table."""
+    """Shared durable execution state, without public Conversation identity."""
 
     __tablename__ = "agent_sessions"
+
+    FK_LIFECYCLE_ROOT = sa.ForeignKeyConstraint(
+        ["lifecycle_root_session_id"],
+        ["agent_sessions.id"],
+        name="fk_session_lifecycle_root",
+        ondelete="RESTRICT",
+    )
+    UQ_LIFECYCLE_IDENTITY = sa.UniqueConstraint(
+        "id", "agent_id", "status", name="uq_session_lifecycle_identity"
+    )
 
     CK_CURRENT_INFERENCE_STATE = sa.CheckConstraint(
         "(current_model_target_label IS NULL "
@@ -167,17 +122,13 @@ class RDBAgentSession(RDBModel):
         "AND applied_enabled_execution_options = '[]'::jsonb)",
         name="ck_agent_sessions_applied_inference_profile",
     )
-    UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
+    IX_LIFECYCLE_ROOT = sa.Index(
+        "ix_agent_sessions_lifecycle_root_session_id",
+        "lifecycle_root_session_id",
+        postgresql_where=sa.text("lifecycle_root_session_id IS NOT NULL"),
+    )
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
-    IX_SESSION_KIND = sa.Index("ix_agent_sessions_session_kind", "session_kind")
-    IX_AGENT_ACTIVE_LAST_USER_INPUT = sa.Index(
-        "ix_agent_sessions_agent_active_last_user_input",
-        "agent_id",
-        "primary_kind",
-        "last_user_input_at",
-        postgresql_where=sa.text("status = 'active'"),
-    )
     IX_MODEL_INPUT_HEAD_EVENT_ID = sa.Index(
         "ix_agent_sessions_model_input_head_event_id",
         "model_input_head_event_id",
@@ -187,11 +138,6 @@ class RDBAgentSession(RDBModel):
         sa.text("model_file_gc_cursor_event_id ASC NULLS FIRST"),
         "model_input_head_event_id",
         postgresql_where=sa.text("model_input_head_event_id IS NOT NULL"),
-    )
-    IX_PENDING_COMMAND = sa.Index(
-        "ix_agent_sessions_pending_command",
-        "pending_command_created_at",
-        postgresql_where=sa.text("pending_command_id IS NOT NULL"),
     )
     IX_STOP_REQUESTED_AT = sa.Index(
         "ix_agent_sessions_stop_requested_at",
@@ -207,58 +153,9 @@ class RDBAgentSession(RDBModel):
         "ix_agent_sessions_archived_purge_after",
         "purge_after",
         postgresql_where=sa.text(
-            "status = 'archived' AND session_kind = 'root' AND purge_after IS NOT NULL"
+            "status = 'archived' AND lifecycle_root_session_id IS NULL "
+            "AND purge_after IS NOT NULL"
         ),
-    )
-    IX_ACTIVE_AUTO_ARCHIVE = sa.Index(
-        "ix_agent_sessions_active_auto_archive",
-        "last_activity_at",
-        "agent_id",
-        postgresql_where=sa.text(
-            "status = 'active' AND session_kind = 'root' AND pinned = false"
-        ),
-    )
-    UQ_AGENT_ACTIVE_TEAM_PRIMARY = sa.Index(
-        "uq_agent_sessions_agent_active_team_primary",
-        "agent_id",
-        unique=True,
-        postgresql_where=sa.text(
-            "status = 'active' "
-            "AND primary_kind = 'team_primary' "
-            "AND product_mode = 'team'"
-        ),
-    )
-    CK_PRODUCT_MODE_OWNERSHIP = sa.CheckConstraint(
-        "("
-        "session_kind = 'root' "
-        "AND product_mode IS NOT NULL "
-        "AND ("
-        "("
-        "product_mode = 'team' "
-        "AND associated_user_id IS NULL"
-        ") OR ("
-        "product_mode = 'user' "
-        "AND associated_user_id IS NOT NULL "
-        "AND primary_kind IS NULL"
-        ")"
-        ")"
-        ") OR ("
-        "session_kind = 'subagent' "
-        "AND product_mode IS NULL "
-        "AND associated_user_id IS NULL "
-        "AND primary_kind IS NULL"
-        ")",
-        name="ck_agent_sessions_product_mode_ownership",
-    )
-    IX_AGENT_ASSOCIATED_USER_STATUS = sa.Index(
-        "ix_agent_sessions_agent_associated_user_status",
-        "agent_id",
-        "associated_user_id",
-        "status",
-    )
-    IX_ASSOCIATED_USER_ID = sa.Index(
-        "ix_agent_sessions_associated_user_id",
-        "associated_user_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -277,7 +174,18 @@ class RDBAgentSession(RDBModel):
         sa.ForeignKey("agents.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    handle: Mapped[str] = mapped_column(sa.String(120), nullable=False)
+    lifecycle_root_session_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    conversation: Mapped[RDBConversation | None] = relationship(
+        init=False,
+        lazy="selectin",
+        uselist=False,
+        viewonly=True,
+        primaryjoin="RDBAgentSession.id == RDBConversation.session_id",
+        foreign_keys="RDBConversation.session_id",
+    )
     current_model_target_label: Mapped[str | None] = mapped_column(
         sa.String(80),
         nullable=True,
@@ -287,11 +195,11 @@ class RDBAgentSession(RDBModel):
         nullable=True,
     )
     current_model_selection: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB,
+        JSONB(none_as_null=True),
         nullable=True,
     )
     current_model_settings: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB,
+        JSONB(none_as_null=True),
         nullable=True,
     )
     current_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
@@ -332,92 +240,20 @@ class RDBAgentSession(RDBModel):
         TimeZoneDateTime,
         nullable=True,
     )
-    session_kind: Mapped[AgentSessionKind] = mapped_column(
-        agent_session_kind_enum,
-        nullable=False,
-        default=AgentSessionKind.ROOT,
-    )
     status: Mapped[AgentSessionStatus] = mapped_column(
         agent_session_status_enum,
         nullable=False,
         default=AgentSessionStatus.ACTIVE,
-    )
-    primary_kind: Mapped[AgentSessionPrimaryKind | None] = mapped_column(
-        agent_session_primary_kind_enum,
-        nullable=True,
-        default=None,
-    )
-    product_mode: Mapped[AgentSessionProductMode | None] = mapped_column(
-        agent_session_product_mode_enum,
-        nullable=True,
-        default=None,
-    )
-    associated_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
     )
     start_reason: Mapped[AgentSessionStartReason] = mapped_column(
         agent_session_start_reason_enum,
         nullable=False,
         default=AgentSessionStartReason.INITIAL,
     )
-    title: Mapped[str | None] = mapped_column(
-        sa.String(200),
-        nullable=True,
-        default=None,
-    )
-    title_source: Mapped[AgentSessionTitleSource | None] = mapped_column(
-        agent_session_title_source_enum,
-        nullable=True,
-        default=None,
-    )
-    title_generated_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    title_generation_event_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        nullable=True,
-        default=None,
-    )
-    primary_model_reservation: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    primary_model_reservation_generation: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        init=False,
-        nullable=False,
-        server_default=sa.text("0"),
-    )
-    title_model_operation_state: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    last_user_input_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        server_default=sa.func.now(),
-        nullable=False,
-    )
     last_activity_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
         server_default=sa.func.now(),
-        nullable=False,
-    )
-    pinned: Mapped[bool] = mapped_column(
-        sa.Boolean,
-        init=False,
-        default=False,
-        server_default=sa.false(),
         nullable=False,
     )
 
@@ -454,49 +290,11 @@ class RDBAgentSession(RDBModel):
         server_default=sa.func.now(),
         nullable=False,
     )
-    pending_idle_continuation_run_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
-        init=False,
-        nullable=True,
-        default=None,
-    )
     owner_generation: Mapped[int] = mapped_column(
         sa.BigInteger,
         init=False,
         server_default="0",
         nullable=False,
-    )
-    pending_command_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_name: Mapped[str | None] = mapped_column(
-        sa.String(120),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_payload: Mapped[dict[str, object] | None] = mapped_column(
-        JSONB,
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_requester_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="SET NULL"),
-        init=False,
-        nullable=True,
-        default=None,
-    )
-    pending_command_created_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=True,
-        default=None,
     )
     stop_requested_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
@@ -572,24 +370,18 @@ class RDBAgentSession(RDBModel):
     )
 
     __table_args__ = (
+        FK_LIFECYCLE_ROOT,
+        UQ_LIFECYCLE_IDENTITY,
+        IX_LIFECYCLE_ROOT,
         CK_CURRENT_INFERENCE_STATE,
         CK_CURRENT_CONTEXT_WINDOW,
         CK_CURRENT_COMPACTION_THRESHOLD,
         CK_APPLIED_INFERENCE_PROFILE,
-        CK_PRODUCT_MODE_OWNERSHIP,
-        UQ_HANDLE,
         IX_WORKSPACE_ID,
         IX_AGENT_ID,
-        IX_SESSION_KIND,
-        IX_AGENT_ACTIVE_LAST_USER_INPUT,
         IX_MODEL_INPUT_HEAD_EVENT_ID,
         IX_MODEL_FILE_GC_CURSOR,
-        IX_PENDING_COMMAND,
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,
         IX_ARCHIVED_PURGE_AFTER,
-        IX_ACTIVE_AUTO_ARCHIVE,
-        UQ_AGENT_ACTIVE_TEAM_PRIMARY,
-        IX_AGENT_ASSOCIATED_USER_STATUS,
-        IX_ASSOCIATED_USER_ID,
     )

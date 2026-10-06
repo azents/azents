@@ -10,6 +10,7 @@ from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.repos.idle_continuation as idle_continuation_module
+from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
@@ -48,6 +49,11 @@ async def test_failed_boundary_consume_rolls_back_new_admissions(
             staged.clear()
 
     agent_session_repository = AsyncMock(spec=AgentSessionRepository)
+    agent_session_repository.get_by_id.return_value = AgentSession.model_construct(
+        id="session-1",
+        pending_idle_continuation_run_id="run-1",
+        pending_command_id=None,
+    )
     monkeypatch.setattr(
         idle_continuation_module,
         "fence_owned_session_mutation",

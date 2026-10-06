@@ -24,6 +24,7 @@ from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.core.vfs import VFS_FILE_MAX_BYTES
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationRevision,
@@ -147,7 +148,7 @@ class HistoricalMemorySettingsRepository:
         if normalized_query:
             statement = statement.where(
                 sa.or_(
-                    RDBAgentSession.title.icontains(
+                    RDBConversation.title.icontains(
                         normalized_query,
                         autoescape=True,
                     ),
@@ -265,8 +266,8 @@ class HistoricalMemorySettingsRepository:
         return (
             sa.select(
                 RDBHistoricalMemorySource.source_session_id,
-                RDBAgentSession.product_mode,
-                RDBAgentSession.title,
+                RDBConversation.product_mode,
+                RDBConversation.title,
                 RDBHistoricalMemorySource.completed_source_activity_at,
                 RDBHistoricalMemorySource.prepared_at,
                 RDBHistoricalMemorySource.summary,
@@ -275,10 +276,11 @@ class HistoricalMemorySettingsRepository:
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.workspace_id == workspace_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBConversation.session_kind == AgentSessionKind.ROOT,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 membership,
                 RDBHistoricalMemorySource.completed_source_activity_at.is_not(None),
@@ -286,7 +288,7 @@ class HistoricalMemorySettingsRepository:
                 RDBHistoricalMemorySource.summary.is_not(None),
                 RDBHistoricalMemorySource.summary != "",
                 (
-                    sa.func.octet_length(sa.func.coalesce(RDBAgentSession.title, ""))
+                    sa.func.octet_length(sa.func.coalesce(RDBConversation.title, ""))
                     + sa.func.octet_length(RDBHistoricalMemorySource.summary)
                 )
                 <= VFS_FILE_MAX_BYTES,
@@ -301,10 +303,10 @@ class HistoricalMemorySettingsRepository:
     ) -> sa.ColumnElement[bool]:
         """Return the exact Team or current-User source predicate."""
         if scope is HistoricalMemorySettingsScope.TEAM:
-            return RDBAgentSession.product_mode == AgentSessionProductMode.TEAM
+            return RDBConversation.product_mode == AgentSessionProductMode.TEAM
         return sa.and_(
-            RDBAgentSession.product_mode == AgentSessionProductMode.USER,
-            RDBAgentSession.associated_user_id == user_id,
+            RDBConversation.product_mode == AgentSessionProductMode.USER,
+            RDBConversation.associated_user_id == user_id,
         )
 
     @staticmethod

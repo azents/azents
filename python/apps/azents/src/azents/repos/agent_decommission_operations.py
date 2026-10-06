@@ -8,7 +8,6 @@ from typing import Annotated, Protocol
 from azcommon.uuid import uuid7
 from fastapi import Depends
 
-from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
@@ -16,7 +15,10 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.retirement_data import RetirementBlob, RetirementRoot, RootRetirement
-from azents.core.session_lifecycle import SessionLifecycleTransitionContext
+from azents.core.session_lifecycle import (
+    SessionArchiveMutation,
+    SessionLifecycleTransitionContext,
+)
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -331,9 +333,21 @@ class RetirementLifecycleRepository(Protocol):
     async def archive(
         self,
         session: WriteSession,
-        command: ChatArchiveMutation,
+        command: SessionArchiveMutation,
     ) -> tuple[ProviderEffectPlan, ...]:
         """Apply ordered participant and root mutations in the same transaction."""
+        ...
+
+    async def accelerate_account_purge(
+        self,
+        session: WriteSession,
+        *,
+        root_session_id: str,
+        session_ids: Sequence[str],
+        archived_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> None:
+        """Retain existing immediate account deletion through common lifecycle."""
         ...
 
 
@@ -643,30 +657,17 @@ class AgentDecommissionOperationsRepository:
                         "retention"
                     )
                 archived_at = datetime.datetime.now(datetime.UTC)
-                purge_after = archived_at + datetime.timedelta(
-                    days=settings.archived_session_retention_days
-                )
 
                 archive_cleanup_plans = await self.lifecycle_repository.archive(
                     session,
-                    ChatArchiveMutation(
+                    SessionArchiveMutation(
                         context=SessionLifecycleTransitionContext(
                             transition_id=f"{job.id}:{root_session_id}:decommission",
                             root_session_id=root_session_id,
                             subtree_session_ids=tuple(session_ids),
                         ),
                         archived_at=archived_at,
-                        purge_after=purge_after,
-                        policy_revision=settings.revision,
-                        retention_days=settings.archived_session_retention_days,
                     ),
-                )
-                await self.retention_repository.schedule_purge_job(
-                    session,
-                    root_session_id=root_session_id,
-                    eligible_at=purge_after,
-                    policy_revision=settings.revision,
-                    now=archived_at,
                 )
                 owned = await self.decommission_repository.set_status(
                     session,

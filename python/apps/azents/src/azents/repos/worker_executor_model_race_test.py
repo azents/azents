@@ -279,6 +279,7 @@ async def test_quota_guard_and_takeover_serialize_real_health_writes_on_distinct
                     original.agent_run_repository,
                     original.mailbox_item_repository,
                     original.terminal_finalization_repository,
+                    original.execution_record_repository,
                     original.fault,
                     waiter_pids,
                     entered,

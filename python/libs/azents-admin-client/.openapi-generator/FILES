@@ -17,6 +17,8 @@ azentsadminclient/api_client.py
 azentsadminclient/api_response.py
 azentsadminclient/configuration.py
 azentsadminclient/docs/AdminWorkspaceRuntimeProfileDetailResponse.md
+azentsadminclient/docs/AgentSessionRunState.md
+azentsadminclient/docs/AgentSessionStatus.md
 azentsadminclient/docs/ArchiveRetentionApplicationResponse.md
 azentsadminclient/docs/ArchiveRetentionPreviewRequest.md
 azentsadminclient/docs/ArchiveRetentionPreviewResponse.md
@@ -35,6 +37,7 @@ azentsadminclient/docs/DockerContainerResources.md
 azentsadminclient/docs/EmailVerificationListResponse.md
 azentsadminclient/docs/EmailVerificationResponse.md
 azentsadminclient/docs/ErrorLevel.md
+azentsadminclient/docs/EventKind.md
 azentsadminclient/docs/ExternalAccountOAuthDetailResponse.md
 azentsadminclient/docs/ExternalAccountOAuthFieldResponse.md
 azentsadminclient/docs/ExternalAccountOAuthHealthResponse.md
@@ -124,6 +127,10 @@ azentsadminclient/docs/RuntimeRecreationOperationResponse.md
 azentsadminclient/docs/RuntimeRecreationOperationStatus.md
 azentsadminclient/docs/RuntimeRecreationTargetKind.md
 azentsadminclient/docs/SentryDiagnostics.md
+azentsadminclient/docs/SessionDiagnosticEvent.md
+azentsadminclient/docs/SessionDiagnosticEventPage.md
+azentsadminclient/docs/SessionDiagnosticFile.md
+azentsadminclient/docs/SessionDiagnosticMetadata.md
 azentsadminclient/docs/SignupTokenDeliveryMethod.md
 azentsadminclient/docs/SignupTokenListResponse.md
 azentsadminclient/docs/SignupTokenResponse.md
@@ -189,6 +196,8 @@ azentsadminclient/docs/WorkspaceV1Api.md
 azentsadminclient/exceptions.py
 azentsadminclient/models/__init__.py
 azentsadminclient/models/admin_workspace_runtime_profile_detail_response.py
+azentsadminclient/models/agent_session_run_state.py
+azentsadminclient/models/agent_session_status.py
 azentsadminclient/models/archive_retention_application_response.py
 azentsadminclient/models/archive_retention_preview_request.py
 azentsadminclient/models/archive_retention_preview_response.py
@@ -205,6 +214,7 @@ azentsadminclient/models/docker_container_resources.py
 azentsadminclient/models/email_verification_list_response.py
 azentsadminclient/models/email_verification_response.py
 azentsadminclient/models/error_level.py
+azentsadminclient/models/event_kind.py
 azentsadminclient/models/external_account_o_auth_detail_response.py
 azentsadminclient/models/external_account_o_auth_field_response.py
 azentsadminclient/models/external_account_o_auth_health_response.py
@@ -290,6 +300,10 @@ azentsadminclient/models/runtime_recreation_operation_response.py
 azentsadminclient/models/runtime_recreation_operation_status.py
 azentsadminclient/models/runtime_recreation_target_kind.py
 azentsadminclient/models/sentry_diagnostics.py
+azentsadminclient/models/session_diagnostic_event.py
+azentsadminclient/models/session_diagnostic_event_page.py
+azentsadminclient/models/session_diagnostic_file.py
+azentsadminclient/models/session_diagnostic_metadata.py
 azentsadminclient/models/signup_token_delivery_method.py
 azentsadminclient/models/signup_token_list_response.py
 azentsadminclient/models/signup_token_response.py
@@ -348,6 +362,8 @@ azentsadminclient/models/workspace_user_update_request.py
 azentsadminclient/rest.py
 azentsadminclient/test/__init__.py
 azentsadminclient/test/test_admin_workspace_runtime_profile_detail_response.py
+azentsadminclient/test/test_agent_session_run_state.py
+azentsadminclient/test/test_agent_session_status.py
 azentsadminclient/test/test_archive_retention_application_response.py
 azentsadminclient/test/test_archive_retention_preview_request.py
 azentsadminclient/test/test_archive_retention_preview_response.py
@@ -366,6 +382,7 @@ azentsadminclient/test/test_docker_container_resources.py
 azentsadminclient/test/test_email_verification_list_response.py
 azentsadminclient/test/test_email_verification_response.py
 azentsadminclient/test/test_error_level.py
+azentsadminclient/test/test_event_kind.py
 azentsadminclient/test/test_external_account_o_auth_detail_response.py
 azentsadminclient/test/test_external_account_o_auth_field_response.py
 azentsadminclient/test/test_external_account_o_auth_health_response.py
@@ -455,6 +472,10 @@ azentsadminclient/test/test_runtime_recreation_operation_response.py
 azentsadminclient/test/test_runtime_recreation_operation_status.py
 azentsadminclient/test/test_runtime_recreation_target_kind.py
 azentsadminclient/test/test_sentry_diagnostics.py
+azentsadminclient/test/test_session_diagnostic_event.py
+azentsadminclient/test/test_session_diagnostic_event_page.py
+azentsadminclient/test/test_session_diagnostic_file.py
+azentsadminclient/test/test_session_diagnostic_metadata.py
 azentsadminclient/test/test_signup_token_delivery_method.py
 azentsadminclient/test/test_signup_token_list_response.py
 azentsadminclient/test/test_signup_token_response.py

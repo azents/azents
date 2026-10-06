@@ -10,7 +10,6 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionStopSignal
-from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
@@ -18,6 +17,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.session_lifecycle import (
+    SessionArchiveMutation,
     SessionLifecycleParticipantDefinition,
     SessionLifecyclePurgePolicy,
     SessionLifecycleTransitionContext,
@@ -827,8 +827,15 @@ class _RetirementLifecycleDouble:
         return self.allows_active_runs
 
     async def archive(
-        self, session: WriteSession, command: ChatArchiveMutation
+        self, session: WriteSession, command: SessionArchiveMutation
     ) -> tuple[ProviderEffectPlan, ...]:
+        settings = await _RetentionRepositoryDouble().get_settings(session)
+        days = settings.archived_session_retention_days
+        purge_after = (
+            None
+            if days is None
+            else command.archived_at + datetime.timedelta(days=days)
+        )
         result = await self.external.archive_participant(
             session, self.participant, command.context
         )
@@ -837,11 +844,22 @@ class _RetirementLifecycleDouble:
             root_session_id=command.context.root_session_id,
             session_ids=command.context.subtree_session_ids,
             archived_at=command.archived_at,
-            purge_after=command.purge_after,
-            policy_revision=command.policy_revision,
-            retention_days=command.retention_days,
+            purge_after=purge_after,
+            policy_revision=settings.revision,
+            retention_days=days,
         )
         return result.cleanup_plans
+
+    async def accelerate_account_purge(
+        self,
+        session: WriteSession,
+        *,
+        root_session_id: str,
+        session_ids: Sequence[str],
+        archived_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> None:
+        raise AssertionError("Agent decommission must not accelerate account purge.")
 
 
 class _ExternalCleanupRepositoryDouble:

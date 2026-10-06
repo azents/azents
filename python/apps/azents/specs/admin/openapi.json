@@ -760,6 +760,247 @@
         }
       }
     },
+    "/debug/v1/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Get Session Diagnostics",
+        "description": "Inspect retained common metadata under authenticated operational authority.",
+        "operationId": "debug_v1_get_session_diagnostics",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDiagnosticMetadata"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/v1/sessions/{session_id}/events": {
+      "get": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Get Session Diagnostic Events",
+        "description": "Page safe canonical audit records without exposing native model artifacts.",
+        "operationId": "debug_v1_get_session_diagnostic_events",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDiagnosticEventPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/v1/sessions/{session_id}/file": {
+      "get": {
+        "tags": [
+          "Debug v1"
+        ],
+        "summary": "Get Session Diagnostic File",
+        "description": "Read retained current file content without file versions or restoration.",
+        "operationId": "debug_v1_get_session_diagnostic_file",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 32,
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "title": "Path"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 65536,
+              "minimum": 1,
+              "default": 10000,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDiagnosticFile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/invitation/v1/workspaces/{handle}/invitations": {
       "get": {
         "tags": [
@@ -4639,6 +4880,24 @@
         "title": "AdminWorkspaceRuntimeProfileDetailResponse",
         "description": "System-Admin read-only Workspace Runtime Profile detail."
       },
+      "AgentSessionRunState": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "running"
+        ],
+        "title": "AgentSessionRunState",
+        "description": "Engine execution status of AgentSession."
+      },
+      "AgentSessionStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "archived"
+        ],
+        "title": "AgentSessionStatus",
+        "description": "AgentSession lifecycle status."
+      },
       "ArchiveRetentionApplicationResponse": {
         "properties": {
           "id": {
@@ -5297,6 +5556,39 @@
         ],
         "title": "ErrorLevel",
         "description": "Test error level."
+      },
+      "EventKind": {
+        "type": "string",
+        "enum": [
+          "user_message",
+          "goal_continuation",
+          "external_channel_continuation",
+          "scheduled_task_trigger",
+          "scheduled_task_continuation",
+          "scheduled_task_result",
+          "goal_updated",
+          "action_message",
+          "agent_message",
+          "external_channel_message",
+          "action_execution_result",
+          "skill_loaded",
+          "goal_briefing",
+          "assistant_message",
+          "reasoning",
+          "client_tool_call",
+          "client_tool_result",
+          "provider_tool_call",
+          "turn_marker",
+          "run_marker",
+          "interrupted",
+          "compaction_marker",
+          "compaction_summary",
+          "system_reminder",
+          "system_error",
+          "unknown_adapter_output"
+        ],
+        "title": "EventKind",
+        "description": "Event transcript event kind."
       },
       "ExternalAccountOAuthDetailResponse": {
         "properties": {
@@ -8595,6 +8887,282 @@
         ],
         "title": "SentryDiagnostics",
         "description": "Sentry SDK diagnostics."
+      },
+      "SessionDiagnosticEvent": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EventKind"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "reverted": {
+            "type": "boolean",
+            "title": "Reverted"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Name"
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Call Id"
+          },
+          "tool_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Status"
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments"
+          },
+          "arguments_omitted": {
+            "type": "boolean",
+            "title": "Arguments Omitted"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "kind",
+          "created_at",
+          "reverted",
+          "text",
+          "tool_name",
+          "call_id",
+          "tool_status",
+          "arguments",
+          "arguments_omitted",
+          "truncated"
+        ],
+        "title": "SessionDiagnosticEvent",
+        "description": "Safe canonical event projection, including retained reverted records."
+      },
+      "SessionDiagnosticEventPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionDiagnosticEvent"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SessionDiagnosticEventPage",
+        "description": "Forward cursor page of canonical diagnostic event projections."
+      },
+      "SessionDiagnosticFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "writable": {
+            "type": "boolean",
+            "title": "Writable"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "writable",
+          "content",
+          "next_offset"
+        ],
+        "title": "SessionDiagnosticFile",
+        "description": "Bounded current durable file content; not file history or restoration."
+      },
+      "SessionDiagnosticMetadata": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "lifecycle_root_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lifecycle Root Session Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentSessionStatus"
+          },
+          "run_state": {
+            "$ref": "#/components/schemas/AgentSessionRunState"
+          },
+          "owner_generation": {
+            "type": "integer",
+            "title": "Owner Generation"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "purge_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purge After"
+          },
+          "archive_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archive Retention Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "agent_id",
+          "workspace_id",
+          "lifecycle_root_session_id",
+          "status",
+          "run_state",
+          "owner_generation",
+          "created_at",
+          "started_at",
+          "ended_at",
+          "archived_at",
+          "purge_after",
+          "archive_retention_days"
+        ],
+        "title": "SessionDiagnosticMetadata",
+        "description": "Common retained execution metadata; no public Conversation identity."
       },
       "SignupTokenDeliveryMethod": {
         "type": "string",

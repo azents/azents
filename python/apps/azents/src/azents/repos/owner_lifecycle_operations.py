@@ -9,7 +9,6 @@ import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from fastapi import Depends
 
-from azents.core.chat_operation_data import ChatArchiveMutation
 from azents.core.enums import (
     AgentSessionProductMode,
     AgentSessionRunState,
@@ -18,15 +17,17 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_provider_effect import ProviderEffectPlan
 from azents.core.retirement_data import RetirementRoot, RootRetirement
-from azents.core.session_lifecycle import SessionLifecycleTransitionContext
+from azents.core.session_lifecycle import (
+    SessionArchiveMutation,
+    SessionLifecycleTransitionContext,
+)
 from azents.rdb.deps import get_read_only_session_manager, get_session_manager
-from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_decommission_operations import RetirementLifecycleRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -164,20 +165,6 @@ class OwnerLifecycleAgentSessionRepositoryProtocol(Protocol):
         """Record a best-effort stop request for one Session."""
         ...
 
-    async def archive_tree(
-        self,
-        session: WriteSession,
-        *,
-        root_session_id: str,
-        session_ids: Sequence[str],
-        archived_at: datetime.datetime,
-        purge_after: datetime.datetime | None,
-        policy_revision: int,
-        retention_days: int | None,
-    ) -> None:
-        """Archive one locked root tree."""
-        ...
-
 
 class OwnerLifecycleRunRepositoryProtocol(Protocol):
     """Execution-state query consumed before root retirement."""
@@ -189,43 +176,6 @@ class OwnerLifecycleRunRepositoryProtocol(Protocol):
         session_ids: Sequence[str],
     ) -> bool:
         """Report whether any Session still has active execution."""
-        ...
-
-
-class OwnerLifecycleRetentionSettings(Protocol):
-    """Read-only retention settings consumed while archiving a root tree."""
-
-    @property
-    def archived_session_retention_days(self) -> int | None:
-        """Return the archive retention policy."""
-        ...
-
-    @property
-    def revision(self) -> int:
-        """Return the policy revision."""
-        ...
-
-
-class OwnerLifecycleRetentionRepositoryProtocol(Protocol):
-    """Retention settings and purge scheduling consumed by owner lifecycle."""
-
-    async def get_settings(
-        self,
-        session: ReadSession,
-    ) -> OwnerLifecycleRetentionSettings:
-        """Read system retention settings."""
-        ...
-
-    async def schedule_purge_job(
-        self,
-        session: WriteSession,
-        *,
-        root_session_id: str,
-        eligible_at: datetime.datetime,
-        policy_revision: int,
-        now: datetime.datetime,
-    ) -> None:
-        """Schedule archived-session purge work."""
         ...
 
 
@@ -321,10 +271,6 @@ class OwnerLifecycleOperationsRepository:
     agent_run_repository: Annotated[
         OwnerLifecycleRunRepositoryProtocol, Depends(AgentRunRepository)
     ]
-    retention_repository: Annotated[
-        OwnerLifecycleRetentionRepositoryProtocol,
-        Depends(ArchivedSessionRetentionRepository),
-    ]
     memory_repository: Annotated[
         OwnerLifecycleMemoryRepositoryProtocol, Depends(MemoryRepository)
     ]
@@ -402,7 +348,7 @@ class OwnerLifecycleOperationsRepository:
             return bool(
                 await session.read_session.scalar(
                     sa.select(
-                        sa.exists().where(RDBAgentSession.associated_user_id == user_id)
+                        sa.exists().where(RDBConversation.associated_user_id == user_id)
                     )
                 )
             )
@@ -511,21 +457,11 @@ class OwnerLifecycleOperationsRepository:
                 ):
                     # Account purge must not wait on prior retention schedules.
                     archived_at = datetime.datetime.now(datetime.UTC)
-                    settings = await self.retention_repository.get_settings(session)
-                    await self.agent_session_repository.archive_tree(
+                    await self.lifecycle_repository.accelerate_account_purge(
                         session,
                         root_session_id=root_session_id,
                         session_ids=[item.id for item in tree],
                         archived_at=tree[0].archived_at or archived_at,
-                        purge_after=archived_at,
-                        policy_revision=settings.revision,
-                        retention_days=0,
-                    )
-                    await self.retention_repository.schedule_purge_job(
-                        session,
-                        root_session_id=root_session_id,
-                        eligible_at=archived_at,
-                        policy_revision=settings.revision,
                         now=archived_at,
                     )
                     owned = await self.owner_lifecycle_repository.set_status(
@@ -578,40 +514,24 @@ class OwnerLifecycleOperationsRepository:
                 stop_session_ids = session_ids
 
             if not active or preserve_scheduled:
-                settings = await self.retention_repository.get_settings(session)
                 archived_at = datetime.datetime.now(datetime.UTC)
-                if immediate_purge:
-                    purge_after = archived_at
-                    retention_days = 0
-                elif settings.archived_session_retention_days is None:
-                    purge_after = None
-                    retention_days = None
-                else:
-                    purge_after = archived_at + datetime.timedelta(
-                        days=settings.archived_session_retention_days
-                    )
-                    retention_days = settings.archived_session_retention_days
-
                 archive_cleanup_plans = await self.lifecycle_repository.archive(
                     session,
-                    ChatArchiveMutation(
+                    SessionArchiveMutation(
                         context=SessionLifecycleTransitionContext(
                             transition_id=f"{job.id}:{root_session_id}:owner-lifecycle",
                             root_session_id=root_session_id,
                             subtree_session_ids=tuple(session_ids),
                         ),
                         archived_at=archived_at,
-                        purge_after=purge_after,
-                        policy_revision=settings.revision,
-                        retention_days=retention_days,
                     ),
                 )
-                if purge_after is not None:
-                    await self.retention_repository.schedule_purge_job(
+                if immediate_purge:
+                    await self.lifecycle_repository.accelerate_account_purge(
                         session,
                         root_session_id=root_session_id,
-                        eligible_at=purge_after,
-                        policy_revision=settings.revision,
+                        session_ids=session_ids,
+                        archived_at=archived_at,
                         now=archived_at,
                     )
                 owned = await self.owner_lifecycle_repository.set_status(

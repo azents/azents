@@ -168,17 +168,16 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
             sa.text(
                 """
                 INSERT INTO agent_sessions (
-                    id, workspace_id, agent_id, handle, status, start_reason,
-                    session_kind, product_mode
+                    id, workspace_id, agent_id, status, start_reason
                 )
                 VALUES
                     (
                         :owner_session_id, :workspace_id, :owner_agent_id,
-                        :owner_session_id, 'active', 'external_channel', 'root', 'team'
+                        'active', 'external_channel'
                     ),
                     (
                         :other_session_id, :workspace_id, :other_agent_id,
-                        :other_session_id, 'active', 'external_channel', 'root', 'team'
+                        'active', 'external_channel'
                     )
                 """
             ),
@@ -186,6 +185,31 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                 "owner_session_id": seeded.owner_session_id,
                 "other_session_id": seeded.other_session_id,
                 "workspace_id": seeded.workspace_id,
+                "owner_agent_id": seeded.owner_agent_id,
+                "other_agent_id": seeded.other_agent_id,
+            },
+        )
+        await connection.execute(
+            sa.text(
+                """
+                INSERT INTO conversations (
+                    session_id, agent_id, session_status, handle,
+                    session_kind, product_mode
+                )
+                VALUES
+                    (
+                        :owner_session_id, :owner_agent_id, 'active',
+                        :owner_session_id, 'root', 'team'
+                    ),
+                    (
+                        :other_session_id, :other_agent_id, 'active',
+                        :other_session_id, 'root', 'team'
+                    )
+                """
+            ),
+            {
+                "owner_session_id": seeded.owner_session_id,
+                "other_session_id": seeded.other_session_id,
                 "owner_agent_id": seeded.owner_agent_id,
                 "other_agent_id": seeded.other_agent_id,
             },

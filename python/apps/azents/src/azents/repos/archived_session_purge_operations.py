@@ -29,7 +29,6 @@ from azents.rdb.deps import get_read_only_session_manager, get_session_manager
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.archived_session_retention.data import ArchivedSessionPurgeJob
 from azents.repos.artifact import ArtifactRepository
@@ -38,6 +37,7 @@ from azents.repos.external_channel_lifecycle_participant import (
     ExternalChannelLifecycleParticipantRepository,
 )
 from azents.repos.hierarchy_contention import retry_hierarchy_operation
+from azents.repos.lifecycle_target import LifecycleTargetRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.scheduled_task_lifecycle_participant import (
     ScheduledTaskLifecycleParticipantRepository,
@@ -63,8 +63,8 @@ class ArchivedSessionPurgeOperations:
         ArchivedSessionRetentionRepository,
         Depends(ArchivedSessionRetentionRepository),
     ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
+    lifecycle_target_repository: Annotated[
+        LifecycleTargetRepository, Depends(LifecycleTargetRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
     model_file_repository: Annotated[ModelFileRepository, Depends(ModelFileRepository)]
@@ -130,7 +130,7 @@ class ArchivedSessionPurgeOperations:
     ) -> PurgeRootPreparation:
         """Fence root ownership and record stop requests before broker publication."""
         async with self.session_manager() as session:
-            sessions = await self.agent_session_repository.lock_root_tree_sessions(
+            sessions = await self.lifecycle_target_repository.lock_target_sessions(
                 session,
                 root_session_id=job.root_session_id,
             )
@@ -165,7 +165,7 @@ class ArchivedSessionPurgeOperations:
                 raise RuntimeError("Purge root session is no longer archived")
             session_ids = [item.id for item in sessions]
             fenced_count = (
-                await self.agent_session_repository.fence_purge_owner_generations(
+                await self.lifecycle_target_repository.fence_purge_owner_generations(
                     session,
                     session_ids=session_ids,
                 )
@@ -191,7 +191,7 @@ class ArchivedSessionPurgeOperations:
             )
             if not preserve_scheduled:
                 for session_id in session_ids:
-                    await self.agent_session_repository.request_stop(
+                    await self.lifecycle_target_repository.request_stop(
                         session,
                         session_id=session_id,
                         stop_request_id=uuid7().hex,
@@ -283,7 +283,7 @@ class ArchivedSessionPurgeOperations:
         """Verify participants and delete root metadata under current fences."""
         async with self.session_manager() as session:
             final_sessions = (
-                await self.agent_session_repository.lock_root_tree_sessions(
+                await self.lifecycle_target_repository.lock_target_sessions(
                     session,
                     root_session_id=job.root_session_id,
                 )

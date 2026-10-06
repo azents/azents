@@ -72,6 +72,7 @@ from azents.repos.model_candidate_health import ModelCandidateHealthRepository
 from azents.repos.model_operation_completion import (
     ModelOperationCompletionRepository,
 )
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.repos.workspace import WorkspaceRepository
 from azents.testing.model_selection import (
@@ -386,7 +387,8 @@ class TestEventExecutionRepositories:
         assert stored_session is not None
         await rdb_session.write_session.refresh(stored_session)
 
-        assert stored_session.last_user_input_at == appended.created_at
+        assert stored_session.conversation is not None
+        assert stored_session.conversation.last_user_input_at == appended.created_at
         assert stored_session.last_activity_at == appended.created_at
 
     async def test_last_user_input_at_never_moves_backward(
@@ -427,7 +429,8 @@ class TestEventExecutionRepositories:
         assert stored_session is not None
         await rdb_session.write_session.refresh(stored_session)
 
-        assert stored_session.last_user_input_at == newer
+        assert stored_session.conversation is not None
+        assert stored_session.conversation.last_user_input_at == newer
 
     async def test_mailbox_batch_advances_session_projections_monotonically(
         self,
@@ -491,7 +494,8 @@ class TestEventExecutionRepositories:
         assert stored_session is not None
         await rdb_session.write_session.refresh(stored_session)
 
-        assert stored_session.last_user_input_at == user_event.created_at
+        assert stored_session.conversation is not None
+        assert stored_session.conversation.last_user_input_at == user_event.created_at
         assert stored_session.last_activity_at == action_event.created_at
 
     async def test_action_message_updates_last_activity_at(
@@ -927,7 +931,7 @@ class TestEventExecutionRepositories:
                     owner=None,
                     session_manager=session_manager,
                     transcript_repository=transcript_repo,
-                    agent_session_repository=session_repo,
+                    agent_session_repository=SessionExecutionRecordRepository(),
                     model_operation_completion_repository=(
                         ModelOperationCompletionRepository(
                             agent_session_repository=session_repo,
@@ -1679,7 +1683,11 @@ class TestEventExecutionRepositories:
         )
         assert rdb_agent_session is not None
         await rdb_session.write_session.refresh(rdb_agent_session)
-        assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
+        assert rdb_agent_session.conversation is not None
+        assert (
+            rdb_agent_session.conversation.pending_idle_continuation_run_id
+            == completed.id
+        )
 
         pending = await repo.create_pending(
             rdb_session,
@@ -1697,7 +1705,8 @@ class TestEventExecutionRepositories:
         )
 
         await rdb_session.write_session.refresh(rdb_agent_session)
-        assert rdb_agent_session.pending_idle_continuation_run_id is None
+        assert rdb_agent_session.conversation is not None
+        assert rdb_agent_session.conversation.pending_idle_continuation_run_id is None
 
     async def test_noncompleted_run_does_not_record_pending_idle_continuation(
         self,
@@ -1739,7 +1748,8 @@ class TestEventExecutionRepositories:
             RDBAgentSession, agent_session.id
         )
         assert rdb_agent_session is not None
-        assert rdb_agent_session.pending_idle_continuation_run_id is None
+        assert rdb_agent_session.conversation is not None
+        assert rdb_agent_session.conversation.pending_idle_continuation_run_id is None
 
     async def test_archived_idle_boundary_requires_scheduled_allowance(
         self,
@@ -1798,7 +1808,11 @@ class TestEventExecutionRepositories:
         await rdb_session.write_session.refresh(rdb_agent_session)
         assert consumed is False
         assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
-        assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
+        assert rdb_agent_session.conversation is not None
+        assert (
+            rdb_agent_session.conversation.pending_idle_continuation_run_id
+            == completed.id
+        )
 
         consumed = await session_repository.consume_pending_idle_continuation(
             rdb_session,
@@ -1812,7 +1826,8 @@ class TestEventExecutionRepositories:
         assert consumed is True
         assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
         assert rdb_agent_session.run_state is AgentSessionRunState.RUNNING
-        assert rdb_agent_session.pending_idle_continuation_run_id is None
+        assert rdb_agent_session.conversation is not None
+        assert rdb_agent_session.conversation.pending_idle_continuation_run_id is None
 
     async def test_agent_run_retry_state_updates_and_clears_on_terminal(
         self,

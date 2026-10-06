@@ -35,6 +35,7 @@ _EXPECTED_HIERARCHY_OWNERS = {
     },
     "failed_run_finalization_operation.py": {"finalize"},
     "terminal_finalization.py": {"finalize_run"},
+    "session_archive_operations.py": {"archive"},
     "subagent_terminal_result.py": {"deliver_one"},
 }
 
@@ -56,7 +57,7 @@ def test_hierarchy_retry_is_limited_to_complete_owning_operation_closure() -> No
                     node.name
                 )
     assert observed == _EXPECTED_HIERARCHY_OWNERS
-    assert sum(len(entries) for entries in observed.values()) == 25
+    assert sum(len(entries) for entries in observed.values()) == 26
 
 
 def test_inventoried_nonwaiting_acquisition_surfaces_are_removed() -> None:

@@ -5,6 +5,7 @@ import sqlalchemy as sa
 from azents.core.enums import AgentSessionProductMode, AgentSessionStatus
 from azents.core.historical_memory_consolidation import ConsolidationWorkKind
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.historical_memory_consolidation.enrollment import (
@@ -72,10 +73,11 @@ async def membership_work_in_session(
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(
                 RDBAgentSession.workspace_id == workspace_id,
-                RDBAgentSession.associated_user_id == user_id,
-                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
+                RDBConversation.associated_user_id == user_id,
+                RDBConversation.product_mode == AgentSessionProductMode.USER,
                 RDBHistoricalMemorySource.prepared_at.is_not(None),
             )
             .order_by(RDBHistoricalMemorySource.source_session_id)
@@ -114,6 +116,7 @@ async def agent_memory_availability_in_session(
                 RDBAgentSession,
                 RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
             )
+            .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
             .where(RDBAgentSession.agent_id == agent_id)
             .order_by(RDBHistoricalMemorySource.source_session_id)
             .limit(50)

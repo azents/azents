@@ -5,9 +5,9 @@ import datetime
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import lazyload
 
 from azents.core.enums import (
-    AgentSessionKind,
     AgentSessionStatus,
     ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
@@ -176,7 +176,7 @@ class ArchivedSessionRetentionRepository:
             sa.select(RDBAgentSession.id).where(
                 RDBAgentSession.id == RDBArchivedSessionPurgeJob.root_session_id,
                 RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.lifecycle_root_session_id.is_(None),
                 RDBAgentSession.purge_after.is_not(None),
                 RDBAgentSession.purge_after == RDBArchivedSessionPurgeJob.eligible_at,
                 RDBAgentSession.archive_policy_revision
@@ -256,7 +256,7 @@ class ArchivedSessionRetentionRepository:
         )
         base = sa.and_(
             RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
-            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.lifecycle_root_session_id.is_(None),
             RDBAgentSession.archived_at.is_not(None),
         )
         candidate = sa.and_(base, ~started_job)
@@ -431,7 +431,7 @@ class ArchivedSessionRetentionRepository:
         """Apply one bounded root batch and return progress counters."""
         query = sa.select(RDBAgentSession).where(
             RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
-            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.lifecycle_root_session_id.is_(None),
             RDBAgentSession.archived_at.is_not(None),
             sa.or_(
                 RDBAgentSession.archive_policy_revision.is_(None),
@@ -443,7 +443,10 @@ class ArchivedSessionRetentionRepository:
         rows = list(
             (
                 await session.write_session.execute(
-                    query.order_by(RDBAgentSession.id).with_for_update().limit(limit)
+                    query.options(lazyload(RDBAgentSession.conversation))
+                    .order_by(RDBAgentSession.id)
+                    .with_for_update(of=RDBAgentSession)
+                    .limit(limit)
                 )
             ).scalars()
         )
@@ -654,7 +657,7 @@ class ArchivedSessionRetentionRepository:
             sa.select(RDBAgentSession.id).where(
                 RDBAgentSession.id == RDBArchivedSessionPurgeJob.root_session_id,
                 RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.lifecycle_root_session_id.is_(None),
                 RDBAgentSession.purge_after.is_not(None),
                 RDBAgentSession.purge_after == RDBArchivedSessionPurgeJob.eligible_at,
                 RDBAgentSession.purge_after <= now,

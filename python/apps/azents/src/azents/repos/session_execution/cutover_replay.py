@@ -12,6 +12,7 @@ from azents.core.enums import (
 )
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 
@@ -219,10 +220,10 @@ class SessionCutoverReplayRepository:
             .scalar_subquery()
         )
         pending_command_columns = (
-            RDBAgentSession.pending_command_id,
-            RDBAgentSession.pending_command_name,
-            RDBAgentSession.pending_command_payload,
-            RDBAgentSession.pending_command_created_at,
+            RDBConversation.pending_command_id,
+            RDBConversation.pending_command_name,
+            RDBConversation.pending_command_payload,
+            RDBConversation.pending_command_created_at,
         )
         stop_request_columns = (
             RDBAgentSession.stop_requested_at,
@@ -235,34 +236,41 @@ class SessionCutoverReplayRepository:
         has_stop_request = sa.or_(
             *(column.is_not(None) for column in stop_request_columns)
         )
-        return sa.select(
-            RDBAgentSession.id,
-            RDBAgentSession.owner_generation,
-            RDBAgentSession.run_state,
-            wake_input_present.label("wake_input_present"),
-            fifo_mailbox_item_id.label("fifo_mailbox_item_id"),
-            has_pending_command.label("pending_command_present"),
-            RDBAgentSession.pending_command_id,
-            sa.and_(*(column.is_not(None) for column in pending_command_columns)).label(
-                "pending_command_complete"
-            ),
-            recoverable_run_id.label("recoverable_run_id"),
-            recoverable_run_count.label("recoverable_run_count"),
-            RDBAgentSession.pending_idle_continuation_run_id,
-            has_stop_request.label("stop_request_present"),
-            RDBAgentSession.stop_request_id,
-            sa.and_(
-                RDBAgentSession.stop_requested_at.is_not(None),
-                RDBAgentSession.stop_request_id.is_not(None),
-            ).label("stop_request_complete"),
-        ).where(
-            sa.or_(
-                wake_input_present,
-                has_pending_command,
-                recoverable_run_count > 0,
-                RDBAgentSession.pending_idle_continuation_run_id.is_not(None),
-                has_stop_request,
-                RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+        return (
+            sa.select(
+                RDBAgentSession.id,
+                RDBAgentSession.owner_generation,
+                RDBAgentSession.run_state,
+                wake_input_present.label("wake_input_present"),
+                fifo_mailbox_item_id.label("fifo_mailbox_item_id"),
+                has_pending_command.label("pending_command_present"),
+                RDBConversation.pending_command_id,
+                sa.and_(
+                    *(column.is_not(None) for column in pending_command_columns)
+                ).label("pending_command_complete"),
+                recoverable_run_id.label("recoverable_run_id"),
+                recoverable_run_count.label("recoverable_run_count"),
+                RDBConversation.pending_idle_continuation_run_id,
+                has_stop_request.label("stop_request_present"),
+                RDBAgentSession.stop_request_id,
+                sa.and_(
+                    RDBAgentSession.stop_requested_at.is_not(None),
+                    RDBAgentSession.stop_request_id.is_not(None),
+                ).label("stop_request_complete"),
+            )
+            .join(
+                RDBConversation,
+                RDBConversation.session_id == RDBAgentSession.id,
+            )
+            .where(
+                sa.or_(
+                    wake_input_present,
+                    has_pending_command,
+                    recoverable_run_count > 0,
+                    RDBConversation.pending_idle_continuation_run_id.is_not(None),
+                    has_stop_request,
+                    RDBAgentSession.run_state == AgentSessionRunState.RUNNING,
+                )
             )
         )
 

@@ -55,6 +55,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.types import FunctionToolCall
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.transport.chat import ChatAttachmentSnapshot, chat_attachment_from_event
@@ -1128,8 +1129,11 @@ class MessageRepository:
             .scalar_subquery()
         )
         await session.write_session.execute(
-            sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == session_id)
+            sa.update(RDBConversation)
+            .where(
+                RDBConversation.session_id == session_id,
+                RDBAgentSession.id == RDBConversation.session_id,
+            )
             .values(
                 last_user_input_at=sa.func.coalesce(
                     latest_user_input_at,

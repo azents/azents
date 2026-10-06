@@ -17,7 +17,6 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.action_execution_data import ActionExecution, ActionExecutionCreate
-from azents.core.agent_session_data import AgentSession
 from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
@@ -27,6 +26,7 @@ from azents.core.enums import (
     SessionGitWorktreeStatus,
 )
 from azents.core.json_value import JSONValue
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.core.session_git_worktree_results import _cleanup_result
 from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.events.action_messages import (
@@ -668,7 +668,7 @@ async def test_allocation_fence_binding_and_path_lock_order(
 
     async def fence(
         session: WriteSession, owner: SessionExecutionOwner
-    ) -> AgentSession:
+    ) -> SessionExecutionRecord:
         observe(session, "owner")
         return await original_fence(session, owner)
 

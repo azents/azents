@@ -25,6 +25,7 @@ from azents.core.historical_memory_cutover import (
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationAttempt,
@@ -76,17 +77,18 @@ async def _source_candidates(
             RDBHistoricalMemorySource.source_session_id,
             RDBAgent.id.label("agent_id"),
             RDBAgentSession.workspace_id,
-            RDBAgentSession.product_mode,
-            RDBAgentSession.associated_user_id,
+            RDBConversation.product_mode,
+            RDBConversation.associated_user_id,
         )
         .join(
             RDBAgentSession,
             RDBAgentSession.id == RDBHistoricalMemorySource.source_session_id,
         )
+        .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
         .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
         .where(
             RDBHistoricalMemorySource.prepared_at.is_not(None),
-            RDBAgentSession.product_mode.is_not(None),
+            RDBConversation.product_mode.is_not(None),
         )
         .order_by(RDBHistoricalMemorySource.source_session_id)
         .limit(request.batch_size)
@@ -300,7 +302,7 @@ class MemoryHandoverRepository:
                     sa.select(RDBAgentSession)
                     .where(RDBAgentSession.id.in_(ids))
                     .order_by(RDBAgentSession.id)
-                    .with_for_update()
+                    .with_for_update(of=RDBAgentSession)
                     .execution_options(populate_existing=True)
                 )
             }
@@ -322,6 +324,11 @@ class MemoryHandoverRepository:
             for candidate in current:
                 source = sources[candidate.source_session_id]
                 root = roots[candidate.source_session_id]
+                conversation = root.conversation
+                if conversation is None:
+                    raise MemoryHandoverPageChanged(
+                        "Memory handover Conversation disappeared."
+                    )
                 agent = agents[candidate.agent_id]
                 if (
                     source.prepared_at is None
@@ -352,10 +359,10 @@ class MemoryHandoverRepository:
                 ):
                     continue
                 grant = None
-                if root.product_mode is AgentSessionProductMode.USER:
+                if conversation.product_mode is AgentSessionProductMode.USER:
                     grant = (
-                        grants.get((root.workspace_id, root.associated_user_id))
-                        if root.associated_user_id is not None
+                        grants.get((root.workspace_id, conversation.associated_user_id))
+                        if conversation.associated_user_id is not None
                         else None
                     )
                     if grant is None:
@@ -377,11 +384,12 @@ class MemoryHandoverRepository:
                             RDBConsolidationWork.scope
                             == (
                                 ConsolidationScope.TEAM
-                                if root.product_mode is AgentSessionProductMode.TEAM
+                                if conversation.product_mode
+                                is AgentSessionProductMode.TEAM
                                 else ConsolidationScope.USER
                             ),
                             RDBConsolidationWork.associated_user_id.is_not_distinct_from(
-                                root.associated_user_id
+                                conversation.associated_user_id
                             ),
                             RDBConsolidationWork.source_session_id
                             == source.source_session_id,

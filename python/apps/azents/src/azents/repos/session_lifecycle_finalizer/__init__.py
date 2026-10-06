@@ -96,7 +96,13 @@ class SessionLifecycleFinalizerRepository:
                     )
                 )
         await session.write_session.execute(
-            sa.delete(RDBAgentSession).where(RDBAgentSession.id.in_(session_ids))
+            sa.delete(RDBAgentSession).where(
+                RDBAgentSession.id.in_(session_ids),
+                RDBAgentSession.id != root_session_id,
+            )
+        )
+        await session.write_session.execute(
+            sa.delete(RDBAgentSession).where(RDBAgentSession.id == root_session_id)
         )
         await session.write_session.flush()
 

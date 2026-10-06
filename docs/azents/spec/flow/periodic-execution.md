@@ -46,6 +46,9 @@ code_paths:
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/repos/archived_session_purge_operations.py
+  - python/apps/azents/src/azents/repos/lifecycle_target.py
+  - python/apps/azents/src/azents/repos/session_archive_operations.py
+  - python/apps/azents/src/azents/repos/session_lifecycle_operations.py
   - python/apps/azents/src/azents/repos/archived_session_retention_operations.py
   - python/apps/azents/src/azents/repos/file_lifecycle_cleanup_operations.py
   - python/apps/azents/src/azents/repos/session_lifecycle_purge_operations.py
@@ -79,8 +82,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-10-06
-spec_version: 35
+last_verified_at: 2026-10-07
+spec_version: 36
 ---
 
 # Periodic Execution Flow Spec
@@ -500,6 +503,11 @@ runs after preparation closes and before its completed metadata settlement.
 
 ## Archived-session retention recalculation task
 
+Retention targets are common lifecycle roots (`lifecycle_root_session_id` is
+null), including profile-free internal Sessions. No public root-kind or
+`SessionAgent` join is required. Conversation descendants remain grouped with
+their common root, and the existing finite/Unlimited policy is unchanged.
+
 `archived_session_retention_recalculation` runs every minute with a two-minute task timeout and
 bounded one-to-thirty-minute scheduler retry. It claims at most one durable retention application
 whose own lease is absent or expired, then recalculates at most 100 archived roots in stable ID order.
@@ -539,11 +547,14 @@ The persisted `session.git-worktrees@1` key is a database-only compatibility
 participant. Existing jobs retry and checkpoint it through the same durable phase
 workflow without contacting a Runtime or checking physical Git state.
 
-The handler locks the complete root tree, increments owner generations, records stop intent, emits
+The handler locks the complete common lifecycle target, increments owner generations, records stop intent, emits
 broker stop signals, and waits for active runs through durable retry rather than deleting around them.
 After no active run remains, it removes broker state, marks subtree file resources terminal, deletes
 their external blobs, revalidates required cleanup state, deletes file metadata, and finally deletes
-worktree allocation rows and the root database subtree. It never inspects or mutates physical Git
+worktree allocation rows and the common Session group, including a singleton
+internal Session without a participant tree. Canonical current execution files
+and Conversation profiles are registered database children; their presence does
+not create another purger. It never inspects or mutates physical Git
 state. Only then does the content-free purge job tombstone become completed. Required external
 cleanup failure or lost ownership keeps metadata and durable retry state instead of allowing a
 cascade to hide unfinished work.
@@ -583,6 +594,9 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 36) — Generalized the existing archive retention
+  and purge pipeline to common lifecycle roots and singleton internal Sessions.
 
 - **2026-10-06** (spec_version 34) — Distinguished immutable attempt-bounded
   pre-unit waiting from current renewable-lease admission after acquisition;

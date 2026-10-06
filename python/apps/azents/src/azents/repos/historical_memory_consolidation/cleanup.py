@@ -12,6 +12,7 @@ from azents.core.historical_memory_consolidation import (
     ConsolidationWorkState,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationAttempt,
@@ -63,19 +64,25 @@ def _denied_draft_dependency(
         root.workspace_id == unit.workspace_id,
         root.status == AgentSessionStatus.ACTIVE,
         source.availability_generation == dependency.availability_generation,
-        sa.or_(
-            sa.and_(
-                unit.scope == ConsolidationScope.TEAM,
-                root.product_mode == AgentSessionProductMode.TEAM,
-                dependency.membership_grant_id.is_(None),
+        sa.select(RDBConversation.session_id)
+        .where(
+            RDBConversation.session_id == root.id,
+            sa.or_(
+                sa.and_(
+                    unit.scope == ConsolidationScope.TEAM,
+                    RDBConversation.product_mode == AgentSessionProductMode.TEAM,
+                    dependency.membership_grant_id.is_(None),
+                ),
+                sa.and_(
+                    unit.scope == ConsolidationScope.USER,
+                    RDBConversation.product_mode == AgentSessionProductMode.USER,
+                    RDBConversation.associated_user_id == unit.associated_user_id,
+                    granted,
+                ),
             ),
-            sa.and_(
-                unit.scope == ConsolidationScope.USER,
-                root.product_mode == AgentSessionProductMode.USER,
-                root.associated_user_id == unit.associated_user_id,
-                granted,
-            ),
-        ),
+        )
+        .correlate(root, unit, dependency)
+        .exists(),
     )
     # Treat SQL UNKNOWN as denial, including deleted roots/sources/grants.
     return (

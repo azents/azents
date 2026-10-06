@@ -12,9 +12,11 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.core.mailbox_data import ScheduledTaskContinuationMailboxPayload
+from azents.core.session_execution_data import SessionExecutionRecord
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -22,6 +24,7 @@ from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session_capabilities import ReadSession
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 
 from .data import CanonicalExecutionSnapshot, PendingCommandSnapshot
 
@@ -36,6 +39,56 @@ class CanonicalExecutionOwnerGenerationStaleError(CanonicalExecutionSnapshotErro
 
 class SessionExecutionRepository:
     """Load the canonical durable identity for one claimed Session execution."""
+
+    async def load_common_snapshot(
+        self,
+        session: ReadSession,
+        *,
+        session_id: str,
+        owner_generation: int,
+    ) -> SessionExecutionRecord:
+        """Validate active execution identity without requiring a Conversation tree."""
+        current = await SessionExecutionRecordRepository().get_by_id(
+            session, session_id
+        )
+        if current is None:
+            raise CanonicalExecutionSnapshotError("AgentSession not found")
+        if current.run_state is not AgentSessionRunState.RUNNING:
+            raise CanonicalExecutionSnapshotError("AgentSession is not running")
+        if current.status is not AgentSessionStatus.ACTIVE:
+            raise CanonicalExecutionSnapshotError("AgentSession is not active")
+        if current.owner_generation != owner_generation:
+            raise CanonicalExecutionOwnerGenerationStaleError(
+                "Session owner generation is stale"
+            )
+        if current.lifecycle_root_session_id is not None:
+            root = await SessionExecutionRecordRepository().get_by_id(
+                session, current.lifecycle_root_session_id
+            )
+            if root is None or root.status is not AgentSessionStatus.ACTIVE:
+                raise CanonicalExecutionSnapshotError("Root AgentSession is not active")
+            if (
+                root.agent_id != current.agent_id
+                or root.workspace_id != current.workspace_id
+                or root.lifecycle_root_session_id is not None
+            ):
+                raise CanonicalExecutionSnapshotError(
+                    "Root AgentSession authority mismatch"
+                )
+        agent = await session.read_session.get(RDBAgent, current.agent_id)
+        if agent is None:
+            raise CanonicalExecutionSnapshotError("Session Agent not found")
+        if agent.workspace_id != current.workspace_id:
+            raise CanonicalExecutionSnapshotError("Session Agent Workspace mismatch")
+        if (
+            agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or not agent.enabled
+        ):
+            raise CanonicalExecutionSnapshotError("Session Agent is not active")
+        workspace = await session.read_session.get(RDBWorkspace, current.workspace_id)
+        if workspace is None:
+            raise CanonicalExecutionSnapshotError("Session Workspace not found")
+        return current
 
     async def load_canonical_snapshot(
         self,
@@ -52,6 +105,9 @@ class SessionExecutionRepository:
             raise CanonicalExecutionSnapshotError("AgentSession not found")
         if agent_session.run_state is not AgentSessionRunState.RUNNING:
             raise CanonicalExecutionSnapshotError("AgentSession is not running")
+        conversation = agent_session.conversation
+        if conversation is None:
+            raise CanonicalExecutionSnapshotError("Session Conversation not found")
         oldest_input = await session.read_session.scalar(
             sa.select(RDBMailboxItem)
             .where(RDBMailboxItem.session_id == session_id)
@@ -152,10 +208,10 @@ class SessionExecutionRepository:
             raise CanonicalExecutionSnapshotError(
                 "Root AgentSession authority mismatch"
             )
-        self._validate_execution_mode(agent_session, current, root)
+        self._validate_execution_mode(conversation, current, root)
         await self._validate_parent_lineage(session, current, root)
 
-        pending_command = self._pending_command(agent_session)
+        pending_command = self._pending_command(conversation)
         recoverable_runs = list(
             (
                 await session.read_session.scalars(
@@ -173,7 +229,7 @@ class SessionExecutionRepository:
         if len(recoverable_runs) > 1:
             raise CanonicalExecutionSnapshotError("Multiple recoverable AgentRuns")
         recoverable_run = recoverable_runs[0] if recoverable_runs else None
-        pending_idle_run_id = agent_session.pending_idle_continuation_run_id
+        pending_idle_run_id = conversation.pending_idle_continuation_run_id
         if pending_idle_run_id is not None:
             pending_idle_run = await session.read_session.get(
                 RDBAgentRun, pending_idle_run_id
@@ -196,7 +252,7 @@ class SessionExecutionRepository:
             session_agent_id=current.id,
             root_session_agent_id=root.id,
             session_agent_context_id=context.id,
-            execution_mode=agent_session.session_kind,
+            execution_mode=conversation.session_kind,
             owner_generation=owner_generation,
             pending_command=pending_command,
             recoverable_run_id=(
@@ -245,7 +301,7 @@ class SessionExecutionRepository:
         )
 
     def _pending_command(
-        self, agent_session: RDBAgentSession
+        self, agent_session: RDBConversation
     ) -> PendingCommandSnapshot | None:
         """Return a complete command or reject a partially persisted command."""
         values = (
@@ -272,7 +328,7 @@ class SessionExecutionRepository:
 
     def _validate_execution_mode(
         self,
-        agent_session: RDBAgentSession,
+        agent_session: RDBConversation,
         current: RDBSessionAgent,
         root: RDBSessionAgent,
     ) -> None:

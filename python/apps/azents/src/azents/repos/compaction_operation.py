@@ -18,12 +18,12 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.model_operation_completion import (
     ModelOperationCompletion,
     ModelOperationCompletionRepository,
 )
 from azents.repos.session_execution.ownership import fence_owned_session_mutation
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 
 
@@ -54,7 +54,8 @@ class CompactionSessionRepository(Protocol):
     async def get_by_id(
         self,
         session: ReadSession,
-        agent_session_id: str,
+        session_id: str,
+        /,
     ) -> CompactionSessionState | None:
         """Return Session state with a model-input head."""
         ...
@@ -128,7 +129,7 @@ def get_compaction_operation_repository(
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ],
     agent_session_repository: Annotated[
-        AgentSessionRepository, Depends(AgentSessionRepository)
+        SessionExecutionRecordRepository, Depends(SessionExecutionRecordRepository)
     ],
     model_operation_completion_repository: Annotated[
         ModelOperationCompletionRepository, Depends(ModelOperationCompletionRepository)
@@ -162,7 +163,7 @@ class CompactionOperationRepository:
     ]
     agent_session_repository: Annotated[
         CompactionSessionRepository,
-        Depends(AgentSessionRepository),
+        Depends(SessionExecutionRecordRepository),
     ]
     model_operation_completion_repository: Annotated[
         CompactionModelOperationRepository,

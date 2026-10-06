@@ -9,6 +9,7 @@ from typing import NamedTuple, TypeVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import sqlalchemy as sa
 from azcommon.infra.s3.service import S3Service
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -56,6 +57,8 @@ from azents.repos.external_channel_lifecycle_participant import (
 from azents.repos.file_lifecycle_cleanup_operations import (
     FileLifecycleCleanupOperations,
 )
+from azents.repos.lifecycle_target import LifecycleTargetRepository
+from azents.repos.lifecycle_target_test import seed_internal_session
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFile
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
@@ -351,7 +354,7 @@ class _AgentSessionRepository:
         self.lock_calls = 0
         self.final_sessions: list[AgentSession] | None = None
 
-    async def lock_root_tree_sessions(
+    async def lock_target_sessions(
         self,
         session: ReadSession,
         *,
@@ -1004,6 +1007,7 @@ def _build_service(
         retention_repository, ArchivedSessionRetentionRepository
     )
     session_dependency = _typed_fake(agent_session_repository, AgentSessionRepository)
+    target_dependency = _typed_fake(agent_session_repository, LifecycleTargetRepository)
     model_dependency = _typed_fake(model_file_repository, ModelFileRepository)
     artifact_dependency = _typed_fake(artifact_repository, ArtifactRepository)
     exchange_dependency = _typed_fake(exchange_file_repository, ExchangeFileRepository)
@@ -1018,7 +1022,7 @@ def _build_service(
             session_manager=_session_manager,
             read_only_session_manager=_session_manager,
             retention_repository=retention_dependency,
-            agent_session_repository=session_dependency,
+            lifecycle_target_repository=target_dependency,
             agent_run_repository=_typed_fake(
                 _AgentRunRepository(active_checks), AgentRunRepository
             ),
@@ -1709,7 +1713,6 @@ async def test_native_purge_preparation_rolls_back_owner_fence_on_stop_failure(
     """Owner fencing and dependent stop writes roll back as one native group."""
     now = datetime.datetime.now(datetime.UTC)
     retention = ArchivedSessionRetentionRepository()
-    sessions = AgentSessionRepository()
     async with rdb_session_manager() as session:
         root_id = await _create_archived_root(
             session,
@@ -1732,7 +1735,9 @@ async def test_native_purge_preparation_rolls_back_owner_fence_on_stop_failure(
         retention_repository=retention,
         registry=get_session_lifecycle_registry(),
     )
-    fake_sessions = MagicMock(spec=AgentSessionRepository, wraps=sessions)
+    fake_sessions = MagicMock(
+        spec=LifecycleTargetRepository, wraps=LifecycleTargetRepository()
+    )
     fake_sessions.request_stop = AsyncMock(
         side_effect=RuntimeError("Injected stop failure")
     )
@@ -1740,8 +1745,8 @@ async def test_native_purge_preparation_rolls_back_owner_fence_on_stop_failure(
         session_manager=rdb_session_manager,
         read_only_session_manager=rdb_session_manager,
         retention_repository=retention,
-        agent_session_repository=require_instance(
-            fake_sessions, AgentSessionRepository
+        lifecycle_target_repository=require_instance(
+            fake_sessions, LifecycleTargetRepository
         ),
         agent_run_repository=AgentRunRepository(),
         model_file_repository=ModelFileRepository(),
@@ -1816,7 +1821,7 @@ async def test_native_finalization_failure_restores_deleted_root_and_job_state(
         session_manager=rdb_session_manager,
         read_only_session_manager=rdb_session_manager,
         retention_repository=retention,
-        agent_session_repository=AgentSessionRepository(),
+        lifecycle_target_repository=LifecycleTargetRepository(),
         agent_run_repository=AgentRunRepository(),
         model_file_repository=ModelFileRepository(),
         artifact_repository=ArtifactRepository(),
@@ -1853,3 +1858,74 @@ async def test_native_finalization_failure_restores_deleted_root_and_job_state(
         job = await session.read_session.get(RDBArchivedSessionPurgeJob, claim.job.id)
         assert job is not None
         assert job.status is not ArchivedSessionPurgeStatus.COMPLETED
+
+
+async def test_native_shared_purge_deletes_singleton_without_conversation_tree(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Real shared claim/participants/finalizer purge profile-free internal state."""
+    retention = ArchivedSessionRetentionRepository()
+    targets = LifecycleTargetRepository()
+    now = datetime.datetime.now(datetime.UTC)
+    async with rdb_session_manager() as session:
+        internal_id, _ = await seed_internal_session(
+            session, suffix="purge-internal-singleton"
+        )
+        policy = await targets.resolve_retention(
+            session,
+            retention_repository=retention,
+            archived_at=now - datetime.timedelta(days=31),
+        )
+        await targets.archive_status(
+            session,
+            root_session_id=internal_id,
+            session_ids=(internal_id,),
+            retention=policy,
+            end_reason=None,
+        )
+        await targets.schedule_archive_purge(
+            session,
+            root_session_id=internal_id,
+            retention_repository=retention,
+            retention=policy,
+            scheduled_at=now,
+        )
+    checkpoints = SessionLifecyclePurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=retention,
+        registry=get_session_lifecycle_registry(),
+    )
+    service, *_ = _build_service(events=[], active_checks=[])
+    service.operations = ArchivedSessionPurgeOperations(
+        session_manager=rdb_session_manager,
+        read_only_session_manager=rdb_session_manager,
+        retention_repository=retention,
+        lifecycle_target_repository=targets,
+        agent_run_repository=AgentRunRepository(),
+        model_file_repository=ModelFileRepository(),
+        artifact_repository=ArtifactRepository(),
+        exchange_file_repository=ExchangeFileRepository(),
+        lifecycle_finalizer_repository=SessionLifecycleFinalizerRepository(),
+        lifecycle_operations=checkpoints,
+        scheduled_participant=ScheduledTaskLifecycleParticipantRepository(
+            ScheduledTaskLifecycleRepository()
+        ),
+        external_participant=ExternalChannelLifecycleParticipantRepository(
+            ExternalChannelLifecycleRepository()
+        ),
+    )
+    service.lifecycle_orchestrator = get_session_lifecycle_orchestrator(checkpoints)
+    summary = await service.purge_once(
+        lease_owner="singleton-worker", deadline=_deadline()
+    )
+    assert summary.completed_count == 1
+    assert summary.failed_count == 0
+    async with rdb_session_manager() as session:
+        assert await session.read_session.get(RDBAgentSession, internal_id) is None
+        job = await session.read_session.scalar(
+            sa.select(RDBArchivedSessionPurgeJob).where(
+                RDBArchivedSessionPurgeJob.root_session_id == internal_id
+            )
+        )
+        assert job is not None and job.status is ArchivedSessionPurgeStatus.COMPLETED

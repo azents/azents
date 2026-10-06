@@ -18,6 +18,7 @@ from azents.core.enums import (
     EventKind,
     WorkspaceUserRole,
 )
+from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.core.json_value import JSONValue
 from azents.engine.events.types import (
     ClientToolCallPayload,
@@ -29,6 +30,7 @@ from azents.engine.events.types import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
 from azents.rdb.models.memory import RDBAgentMemory
@@ -37,6 +39,8 @@ from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.historical_memory import HistoricalMemoryRepository
+from azents.repos.historical_memory.settings import HistoricalMemorySettingsRepository
 from azents.repos.memory_vfs.data import (
     HistoricalMemoryVfsRecord,
     MemoryVfsAuthority,
@@ -46,6 +50,10 @@ from azents.repos.memory_vfs.data import (
     SourceSessionVfsRecord,
 )
 from azents.repos.memory_vfs.repository import MemoryVfsRepository
+from azents.repos.session_history.repository import (
+    SessionHistoryRepository,
+    SessionHistoryScope,
+)
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.testing.model_selection import (
@@ -689,7 +697,7 @@ async def test_broad_lists_omit_oversized_rows_before_body_transfer(
             associated_user_id=None,
         )
         oversized_source = await session.read_session.get(
-            RDBAgentSession, oversized_source_id
+            RDBConversation, oversized_source_id
         )
         assert oversized_source is not None
         oversized_source.title = "t" * 200
@@ -782,7 +790,7 @@ async def test_glob_inventory_projects_only_body_free_uri_columns(
             mode=AgentSessionProductMode.TEAM,
             associated_user_id=None,
         )
-        source = await session.read_session.get(RDBAgentSession, source_id)
+        source = await session.read_session.get(RDBConversation, source_id)
         assert source is not None
         source.title = "t" * 200
         historical = await session.read_session.get(
@@ -881,3 +889,153 @@ async def test_glob_inventory_projects_only_body_free_uri_columns(
         "payload",
     }
     assert all(forbidden.isdisjoint(columns) for columns in projected_columns)
+
+
+async def test_profile_free_execution_is_not_a_memory_source_or_consumer(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """Private execution records never enter public source or consumer discovery."""
+    async with rdb_session_manager() as session:
+        agent, workspace_id = await _create_agent(session, slug="private-execution")
+        member = await UserRepository().create(
+            session, UserCreate(email="private-execution-inspector@example.test")
+        )
+        session.write_session.add(
+            RDBWorkspaceUser(
+                workspace_id=workspace_id,
+                user_id=member.id,
+                name="Inspector",
+                role=WorkspaceUserRole.MEMBER,
+            )
+        )
+        await session.write_session.flush()
+        member_id = member.id
+        consumer = await _create_source(
+            session,
+            agent_id=agent.id,
+            workspace_id=workspace_id,
+            slug="public-consumer",
+            mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
+        )
+        internal = RDBAgentSession(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            lifecycle_root_session_id=None,
+            current_model_target_label=None,
+            applied_model_target_label=None,
+            current_model_selection=None,
+            current_model_settings=None,
+            current_reasoning_effort=None,
+            applied_reasoning_effort=None,
+            current_enabled_execution_options=[],
+            applied_enabled_execution_options=[],
+            current_effective_context_window_tokens=None,
+            current_effective_auto_compaction_threshold_tokens=None,
+            current_inference_resolved_at=None,
+        )
+        session.write_session.add(internal)
+        await session.write_session.flush()
+        internal.last_activity_at = _NOW - datetime.timedelta(hours=1)
+        event_row = RDBEvent(
+            session_id=internal.id,
+            kind=EventKind.USER_MESSAGE,
+            payload={"sender_user_id": None, "content": "private audit text"},
+        )
+        session.write_session.add(event_row)
+        await session.write_session.flush()
+        source_row = RDBHistoricalMemorySource(
+            source_session_id=internal.id,
+            admitted_at=_NOW,
+        )
+        source_row.completed_source_activity_at = internal.last_activity_at
+        source_row.completed_source_tail_event_id = event_row.id
+        source_row.prepared_at = _NOW
+        source_row.summary = "private execution summary"
+        session.write_session.add(source_row)
+        await session.write_session.flush()
+        internal_id, event_id = internal.id, event_row.id
+        assert (
+            await HistoricalMemoryRepository.get_snapshot_consumer_in_session(
+                session,
+                session_id=internal_id,
+            )
+            is None
+        )
+        hit_page = await SessionHistoryRepository().search_roots(
+            session,
+            scope=SessionHistoryScope(
+                agent_id=agent.id,
+                workspace_id=workspace_id,
+                associated_user_id=None,
+            ),
+            query="private audit text",
+            limit=20,
+            before=None,
+        )
+        assert hit_page.items == []
+        await session.write_session.commit()
+
+    repository = MemoryVfsRepository(session_manager=rdb_session_manager)
+    authority = MemoryVfsAuthority(
+        root_session_id=consumer.session_id,
+        agent_id=agent.id,
+        workspace_id=workspace_id,
+        associated_user_id=None,
+        memory_enabled=True,
+    )
+    assert (
+        await repository.get_historical(
+            authority,
+            scope="team",
+            source_session_id=internal_id,
+            max_bytes=10000,
+        )
+        is None
+    )
+    assert (
+        await repository.get_source(
+            authority,
+            scope="team",
+            session_id=internal_id,
+            max_bytes=10000,
+        )
+        is None
+    )
+    assert (
+        await repository.get_event(
+            authority,
+            scope="team",
+            session_id=internal_id,
+            event_id=event_id,
+            max_bytes=10000,
+        )
+        is None
+    )
+    assert not await repository.authorized(
+        dataclasses.replace(authority, root_session_id=internal_id),
+    )
+    uri_page = await repository.list_uris(
+        authority,
+        query=MemoryVfsUriQuery(
+            namespace="sources",
+            saved_scopes=(),
+            source_scopes=("team",),
+            session_id=internal_id,
+            source_file_kinds=("session", "events"),
+            include_readme=False,
+        ),
+        limit=20,
+    )
+    assert uri_page.uris == ()
+    settings = HistoricalMemorySettingsRepository(session_manager=rdb_session_manager)
+    page = await settings.list(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        user_id=member_id,
+        scope=HistoricalMemorySettingsScope.TEAM,
+        query=None,
+        cursor=None,
+        limit=20,
+    )
+    assert [item.source_session_id for item in page.items] == [consumer.session_id]
