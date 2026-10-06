@@ -53,7 +53,7 @@ class HistoricalMemoryVfsRecord:
 
 @dataclasses.dataclass(frozen=True)
 class ConsolidatedMemoryVfsRecord:
-    """One latest currently authorized immutable compact document."""
+    """One current compact result authorized for this consumer's scope."""
 
     entry: ConsolidatedMemorySnapshotEntry
 

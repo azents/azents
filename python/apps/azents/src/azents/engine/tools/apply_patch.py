@@ -58,7 +58,7 @@ fences. Include each file only once, use exact context, and do not invent line n
 After an applicability failure, read the current source before retrying. A commit-phase
 failure on Runtime may have partially applied the patch, so re-read every affected
 file before continuing. Writable VFS patches are all-or-none; conflicts require fresh
-reads. Keep all targets in one bound VFS draft domain, without Runtime fallback.
+reads. Keep all targets in one bound VFS file domain, without Runtime fallback.
 """
 
 GPT_V4A_PLAINTEXT_CUSTOM_APPLY_PATCH_PROMPT = """\
@@ -71,7 +71,7 @@ do not add a blank line, Markdown fence, or commentary, and include each file on
 After an applicability failure, read the current source before retrying. A commit-phase
 failure on Runtime may have partially applied the patch, so re-read every affected
 file before continuing. Writable VFS patches are all-or-none; read every existing
-target in this execution first and keep all targets in the same bound draft domain.
+target in this execution first and keep all targets in the same bound file domain.
 """
 
 

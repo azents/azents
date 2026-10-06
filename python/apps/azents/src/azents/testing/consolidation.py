@@ -18,8 +18,14 @@ from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.historical_memory import HistoricalMemoryRepository
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
+)
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.testing.model_selection import (
@@ -28,6 +34,21 @@ from azents.testing.model_selection import (
 )
 
 CONSOLIDATION_FIXTURE_TIME = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+
+
+def memory_execution_repository(
+    manager: SessionManager[WriteSession],
+) -> MemoryExecutionRepository:
+    """Create the concrete common-operation collaborators for disposable tests."""
+    return MemoryExecutionRepository(
+        manager,
+        manager,
+        ModelOperationCompletionRepository(
+            AgentSessionRepository(),
+            AgentRunRepository(),
+            ModelCandidateHealthRepository(manager),
+        ),
+    )
 
 
 def consolidation_deadline() -> datetime.datetime:

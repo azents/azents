@@ -19,12 +19,7 @@ async def source_availability_in_session(
     source_session_id: str,
     denied: bool,
 ) -> None:
-    """Advance denial continuity and enroll the exact changed or restored source.
-
-    Call after locking/mutating the root, in the same transaction. Restore leaves
-    the monotonic availability identity unchanged and cannot revive old evidence.
-    An unprepared source still records continuity but needs no consolidation work.
-    """
+    """Register a prepared source's availability change in its lifecycle transaction."""
     root = await session.write_session.get(RDBAgentSession, source_session_id)
     if root is None:
         return
@@ -36,8 +31,6 @@ async def source_availability_in_session(
     )
     if source is None:
         return
-    if denied:
-        source.availability_generation += 1
     if source.prepared_at is not None:
         await enroll_source_in_session(
             session,
@@ -59,12 +52,7 @@ async def membership_work_in_session(
     user_id: str,
     denied: bool,
 ) -> None:
-    """Enroll body-free personal source deltas in the membership transaction.
-
-    Removal runs before deleting the old grant, restoration after inserting the
-    fresh grant. Pages do not acquire consolidation ownership locks. All existing
-    source summaries remain canonical; old attempts/manifests stay grant-fenced.
-    """
+    """Register personal changes around membership removal or restoration."""
     after: str | None = None
     while True:
         query = (
@@ -107,7 +95,7 @@ async def membership_work_in_session(
 async def agent_memory_availability_in_session(
     session: WriteSession, *, agent_id: str, denied: bool
 ) -> None:
-    """Record Memory disable continuity across all source roots before commit."""
+    """Register Memory availability changes across prepared source roots."""
     after: str | None = None
     while True:
         query = (

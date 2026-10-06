@@ -76,10 +76,7 @@ class HistoricalMemorySampleResponse(BaseModel):
     empty: int
     failed: int
     quota_advanced: int
-    consolidation_due: int
-    consolidation_published: int
-    consolidation_unclaimed: int
-    consolidation_failed: int
+    consolidation_dispatched: int
 
 
 @router.post("/historical-memory/sample")
@@ -89,9 +86,9 @@ async def sample_historical_memory(
 ) -> HistoricalMemorySampleResponse:
     """Run real bounded services without changing source activity.
 
-    Optional consolidation uses the real claimed shared-core host and publication
-    services. Scheduler dispatch and Job Runtime have separate integration
-    coverage; sampling never overrides database ownership or execution clocks.
+    Optional consolidation routes actual common Worker Sessions. A dispatched
+    notification is not publication evidence; callers observe accepted results
+    separately. Sampling never overrides execution ownership or admitted clocks.
     """
     now = body.now.astimezone(datetime.UTC)
     report = await sampling.sample_agent(

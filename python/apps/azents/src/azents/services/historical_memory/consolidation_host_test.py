@@ -1,41 +1,30 @@
-"""Deterministic real-storage multi-turn internal Agent and fail-closed completion."""
+"""Real canonical Memory dialogue, explicit submit and same-execution correction."""
 
-import asyncio
 import dataclasses
+import datetime
 import json
-import math
-import re
-from collections.abc import AsyncGenerator, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Sequence
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
-from azents.core.agent import AgentModelSelection
-from azents.core.enums import EventKind
+from azents.core.agent import AgentModelSelection, SelectableModelCandidate
+from azents.core.enums import AgentRunStatus, AgentSessionRunState, EventKind
 from azents.core.historical_memory_budget import ConsolidationTurnLimitExceeded
 from azents.core.historical_memory_consolidation import (
-    ConsolidationAttemptState,
-    ConsolidationJobPrincipal,
-)
-from azents.core.historical_memory_publication import (
-    ConsolidationOutputError,
-    ValidatedConsolidationOverview,
+    FreshMemoryAdmission,
+    MemoryAcceptedOutcome,
+    MemoryExecutionPrincipal,
+    MemorySubmissionUncertainError,
 )
 from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
-from azents.core.llm_catalog import (
-    ModelCapabilities,
-    ModelParameterCapabilities,
-    ModelToolCallingCapabilities,
-)
-from azents.engine.events.iteration import AdmittedIteration
+from azents.core.llm_catalog import ModelCapabilities, ModelToolCallingCapabilities
+from azents.core.session_resource_authority import SessionExecutionOwner
+from azents.engine.context.compaction import SummaryModelCall
 from azents.engine.events.model_messages import (
     TransientModelMessage,
     transient_model_message,
 )
-from azents.engine.events.openai_responses import OpenAIResponsesLowerer
 from azents.engine.events.protocols import NormalizedAdapterOutput
 from azents.engine.events.tools import ToolCatalog
 from azents.engine.events.types import (
@@ -43,65 +32,55 @@ from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
     NativeArtifact,
-    OutputTextPart,
-    TokenUsagePayload,
     build_native_compat_key,
 )
 from azents.engine.model_stream import (
-    InternalModelStreamCallContext,
-    admit_model_dispatch,
+    ModelDispatchAdmissionError,
+    ModelStreamCallContext,
 )
 from azents.engine.provider_model_operation import (
     PreparedModelOperation,
+    prepare_model_operation_request,
 )
-from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.base import RDBModel
-from azents.rdb.models.historical_memory_consolidation import (
-    RDBConsolidationAttempt,
-    RDBConsolidationModelDispatch,
-    RDBConsolidationMutationReceipt,
-    RDBConsolidationRevision,
-    RDBConsolidationUnit,
+from azents.engine.run.model_transport import (
+    InMemoryModelTransportState,
+    ModelTransportState,
 )
+from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.event import RDBEvent
+from azents.rdb.models.session_execution_file import RDBSessionExecutionFile
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
-from azents.repos.historical_memory_consolidation.budget import (
-    ConsolidationExecutionRepository,
+from azents.rdb.session_capabilities import WriteSession
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.compaction_operation import CompactionOperationRepository
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
 )
-from azents.repos.historical_memory_consolidation.drafts import (
-    ConsolidationDraftRepository,
-)
-from azents.repos.historical_memory_consolidation.ownership import (
-    ConsolidationOwnershipRepository,
-)
-from azents.repos.historical_memory_consolidation.publication import (
-    ConsolidationPublicationOutcome,
-    ConsolidationPublicationRepository,
-)
-from azents.repos.historical_memory_consolidation.recovery import (
-    ConsolidationRecoveryRepository,
-)
-from azents.repos.historical_memory_consolidation.sources import (
-    ConsolidationSourceRepository,
-)
-from azents.repos.historical_memory_consolidation.work import (
-    ConsolidationWorkRepository,
-)
+from azents.repos.memory_execution_events import MemoryExecutionEventsRepository
+from azents.repos.model_candidate_health import ModelCandidateHealthRepository
+from azents.repos.model_operation_completion import ModelOperationCompletionRepository
+from azents.repos.session_execution_file import SessionExecutionFileRepository
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
+from azents.repos.toolkit_state.engine import ToolWorkingSetStore
 from azents.services.historical_memory.consolidation_host import (
-    ConsolidationAdmission,
     ConsolidationIterationHost,
-    ConsolidationPreparedTurn,
 )
 from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
 )
-from azents.services.historical_memory.draft_vfs import ConsolidationVfsObservations
-from azents.testing.committed_fixture_cleanup import committed_fixture_graph
+from azents.services.historical_memory.execution_context import (
+    MemoryExecutionContextService,
+)
 from azents.testing.consolidation import (
-    consolidation_deadline,
+    memory_execution_repository,
     seed_consolidation_corpus,
 )
-from azents.testing.model_selection import make_test_model_selection
+from azents.testing.model_selection import (
+    make_test_model_selection,
+    make_test_model_settings,
+)
 
 
 def _native() -> NativeArtifact:
@@ -118,542 +97,476 @@ def _native() -> NativeArtifact:
         provider="openai",
         model="gpt-4o",
         schema_version="1",
-        item={"type": "synthetic_completed_model_output"},
+        item={"type": "synthetic"},
+    )
+
+
+def _call(
+    name: str, call_id: str, arguments: dict[str, object]
+) -> TransientModelMessage:
+    return transient_model_message(
+        EventKind.CLIENT_TOOL_CALL,
+        ClientToolCallPayload(
+            call_id=call_id,
+            name=name,
+            arguments=json.dumps(arguments),
+            wire_dialect="json_function",
+            native_artifact=_native(),
+        ),
+    )
+
+
+def _final() -> TransientModelMessage:
+    return transient_model_message(
+        EventKind.ASSISTANT_MESSAGE,
+        AssistantMessagePayload(
+            content="I have finished the memory.", native_artifact=_native()
+        ),
+    )
+
+
+def _selection() -> AgentModelSelection:
+    return make_test_model_selection().model_copy(
+        update={
+            "normalized_capabilities": ModelCapabilities(
+                tool_calling=ModelToolCallingCapabilities(supported=True)
+            )
+        }
     )
 
 
 @dataclasses.dataclass
 class _ScriptedModel:
-    selection: AgentModelSelection
-    empty: bool
-    invalid_final: bool
-    hard_input: bool
-    source_uri: str | None = dataclasses.field(init=False, default=None)
-    work_id: str | None = dataclasses.field(init=False, default=None)
-    turn: int = dataclasses.field(init=False, default=0)
-    closed: bool = dataclasses.field(init=False, default=False)
-    requests: list[str] = dataclasses.field(init=False, default_factory=list)
-    feedback: list[ClientToolResultPayload] = dataclasses.field(
-        init=False, default_factory=list
+    script: list[list[TransientModelMessage]]
+    close_failure: bool
+    selection: AgentModelSelection = dataclasses.field(default_factory=_selection)
+    effective_input_tokens: int = 128_000
+    max_output_tokens: int | None = None
+    prompts: list[str] = dataclasses.field(default_factory=list)
+    prepared_inputs: list[str] = dataclasses.field(default_factory=list)
+    contexts: list[ModelStreamCallContext] = dataclasses.field(default_factory=list)
+    closed: bool = False
+    credential_kwargs: dict[str, object] = dataclasses.field(
+        default_factory=lambda: {"api_key": "synthetic"}
     )
-    names: set[str] = dataclasses.field(init=False, default_factory=set)
+    transport_state: ModelTransportState = dataclasses.field(
+        default_factory=lambda: InMemoryModelTransportState(websocket_enabled=False)
+    )
 
     @property
-    def effective_input_tokens(self) -> int:
-        return 128000
+    def candidate(self) -> SelectableModelCandidate:
+        return SelectableModelCandidate(
+            model_selection=self.selection, settings=make_test_model_settings()
+        )
 
     @property
-    def max_output_tokens(self) -> int:
-        return 2500
+    def summary_call(self) -> SummaryModelCall:
+        async def summarize(
+            *,
+            candidate: SelectableModelCandidate,
+            credential_kwargs: dict[str, object],
+            effective_input_tokens: int,
+            transport_state: ModelTransportState,
+            system_prompt: str,
+            user_prompt: str,
+            conversation_text: str,
+            session_id: str | None = None,
+        ) -> str:
+            raise AssertionError(
+                "This ordinary-sized execution does not need compaction."
+            )
+
+        return summarize
 
     def prepare(
         self,
         messages: Sequence[TransientModelMessage],
-        catalog: ToolCatalog,
+        catalog: ToolCatalog | None,
         *,
         system_prompt: str,
         output_tokens: int | None,
     ) -> PreparedModelOperation:
-        self.names.update(catalog.tools)
-        self.feedback = [
-            message.payload
-            for message in messages
-            if isinstance(message.payload, ClientToolResultPayload)
-        ]
-        text = "\n".join(
-            part.text
-            for result in self.feedback
-            for part in result.output
-            if isinstance(part, OutputTextPart)
-        )
-        match = re.search(
-            r"Work ([a-f0-9]{32});.*?(azents://memory/historical/[^\s]+)", text
-        )
-        if match is not None:
-            self.work_id, self.source_uri = match.group(1), match.group(2)
-        request = OpenAIResponsesLowerer(
-            top_k=None,
-            provider="openai",
-            provider_id=self.selection.provider,
-            model=self.selection.model_identifier,
-            tools=catalog.native_tools_for(catalog.direct_tool_names),
-            supported_execution_options=(),
-            enabled_execution_options=(),
-            max_output_tokens=output_tokens,
-            model_capabilities=self.selection.normalized_capabilities,
-        ).lower(
-            messages,
-            native_replay_context=None,
-            model=self.selection.model_identifier,
+        self.prompts.append(system_prompt)
+        prepared = prepare_model_operation_request(
+            selection=self.selection,
+            messages=messages,
+            catalog=catalog,
             system_prompt=system_prompt,
+            output_tokens=output_tokens,
         )
-        self.requests.append(str(request))
-        estimate = (
-            100000
-            if self.hard_input
-            else math.ceil(request.native_request_input_chars() / 0.75)
-        )
-        return PreparedModelOperation(request, estimate, output_tokens)
+        self.prepared_inputs.append(str(prepared.request))
+        return prepared
 
     async def invoke(
         self,
         prepared: PreparedModelOperation,
         *,
-        context: InternalModelStreamCallContext,
+        context: ModelStreamCallContext,
     ) -> NormalizedAdapterOutput[TransientModelMessage]:
-        assert context.session_id is context.run_id is None
-        await admit_model_dispatch(context)
-        turn = self.turn
-        self.turn += 1
-        if self.invalid_final:
-            turn = 7
-        uri = "azents://memory-draft/summary.md"
-        name: str
-        arguments: dict[str, str]
-        if turn == 0:
-            name, arguments = (
-                "read",
-                {"path": "azents://memory/inventory/work/README.md"},
-            )
-        elif turn == 1:
-            assert self.source_uri is not None
-            name, arguments = "read", {"path": self.source_uri}
-        elif turn == 2:
-            name, arguments = "read", {"path": uri}
-        elif turn == 3:
-            assert self.source_uri is not None
-            content = (
-                "## Historical Context\n\n## Source Routes\n"
-                if self.empty
-                else (
-                    "## Historical Context\nSource-dependent continuation context.\n\n"
-                    f"## Source Routes\n- {self.source_uri} — Scoped source details\n"
-                )
-            )
-            name, arguments = "write", {"path": uri, "content": content}
-        elif turn == 4:
-            name, arguments = (
-                "edit",
-                {
-                    "path": uri,
-                    "old_string": "absent exact text",
-                    "new_string": "never committed",
-                },
-            )
-        elif turn == 5:
-            name, arguments = (
-                "edit",
-                {
-                    "path": uri,
-                    "old_string": "## Historical Context",
-                    "new_string": "## Historical Context",
-                },
-            )
-        elif turn == 6:
-            assert self.work_id is not None
-            coverage = {
-                "dispositions": [
-                    {
-                        "work_id": self.work_id,
-                        "action": "omitted" if self.empty else "considered",
-                        "reason": "No useful continuation context"
-                        if self.empty
-                        else "Integrated source context",
-                    }
-                ]
-            }
-            name, arguments = (
-                "write",
-                {
-                    "path": "azents://memory-draft/coverage.json",
-                    "content": json.dumps(coverage),
-                },
-            )
-        else:
-            return NormalizedAdapterOutput[TransientModelMessage](
-                needs_follow_up=False,
-                events=[
-                    transient_model_message(
-                        EventKind.ASSISTANT_MESSAGE,
-                        AssistantMessagePayload(
-                            content=(
-                                "Untrusted final prose is not a publication payload."
-                            ),
-                            native_artifact=_native(),
-                        ),
-                    )
-                ],
-                usage=TokenUsagePayload(
-                    prompt_tokens=20, completion_tokens=5, total_tokens=25
-                ),
-            )
+        self.contexts.append(context)
+        assert self.script, "Accepted submit must not request another model turn."
         return NormalizedAdapterOutput[TransientModelMessage](
-            needs_follow_up=True,
-            events=[
-                transient_model_message(
-                    EventKind.CLIENT_TOOL_CALL,
-                    ClientToolCallPayload(
-                        call_id=f"step-{turn}",
-                        name=name,
-                        arguments=json.dumps(arguments),
-                        wire_dialect="json_function",
-                        native_artifact=_native(),
-                    ),
-                )
-            ],
-            usage=TokenUsagePayload(
-                prompt_tokens=20, completion_tokens=5, total_tokens=25
-            ),
+            events=self.script.pop(0), needs_follow_up=False
         )
 
     async def close(self) -> None:
         self.closed = True
+        if self.close_failure:
+            raise RuntimeError("Synthetic close fault after durable acceptance")
+
+
+async def _never_stop() -> bool:
+    return False
 
 
 async def _host(
     manager: SessionManager[WriteSession],
+    model: _ScriptedModel,
     *,
-    personal: bool,
-    empty: bool,
-    invalid_final: bool,
-    hard_input: bool,
+    max_turns: int | None,
 ) -> ConsolidationIterationHost:
     corpus = await seed_consolidation_corpus(manager)
-    ownership = ConsolidationOwnershipRepository(manager)
-    claim = await ownership.claim(
-        corpus.personal if personal else corpus.team, deadline=consolidation_deadline()
-    )
-    assert claim is not None
-    await ConsolidationRecoveryRepository(manager).prepare(claim.principal)
-    work = ConsolidationWorkRepository(manager)
-    tools = ConsolidationToolBindings(
-        ConsolidationVfsObservations(claim.principal),
-        ConsolidationDraftRepository(manager),
-        ConsolidationSourceRepository(manager),
-        work,
-        ownership,
-    )
-    selection = make_test_model_selection().model_copy(
-        update={
-            "normalized_capabilities": ModelCapabilities(
-                tool_calling=ModelToolCallingCapabilities(supported=True),
-                parameters=ModelParameterCapabilities(max_output_tokens=True),
-            )
-        }
-    )
-    model = _ScriptedModel(selection, empty, invalid_final, hard_input)
-    return ConsolidationIterationHost(
-        claim,
-        model,
-        tools,
-        ConsolidationExecutionRepository(manager),
-        ownership,
-        work,
-        ConsolidationPublicationRepository(
-            session_manager=manager, read_session_manager=manager
+    executions = memory_execution_repository(manager)
+    binding = await executions.ensure_execution(
+        corpus.team,
+        admission=FreshMemoryAdmission(
+            deadline_at=datetime.datetime.now(datetime.UTC)
+            + datetime.timedelta(minutes=5),
+            execution_policy=HistoricalMemoryExecutionConfig(max_turns=max_turns),
         ),
-        HistoricalMemoryExecutionConfig(),
+    )
+    assert binding is not None
+    records = SessionExecutionRecordRepository()
+    async with manager() as session:
+        generation = await records.claim_owner_generation(session, binding.session_id)
+    principal = await executions.open_run(
+        binding, SessionExecutionOwner(binding.session_id, generation)
+    )
+    await executions.provision_inputs(principal)
+    transcript = EventTranscriptRepository()
+    runs = AgentRunRepository()
+    completion = ModelOperationCompletionRepository(
+        AgentSessionRepository(), runs, ModelCandidateHealthRepository(manager)
+    )
+    context = MemoryExecutionContextService(
+        MemoryExecutionEventsRepository(
+            manager, manager, executions, transcript, records, runs
+        ),
+        CompactionOperationRepository(
+            manager, transcript, records, completion, ToolWorkingSetStore(manager), None
+        ),
+    )
+    return ConsolidationIterationHost(
+        principal,
+        model,
+        ConsolidationToolBindings(
+            principal, SessionExecutionFileRepository(manager), executions
+        ),
+        executions,
+        context,
+        _never_stop,
     )
 
 
-@pytest.mark.parametrize("personal", [False, True])
-@pytest.mark.parametrize("empty", [False, True])
-async def test_multi_turn_shared_host_edits_handles_errors_and_publishes_files(
-    rdb_session_manager: SessionManager[WriteSession],
-    personal: bool,
-    empty: bool,
-) -> None:
-    host = await _host(
-        rdb_session_manager,
-        personal=personal,
-        empty=empty,
-        invalid_final=False,
-        hard_input=False,
-    )
-    model = host.model
-    assert isinstance(model, _ScriptedModel)
-    outcome = await host.run()
-    assert model.turn == 8 and model.closed and host.closed
-    assert host.messages == [] and host.tools.observations.files == {}
-    assert {"read", "grep", "glob", "write", "edit", "delete"} <= model.names
-    assert not model.names & {
-        "exec_command",
-        "save_memory",
-        "spawn_agent",
-        "load_skill",
-        "submit",
-    }
-    assert any(
-        result.status == "failed" and result.name == "edit" for result in model.feedback
-    )
-    forbidden_scope = "team" if personal else "user"
-    assert all(
-        f"azents://memory/historical/{forbidden_scope}/" not in request
-        for request in model.requests
-    )
-    assert all("combined budget" not in request.lower() for request in model.requests)
-    async with rdb_session_manager() as session:
-        revision = await session.read_session.get(
-            RDBConsolidationRevision, outcome.revision_id
-        )
-        assert revision is not None
-        assert "Untrusted final prose" not in revision.markdown
-        assert (revision.rendered_block == "") == empty
-        assert "never committed" not in revision.markdown
-    inspected = await host.publication_repository.inspect_outcome(host.claim.principal)
-    assert inspected is not None and inspected == outcome
-
-
-async def test_captured_model_output_survives_agent_contention_without_rerunning_turn(
-    rdb_engine: AsyncEngine, latest_db_schema: None, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The same RAM output/claim publishes after its local admission retries."""
-    factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
-
-    @asynccontextmanager
-    async def manager() -> AsyncGenerator[WriteSession, None]:
-        async with factory.begin() as session:
-            yield ReadWriteSession(session)
-
-    async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
-        host = await _host(
-            manager, personal=False, empty=False, invalid_final=False, hard_input=False
-        )
-        model = host.model
-        assert isinstance(model, _ScriptedModel)
-        captured = asyncio.Event()
-        writer_locked = asyncio.Event()
-        release_writer = asyncio.Event()
-        admit = ConsolidationIterationHost.admit_output
-        writer_pid: int | None = None
-
-        async def paused_admission(
-            self: ConsolidationIterationHost,
-            prepared: ConsolidationPreparedTurn,
-            output: NormalizedAdapterOutput[TransientModelMessage],
-        ) -> AdmittedIteration[ConsolidationAdmission]:
-            if self is host and model.turn == 1:
-                captured.set()
-                await writer_locked.wait()
-            return await admit(self, prepared, output)
-
-        async def writer() -> None:
-            nonlocal writer_pid
-            await captured.wait()
-            async with manager() as session:
-                writer_pid = await session.read_session.scalar(
-                    sa.select(sa.func.pg_backend_pid())
-                )
-                await session.write_session.scalar(
-                    sa.select(RDBAgent)
-                    .where(RDBAgent.id == host.claim.principal.unit.agent_id)
-                    .with_for_update()
-                )
-                writer_locked.set()
-                await release_writer.wait()
-
-        monkeypatch.setattr(
-            ConsolidationIterationHost, "admit_output", paused_admission
-        )
-        holder = asyncio.create_task(writer())
-        execution = asyncio.create_task(host.run())
-        try:
-            async with asyncio.timeout(5):
-                await writer_locked.wait()
-                assert writer_pid is not None
-                while True:
-                    async with manager() as observer:
-                        blocked = await observer.read_session.scalar(
-                            sa.text(
-                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
-                                "WHERE wait_event_type = 'Lock' "
-                                "AND :holder = ANY(pg_blocking_pids(pid)))"
-                            ),
-                            {"holder": writer_pid},
-                        )
-                    if blocked:
-                        break
-            assert model.turn == 1 and host.started_turns == 1
-            release_writer.set()
-            await holder
-            async with asyncio.timeout(10):
-                outcome = await execution
-            assert model.turn == host.started_turns == 8
-            assert model.closed and host.closed
-            async with manager() as session:
-                attempt = await session.read_session.get(
-                    RDBConsolidationAttempt, host.claim.principal.attempt_id
-                )
-                unit = await session.read_session.get(
-                    RDBConsolidationUnit, host.claim.unit_id
-                )
-                assert attempt is not None and unit is not None
-                assert attempt.state is ConsolidationAttemptState.COMPLETED
-                assert attempt.model_requests == 8 and attempt.tool_calls == 7
-                assert attempt.input_tokens == 160 and attempt.output_tokens == 40
-                assert attempt.failure_code is None and unit.retry_at is None
-                assert unit.failure_count == unit.no_progress_count == 0
-                assert unit.published_revision_id == outcome.revision_id
-                dispatches = list(
-                    await session.read_session.scalars(
-                        sa.select(RDBConsolidationModelDispatch).where(
-                            RDBConsolidationModelDispatch.attempt_id == attempt.id
-                        )
-                    )
-                )
-                assert len(dispatches) == 8
-                assert all(row.usage_recorded for row in dispatches)
-                assert (
-                    await session.read_session.scalar(
-                        sa.select(sa.func.count())
-                        .select_from(RDBConsolidationMutationReceipt)
-                        .where(RDBConsolidationMutationReceipt.attempt_id == attempt.id)
-                    )
-                    == 0
-                )
-                assert (
-                    await session.read_session.scalar(
-                        sa.select(sa.func.count())
-                        .select_from(RDBConsolidationAttempt)
-                        .where(RDBConsolidationAttempt.unit_id == unit.id)
-                    )
-                    == 1
-                )
-            assert (
-                await host.publication_repository.inspect_outcome(host.claim.principal)
-                == outcome
+async def _stored_events(
+    manager: SessionManager[WriteSession],
+    principal: MemoryExecutionPrincipal,
+) -> list[RDBEvent]:
+    async with manager() as session:
+        return list(
+            await session.read_session.scalars(
+                sa.select(RDBEvent)
+                .where(RDBEvent.session_id == principal.owner.session_id)
+                .order_by(RDBEvent.id)
             )
-        finally:
-            release_writer.set()
-            for task in (holder, execution):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(holder, execution, return_exceptions=True)
+        )
 
 
-async def test_normal_final_response_without_valid_files_is_not_success(
+async def test_final_prose_feedback_and_sibling_submit_keep_one_durable_execution(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    host = await _host(
-        rdb_session_manager,
-        personal=False,
-        empty=False,
-        invalid_final=True,
-        hard_input=False,
+    model = _ScriptedModel(
+        [
+            [_final()],
+            [
+                _call(
+                    "submit_memory", "wrong", {"path": "azents://execution/missing.md"}
+                )
+            ],
+            [
+                _call(
+                    "submit_memory",
+                    "accepted",
+                    {"path": "azents://execution/memory.md"},
+                ),
+                _call(
+                    "write",
+                    "author",
+                    {
+                        "path": "azents://execution/memory.md",
+                        "content": (
+                            "# Useful context\nVerified task remains in progress.\n"
+                        ),
+                        "overwrite": False,
+                    },
+                ),
+            ],
+        ],
+        close_failure=False,
     )
-    with pytest.raises(ConsolidationOutputError):
-        await host.run()
-    assert host.closed and host.messages == []
-    assert (
-        await host.publication_repository.inspect_outcome(host.claim.principal) is None
-    )
-
-
-async def test_input_above_old_seventy_percent_checkpoint_does_not_stop_execution(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    host = await _host(
-        rdb_session_manager,
-        personal=False,
-        empty=False,
-        invalid_final=False,
-        hard_input=True,
-    )
+    host = await _host(rdb_session_manager, model, max_turns=5)
     outcome = await host.run()
-    model = host.model
-    assert isinstance(model, _ScriptedModel) and model.turn > 0 and model.closed
-    assert (
-        await host.publication_repository.inspect_outcome(host.claim.principal)
-        == outcome
+    assert outcome.tool_call_id == "accepted"
+    assert host.started_turns == 3 and len(model.contexts) == 3
+    assert model.closed and not model.script
+    assert all(
+        context.session_id == host.principal.owner.session_id
+        for context in model.contexts
     )
+    assert all(context.run_id == host.principal.run_id for context in model.contexts)
+    rows = await _stored_events(rdb_session_manager, host.principal)
+    assert sum(row.kind is EventKind.USER_MESSAGE for row in rows) >= 3
+    results = [
+        ClientToolResultPayload.model_validate(row.payload)
+        for row in rows
+        if row.kind is EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert [result.call_id for result in results] == ["wrong", "author", "accepted"]
+    assert results[0].status == "failed"
+    assert results[0].metadata["kind"] == "memory_submission_feedback"
+    assert results[-1].status == "completed"
+    assert "no explicit submission has been accepted" in model.prepared_inputs[1]
+    assert "Submit a writable authored Markdown file." in model.prepared_inputs[2]
+    for prompt in model.prompts:
+        assert "coverage.json" not in prompt
+        assert "## Historical Context" not in prompt
+        assert "previous integrated" not in prompt
+    async with rdb_session_manager() as session:
+        run = await session.read_session.get(RDBAgentRun, host.principal.run_id)
+        record = await session.read_session.get(
+            RDBAgentSession, host.principal.owner.session_id
+        )
+        assert run is not None and run.status is AgentRunStatus.COMPLETED
+        assert record is not None and record.run_state is AgentSessionRunState.IDLE
+        files = list(
+            await session.read_session.scalars(
+                sa.select(RDBSessionExecutionFile).where(
+                    RDBSessionExecutionFile.session_id
+                    == host.principal.owner.session_id
+                )
+            )
+        )
+        assert any(
+            file.path.startswith("inputs/") and not file.writable for file in files
+        )
+        assert any(file.path == "memory.md" and file.writable for file in files)
+    result = await host.execution_repository.current_result(host.principal.binding.unit)
+    assert result is not None and "Verified task" in result.markdown
 
 
-async def test_configured_maximum_turns_uses_shared_core_without_publication(
+async def test_accepted_submit_survives_model_close_failure(
+    rdb_session_manager: SessionManager[WriteSession],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = _ScriptedModel(
+        [
+            [
+                _call(
+                    "write",
+                    "write",
+                    {
+                        "path": "azents://execution/result.md",
+                        "content": "",
+                        "overwrite": False,
+                    },
+                ),
+                _call(
+                    "submit_memory", "empty", {"path": "azents://execution/result.md"}
+                ),
+            ]
+        ],
+        close_failure=True,
+    )
+    host = await _host(rdb_session_manager, model, max_turns=2)
+    outcome = await host.run()
+    assert outcome.tool_call_id == "empty"
+    assert model.closed and host.closed
+    assert "transport cleanup failed" in caplog.text
+    observed = await host.execution_repository.inspect_accepted(
+        host.principal.owner.session_id, tool_call_id="empty"
+    )
+    assert observed == outcome
+
+
+async def test_unsubmitted_turn_limit_retains_files_dialogue_and_pending_truth(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    host = await _host(
-        rdb_session_manager,
-        personal=False,
-        empty=False,
-        invalid_final=False,
-        hard_input=False,
-    )
-    host.execution_policy = HistoricalMemoryExecutionConfig(max_turns=2)
-    with pytest.raises(ConsolidationTurnLimitExceeded, match="turn limit"):
-        await host.run()
-    model = host.model
-    assert isinstance(model, _ScriptedModel) and model.turn == 2 and model.closed
-    assert (
-        await host.publication_repository.inspect_outcome(host.claim.principal) is None
-    )
-
-
-async def test_candidate_host_uses_only_claim_remaining_logical_turns(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    host = await _host(
-        rdb_session_manager,
-        personal=False,
-        empty=False,
-        invalid_final=False,
-        hard_input=False,
-    )
-    host.execution_policy = HistoricalMemoryExecutionConfig(max_turns=5)
-    host.prior_turns = 4
+    model = _ScriptedModel([[_final()], [_final()]], close_failure=False)
+    host = await _host(rdb_session_manager, model, max_turns=2)
     with pytest.raises(ConsolidationTurnLimitExceeded):
         await host.run()
-    model = host.model
-    assert isinstance(model, _ScriptedModel) and model.turn == 1
-    assert host.started_turns == 1 and host.closed
-    assert (
-        await host.publication_repository.inspect_outcome(host.claim.principal) is None
+    assert len(model.contexts) == 2 and model.closed
+    binding = await host.execution_repository.load_binding(
+        host.principal.owner.session_id
     )
+    assert (
+        binding is not None and binding.started_turns == 2 and binding.accepted is None
+    )
+    assert await host.execution_repository.current_result(binding.unit) is None
+    rows = await _stored_events(rdb_session_manager, host.principal)
+    assert sum(row.kind is EventKind.ASSISTANT_MESSAGE for row in rows) == 2
 
 
-class _UncertainPublication(ConsolidationPublicationRepository):
-    async def _publish(
-        self,
-        principal: ConsolidationJobPrincipal,
-        *,
-        expected_draft_revision_id: str,
-        expected_observation_epoch: int,
-        overview: ValidatedConsolidationOverview,
-    ) -> ConsolidationPublicationOutcome:
-        await super()._publish(
-            principal,
-            expected_draft_revision_id=expected_draft_revision_id,
-            expected_observation_epoch=expected_observation_epoch,
-            overview=overview,
-        )
-        raise OperationalError(
-            "Synthetic publication result loss", None, RuntimeError("Result lost")
-        )
-
-
-async def test_uncertain_commit_inspects_original_outcome_without_repeat_publication(
+async def test_owner_loss_at_physical_dispatch_preserves_admission_rejection(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    host = await _host(
-        rdb_session_manager,
-        personal=False,
-        empty=False,
-        invalid_final=False,
-        hard_input=False,
+    """Rejected I/O cannot settle stale usage and replace its safe admission error."""
+
+    class LostOwnerModel(_ScriptedModel):
+        async def invoke(
+            self,
+            prepared: PreparedModelOperation,
+            *,
+            context: ModelStreamCallContext,
+        ) -> NormalizedAdapterOutput[TransientModelMessage]:
+            assert context.session_id is not None and context.check_stop is not None
+            async with rdb_session_manager() as session:
+                await SessionExecutionRecordRepository().claim_owner_generation(
+                    session, context.session_id
+                )
+            await context.check_stop()
+            raise AssertionError("The stale owner must not reach provider I/O.")
+
+    model = LostOwnerModel([], close_failure=False)
+    host = await _host(rdb_session_manager, model, max_turns=2)
+    with pytest.raises(ModelDispatchAdmissionError) as failure:
+        await host.run()
+    assert failure.value.reason == "ownership"
+    assert model.closed
+    rows = await _stored_events(rdb_session_manager, host.principal)
+    assert not any(row.kind is EventKind.ASSISTANT_MESSAGE for row in rows)
+
+
+@dataclasses.dataclass(frozen=True)
+class _LostAcknowledgement(MemoryExecutionRepository):
+    calls: list[str]
+
+    async def submit(
+        self,
+        principal: MemoryExecutionPrincipal,
+        *,
+        tool_call_id: str,
+        authored_path: str,
+    ) -> MemoryAcceptedOutcome:
+        self.calls.append(tool_call_id)
+        await super().submit(
+            principal, tool_call_id=tool_call_id, authored_path=authored_path
+        )
+        raise MemorySubmissionUncertainError("Synthetic accepted acknowledgement loss")
+
+
+async def test_uncertain_submit_resolves_original_outcome_without_repeating_model(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    model = _ScriptedModel(
+        [
+            [
+                _call(
+                    "write",
+                    "write",
+                    {
+                        "path": "azents://execution/result.md",
+                        "content": "# Exactly one accepted result",
+                        "overwrite": False,
+                    },
+                ),
+                _call(
+                    "submit_memory",
+                    "original",
+                    {
+                        "path": "azents://execution/result.md",
+                    },
+                ),
+            ]
+        ],
+        close_failure=False,
     )
-    host.publication_repository = _UncertainPublication(
-        session_manager=rdb_session_manager,
-        read_session_manager=rdb_session_manager,
+    host = await _host(rdb_session_manager, model, max_turns=3)
+    calls: list[str] = []
+    uncertain = _LostAcknowledgement(
+        rdb_session_manager,
+        rdb_session_manager,
+        host.execution_repository.model_operation_completion_repository,
+        calls,
+    )
+    host.execution_repository = uncertain
+    host.tools.executions = uncertain
+    outcome = await host.run()
+    assert outcome.tool_call_id == "original" and calls == ["original"]
+    assert len(model.contexts) == 1 and not model.script
+    rows = await _stored_events(rdb_session_manager, host.principal)
+    results = [
+        ClientToolResultPayload.model_validate(row.payload)
+        for row in rows
+        if row.kind is EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert results[-1].call_id == "original"
+    assert results[-1].status == "completed"
+
+
+@dataclasses.dataclass(frozen=True)
+class _AcceptedAuditFault(MemoryExecutionContextService):
+    async def append(
+        self,
+        principal: MemoryExecutionPrincipal,
+        messages: Sequence[TransientModelMessage],
+        *,
+        accepted: MemoryAcceptedOutcome | None,
+    ) -> None:
+        if accepted is not None:
+            raise RuntimeError("Synthetic accepted audit append fault")
+        await super().append(principal, messages, accepted=None)
+
+
+async def test_accepted_tool_result_audit_fault_is_secondary_health(
+    rdb_session_manager: SessionManager[WriteSession],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    model = _ScriptedModel(
+        [
+            [
+                _call(
+                    "write",
+                    "write",
+                    {
+                        "path": "azents://execution/result.md",
+                        "content": "",
+                        "overwrite": False,
+                    },
+                ),
+                _call(
+                    "submit_memory",
+                    "accepted",
+                    {
+                        "path": "azents://execution/result.md",
+                    },
+                ),
+            ]
+        ],
+        close_failure=False,
+    )
+    host = await _host(rdb_session_manager, model, max_turns=3)
+    context = host.context_port
+    assert isinstance(context, MemoryExecutionContextService)
+    host.context_port = _AcceptedAuditFault(
+        context.repository, context.compaction_operations
     )
     outcome = await host.run()
-    assert host.closed and host.messages == []
+    assert outcome.tool_call_id == "accepted" and len(model.contexts) == 1
+    assert "audit follow-up failed" in caplog.text
     assert (
-        await host.publication_repository.inspect_outcome(host.claim.principal)
+        await host.execution_repository.inspect_accepted(
+            outcome.session_id, tool_call_id=outcome.tool_call_id
+        )
         == outcome
     )
-    async with rdb_session_manager() as session:
-        count = await session.read_session.scalar(
-            sa.select(sa.func.count())
-            .select_from(RDBConsolidationRevision)
-            .where(RDBConsolidationRevision.unit_id == host.claim.unit_id)
-        )
-        assert count == 1

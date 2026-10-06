@@ -17,17 +17,13 @@ from azents.core.historical_memory_consolidation import (
     ConsolidationScope,
     ConsolidationUnitKey,
 )
-from azents.core.historical_memory_publication import validate_consolidation_overview
+from azents.core.historical_memory_publication import render_submitted_markdown
 from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
-from azents.rdb.models.historical_memory_consolidation import (
-    RDBConsolidationRevision,
-    RDBConsolidationRevisionDependency,
-    RDBConsolidationUnit,
-)
+from azents.rdb.models.historical_memory_execution import RDBMemoryUnit
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
@@ -363,60 +359,23 @@ async def _publish_overview(
         scope=scope,
         associated_user_id=associated_user_id,
     )
-    text = (
-        f"## Historical Context\n\n{marker}\n\n## Source Routes\n\n"
-        f"- azents://memory/historical/{scope.value}/{source_id}/summary.md"
-        " — Supplied summary\n"
-    )
-    overview = validate_consolidation_overview(key=key, markdown=text)
-    unit = RDBConsolidationUnit(
-        id=uuid7().hex,
-        workspace_id=setup.workspace_id,
-        agent_id=setup.agent_id,
-        scope=scope,
-        associated_user_id=associated_user_id,
-    )
-    session.write_session.add(unit)
-    await session.write_session.flush()
-    publication = RDBConsolidationRevision(
-        id=uuid7().hex,
-        unit_id=unit.id,
-        attempt_id=uuid7().hex,
-        markdown=overview.markdown,
-        rendered_block=overview.rendered_block,
-    )
-    session.write_session.add(publication)
-    await session.write_session.flush()
-    source = await session.write_session.get(RDBHistoricalMemorySource, source_id)
-    assert source is not None
-    source.summary_generation = 1
-    source.evidence_hash = "e" * 64
-    await session.write_session.flush()
-    assert source.evidence_hash is not None
-    grant = (
-        await session.write_session.scalar(
-            sa.select(RDBWorkspaceUser.memory_grant_identity).where(
-                RDBWorkspaceUser.workspace_id == setup.workspace_id,
-                RDBWorkspaceUser.user_id == associated_user_id,
-            )
-        )
-        if associated_user_id is not None
-        else None
-    )
+    rendered = render_submitted_markdown(key=key, markdown=marker)
     session.write_session.add(
-        RDBConsolidationRevisionDependency(
+        RDBMemoryUnit(
             id=uuid7().hex,
-            revision_id=publication.id,
-            source_session_id=source_id,
-            summary_generation=source.summary_generation,
-            evidence_hash=source.evidence_hash,
-            availability_generation=source.availability_generation,
-            membership_grant_id=grant,
+            workspace_id=key.workspace_id,
+            agent_id=key.agent_id,
+            scope=scope,
+            associated_user_id=associated_user_id,
+            active_session_id=None,
+            markdown=rendered.markdown,
+            rendered_block=rendered.rendered_block,
+            accepted_at=_NOW,
+            retry_at=None,
         )
     )
-    unit.published_revision_id = publication.id
     await session.write_session.flush()
-    return overview.markdown
+    return rendered.markdown
 
 
 async def test_integrated_settings_scope_empty_disabled_and_membership(
@@ -499,10 +458,10 @@ async def test_integrated_settings_scope_empty_disabled_and_membership(
     assert denied.markdown is None and denied.published_at is None
 
 
-async def test_integrated_settings_retains_current_source_admission_until_replacement(
+async def test_integrated_settings_current_result_does_not_inherit_source_manifest(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
-    """Phase 1 does not bypass the current storage's publication read boundary."""
+    """Accepted current result survives source archive under exact human scope."""
     async with rdb_session_manager() as session:
         setup = await _fixture(session)
         source_id = await _create_source(
@@ -537,9 +496,9 @@ async def test_integrated_settings_retains_current_source_admission_until_replac
         user_id=setup.user_id,
         scope=HistoricalMemorySettingsScope.TEAM,
     )
-    assert unavailable.markdown is None
+    assert unavailable.markdown is not None and "Overview" in unavailable.markdown
     async with rdb_session_manager() as session:
         count = await session.write_session.scalar(
-            sa.select(sa.func.count()).select_from(RDBConsolidationRevision)
+            sa.select(sa.func.count()).select_from(RDBMemoryUnit)
         )
     assert count == 1

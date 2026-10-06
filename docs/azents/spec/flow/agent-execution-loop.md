@@ -80,6 +80,13 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - python/apps/azents/src/azents/repos/idle_continuation.py
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/worker/run/memory_execution.py
+  - python/apps/azents/src/azents/services/historical_memory/consolidation_host.py
+  - python/apps/azents/src/azents/services/historical_memory/consolidation_tools.py
+  - python/apps/azents/src/azents/services/historical_memory/execution_context.py
+  - python/apps/azents/src/azents/repos/historical_memory_consolidation/execution.py
+  - python/apps/azents/src/azents/repos/memory_execution_events.py
+  - python/apps/azents/src/azents/repos/session_execution_file.py
   - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py
@@ -105,7 +112,6 @@ code_paths:
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
-  - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_web/**
   - python/apps/azents/src/azents/services/vfs.py
@@ -186,8 +192,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-06
-spec_version: 218
+last_verified_at: 2026-10-07
+spec_version: 219
 ---
 
 # Agent Execution Loop
@@ -203,8 +209,10 @@ its interface contains no public Session/Run identity, durable Event or database
 dependency. The foreground host retains mailbox/stop admission, compaction,
 provider normalization, repository-owned atomic groups, output delivery and
 terminal effects. Adapter closure occurs on every core exit, and hard turn
-exhaustion is interruption rather than successful completion. This extraction
-does not activate a background consolidation consumer or change provider dialects.
+exhaustion is interruption rather than successful completion. The internal Memory
+purpose host also uses this core while binding common
+Session/Run/Event ownership and its private file/submission domain. Provider
+dialects remain owned by the same shared lowerers/adapters.
 
 Native stream consumption/partial-stop normalization and parallel call/result
 matching, independent settlement and cancellation also use identity-neutral
@@ -1149,16 +1157,12 @@ read-only `azents://memory` mount. Each operation independently checks Memory
 enablement, the concrete execution's active root, same Agent/Workspace, and
 current Team/associated-User source access. Paths use authorized database IDs
 or exact `consolidated/{team,user}/summary.md` aliases bound to that root.
-Live aggregate reads may be newer than the boundary selection without replacing
-it. Selected revision filtering uses its own full manifest and omits the whole
-affected unit; the independently authorized peer is unchanged. A changed/denied
-semantic prefix or exact admitted unit/revision selection resets both native
-opaque replay and stored-response continuation. Preparation carries the existing
-authorized identities out-of-band and corresponding normalization stamps
-request-local native compatibility. Same visible bytes on a new clean revision
-do not restore old opaque state. Old/unbound artifacts use canonical visible
-history without encrypted reasoning/assistant/tool signatures; durable Events
-remain unchanged, including after fresh-adapter resume.
+Live aggregate reads can observe newer scope-authorized current results without
+replacing the boundary bytes. Selected Historical scope authority uses current
+Agent/Workspace/personal membership, not source revisions or dependency manifests.
+Changed/denied semantic prefix resets incompatible opaque native replay and
+stored-response continuation; compatibility carries the actual permitted text,
+not aggregate revision identities. Durable visible Events remain unchanged.
 The canonical Session event store remains source evidence. Broad grep excludes
 tool-result bodies; an exact result path yields bounded persisted text only,
 never artifacts, file bytes, or native result payloads. Archive/access loss
@@ -1168,13 +1172,31 @@ Root execution retains only `save_memory` and `delete_memory` as Memory domain
 tools. Subagents have context/generic reads but no Saved mutation. Dedicated
 Memory/history read factories are removed without aliases. Snapshot, mutation,
 and VFS read composition return from completed repository transactions before
-model-visible rendering. Background Historical preparation uses the Agent
-Lightweight chain independently of foreground execution. Internal consolidation
-hosts the same iteration core with scoped generic VFS tools, RAM-only dialogue,
-PostgreSQL draft/coverage/budget journals and fenced host publication. It has no
-foreground Session/Run, Runtime callbacks, public mutation or peer-scope context.
-Summaries and consolidated documents remain potentially stale source-linked
-reference data, not instructions or Saved Memory.
+model-visible rendering. Background source preparation uses the Agent Lightweight chain. Summary-only
+integration runs as an internal common Session through the ordinary Worker,
+using the same owner generation, broker lock/heartbeat, Run/Event store,
+stop/shutdown supervision, provider contracts and compaction. Its common model
+operation kind is `FOREGROUND`, but its requested route is the Agent Lightweight
+label; no Main fallback or second Memory owner/semaphore is introduced.
+
+The internal host receives only read-only prepared summary files in
+`azents://execution/inputs/`, plus a task README. Its closed generic execution-file
+catalog has no original-source, previous aggregate, Runtime, Saved mutation or
+attached Toolkit backend. It authors a fresh writable Markdown file and calls
+`submit_memory` with the file path. Correctable format/size feedback or final prose
+without acceptance continues the same dialogue/files/deadline. Only accepted
+submission durably stores the current result and settles associated supplied
+work; late unassociated work remains pending. Secondary audit/close/archive faults
+do not reverse the original accepted outcome.
+
+Every physical native SDK send rechecks common ownership and stop admission;
+admission denial remains distinct from provider/quota failure even through native
+SDK wrappers. Takeover starts a clean successor with the original deadline,
+policy and consumed turns. Canonical diagnostic dialogue, tool results and
+execution files remain until common retention purge; current result and original
+accepted scalars survive audit purge. Internal Sessions are unavailable through
+public Conversation APIs. Summaries remain untrusted reference data, not Saved
+Memory or current instruction.
 See [`memory.md`](../domain/memory.md) for selection, authorization, and bounds.
 
 `AgentRunExecution` executes foreground client tool calls in parallel. Each tool result is normalized
@@ -1968,6 +1990,8 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 219) — Bind summary-only explicit Memory submission to common Worker Session/Run/Event ownership, native physical admission, compaction and audit retention; select aggregates by current scope.
 
 - **2026-10-06** (spec_version 217) — Replaced hierarchy partial NOWAIT admission
   with exact waiting locks and finite whole-DB-operation recovery covering both

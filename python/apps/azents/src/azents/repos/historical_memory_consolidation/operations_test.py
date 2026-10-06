@@ -1,463 +1,62 @@
-"""Real PostgreSQL Lightweight operation selection, routing and settlement."""
+"""Configured Lightweight candidates and quota-only progression on common Runs."""
 
-import asyncio
 import json
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from azents.core.active_model_capabilities import (
     CapturedStoredChoice,
     ConfiguredModelIdentity,
 )
-from azents.core.enums import LLMProvider
+from azents.core.enums import AgentRunStatus, LLMProvider
 from azents.core.historical_memory_consolidation import (
-    ConsolidationAttemptState,
-    ConsolidationJobPrincipal,
+    MemoryExecutionAuthorityError,
+    MemoryExecutionPrincipal,
 )
 from azents.core.model_catalog_identity import catalog_source_keys
 from azents.core.model_catalog_source import decode_catalog_source
 from azents.core.model_operation import (
     ModelOperationCandidateOutcomeStatus,
-    ModelOperationChainExhaustedError,
     ModelOperationKind,
     ModelOperationSnapshot,
+    ModelOperationState,
 )
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
     ModelProviderFailureRetryability,
 )
 from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.base import RDBModel
-from azents.rdb.models.historical_memory_consolidation import (
-    RDBConsolidationAttempt,
-    RDBConsolidationUnit,
-)
+from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_execution_file import RDBSessionExecutionFile
 from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
+from azents.rdb.session_capabilities import WriteSession
 from azents.repos.active_model_capabilities import ActiveModelCapabilitiesRepository
 from azents.repos.active_model_capabilities_data import CapturedActiveChoiceInputs
 from azents.repos.agent import AgentRepository
-from azents.repos.historical_memory_consolidation.authority import (
-    ConsolidationAuthorityError,
-    consolidation_job_session,
-    require_commit_owner,
-)
-from azents.repos.historical_memory_consolidation.drafts import (
-    ConsolidationDraftRepository,
-)
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.historical_memory_consolidation.operations import (
     ConsolidationModelOperationRepository,
-    finish_consolidation_model_operation,
-)
-from azents.repos.historical_memory_consolidation.ownership import (
-    ConsolidationOwnershipRepository,
 )
 from azents.repos.model_candidate_health import ModelCandidateHealthRepository
-from azents.repos.model_candidate_health.data import ModelCandidateIdentity
-from azents.testing.committed_fixture_cleanup import committed_fixture_graph
-from azents.testing.consolidation import (
-    consolidation_deadline,
-    seed_consolidation_corpus,
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
+from azents.services.historical_memory.consolidation_host_test import (
+    _host,
+    _ScriptedModel,
 )
+from azents.testing.consolidation import memory_execution_repository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_selectable_model_option_dicts,
 )
 
 
-async def _principal(
-    manager: SessionManager[WriteSession],
-) -> ConsolidationJobPrincipal:
-    corpus = await seed_consolidation_corpus(manager)
-    async with manager() as session:
-        agent = await session.write_session.get(RDBAgent, corpus.team.agent_id)
-        assert agent is not None
-        integration = RDBLLMProviderIntegration(
-            workspace_id=corpus.team.workspace_id,
-            provider=LLMProvider.OPENAI,
-            name="Synthetic internal route",
-            encrypted_credentials="synthetic-unused",
-            config=None,
-        )
-        session.write_session.add(integration)
-        await session.write_session.flush()
-        main = make_test_model_selection_dict(model_identifier="main-not-permitted")
-        primary = make_test_model_selection_dict(
-            integration_id=integration.id, model_identifier="lightweight-first"
-        )
-        fallback = make_test_model_selection_dict(
-            integration_id=integration.id, model_identifier="lightweight-second"
-        )
-        primary["normalized_capabilities"] = _legacy_v2_capabilities()
-        fallback["normalized_capabilities"] = _legacy_v2_capabilities()
-        options = make_test_selectable_model_option_dicts(
-            model_selection=main, lightweight_model_selection=primary
-        )
-        second = make_test_selectable_model_option_dicts(
-            model_selection=main, lightweight_model_selection=fallback
-        )[1]
-        candidates = options[1]["candidates"]
-        fallback_candidates = second["candidates"]
-        assert isinstance(candidates, list) and isinstance(fallback_candidates, list)
-        options[1]["candidates"] = [*candidates, *fallback_candidates]
-        agent.model_selection = main
-        agent.lightweight_model_selection = primary
-        agent.selectable_model_options = options
-    claim = await ConsolidationOwnershipRepository(manager).claim(
-        corpus.team, deadline=consolidation_deadline()
-    )
-    assert claim is not None
-    await ConsolidationDraftRepository(manager).observe(
-        claim.principal, path="summary.md"
-    )
-    return claim.principal
-
-
-def _repository(
-    manager: SessionManager[WriteSession],
-) -> ConsolidationModelOperationRepository:
-    return ConsolidationModelOperationRepository(
-        manager,
-        AgentRepository(),
-        ModelCandidateHealthRepository(manager),
-        _active_metadata_repository(structured_output=True),
-    )
-
-
-def _failure(
-    operation: ModelOperationSnapshot,
-    category: ModelProviderFailureCategory,
-    *,
-    model: str | None,
-) -> ModelProviderFailure:
-    selection = operation.current_candidate.model_selection
-    return ModelProviderFailure(
-        operation="historical_memory",
-        category=category,
-        retryability=ModelProviderFailureRetryability.USER_ACTION_REQUIRED,
-        provider_message=None,
-        status_code=429,
-        provider_code=None,
-        provider_error_type=None,
-        provider_error_param=None,
-        retry_hint_seconds=None,
-        provider=selection.provider.value,
-        integration=selection.llm_provider_integration_id,
-        model=selection.model_identifier if model is None else model,
-    )
-
-
-async def test_begin_retries_agent_contention_without_new_attempt_or_model_request(
-    rdb_engine: AsyncEngine, latest_db_schema: None
-) -> None:
-    """Initial provider preparation waits with its original attempt and inputs."""
-    factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
-
-    @asynccontextmanager
-    async def manager() -> AsyncGenerator[WriteSession, None]:
-        async with factory.begin() as session:
-            yield ReadWriteSession(session)
-
-    async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
-        principal = await _principal(manager)
-        metadata = _active_metadata_repository(structured_output=True)
-        repository = ConsolidationModelOperationRepository(
-            manager,
-            AgentRepository(),
-            ModelCandidateHealthRepository(manager),
-            metadata,
-        )
-        async with manager() as holder:
-            await holder.write_session.scalar(
-                sa.select(RDBAgent)
-                .where(RDBAgent.id == principal.unit.agent_id)
-                .with_for_update()
-            )
-            holder_pid = await holder.read_session.scalar(
-                sa.select(sa.func.pg_backend_pid())
-            )
-            assert isinstance(holder_pid, int)
-            waiting = asyncio.Event()
-            task = asyncio.create_task(repository.begin(principal))
-            async with asyncio.timeout(3):
-                while not waiting.is_set():
-                    async with manager() as observer:
-                        blocked = await observer.read_session.scalar(
-                            sa.text(
-                                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
-                                "WHERE datname = current_database() "
-                                "AND wait_event_type = 'Lock' "
-                                "AND :holder_pid = ANY(pg_blocking_pids(pid)))"
-                            ),
-                            {"holder_pid": holder_pid},
-                        )
-                    if blocked:
-                        waiting.set()
-            assert not task.done()
-        async with asyncio.timeout(3):
-            operation = await task
-        assert operation.kind is ModelOperationKind.HISTORICAL_MEMORY
-        metadata.capture_exact_choices_in_session.assert_awaited_once()
-        assert await repository.begin(principal) == operation
-        async with manager() as session:
-            attempt = await session.read_session.get(
-                RDBConsolidationAttempt, principal.attempt_id
-            )
-            unit = await session.read_session.scalar(
-                sa.select(RDBConsolidationUnit).where(
-                    RDBConsolidationUnit.agent_id == principal.unit.agent_id,
-                    RDBConsolidationUnit.associated_user_id.is_(None),
-                )
-            )
-            assert attempt is not None and unit is not None
-            assert attempt.state is ConsolidationAttemptState.RUNNING
-            assert attempt.model_requests == 0
-            assert attempt.failure_code is None
-            assert unit.active_attempt_id == attempt.id
-            assert unit.owner_generation == principal.owner_generation
-            assert unit.failure_count == unit.no_progress_count == 0
-            assert unit.retry_at is None
-
-
-async def test_begin_freezes_only_lightweight_and_replays_without_foreground_claim(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    principal = await _principal(rdb_session_manager)
-    active_metadata = _active_metadata_repository(structured_output=True)
-    repository = ConsolidationModelOperationRepository(
-        rdb_session_manager,
-        AgentRepository(),
-        ModelCandidateHealthRepository(rdb_session_manager),
-        active_metadata,
-    )
-    operation = await repository.begin(principal)
-    assert operation.kind is ModelOperationKind.HISTORICAL_MEMORY
-    assert operation.semantic_label == "lightweight"
-    assert [c.model_selection.model_identifier for c in operation.candidates] == [
-        "lightweight-first",
-        "lightweight-second",
-    ]
-    assert operation.transferred_probe_claim is None
-    assert operation.outcomes[0].status is ModelOperationCandidateOutcomeStatus.ACTIVE
-    assert all(
-        candidate.model_selection.normalized_capabilities.tool_calling.supported
-        for candidate in operation.candidates
-    )
-    active_metadata.capture_exact_choices_in_session.assert_awaited_once()
-    active_metadata.inputs_match_in_session.assert_awaited_once()
-    active_metadata.reset_mock()
-    active_metadata.capture_exact_choices_in_session.side_effect = AssertionError(
-        "Frozen consolidation must not query active metadata."
-    )
-    assert await repository.begin(principal) == operation
-    active_metadata.capture_exact_choices_in_session.assert_not_awaited()
-    active_metadata.inputs_match_in_session.assert_not_awaited()
-    async with rdb_session_manager() as session:
-        attempt = await session.read_session.get(
-            RDBConsolidationAttempt, principal.attempt_id
-        )
-        assert attempt is not None
-        assert (
-            ModelOperationSnapshot.model_validate(attempt.model_operation_state)
-            == operation
-        )
-        persisted_agent = await AgentRepository().get_by_id(
-            session, principal.unit.agent_id
-        )
-        assert persisted_agent is not None
-        persisted_row = await session.read_session.get(
-            RDBAgent, principal.unit.agent_id
-        )
-        assert persisted_row is not None
-        assert (
-            persisted_row.lightweight_model_selection["normalized_capabilities"][
-                "semantic_contract"
-            ]["version"]
-            == 2
-        )
-        assert all(
-            not candidate.model_selection.normalized_capabilities.tool_calling.supported
-            for option in persisted_agent.selectable_model_options
-            for candidate in option.candidates
-        )
-
-
-async def test_begin_metadata_drift_does_not_persist_a_new_operation(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """The existing consolidation owner fence precedes execution-state writes."""
-    principal = await _principal(rdb_session_manager)
-    active_metadata = _active_metadata_repository(structured_output=True)
-    active_metadata.inputs_match_in_session.return_value = False
-    repository = ConsolidationModelOperationRepository(
-        rdb_session_manager,
-        AgentRepository(),
-        ModelCandidateHealthRepository(rdb_session_manager),
-        active_metadata,
-    )
-    with pytest.raises(ConsolidationAuthorityError, match="metadata changed"):
-        await repository.begin(principal)
-    async with rdb_session_manager() as session:
-        attempt = await session.read_session.get(
-            RDBConsolidationAttempt, principal.attempt_id
-        )
-        assert attempt is not None
-        assert attempt.model_operation_state is None
-
-
-async def test_quota_only_advances_exact_route_and_persists_exhaustion(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    principal = await _principal(rdb_session_manager)
-    active_metadata = _active_metadata_repository(structured_output=True)
-    repository = ConsolidationModelOperationRepository(
-        rdb_session_manager,
-        AgentRepository(),
-        ModelCandidateHealthRepository(rdb_session_manager),
-        active_metadata,
-    )
-    first = await repository.begin(principal)
-    active_metadata.reset_mock()
-    active_metadata.capture_exact_choices_in_session.side_effect = AssertionError(
-        "Quota/reuse must retain the frozen chain without active metadata."
-    )
-    with pytest.raises(ConsolidationAuthorityError, match="route does not match"):
-        await repository.advance_after_quota(
-            principal,
-            failure=_failure(
-                first,
-                ModelProviderFailureCategory.QUOTA_OR_BILLING,
-                model="forged-route",
-            ),
-        )
-    assert await repository.begin(principal) == first
-    second = await repository.advance_after_quota(
-        principal,
-        failure=_failure(
-            first, ModelProviderFailureCategory.QUOTA_OR_BILLING, model=None
-        ),
-    )
-    assert second is not None and second.cursor == 1
-    assert (
-        second.outcomes[0].status
-        is ModelOperationCandidateOutcomeStatus.QUOTA_OR_BILLING
-    )
-    assert (
-        await repository.advance_after_quota(
-            principal,
-            failure=_failure(
-                second, ModelProviderFailureCategory.QUOTA_OR_BILLING, model=None
-            ),
-        )
-        is None
-    )
-    async with rdb_session_manager() as session:
-        attempt = await session.read_session.get(
-            RDBConsolidationAttempt, principal.attempt_id
-        )
-        assert attempt is not None
-        exhausted = ModelOperationSnapshot.model_validate(attempt.model_operation_state)
-        assert exhausted.terminal_reason is not None
-        assert all(
-            o.status is ModelOperationCandidateOutcomeStatus.QUOTA_OR_BILLING
-            for o in exhausted.outcomes
-        )
-    active_metadata.capture_exact_choices_in_session.assert_not_awaited()
-    active_metadata.inputs_match_in_session.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    "category",
-    [
-        ModelProviderFailureCategory.RATE_LIMIT,
-        ModelProviderFailureCategory.AUTHENTICATION,
-        ModelProviderFailureCategory.TRANSPORT,
-    ],
-)
-async def test_nonquota_cannot_advance_or_change_health(
-    rdb_session_manager: SessionManager[WriteSession],
-    category: ModelProviderFailureCategory,
-) -> None:
-    principal = await _principal(rdb_session_manager)
-    repository = _repository(rdb_session_manager)
-    operation = await repository.begin(principal)
-    with pytest.raises(ValueError, match="Only provider quota"):
-        await repository.advance_after_quota(
-            principal, failure=_failure(operation, category, model=None)
-        )
-    assert await repository.begin(principal) == operation
-
-
-async def test_unavailable_chain_is_durably_exhausted_without_background_probe(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    principal = await _principal(rdb_session_manager)
-    health = ModelCandidateHealthRepository(rdb_session_manager)
-    async with rdb_session_manager() as session:
-        agent = await session.read_session.get(RDBAgent, principal.unit.agent_id)
-        assert agent is not None
-        integration_id = agent.lightweight_model_selection[
-            "llm_provider_integration_id"
-        ]
-        assert isinstance(integration_id, str)
-    for model in ("lightweight-first", "lightweight-second"):
-        await health.renew_quota(
-            ModelCandidateIdentity(
-                workspace_id=principal.unit.workspace_id,
-                llm_provider_integration_id=integration_id,
-                model_identifier=model,
-            )
-        )
-    with pytest.raises(ModelOperationChainExhaustedError):
-        await _repository(rdb_session_manager).begin(principal)
-    async with rdb_session_manager() as session:
-        attempt = await session.read_session.get(
-            RDBConsolidationAttempt, principal.attempt_id
-        )
-        assert attempt is not None
-        operation = ModelOperationSnapshot.model_validate(attempt.model_operation_state)
-        assert operation.terminal_reason is not None
-        assert all(
-            o.status is ModelOperationCandidateOutcomeStatus.COOLDOWN
-            for o in operation.outcomes
-        )
-        assert operation.transferred_probe_claim is None
-
-
-async def test_success_settles_operation_inside_owner_fenced_database_boundary(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    principal = await _principal(rdb_session_manager)
-    repository = _repository(rdb_session_manager)
-    operation = await repository.begin(principal)
-    async with consolidation_job_session(
-        rdb_session_manager, principal, participants=None
-    ) as job:
-        await finish_consolidation_model_operation(
-            job.session, owner=job.owner, health_repository=repository.health_repository
-        )
-        await require_commit_owner(job.session, job.owner)
-    async with rdb_session_manager() as session:
-        attempt = await session.read_session.get(
-            RDBConsolidationAttempt, principal.attempt_id
-        )
-        assert attempt is not None
-        settled = ModelOperationSnapshot.model_validate(attempt.model_operation_state)
-        assert settled.operation_id == operation.operation_id
-        assert (
-            settled.outcomes[0].status is ModelOperationCandidateOutcomeStatus.SUCCEEDED
-        )
-
-
-def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
-    """Capture synthetic exact declarations, never the saved capability object."""
+def _metadata() -> AsyncMock:
     repository = AsyncMock(spec=ActiveModelCapabilitiesRepository)
 
     async def capture(
@@ -466,7 +65,6 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
         workspace_id: str,
         identities: tuple[ConfiguredModelIdentity, ...],
     ) -> CapturedActiveChoiceInputs:
-        del session
         choices = []
         for identity in identities:
             key = catalog_source_keys(
@@ -482,7 +80,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
                             "supported_modalities": ["text"],
                             "supported_output_modalities": ["text"],
                             "supports_function_calling": True,
-                            "supports_response_schema": structured_output,
+                            "supports_response_schema": True,
                             "max_input_tokens": 128000,
                             "max_output_tokens": 16384,
                         }
@@ -496,7 +94,7 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
                     source_models=(source,),
                     supported_execution_options=(),
                     model_developer=None,
-                    catalog_id="synthetic-local-catalog",
+                    catalog_id="synthetic-current-catalog",
                 )
             )
         return CapturedActiveChoiceInputs(
@@ -512,35 +110,229 @@ def _active_metadata_repository(*, structured_output: bool) -> AsyncMock:
     return repository
 
 
-def _legacy_v2_capabilities() -> dict[str, object]:
-    """Keep a real persisted v2 declaration unknown until exact facts compile it."""
-    unknown = {"state": "unknown", "origin": None, "predicate": None}
-    return {
-        "semantic_contract": {
-            "version": 2,
-            "reasoning": {
-                "support": unknown,
-                "completeness": "unknown",
-                "efforts": [],
-                "default_effort": None,
-            },
-            "reasoning_summaries": unknown,
-            "function_calling": unknown,
-            "parallel_function_calls": unknown,
-            "strict_function_schema": unknown,
-            "structured_response": unknown,
-            "parameters": {
-                name: unknown
-                for name in (
-                    "temperature",
-                    "max_output_tokens",
-                    "top_p",
-                    "top_k",
-                    "stop_sequences",
+async def _principal(manager: SessionManager[WriteSession]) -> MemoryExecutionPrincipal:
+    host = await _host(manager, _ScriptedModel([], close_failure=False), max_turns=5)
+    async with manager() as session:
+        agent = await session.write_session.get(
+            RDBAgent, host.principal.binding.unit.agent_id
+        )
+        assert agent is not None
+        integration = RDBLLMProviderIntegration(
+            workspace_id=agent.workspace_id,
+            provider=LLMProvider.OPENAI,
+            name="Synthetic common Memory route",
+            encrypted_credentials="unused",
+            config=None,
+        )
+        session.write_session.add(integration)
+        await session.write_session.flush()
+        main = make_test_model_selection_dict(
+            integration_id=integration.id, model_identifier="main-not-permitted"
+        )
+        first = make_test_model_selection_dict(
+            integration_id=integration.id, model_identifier="lightweight-first"
+        )
+        second = make_test_model_selection_dict(
+            integration_id=integration.id, model_identifier="lightweight-second"
+        )
+        options = make_test_selectable_model_option_dicts(
+            model_selection=main, lightweight_model_selection=first
+        )
+        other = make_test_selectable_model_option_dicts(
+            model_selection=main, lightweight_model_selection=second
+        )
+        candidates = options[1]["candidates"]
+        other_candidates = other[1]["candidates"]
+        assert isinstance(candidates, list) and isinstance(other_candidates, list)
+        options[1]["candidates"] = [*candidates, *other_candidates]
+        agent.model_selection = main
+        agent.lightweight_model_selection = first
+        agent.selectable_model_options = options
+    return host.principal
+
+
+def _repository(
+    manager: SessionManager[WriteSession], metadata: AsyncMock
+) -> ConsolidationModelOperationRepository:
+    return ConsolidationModelOperationRepository(
+        manager,
+        AgentRepository(),
+        ModelCandidateHealthRepository(manager),
+        metadata,
+        memory_execution_repository(manager),
+        AgentRunRepository(),
+    )
+
+
+def _failure(
+    operation: ModelOperationSnapshot,
+    category: ModelProviderFailureCategory,
+    *,
+    model: str | None,
+) -> ModelProviderFailure:
+    selected = operation.current_candidate.model_selection
+    return ModelProviderFailure(
+        operation="historical_memory",
+        category=category,
+        retryability=ModelProviderFailureRetryability.USER_ACTION_REQUIRED,
+        provider_message=None,
+        status_code=429,
+        provider_code=None,
+        provider_error_type=None,
+        provider_error_param=None,
+        retry_hint_seconds=None,
+        provider=selected.provider.value,
+        integration=selected.llm_provider_integration_id,
+        model=selected.model_identifier if model is None else model,
+    )
+
+
+async def test_memory_uses_lightweight_and_freezes_common_run_snapshot(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    principal = await _principal(rdb_session_manager)
+    metadata = _metadata()
+    repository = _repository(rdb_session_manager, metadata)
+    operation = await repository.begin(principal)
+    assert operation.kind is ModelOperationKind.FOREGROUND
+    assert (
+        operation.current_candidate.model_selection.model_identifier
+        == "lightweight-first"
+    )
+    assert operation.semantic_label == "lightweight"
+    metadata.capture_exact_choices_in_session.assert_awaited_once()
+    metadata.reset_mock()
+    metadata.capture_exact_choices_in_session.side_effect = AssertionError(
+        "Frozen route must not recapture metadata"
+    )
+    assert await repository.begin(principal) == operation
+    async with rdb_session_manager() as session:
+        run = await session.read_session.get(RDBAgentRun, principal.run_id)
+        assert run is not None and run.model_operation_state is not None
+        assert (
+            ModelOperationState.model_validate(run.model_operation_state).foreground
+            == operation
+        )
+        assert run.session_id == principal.owner.session_id
+    metadata.capture_exact_choices_in_session.assert_not_awaited()
+
+
+async def test_metadata_drift_rolls_back_common_run_model_operation(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    principal = await _principal(rdb_session_manager)
+    metadata = _metadata()
+    metadata.inputs_match_in_session.return_value = False
+    with pytest.raises(MemoryExecutionAuthorityError, match="metadata changed"):
+        await _repository(rdb_session_manager, metadata).begin(principal)
+    async with rdb_session_manager() as session:
+        run = await session.read_session.get(RDBAgentRun, principal.run_id)
+        assert run is not None and run.model_operation_state is None
+
+
+async def test_quota_replaces_host_with_exact_captured_route_without_main_fallback(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    principal = await _principal(rdb_session_manager)
+    metadata = _metadata()
+    repository = _repository(rdb_session_manager, metadata)
+    executions = memory_execution_repository(rdb_session_manager)
+    first = await repository.begin(principal)
+    await executions.start_turn(principal)
+    with pytest.raises(MemoryExecutionAuthorityError, match="route does not match"):
+        await repository.replace_after_quota(
+            principal,
+            failure=_failure(
+                first, ModelProviderFailureCategory.QUOTA_OR_BILLING, model="forged"
+            ),
+        )
+    replacement = await repository.replace_after_quota(
+        principal,
+        failure=_failure(
+            first, ModelProviderFailureCategory.QUOTA_OR_BILLING, model=None
+        ),
+    )
+    assert replacement is not None
+    assert replacement.session_id != principal.owner.session_id
+    assert replacement.deadline_at == principal.binding.deadline_at
+    assert replacement.execution_policy == principal.binding.execution_policy
+    assert replacement.started_turns == 1
+    async with rdb_session_manager() as session:
+        old = await session.read_session.get(RDBAgentRun, principal.run_id)
+        assert old is not None and old.status is AgentRunStatus.FAILED
+        assert not list(
+            await session.read_session.scalars(
+                sa.select(RDBSessionExecutionFile).where(
+                    RDBSessionExecutionFile.session_id == replacement.session_id
                 )
-            },
-            "input_modalities": [],
-            "output_modalities": [],
-            "built_in_tools": [],
-        }
-    }
+            )
+        )
+        assert not list(
+            await session.read_session.scalars(
+                sa.select(RDBEvent).where(RDBEvent.session_id == replacement.session_id)
+            )
+        )
+        generation = await SessionExecutionRecordRepository().claim_owner_generation(
+            session, replacement.session_id
+        )
+    owner = SessionExecutionOwner(replacement.session_id, generation)
+    assert await executions.recover_worker_execution(replacement, owner) == replacement
+    second_principal = await executions.open_run(replacement, owner)
+    metadata.capture_exact_choices_in_session.side_effect = AssertionError(
+        "Frozen route changed"
+    )
+    second = await repository.begin(second_principal)
+    assert second.operation_id == first.operation_id
+    assert second.cursor == 1
+    assert (
+        second.current_candidate.model_selection.model_identifier
+        == "lightweight-second"
+    )
+    assert (
+        second.outcomes[0].status
+        is ModelOperationCandidateOutcomeStatus.QUOTA_OR_BILLING
+    )
+    await executions.start_turn(second_principal)
+    assert (
+        await repository.replace_after_quota(
+            second_principal,
+            failure=_failure(
+                second, ModelProviderFailureCategory.QUOTA_OR_BILLING, model=None
+            ),
+        )
+        is None
+    )
+    async with rdb_session_manager() as session:
+        run = await session.read_session.get(RDBAgentRun, second_principal.run_id)
+        assert run is not None and run.status is AgentRunStatus.FAILED
+        assert run.model_operation_state is not None
+        exhausted = ModelOperationState.model_validate(
+            run.model_operation_state
+        ).foreground
+        assert exhausted is not None and exhausted.terminal_reason is not None
+        assert all(
+            outcome.status is ModelOperationCandidateOutcomeStatus.QUOTA_OR_BILLING
+            for outcome in exhausted.outcomes
+        )
+
+
+@pytest.mark.parametrize(
+    "category",
+    [
+        ModelProviderFailureCategory.RATE_LIMIT,
+        ModelProviderFailureCategory.AUTHENTICATION,
+        ModelProviderFailureCategory.TRANSPORT,
+    ],
+)
+async def test_nonquota_error_cannot_advance_the_memory_chain(
+    rdb_session_manager: SessionManager[WriteSession],
+    category: ModelProviderFailureCategory,
+) -> None:
+    principal = await _principal(rdb_session_manager)
+    repository = _repository(rdb_session_manager, _metadata())
+    first = await repository.begin(principal)
+    with pytest.raises(ValueError, match="Only provider quota"):
+        await repository.replace_after_quota(
+            principal, failure=_failure(first, category, model=None)
+        )
+    assert await repository.begin(principal) == first

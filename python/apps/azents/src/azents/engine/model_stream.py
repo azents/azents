@@ -196,7 +196,9 @@ class ModelDispatchAdmissionError(RuntimeError):
 
 
 async def admit_model_dispatch(context: ModelStreamCallContext) -> None:
-    """Finish the job's database reservation before physical provider I/O."""
+    """Revalidate current admission before every physical provider request."""
+    if context.check_stop is not None and await context.check_stop():
+        raise asyncio.CancelledError(USER_STOP_CANCEL_MESSAGE)
     if isinstance(context, InternalModelStreamCallContext):
         await context.admit_dispatch()
 

@@ -1,17 +1,36 @@
 """Additive Historical storage migration with paged, canonical evidence backfill."""
 
 import datetime
+import hashlib
+import json
 
 import sqlalchemy as sa
 from pytest_alembic import MigrationContext
 from sqlalchemy.engine import Engine
 
 from azents.core.historical_memory import HistoricalMemoryCompletion
-from azents.core.historical_memory_consolidation import prepared_source_evidence_hash
 
 _OLD = "d9bff320245f"
 _NEW = "3be144f78dca"
 _NOW = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+
+
+def _legacy_migration_evidence_hash(completion: HistoricalMemoryCompletion) -> str:
+    """Freeze revision 3be144f78dca's hash for its immutable migration fixture."""
+    payload = {
+        "schema_version": 1,
+        "summary": completion.summary or None,
+        "source_title": completion.source_title_snapshot,
+        "source_activity_at": completion.source_activity_at.astimezone(
+            datetime.UTC
+        ).isoformat(),
+        "source_tail_event_id": completion.source_tail_event_id,
+        "prepared_at": completion.prepared_at.astimezone(datetime.UTC).isoformat(),
+    }
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def test_paged_evidence_backfill_preserves_canonical_bodies_and_reverses(
@@ -111,7 +130,7 @@ def test_paged_evidence_backfill_preserves_canonical_bodies_and_reverses(
                 assert row["summary_generation"] == 0 and row["evidence_hash"] is None
                 continue
             assert row["summary_generation"] == 1
-            expected = prepared_source_evidence_hash(
+            expected = _legacy_migration_evidence_hash(
                 HistoricalMemoryCompletion(
                     source_activity_at=_NOW,
                     source_tail_event_id="e" * 32,

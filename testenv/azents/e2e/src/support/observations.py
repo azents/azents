@@ -287,11 +287,9 @@ class ProxyToolObservation(ExtensionObservation):
 
 
 class ConsolidatedHistoricalSampleObservation(HistoricalSampleObservation):
-    """Sampler evidence including the explicitly requested consolidation pass."""
+    """Routing evidence only; acceptance is observed through the current API."""
 
-    consolidation_due: StrictInt
-    consolidation_published: StrictInt
-    consolidation_failed: StrictInt
+    consolidation_dispatched: StrictInt
 
 
 class ProxyRequestObservation(ExtensionObservation):

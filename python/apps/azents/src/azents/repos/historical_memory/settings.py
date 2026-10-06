@@ -19,17 +19,13 @@ from azents.core.historical_memory_consolidation import (
     ConsolidationScope,
     ConsolidationUnitKey,
 )
-from azents.core.historical_memory_publication import validate_consolidation_overview
 from azents.core.historical_memory_settings import HistoricalMemorySettingsScope
 from azents.core.vfs import VFS_FILE_MAX_BYTES
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.conversation import RDBConversation
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
-from azents.rdb.models.historical_memory_consolidation import (
-    RDBConsolidationRevision,
-    RDBConsolidationUnit,
-)
+from azents.rdb.models.historical_memory_execution import RDBMemoryUnit
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
@@ -38,10 +34,6 @@ from azents.repos.historical_memory.settings_data import (
     HistoricalMemorySettingsCursorError,
     HistoricalMemorySettingsPage,
     HistoricalMemorySettingsRecord,
-)
-from azents.repos.historical_memory_consolidation.authority import unit_predicate
-from azents.repos.historical_memory_consolidation.foreground import (
-    denied_revision_manifest,
 )
 
 
@@ -91,37 +83,23 @@ class HistoricalMemorySettingsRepository:
                 RDBWorkspaceUser.user_id == user_id,
             )
         )
-        statement = (
-            sa.select(RDBConsolidationRevision)
-            .join(
-                RDBConsolidationUnit,
-                sa.and_(
-                    RDBConsolidationUnit.id == RDBConsolidationRevision.unit_id,
-                    RDBConsolidationUnit.published_revision_id
-                    == RDBConsolidationRevision.id,
-                ),
-            )
-            .where(
-                unit_predicate(key),
-                membership,
-                ~denied_revision_manifest(key),
-            )
+        statement = sa.select(RDBMemoryUnit).where(
+            RDBMemoryUnit.agent_id == key.agent_id,
+            RDBMemoryUnit.workspace_id == key.workspace_id,
+            RDBMemoryUnit.scope == key.scope,
+            RDBMemoryUnit.associated_user_id.is_not_distinct_from(
+                key.associated_user_id
+            ),
+            membership,
         )
         async with self.session_manager() as session:
-            row = await session.write_session.scalar(statement)
-            if row is None:
+            row = await session.read_session.scalar(statement)
+            if row is None or row.accepted_at is None or not row.markdown:
                 return ConsolidatedMemorySettingsRecord(
                     scope=scope, markdown=None, published_at=None
                 )
-            overview = validate_consolidation_overview(key=key, markdown=row.markdown)
-            if overview.rendered_block != row.rendered_block:
-                raise ValueError(
-                    "Consolidated Memory publication bytes are inconsistent."
-                )
             return ConsolidatedMemorySettingsRecord(
-                scope=scope,
-                markdown=overview.markdown,
-                published_at=row.published_at,
+                scope=scope, markdown=row.markdown, published_at=row.accepted_at
             )
 
     async def list(

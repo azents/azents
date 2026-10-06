@@ -21,7 +21,9 @@ from azents.engine.events.sensitive_text import redact_sensitive_text
 from azents.engine.events.types import (
     ClientToolCallPayload,
     ClientToolResultPayload,
+    CompactionSummaryPayload,
     Event,
+    SystemReminderPayload,
     validate_persisted_event_payload,
 )
 from azents.rdb.deps import get_read_only_session_manager
@@ -47,14 +49,19 @@ def project_diagnostic_event(row: RDBEvent) -> SessionDiagnosticEvent:
         payload=validate_persisted_event_payload(row.kind, row.payload),
         created_at=row.created_at,
     )
-    projection = project_historical_memory_event(event)
-    text = None if projection is None else projection.text
+    payload = event.payload
+    if isinstance(payload, SystemReminderPayload):
+        text = redact_sensitive_text(payload.text)
+    elif isinstance(payload, CompactionSummaryPayload):
+        text = redact_sensitive_text(payload.content)
+    else:
+        projection = project_historical_memory_event(event)
+        text = None if projection is None else projection.text
     name: str | None = None
     call_id: str | None = None
     status: str | None = None
     arguments: str | None = None
     arguments_omitted = False
-    payload = event.payload
     if isinstance(payload, ClientToolCallPayload):
         name = payload.name
         call_id = payload.call_id

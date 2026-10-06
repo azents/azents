@@ -15,10 +15,18 @@ from azents.broker.types import (
     SessionWakeUp,
 )
 from azents.core.enums import AgentRunStatus
+from azents.core.historical_memory_consolidation import (
+    MemoryExecutionAuthorityError,
+    MemoryExecutionBinding,
+)
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.run.contracts import ToolkitBinding
 from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
+from azents.repos.historical_memory_consolidation.execution import (
+    MemoryExecutionRepository,
+)
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshotError,
@@ -29,6 +37,7 @@ from azents.repos.worker_session_data import CanonicalExecutionWorkDriftError
 from azents.services.mailbox import MailboxService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor
+from azents.worker.run.memory_execution import MemoryRunExecutor
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.errors import ErrorEventEngine, SessionRunnerErrorReporter
 from azents.worker.session.execution_snapshot import CanonicalExecutionSnapshotLoader
@@ -90,6 +99,8 @@ class SessionRunner:
         idle_continuation_service: IdleContinuationService,
         user_stop_finalizer: UserStopFinalizer,
         run_executor: RunExecutor,
+        memory_execution_repository: MemoryExecutionRepository,
+        memory_run_executor: MemoryRunExecutor,
         engine: ErrorEventEngine,
         model_transport_state: ModelTransportState,
     ) -> None:
@@ -101,6 +112,9 @@ class SessionRunner:
         self.mailbox_item_service = mailbox_item_service
         self.idle_continuation_service = idle_continuation_service
         self.run_executor = run_executor
+        self.memory_execution_repository = memory_execution_repository
+        self.memory_run_executor = memory_run_executor
+        self.internal_execution = False
         self.model_transport_state = model_transport_state
         self.inbox = SessionRunnerInbox()
         self.runner_shutdown = asyncio.Event()
@@ -373,6 +387,18 @@ class SessionRunner:
         )
         return True
 
+    async def _release_runner_session_lock(self, session_id: str) -> None:
+        """Release this Runner's broker lease after domain execution has stopped."""
+        if self.owner_generation is None or self.internal_execution:
+            # Private settlement can fence this generation before Runner cleanup.
+            # The broker independently limits release to its current Worker owner.
+            await self.session_lifecycle.release_session_lock(session_id)
+            return
+        await self.session_lifecycle.release_owned_session_lock(
+            session_id,
+            owner_generation=self._required_owner_generation(),
+        )
+
     async def _release_current_session(self) -> None:
         """Release current session ownership or hand it over to another worker."""
         operation_logger = bind_extra(logger, {"session_id": self.running_session_id})
@@ -382,44 +408,29 @@ class SessionRunner:
 
         wake_up = self.handover_wake_up
         if wake_up is None:
-            if self.owner_generation is None:
-                await self.session_lifecycle.release_session_lock(session_id)
-            else:
-                await self.session_lifecycle.release_owned_session_lock(
-                    session_id,
-                    owner_generation=self.owner_generation,
-                )
+            await self._release_runner_session_lock(session_id)
             return
 
         if self.handover_required:
             if not self.ownership_lost:
-                await self.session_lifecycle.release_owned_session_lock(
-                    session_id,
-                    owner_generation=self._required_owner_generation(),
-                )
+                await self._release_runner_session_lock(session_id)
             await self.session_lifecycle.send_session_wake_up(wake_up)
             return
 
         should_handover = await self.session_lifecycle.has_active_agent_run(session_id)
-        if not should_handover:
+        if not should_handover and not self.internal_execution:
             should_handover = (
                 await self.session_lifecycle.has_pending_idle_continuation(session_id)
             )
 
         if not should_handover:
-            await self.session_lifecycle.release_owned_session_lock(
-                session_id,
-                owner_generation=self._required_owner_generation(),
-            )
+            await self._release_runner_session_lock(session_id)
             return
 
         operation_logger.info(
             "Session runner stopped during active run, handing over session"
         )
-        await self.session_lifecycle.release_owned_session_lock(
-            session_id,
-            owner_generation=self._required_owner_generation(),
-        )
+        await self._release_runner_session_lock(session_id)
         try:
             await self.session_lifecycle.send_session_wake_up(wake_up)
         except asyncio.CancelledError:
@@ -524,6 +535,12 @@ class SessionRunner:
 
                 result = await self._process_message(message)
 
+                if self.internal_execution:
+                    # Domain terminal/idle/archive settlement already uses common
+                    # records. Public continuation and parent delivery do not apply.
+                    self.runner_shutdown.set()
+                    return None
+
                 if self.shutdown_event.is_set():
                     return None
 
@@ -614,9 +631,21 @@ class SessionRunner:
                     assert_never(message)
         except asyncio.CancelledError:
             raise
+        except MemoryExecutionAuthorityError:
+            logger.info(
+                "Memory execution admission is unavailable",
+                extra={"session_id": message.session_id},
+            )
+            self.runner_shutdown.set()
+            return RunExecutionResult(
+                toolkits=[], terminal_event_observed=False, no_actionable_work=False
+            )
         except CanonicalExecutionSnapshotError as exc:
             return await self._handle_canonical_execution_error(message, exc)
         except UserVisibleRuntimeError as exc:
+            if self.internal_execution:
+                self.runner_shutdown.set()
+                raise
             try:
                 finalized_run_id = (
                     await self.run_executor.finalize_unhandled_active_run(
@@ -654,6 +683,9 @@ class SessionRunner:
                 no_actionable_work=False,
             )
         except Exception as exc:
+            if self.internal_execution:
+                self.runner_shutdown.set()
+                raise
             try:
                 finalized_run_id = (
                     await self.run_executor.finalize_unhandled_active_run(
@@ -736,6 +768,12 @@ class SessionRunner:
         if self.owner_generation is None:
             raise RuntimeError("Session ownership generation was not claimed")
         self.execution_snapshot = None
+        binding = await self.memory_execution_repository.load_binding(
+            message.session_id
+        )
+        if binding is not None:
+            self.internal_execution = True
+            return await self._process_memory_wake_up(message, binding)
         snapshot = await self.execution_snapshot_loader.load(
             message.session_id,
             owner_generation=self.owner_generation,
@@ -757,3 +795,41 @@ class SessionRunner:
         if self.shutdown_event.is_set():
             self._drain_stop_signals()
         return result
+
+    async def _process_memory_wake_up(
+        self, message: SessionWakeUp, binding: MemoryExecutionBinding
+    ) -> RunExecutionResult:
+        """Select a private domain host after the same common Worker owner claim."""
+        generation = self._required_owner_generation()
+        owner = SessionExecutionOwner(message.session_id, generation)
+        admitted = await self.memory_execution_repository.recover_worker_execution(
+            binding, owner
+        )
+        if admitted is None or admitted.session_id != message.session_id:
+            await self.memory_run_executor.archive_previous(
+                binding, owner_generation=generation
+            )
+            if admitted is not None:
+                await self.session_lifecycle.send_session_wake_up(
+                    SessionWakeUp(session_id=admitted.session_id)
+                )
+            return RunExecutionResult(
+                toolkits=[], terminal_event_observed=False, no_actionable_work=False
+            )
+        self.run_active = True
+        try:
+            return await self.memory_run_executor.execute(
+                admitted,
+                owner_generation=generation,
+                shutdown_event=self.shutdown_event,
+                stop_controller=self.stop_controller,
+                check_stop=self._make_check_stop_fn(message.session_id),
+                drain_stop_signals=self._drain_stop_signals,
+            )
+        finally:
+            self.run_active = False
+            if (
+                self.stop_controller.handover_stop_requested
+                or self.shutdown_event.is_set()
+            ) and not self.stop_controller.user_stop_requested:
+                self.handover_wake_up = message

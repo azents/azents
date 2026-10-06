@@ -88,22 +88,8 @@ _HISTORICAL_MEMORY_SUMMARY = (
 )
 
 
-_CONSOLIDATION_TASK_MARKER = (
-    "You are an internal historical-context consolidation Agent."
-)
+_CONSOLIDATION_TASK_MARKER = "You are an internal historical-context Memory Agent."
 _CONSOLIDATION_SENTINEL = re.compile(r"AGENTIC_(?:TEAM|PERSONAL)_[a-zA-Z0-9]+_V[0-9]+")
-_CONSOLIDATION_WORK = re.compile(
-    r"- Work ([0-9a-f]{32}); (?:prepared|removed|restored); "
-    r"(azents://memory/historical/(team|user)/[0-9a-f]{32}/summary\.md)"
-)
-
-
-class ConsolidationFixtureWork(NamedTuple):
-    """An exact presented identity parsed only from this execution's result."""
-
-    work_id: str
-    uri: str
-    scope: str
 
 
 class ConsolidationFixtureCall(NamedTuple):
@@ -128,18 +114,42 @@ class ConsolidationFixtureRequest(NamedTuple):
 
 
 def is_consolidation_fixture_request(request: dict[str, object]) -> bool:
-    """Match the closed internal host rather than foreground Memory tools."""
+    """Match the current private task and every tool in its closed file contract."""
     instructions = request.get("instructions")
-    names = {
-        name
-        for tool in _list(request.get("tools", []))
-        if isinstance(tool, dict) and isinstance(name := tool.get("name"), str)
-    }
+    tools = request.get("tools")
+    if (
+        not isinstance(instructions, str)
+        or not instructions.lstrip().startswith(_CONSOLIDATION_TASK_MARKER)
+        or "azents://execution/README.md" not in instructions
+        or "azents://execution/inputs/" not in instructions
+        or "submit_memory" not in instructions
+        or not isinstance(tools, list)
+        or not tools
+    ):
+        return False
+    names: set[str] = set()
+    for tool in tools:
+        if not isinstance(tool, dict):
+            return False
+        name, kind = tool.get("name"), tool.get("type")
+        if not isinstance(name, str) or name in names:
+            return False
+        if kind != "function" and not (name == "apply_patch" and kind == "custom"):
+            return False
+        names.add(name)
     return (
-        isinstance(instructions, str)
-        and _CONSOLIDATION_TASK_MARKER in instructions
-        and {"read", "write", "edit"} <= names
-        and names <= {"read", "write", "edit", "delete", "glob", "grep", "apply_patch"}
+        {"read", "write", "edit", "glob", "submit_memory"}
+        <= names
+        <= {
+            "read",
+            "write",
+            "edit",
+            "delete",
+            "glob",
+            "grep",
+            "apply_patch",
+            "submit_memory",
+        }
     )
 
 
@@ -207,119 +217,65 @@ def consolidation_fixture_plan(
             {"path": path, "offset": 0, "limit": 10000, "encoding": "utf-8"},
         )
 
-    if "work" not in outputs:
-        return read("work", "azents://memory/inventory/work/README.md")
-    work = [
-        ConsolidationFixtureWork(match.group(1), match.group(2), match.group(3))
-        for match in _CONSOLIDATION_WORK.finditer(outputs["work"])
-    ]
-    if len({entry.scope for entry in work}) > 1:
-        raise ValueError("Consolidation inventory crosses a scope boundary.")
-    if "draft" not in outputs:
-        return read("draft", "azents://memory-draft/summary.md")
-    if "coverage" not in outputs:
-        return read("coverage", "azents://memory-draft/coverage.json")
-    for index, entry in enumerate(work):
+    if "readme" not in outputs:
+        return read("readme", "azents://execution/README.md")
+    if "inputs" not in outputs:
+        return call("inputs", "glob", {"pattern": "azents://execution/inputs/*.md"})
+    paths = tuple(
+        dict.fromkeys(
+            re.findall(r"azents://execution/inputs/[0-9a-f]{32}\.md", outputs["inputs"])
+        )
+    )
+    for index, path in enumerate(paths):
         if f"source{index}" not in outputs:
-            return read(f"source{index}", entry.uri)
+            return read(f"source{index}", path)
     useful = [
-        (entry, outputs[f"source{index}"])
-        for index, entry in enumerate(work)
+        outputs[f"source{index}"]
+        for index in range(len(paths))
         if _CONSOLIDATION_SENTINEL.search(outputs[f"source{index}"])
     ]
-    if not useful:
-        return ConsolidationFixturePlan(None, "UNSUPPORTED_CONSOLIDATION_FIXTURE")
     context = "\n".join(
-        re.sub(r"azents://[^\s\"'`]+", "[source route below]", text)[:1200]
-        for _entry, text in useful
-    )
-    routes = "\n".join(
-        f"- {entry.uri} — Correction and unfinished-work evidence"
-        for entry, _text in useful
+        re.sub(r"azents://[^\s\"'`]+", "[provided summary]", text)[:1200]
+        for text in useful
     )
     markdown = (
-        "## Historical Context\nConsolidation working draft\n"
-        f"{context}\n\n## Source Routes\n{routes}\n"
+        "### Current historical findings\n" + context
+        if useful
+        else "No useful historical findings in the provided summaries."
     )
-    if "write_summary" not in outputs:
+    # Exercise the host's normal-ending continuation before any submission.
+    if (
+        "The Memory task is not complete: no explicit submission has been accepted."
+        not in json.dumps(request.get("input", []))
+    ):
+        return ConsolidationFixturePlan(None, "CONSOLIDATION_FIXTURE_NOT_SUBMITTED")
+    result_path = "azents://execution/result.md"
+    if "write_oversized" not in outputs:
         return call(
-            "write_summary",
+            "write_oversized",
             "write",
             {
-                "path": "azents://memory-draft/summary.md",
+                "path": result_path,
+                "content": "Oversized candidate " * 600,
+                "overwrite": False,
+            },
+        )
+    if "submit_oversized" not in outputs:
+        return call("submit_oversized", "submit_memory", {"path": result_path})
+    if "observe_result" not in outputs:
+        return read("observe_result", result_path)
+    if "write_corrected" not in outputs:
+        return call(
+            "write_corrected",
+            "write",
+            {
+                "path": result_path,
                 "content": markdown,
-                "overwrite": "## Historical Context" in outputs["draft"],
+                "overwrite": True,
             },
         )
-    if "observe_summary" not in outputs:
-        if not outputs["write_summary"].startswith("VFS write committed:"):
-            if "refresh_draft" not in outputs:
-                return read("refresh_draft", "azents://memory-draft/summary.md")
-            if "retry_write_summary" not in outputs:
-                return call(
-                    "retry_write_summary",
-                    "write",
-                    {
-                        "path": "azents://memory-draft/summary.md",
-                        "content": markdown,
-                        "overwrite": "## Historical Context"
-                        in outputs["refresh_draft"],
-                    },
-                )
-            if not outputs["retry_write_summary"].startswith("VFS write committed:"):
-                raise ValueError("Consolidation fixture could not author its draft.")
-        return read("observe_summary", "azents://memory-draft/summary.md")
-    if "bad_edit" not in outputs:
-        return call(
-            "bad_edit",
-            "edit",
-            {
-                "path": "azents://memory-draft/summary.md",
-                "old_string": "ABSENT_CONSOLIDATION_FIXTURE_MATCH",
-                "new_string": "Unreachable replacement",
-                "replace_all": False,
-            },
-        )
-    if "repair_edit" not in outputs:
-        return call(
-            "repair_edit",
-            "edit",
-            {
-                "path": "azents://memory-draft/summary.md",
-                "old_string": "Consolidation working draft",
-                "new_string": "Source-dependent integrated context",
-                "replace_all": False,
-            },
-        )
-    if "observe_coverage" not in outputs:
-        return read("observe_coverage", "azents://memory-draft/coverage.json")
-    if "write_coverage" not in outputs:
-        useful_ids = {entry.work_id for entry, _text in useful}
-        coverage = {
-            "dispositions": [
-                {
-                    "work_id": entry.work_id,
-                    "action": "considered"
-                    if entry.work_id in useful_ids
-                    else "omitted",
-                    "reason": "Integrated source-dependent evidence"
-                    if entry.work_id in useful_ids
-                    else "Empty or unavailable synthetic summary",
-                }
-                for entry in work
-            ]
-        }
-        return call(
-            "write_coverage",
-            "write",
-            {
-                "path": "azents://memory-draft/coverage.json",
-                "content": json.dumps(coverage, ensure_ascii=False),
-                "overwrite": '"dispositions"' in outputs["observe_coverage"],
-            },
-        )
-    if "verify" not in outputs:
-        return read("verify", "azents://memory-draft/summary.md")
+    if "submit_corrected" not in outputs:
+        return call("submit_corrected", "submit_memory", {"path": result_path})
     return ConsolidationFixturePlan(
         None, "CONSOLIDATION_FIXTURE_FINISHED_NOT_THE_PUBLICATION_BODY"
     )
@@ -2448,6 +2404,25 @@ class _Handler(BaseHTTPRequestHandler):
                                             )
                                         ],
                                         item,
+                                    ],
+                                )
+                            )
+                        else:
+                            response_id = f"resp_consolidation_final_{logical.chain_id}"
+                            _State.consolidation_continuations[response_id] = (
+                                ConsolidationFixtureContinuation(
+                                    logical.chain_id,
+                                    [
+                                        *[
+                                            _object(item)
+                                            for item in _list(
+                                                logical.request.get("input", [])
+                                            )
+                                        ],
+                                        {
+                                            "role": "assistant",
+                                            "content": plan.final_text,
+                                        },
                                     ],
                                 )
                             )

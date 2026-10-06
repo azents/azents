@@ -1,38 +1,38 @@
-"""Shared synthetic native VFS bindings for storage and tool integration tests."""
+"""Real common Session bindings for current private file and tool tests."""
 
 import dataclasses
 import json
 from collections.abc import Mapping
 
-from azents.core.historical_memory_consolidation import ConsolidationJobPrincipal
+import sqlalchemy as sa
+from uuid6 import uuid7
+
+from azents.core.enums import AgentRunPhase, AgentRunStatus
+from azents.core.historical_memory_consolidation import (
+    ConsolidationUnitKey,
+    FreshMemoryAdmission,
+    MemoryExecutionPrincipal,
+)
+from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
+from azents.core.session_resource_authority import SessionExecutionOwner
 from azents.engine.run.types import FunctionTool, FunctionToolResult
 from azents.engine.tooling.execution_context import (
     client_tool_execution_context,
     get_client_tool_execution_context,
 )
 from azents.engine.tools.mutable_storage import RoutedMutationTools
+from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
-from azents.repos.historical_memory_consolidation.drafts import (
-    ConsolidationDraftRepository,
-)
-from azents.repos.historical_memory_consolidation.ownership import (
-    ConsolidationOwnershipRepository,
-)
-from azents.repos.historical_memory_consolidation.sources import (
-    ConsolidationSourceRepository,
-)
-from azents.repos.historical_memory_consolidation.work import (
-    ConsolidationWorkRepository,
-)
+from azents.repos.session_execution_file import SessionExecutionFileRepository
+from azents.repos.session_execution_record import SessionExecutionRecordRepository
 from azents.services.file_storage import TextReadResult
-from azents.services.historical_memory.draft_vfs import (
-    ConsolidationDraftVfsBackend,
-    ConsolidationVfsObservations,
+from azents.services.historical_memory.consolidation_tools import (
+    ConsolidationToolBindings,
+    MemoryFileAuthority,
 )
-from azents.services.historical_memory.source_vfs import (
-    ConsolidationSourceVfsBackend,
-    ConsolidationVfsAuthorityValidator,
+from azents.services.session_execution_files import (
+    SessionExecutionFileBackend,
 )
 from azents.services.vfs_mutation import (
     VfsBackendRegistration,
@@ -42,20 +42,53 @@ from azents.services.vfs_mutation import (
 )
 from azents.services.vfs_read import VfsReadBackendRegistry, VfsReadRouter
 from azents.testing.consolidation import (
+    ConsolidationCorpus,
     consolidation_deadline,
+    memory_execution_repository,
     seed_consolidation_corpus,
 )
 
 
+async def create_memory_test_principal(
+    manager: SessionManager[WriteSession], key: ConsolidationUnitKey
+) -> MemoryExecutionPrincipal:
+    repository = memory_execution_repository(manager)
+    binding = await repository.ensure_execution(
+        key,
+        admission=FreshMemoryAdmission(
+            consolidation_deadline(),
+            HistoricalMemoryExecutionConfig(),
+        ),
+    )
+    assert binding is not None
+    async with manager() as session:
+        generation = await SessionExecutionRecordRepository().claim_owner_generation(
+            session, binding.session_id
+        )
+        run_id = uuid7().hex
+        await session.write_session.execute(
+            sa.insert(RDBAgentRun).values(
+                id=run_id,
+                session_id=binding.session_id,
+                run_index=1,
+                parent_agent_run_id=None,
+                phase=AgentRunPhase.IDLE,
+                status=AgentRunStatus.RUNNING,
+            )
+        )
+    return MemoryExecutionPrincipal(
+        binding, SessionExecutionOwner(binding.session_id, generation), run_id
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class ConsolidationTestVfsBinding:
-    """One real current owner, closed source corpus and private file backend."""
-
-    principal: ConsolidationJobPrincipal
-    draft: ConsolidationDraftVfsBackend
-    source: ConsolidationSourceVfsBackend
-    reads: VfsReadRouter[ConsolidationJobPrincipal]
-    mutations: VfsMutationRouter[ConsolidationJobPrincipal]
+    corpus: ConsolidationCorpus
+    principal: MemoryExecutionPrincipal
+    backend: SessionExecutionFileBackend
+    reads: VfsReadRouter[MemoryExecutionPrincipal]
+    mutations: VfsMutationRouter[MemoryExecutionPrincipal]
+    bindings: ConsolidationToolBindings
 
     def tools(self, runtime_tools: dict[str, FunctionTool]) -> dict[str, FunctionTool]:
         return {
@@ -73,39 +106,30 @@ async def bind_consolidation_test_vfs(
     manager: SessionManager[WriteSession],
 ) -> ConsolidationTestVfsBinding:
     corpus = await seed_consolidation_corpus(manager)
-    owner_repository = ConsolidationOwnershipRepository(manager)
-    claim = await owner_repository.claim(corpus.team, deadline=consolidation_deadline())
-    assert claim is not None
-    ledger = ConsolidationVfsObservations(claim.principal)
-    draft = ConsolidationDraftVfsBackend(ConsolidationDraftRepository(manager), ledger)
-    source = ConsolidationSourceVfsBackend(
-        ConsolidationSourceRepository(manager),
-        ledger,
-        ConsolidationWorkRepository(manager),
-    )
-    authority = ConsolidationVfsAuthorityValidator(owner_repository)
+    principal = await create_memory_test_principal(manager, corpus.team)
+    executions = memory_execution_repository(manager)
+    await executions.provision_inputs(principal)
+    files = SessionExecutionFileRepository(manager)
+    bindings = ConsolidationToolBindings(principal, files, executions)
+    backend = SessionExecutionFileBackend(files, bindings.observations)
+    authority = MemoryFileAuthority(executions)
     mutations = VfsMutationRouter(
         VfsMutationRegistry(
             [
                 VfsBackendRegistration(
-                    draft, draft, draft, VfsMutationCapabilities(True, True)
-                ),
-                VfsBackendRegistration(
-                    source, None, None, VfsMutationCapabilities(False, False)
+                    backend, backend, backend, VfsMutationCapabilities(True, True)
                 ),
             ]
         ),
         authority,
     )
     return ConsolidationTestVfsBinding(
-        claim.principal,
-        draft,
-        source,
-        VfsReadRouter(
-            VfsReadBackendRegistry([draft, source]),
-            authority,
-        ),
+        corpus,
+        principal,
+        backend,
+        VfsReadRouter(VfsReadBackendRegistry([backend]), authority),
         mutations,
+        bindings,
     )
 
 

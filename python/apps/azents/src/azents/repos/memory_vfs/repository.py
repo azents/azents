@@ -44,11 +44,8 @@ from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession
 from azents.repos.historical_memory import HistoricalMemoryRepository
-from azents.repos.historical_memory_consolidation.authority import (
-    consolidation_read_session,
-)
 from azents.repos.historical_memory_consolidation.foreground import (
-    read_foreground_revision,
+    read_current_result,
 )
 from azents.repos.memory_vfs.data import (
     ConsolidatedMemoryVfsRecord,
@@ -118,7 +115,7 @@ class MemoryVfsRepository:
         self._require_max_bytes(max_bytes)
         if not authority.memory_enabled:
             return None
-        async with consolidation_read_session(self.session_manager) as session:
+        async with self.session_manager() as session:
             await session.read_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
@@ -134,7 +131,7 @@ class MemoryVfsRepository:
                 or consumer.associated_user_id != authority.associated_user_id
             ):
                 return None
-            entry = await read_foreground_revision(
+            entry = await read_current_result(
                 session,
                 consumer=consumer,
                 scope=ConsolidationScope(scope),

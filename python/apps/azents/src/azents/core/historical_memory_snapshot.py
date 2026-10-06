@@ -36,13 +36,11 @@ class SavedMemorySnapshotEntry(BaseModel):
 
 
 class ConsolidatedMemorySnapshotEntry(BaseModel):
-    """One complete immutable unit revision frozen at a context boundary."""
+    """One complete scope result frozen at an ordinary context boundary."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     unit: ConsolidationUnitKey
-    unit_id: str = Field(min_length=32, max_length=32)
-    revision_id: str = Field(min_length=32, max_length=32)
     rendered_block: str = Field(min_length=1)
     published_at: datetime.datetime
 

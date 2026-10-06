@@ -1,44 +1,25 @@
-"""Ordinary service sampling uses real deadlines/ownership and truthful outcomes."""
+"""Sampling preserves Stage 1 semantics and reports routing, not publication."""
 
 import datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
-from azents.core.historical_memory_publication import ConsolidationOutputError
-from azents.core.historical_memory_system_setting import HistoricalMemoryExecutionConfig
-from azents.rdb.session import SessionManager
-from azents.rdb.session_capabilities import WriteSession
-from azents.repos.historical_memory_consolidation.publication import (
-    ConsolidationPublicationOutcome,
-)
-from azents.services.historical_memory.consolidation_job import (
-    HistoricalMemoryConsolidationService,
+from azents.services.historical_memory.consolidation_discovery import (
+    HistoricalMemoryConsolidationDiscoveryService,
 )
 from azents.services.historical_memory.discovery import (
     HistoricalMemoryAdmissionSample,
     HistoricalMemoryDiscoveryService,
-)
-from azents.services.historical_memory.execution_policy import (
-    HistoricalMemoryExecutionPolicyService,
 )
 from azents.services.historical_memory.preparation import (
     HistoricalMemoryPreparationService,
     HistoricalMemoryPreparationSummary,
 )
 from azents.services.historical_memory.sampling import HistoricalMemorySamplingService
-from azents.testing.consolidation import seed_consolidation_corpus
 
 
-def _execution_settings() -> HistoricalMemoryExecutionPolicyService:
-    service = AsyncMock(spec=HistoricalMemoryExecutionPolicyService)
-    service.resolve.return_value = HistoricalMemoryExecutionConfig()
-    return service
-
-
-async def test_stage1_sampler_shares_aware_time_but_preserves_real_attempt_deadline(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
+def _service() -> HistoricalMemorySamplingService:
     discovery = AsyncMock(spec=HistoricalMemoryDiscoveryService)
     discovery.admit_and_list_due_agents.return_value = HistoricalMemoryAdmissionSample(
         1, ("a" * 32,)
@@ -47,96 +28,66 @@ async def test_stage1_sampler_shares_aware_time_but_preserves_real_attempt_deadl
     preparation.prepare_agent.return_value = HistoricalMemoryPreparationSummary(
         1, 1, 0, 0, 0
     )
-    consolidation = AsyncMock(spec=HistoricalMemoryConsolidationService)
-    service = HistoricalMemorySamplingService(
-        rdb_session_manager,
-        discovery,
-        preparation,
-        consolidation,
-        _execution_settings(),
-    )
+    dispatch = AsyncMock(spec=HistoricalMemoryConsolidationDiscoveryService)
+    dispatch.dispatch_pending.return_value = 2
+    return HistoricalMemorySamplingService(discovery, preparation, dispatch)
+
+
+async def test_stage1_sampling_uses_aware_time_and_real_attempt_deadline() -> None:
+    service = _service()
     now = datetime.datetime(2099, 1, 1, tzinfo=datetime.UTC)
-    real_before = datetime.datetime.now(datetime.UTC)
+    before = datetime.datetime.now(datetime.UTC)
     report = await service.sample_agent(agent_id="a" * 32, now=now, consolidate=False)
-    assert report.prepared == 1 and report.consolidation_due == 0
-    discovery.admit_and_list_due_agents.assert_awaited_once_with(
+    assert report.prepared == 1 and report.consolidation_dispatched == 0
+    assert isinstance(service.discovery, AsyncMock)
+    assert isinstance(service.preparation, AsyncMock)
+    assert isinstance(service.consolidation_discovery, AsyncMock)
+    service.discovery.admit_and_list_due_agents.assert_awaited_once_with(
         now=now, agent_id="a" * 32
     )
-    kwargs = preparation.prepare_agent.await_args.kwargs
-    assert kwargs["now"] == now
-    assert (
-        real_before < kwargs["deadline"] < real_before + datetime.timedelta(seconds=120)
-    )
-    consolidation.run_unit.assert_not_awaited()
+    deadline = service.preparation.prepare_agent.await_args.kwargs["deadline"]
+    assert before < deadline < before + datetime.timedelta(seconds=120)
+    service.consolidation_discovery.dispatch_pending.assert_not_awaited()
 
 
-async def test_not_due_stage1_does_not_skip_pending_consolidation_or_invent_success(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    corpus = await seed_consolidation_corpus(rdb_session_manager)
-    discovery = AsyncMock(spec=HistoricalMemoryDiscoveryService)
-    discovery.admit_and_list_due_agents.return_value = HistoricalMemoryAdmissionSample(
-        0, ()
-    )
-    preparation = AsyncMock(spec=HistoricalMemoryPreparationService)
-    consolidation = AsyncMock(spec=HistoricalMemoryConsolidationService)
-    consolidation.run_unit.side_effect = [
-        ConsolidationPublicationOutcome("a" * 32),
-        None,
-    ]
-    service = HistoricalMemorySamplingService(
-        rdb_session_manager,
-        discovery,
-        preparation,
-        consolidation,
-        _execution_settings(),
+async def test_not_due_preparation_routes_work_without_claiming_publish() -> None:
+    service = _service()
+    assert isinstance(service.discovery, AsyncMock)
+    assert isinstance(service.preparation, AsyncMock)
+    assert isinstance(service.consolidation_discovery, AsyncMock)
+    service.discovery.admit_and_list_due_agents.return_value = (
+        HistoricalMemoryAdmissionSample(0, ())
     )
     report = await service.sample_agent(
-        agent_id=corpus.team.agent_id,
-        now=datetime.datetime.now(datetime.UTC),
-        consolidate=True,
+        agent_id="a" * 32, now=datetime.datetime.now(datetime.UTC), consolidate=True
     )
-    assert report.prepared == 0 and report.consolidation_due == 2
-    assert report.consolidation_published == 1 and report.consolidation_unclaimed == 1
-    assert report.consolidation_failed == 0
-    preparation.prepare_agent.assert_not_awaited()
-    assert {call.args[0] for call in consolidation.run_unit.await_args_list} == {
-        corpus.team,
-        corpus.personal,
-    }
+    assert report.prepared == 0 and report.consolidation_dispatched == 2
+    assert "consolidation_published" not in report.__dataclass_fields__
+    service.preparation.prepare_agent.assert_not_awaited()
+    service.consolidation_discovery.dispatch_pending.assert_awaited_once_with(
+        agent_id="a" * 32
+    )
 
 
-async def test_known_validation_failure_is_counted_but_unexpected_errors_propagate(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    corpus = await seed_consolidation_corpus(rdb_session_manager)
-    discovery = AsyncMock(spec=HistoricalMemoryDiscoveryService)
-    discovery.admit_and_list_due_agents.return_value = HistoricalMemoryAdmissionSample(
-        0, ()
+async def test_dispatch_error_propagates_instead_of_inventing_publication_health() -> (
+    None
+):
+    service = _service()
+    assert isinstance(service.consolidation_discovery, AsyncMock)
+    service.consolidation_discovery.dispatch_pending.side_effect = RuntimeError(
+        "routing failed"
     )
-    preparation = AsyncMock(spec=HistoricalMemoryPreparationService)
-    consolidation = AsyncMock(spec=HistoricalMemoryConsolidationService)
-    consolidation.run_unit.side_effect = [
-        ConsolidationOutputError("Expected authored validation failure"),
-        None,
-    ]
-    service = HistoricalMemorySamplingService(
-        rdb_session_manager,
-        discovery,
-        preparation,
-        consolidation,
-        _execution_settings(),
-    )
-    report = await service.sample_agent(
-        agent_id=corpus.team.agent_id,
-        now=datetime.datetime.now(datetime.UTC),
-        consolidate=True,
-    )
-    assert report.consolidation_failed == 1 and report.consolidation_published == 0
-    consolidation.run_unit.side_effect = RuntimeError("Unexpected model failure")
-    with pytest.raises(RuntimeError, match="Unexpected model failure"):
+    with pytest.raises(RuntimeError, match="routing failed"):
         await service.sample_agent(
-            agent_id=corpus.team.agent_id,
-            now=datetime.datetime.now(datetime.UTC),
-            consolidate=True,
+            agent_id="a" * 32, now=datetime.datetime.now(datetime.UTC), consolidate=True
         )
+
+
+async def test_sampling_rejects_naive_operator_time_before_preparation() -> None:
+    service = _service()
+    with pytest.raises(ValueError, match="aware timestamp"):
+        await service.sample_agent(
+            agent_id="a" * 32, now=datetime.datetime(2099, 1, 1), consolidate=True
+        )
+    assert isinstance(service.discovery, AsyncMock)
+    service.discovery.admit_and_list_due_agents.assert_not_awaited()

@@ -9,12 +9,7 @@ from azents.services.external_channel.ingress_queue import (
     EXTERNAL_CHANNEL_INGRESS_JOB_HANDLER_KEY,
     execute_external_channel_ingress_job,
 )
-from azents.services.historical_memory.consolidation_job import (
-    execute_historical_memory_consolidation_job,
-)
 from azents.services.historical_memory.constants import (
-    HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
-    HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY,
     HISTORICAL_MEMORY_PREPARE_HANDLER_KEY,
 )
 from azents.services.historical_memory.job import (
@@ -41,12 +36,6 @@ def get_job_handler_registry() -> JobHandlerRegistry:
                 handler=execute_historical_memory_preparation_job,
                 rerun_on_coalesce=True,
                 max_concurrency=HISTORICAL_MEMORY_MAX_CONCURRENCY,
-            ),
-            JobHandlerDefinition(
-                key=HISTORICAL_MEMORY_CONSOLIDATE_HANDLER_KEY,
-                handler=execute_historical_memory_consolidation_job,
-                rerun_on_coalesce=True,
-                max_concurrency=HISTORICAL_MEMORY_CONSOLIDATION_MAX_CONCURRENCY,
             ),
         )
     )

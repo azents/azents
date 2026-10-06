@@ -32,7 +32,11 @@ code_paths:
   - python/apps/azents/src/azents/services/historical_memory/**
   - python/apps/azents/src/azents/repos/historical_memory/**
   - python/apps/azents/src/azents/repos/historical_memory_consolidation/**
-  - python/apps/azents/src/azents/rdb/models/historical_memory_consolidation.py
+  - python/apps/azents/src/azents/rdb/models/historical_memory_execution.py
+  - python/apps/azents/src/azents/worker/run/memory_execution.py
+  - python/apps/azents/src/azents/worker/session/runner.py
+  - python/apps/azents/src/azents/repos/memory_execution_events.py
+  - python/apps/azents/src/azents/repos/session_execution_file.py
   - python/apps/azents/src/azents/rdb/models/historical_memory.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/services/external_account_link.py
@@ -83,7 +87,7 @@ code_paths:
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
 last_verified_at: 2026-10-07
-spec_version: 36
+spec_version: 37
 ---
 
 # Periodic Execution Flow Spec
@@ -368,84 +372,54 @@ optional diagnostic Agent ID and cannot remove the cleanup snapshot.
 
 ## Historical Memory discovery and preparation
 
-NEW preparation and consolidation model operations compile current exact local
-declarations for their configured identities through the central capability
-capture. They use the same final schema-3 fields and encoded-request admission
-as foreground calls. Existing attempt operations, retries and quota cursors keep
-their captured candidates. Missing required metadata produces typed preparation
-diagnostics rather than a model substitution, source fetch or permissive unknown
-support state. This does not change Job Runtime routing, capacity or leases.
+Five-minute discovery admits never-prepared eligible active Conversation roots
+whose latest activity is six hours to ten days old, with no ongoing Run. Each
+pass admits at most 500 sources and routes at most 25 due Agents. Admitted
+retry/completion and retained summaries can outlive the initial ten-day window.
+Stage 1 `historical_memory.prepare` remains a registered Job Runtime handler,
+coalesced per Agent, with ten source operations and a thirty-minute request
+deadline. Its local preparation concurrency defaults to 12, configurable 1–12.
+There is no separate two-slot consolidation handler or combined 14-slot Memory
+reservation. Prepared-source progress and rediscovery recover interrupted work;
+process coalescing does not prove cross-process exactly-once provider calls.
 
-`historical_memory_discovery` is enabled by default and runs every five minutes
-with a two-minute discovery timeout and bounded one-to-thirty-minute retry.
-Admission uses current PostgreSQL authority and active root Session state:
-Memory must be enabled, no Run may be ongoing, and latest conversation/Run
-activity must be at least six hours old. A never-prepared source must initially
-fall within the rolling ten-day window. Pinning and Team-primary status do not
-exclude a source.
+Preparation uses captured Lightweight candidates, scope/source permission and
+ordinary provider contracts. It publishes summaries only after current access,
+source lifecycle and enablement checks. Source summaries stay distinct from
+Saved entries and from the current integrated scope result.
 
-Each pass admits at most 500 sources and selects at most 25 due Agents. After
-the database operations complete, it submits `historical_memory.prepare` work
-under `historical-memory:{agent_id}` execution keys with absolute thirty-minute
-deadlines. The discovery task waits only for dispatch, not provider preparation.
-Admission, due work, and submitted-job counts form its bounded result summary.
+Integration discovery observes pending same-Agent Team/personal work and durably
+associates it with an internal common Session. After DB admission, it publishes
+`SessionWakeUp` routing to the ordinary Worker. The Session owner generation,
+broker lock, heartbeat, Run and canonical Event lifecycle are the only execution
+owner. The Scheduler/Job Runtime does not run a private model/tool host.
 
-Preparation runs in application Job Runtime, coalescing same-Agent work within
-one process. A job attempts at most ten source operations; its handler defaults
-to 12 of the application's 16 concurrency slots. Registered
-`historical_memory.consolidate` handlers use two more slots, leaving combined
-Memory capacity at 14 and two ordinary slots. Configured preparation capacity
-must obey the combined limit. Every worker replica owns its local capacity;
-these limits are not a deployment-wide spend ceiling.
-Process-local coalescing does not promise cross-process exactly-once preparation model
-calls. Durable source progress plus later discovery recover interrupted or
-unaccepted work without a persistent Runtime queue or Redis dependency.
+Fresh admission snapshots `historical_memory_execution` max turns and timeout
+(defaults unlimited logical turns and 600 seconds) into a policy and absolute
+deadline. Owner takeover creates a clean successor Session using the existing
+deadline, policy and consumed turns, not a new budget. Common Worker stop/shutdown
+supervision and physical-send owner/cancellation admission apply. Candidate
+quota handoff stays on the captured Lightweight chain. Model operations close as
+`FOREGROUND` through the common Run lifecycle; that kind does not imply Main
+model selection. Failed/unaccepted work is released for discovery with unit
+backoff starting at one minute and capped at six hours; accepted work retains its
+original outcome even when secondary close/archive/dispatch follow-up fails.
 
-Preparation uses the Agent Lightweight chain and rechecks enablement,
-source lifecycle, and current access before publication. Retry/completion for
-admitted sources and retention of prepared summaries are not bounded by the
-initial ten-day admission window. Unchanged content is not repeatedly prepared
-merely because time passes; later activity can permit a fresh inactive
-preparation.
+Provisioned input files contain only currently eligible prepared summaries.
+The Agent writes a fresh Markdown artifact and explicitly calls `submit_memory`
+with its authored execution-file path. Format/size feedback and final-only output
+continue the same execution. Acceptance atomically stores the current scope
+result, settles associated supplied work and completes the common Run; late or
+unassociated changes remain pending. No draft coverage, original transcript,
+source-version/dependency ledger or previous integrated prose is supplied.
 
-Consolidation discovery reuses this five-minute cadence for exact Team/personal
-units and due recovery. Obsolete metadata retirement runs inside the claimed
-attempt before model preparation, not in discovery before dispatch. Short
-PostgreSQL leases and owner generations, not local coalescing or Redis, establish
-one active consolidation owner per unit. Jobs snapshot system-configured
-`max_turns` and `timeout_seconds` from `historical_memory_execution` (defaults:
-unlimited logical turns and 600 seconds). The submitted Runtime, durable claim
-and supervisor share one absolute deadline. Logical turn consumption survives
-quota candidate handoff. Jobs renew 120-second leases every 30 seconds and
-preserve exact pending work across
-productive finite slices. Productive progress requeues without failure delay;
-failures/no progress use one-minute exponential backoff capped at six hours.
-Every fresh host atomically cleans the previous unit workspace before any model
-or tool dispatch. Unpublished choices return to pending with private pointers
-cleared; current permitted published bytes and complete dependencies seed a new
-workspace. Startup repeats this boundary for failure retry, takeover and quota
-handoff without retaining old coverage. Its rollback keeps the preceding state
-and prevents dispatch. Successful publication additionally retires its completed
-workspace and private receipt/exposure payloads before releasing ownership as
-eager reclamation. Unpublished work and finite-pass bounds survive both boundaries.
-Startup correctness depends on neither successful-end nor periodic cleanup.
-Temporary rollback-confirmed database contention is recovered in the same
-claim's database operation rather than immediately counting as a failed/no-progress
-attempt. Heartbeat shares this recovery policy; actual expired/replaced ownership
-remains terminal. The original immutable attempt deadline and cancellation bound
-pre-unit acquisition and same-operation retry. Exact manifest/source participants
-are prelocked before the unit so their waits do not block independent heartbeat
-renewal. After exact unit/attempt acquisition, the current renewable lease and
-same attempt cutoff bound acceptance; a valid extension is not frozen to the
-initially observed lease. No new call/count budget, model replay or execution
-loop is introduced.
-Elapsed cutoff settlement compares the exact active attempt/generation/token
-and writes terminal/retry metadata without restoring expired execution or
-publication authority. Internal faults/cutoffs store no user-facing failure code.
-Fenced periodic cleanup preserves active owners, unfinished passes and snapshot-
-referenced publications while collecting eligible private payloads.
-No Saved Memory is created or mutated. See
-[`memory.md`](../domain/memory.md) for retry, source, and publication contracts.
+Operator/testenv sampling prepares sources and dispatches this real Worker route.
+Its report contains `consolidation_dispatched`, not a synchronous publication
+count or simulated integration success. Current-result observation is a separate
+read after dispatch. Terminal internal Sessions archive via common lifecycle,
+retain audit/files until retention purge, and retain current result/original
+acceptance scalars after audit purge. See [`memory.md`](../domain/memory.md) and
+[`conversation.md`](../domain/conversation.md) for current access and lifecycle.
 
 ## External account OAuth attempt cleanup task
 
@@ -594,6 +568,10 @@ The periodic execution flow does not provide:
   the existing system projection task.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 37) — Route summary-only integration to common
+  Session Workers; record explicit submission, immutable takeover cutoffs and
+  retained audit, and remove Scheduler-local integration capacity/cleanup.
 
 - **2026-10-07** (spec_version 36) — Generalized the existing archive retention
   and purge pipeline to common lifecycle roots and singleton internal Sessions.

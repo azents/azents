@@ -28,7 +28,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.historical_memory import RDBHistoricalMemorySource
-from azents.rdb.models.historical_memory_consolidation import RDBConsolidationWork
+from azents.rdb.models.historical_memory_execution import RDBMemoryWork
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import (
@@ -537,7 +537,6 @@ async def test_memory_toggle_wait_allows_archive_enrollment_agent_fk(
                 .with_for_update()
             )
             assert root is not None and source is not None
-            original_availability = source.availability_generation
             holder_pid = await _pid(holder)
 
             async def toggle() -> None:
@@ -556,7 +555,6 @@ async def test_memory_toggle_wait_allows_archive_enrollment_agent_fk(
                 _wait_for_blocker(rdb_engine, waiter=pid, holder=holder_pid), timeout=5
             )
             root.status = AgentSessionStatus.ARCHIVED
-            source.availability_generation += 1
             # Test-only acquisition exposes exactly the KEY SHARE mode used by
             # enrollment's Agent foreign key, deterministically before INSERT.
             await holder.write_session.scalar(
@@ -575,17 +573,14 @@ async def test_memory_toggle_wait_allows_archive_enrollment_agent_fk(
                 RDBHistoricalMemorySource, case.source.session_id
             )
             assert source is not None
-            assert source.availability_generation == original_availability + 2
-            assert source.summary_generation == 1
             assert source.summary == "Captured provider response"
             assert (
                 await session.read_session.scalar(
                     sa.select(sa.func.count())
-                    .select_from(RDBConsolidationWork)
+                    .select_from(RDBMemoryWork)
                     .where(
-                        RDBConsolidationWork.source_session_id
-                        == case.source.session_id,
-                        RDBConsolidationWork.kind == ConsolidationWorkKind.REMOVED,
+                        RDBMemoryWork.source_session_id == case.source.session_id,
+                        RDBMemoryWork.kind == ConsolidationWorkKind.REMOVED,
                     )
                 )
                 == 2

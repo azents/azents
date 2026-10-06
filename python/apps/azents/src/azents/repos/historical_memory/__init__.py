@@ -24,7 +24,6 @@ from azents.core.historical_memory import (
 )
 from azents.core.historical_memory_consolidation import (
     ConsolidationWorkKind,
-    prepared_source_evidence_hash,
 )
 from azents.core.historical_memory_snapshot import MemorySnapshotConsumer
 from azents.core.model_operation import ModelOperationSnapshot
@@ -559,8 +558,6 @@ class HistoricalMemoryRepository:
         row.prepared_at = completion.prepared_at
         row.source_title_snapshot = completion.source_title_snapshot
         row.summary = completion.summary or None
-        row.summary_generation += 1
-        row.evidence_hash = prepared_source_evidence_hash(completion)
         await enroll_source_in_session(
             session,
             source=row,

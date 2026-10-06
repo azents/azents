@@ -1,8 +1,8 @@
 """Credential-free Historical Memory preparation and live lookup journey.
 
-The explicit-time testenv sampler executes ordinary admission, provider summary,
-and publication services. Scheduler/Job Runtime dispatch and exact interleavings
-have separate production integration coverage; the sampler does not prove them.
+The explicit-time sampler prepares summaries and dispatches common Worker work.
+Tests poll the accepted current-memory API instead of treating routing counts as
+publication proof. Exact ownership/commit interleavings have backend coverage.
 """
 
 import datetime
@@ -12,11 +12,19 @@ from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
+import psycopg
 import pytest
 import requests
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api
 from azentsadminclient.models.historical_memory_execution_patch_request import (
     HistoricalMemoryExecutionPatchRequest,
+)
+from azentsadminclient.models.session_diagnostic_event_page import (
+    SessionDiagnosticEventPage,
+)
+from azentsadminclient.models.session_diagnostic_file import SessionDiagnosticFile
+from azentsadminclient.models.session_diagnostic_metadata import (
+    SessionDiagnosticMetadata,
 )
 from azentsadminclient.models.system_setting_version_conflict_response import (
     SystemSettingVersionConflictResponse,
@@ -33,6 +41,9 @@ from azentspublicclient.models.agent_session_response import AgentSessionRespons
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.chat_event_response import ChatEventResponse
+from azentspublicclient.models.consolidated_memory_response import (
+    ConsolidatedMemoryResponse,
+)
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.historical_memory_response import (
@@ -43,6 +54,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from testcontainers.postgres import PostgresContainer
 
 from support.observations import (
     ConsolidatedHistoricalSampleObservation,
@@ -64,6 +76,7 @@ from support.utils import (
 )
 
 _COMPLETED = "HISTORICAL_MEMORY_E2E_TURN_COMPLETED"
+_UNVERIFIED_DELIVERY = "Delivery uncertainty: no external completion is verified."
 
 
 class _Setup(NamedTuple):
@@ -226,6 +239,142 @@ def _settings(
     )
     response.raise_for_status()
     return decode_historical_memories(response.json()).items
+
+
+def _current_memory(
+    server_url: str, setup: _Setup, scope: str
+) -> ConsolidatedMemoryResponse:
+    """Read the authoritative accepted document without triggering generation."""
+    response = requests.get(
+        f"{server_url}/agent/v1/workspaces/{setup.handle}/agents/{setup.agent_id}/consolidated-memory",
+        headers=_headers(setup.token),
+        params={"scope": scope},
+        timeout=10,
+    )
+    response.raise_for_status()
+    return ConsolidatedMemoryResponse.model_validate(response.json())
+
+
+def _wait_current_memory(
+    server_url: str, setup: _Setup, scope: str, marker: str
+) -> ConsolidatedMemoryResponse:
+    """Wait for actual Worker submission acceptance, never dispatch counters."""
+
+    def accepted() -> ConsolidatedMemoryResponse | None:
+        current = _current_memory(server_url, setup, scope)
+        if current.markdown is None or marker not in current.markdown:
+            return None
+        assert current.published_at is not None
+        return current
+
+    result = wait_until(
+        accepted,
+        timeout=120,
+        interval=0.2,
+        message="Common Worker did not accept the integrated memory",
+    )
+    assert result is not None
+    return result
+
+
+def _assert_retained_submission_audit(
+    admin_url: str,
+    server_url: str,
+    setup: _Setup,
+    admin_client: azentsadminclient.ApiClient,
+    postgres: PostgresContainer,
+    source_id: str,
+    marker: str,
+) -> None:
+    """Discover metadata read-only, then verify retained files/events via real API."""
+    with psycopg.connect(
+        host=postgres.get_container_host_ip(),
+        port=postgres.get_exposed_port(5432),
+        user=postgres.username,
+        password=postgres.password,
+        dbname=postgres.dbname,
+    ) as connection:
+        row = connection.execute(
+            """
+            SELECT execution.session_id, unit.workspace_id
+            FROM memory_executions AS execution
+            JOIN memory_units AS unit ON unit.id = execution.unit_id
+            WHERE unit.agent_id = %s AND lower(unit.scope::text) = 'team'
+              AND execution.accepted_at IS NOT NULL
+            ORDER BY execution.accepted_at DESC LIMIT 1
+            """,
+            (setup.agent_id,),
+        ).fetchone()
+    assert row is not None
+    session_id, workspace_id = row
+    assert isinstance(session_id, str) and isinstance(workspace_id, str)
+    admin_token = admin_client.configuration.access_token
+    assert isinstance(admin_token, str)
+    url = f"{admin_url}/debug/v1/sessions/{session_id}"
+
+    def archived() -> SessionDiagnosticMetadata | None:
+        response = requests.get(
+            url,
+            headers=_headers(admin_token),
+            params={"workspace_id": workspace_id},
+            timeout=10,
+        )
+        response.raise_for_status()
+        metadata = SessionDiagnosticMetadata.model_validate(response.json())
+        return metadata if metadata.status == "archived" else None
+
+    assert (
+        wait_until(
+            archived,
+            timeout=30,
+            interval=0.2,
+            message="Accepted internal Session was not archived",
+        )
+        is not None
+    )
+    events = []
+    after: str | None = None
+    while True:
+        params: dict[str, str | int] = {"workspace_id": workspace_id, "limit": 100}
+        if after is not None:
+            params["after"] = after
+        response = requests.get(
+            url + "/events", headers=_headers(admin_token), params=params, timeout=10
+        )
+        response.raise_for_status()
+        page = SessionDiagnosticEventPage.model_validate(response.json())
+        events.extend(page.items)
+        if page.next_cursor is None:
+            break
+        assert page.next_cursor != after
+        after = page.next_cursor
+    submit_calls = [
+        event
+        for event in events
+        if event.tool_name == "submit_memory" and event.arguments
+    ]
+    assert len(submit_calls) == 2
+    assert any(
+        "no explicit submission has been accepted" in (event.text or "")
+        for event in events
+    )
+    assert any("10,000" in (event.text or "") for event in events)
+    for path, writable in ((f"inputs/{source_id}.md", False), ("result.md", True)):
+        response = requests.get(
+            url + "/file",
+            headers=_headers(admin_token),
+            params={"workspace_id": workspace_id, "path": path},
+            timeout=10,
+        )
+        response.raise_for_status()
+        file = SessionDiagnosticFile.model_validate(response.json())
+        assert marker in file.content and file.writable == writable
+    public = requests.get(
+        f"{server_url}/chat/v1/agents/{setup.agent_id}/sessions/{session_id}",
+        headers=_headers(setup.token),
+        timeout=10,
+    )
+    assert public.status_code == 404
 
 
 def _inspect(
@@ -476,15 +625,16 @@ def _foreground_instructions(proxy_url: str, marker: str) -> str:
     return instructions
 
 
-def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
+def test_agentic_consolidation_isolated_runtime_free_and_scope_only_result(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_admin_server_url: str,
     openai_proxy_url: str,
     tmp_path: Path,
+    postgres_container: PostgresContainer,
 ) -> None:
-    """Real file rounds publish independent units; only foreground composes them."""
+    """Common Worker submits independent scope results from supplied summaries."""
     server, admin = azents_public_server_url, azents_admin_server_url
     setup = _setup(public_api_client, admin_api_client, server)
     other_email = f"historical-other-{unique()}@example.com"
@@ -534,6 +684,17 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
         datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=7),
         consolidate=True,
     )
+    assert sample.prepared == 3 and sample.failed == 0, sample
+    assert sample.consolidation_dispatched == 3, sample
+    team_result = _wait_current_memory(server, setup, "team", team_marker)
+    own_result = _wait_current_memory(server, setup, "user", own_marker)
+    peer_result = _wait_current_memory(server, other, "user", peer_marker)
+    _assert_retained_submission_audit(
+        admin, server, setup, admin_api_client, postgres_container, team, team_marker
+    )
+    assert own_marker not in (team_result.markdown or "")
+    assert peer_marker not in (own_result.markdown or "")
+    assert team_marker not in (peer_result.markdown or "")
     journal = _journal(openai_proxy_url)
     (tmp_path / "consolidation-journal.json").write_text(
         ConsolidationProxyJournalObservation(requests=journal).model_dump_json(
@@ -541,10 +702,6 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
         ),
         encoding="utf-8",
     )
-    assert sample.prepared == 3 and sample.failed == 0, sample
-    assert sample.consolidation_due == 3, sample
-    assert sample.consolidation_published == 3, sample
-    assert sample.consolidation_failed == 0, sample
     groups: dict[str, list[ConsolidationProxyRequestObservation]] = {}
     for request in journal:
         identifier = request.fixture_consolidation_chain
@@ -562,7 +719,7 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
         ]
         assert len(matching) == 1
         group = matching[0]
-        assert len(group) >= 10
+        assert len(group) >= 3
         captured = ConsolidationProxyJournalObservation(requests=group).model_dump_json(
             exclude_unset=True
         )
@@ -578,10 +735,13 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
             "grep",
             "delete",
             "apply_patch",
+            "submit_memory",
         }
-        assert "ABSENT_CONSOLIDATION_FIXTURE_MATCH" in captured
-        assert "Source-dependent integrated context" in captured
-        assert "azents://memory-draft/coverage.json" in captured
+        assert "submit_memory" in names
+        assert "coverage.json" not in captured
+        assert "inventory/work" not in captured
+        assert "azents://memory/sources/" not in captured
+        assert "Source-dependent integrated context" not in captured
     owner_turn = f"Historical Memory E2E continue {unique()}"
     owner_consumer = _create_session(server, setup, scope="user", message=owner_turn)
     owner_prompt = _foreground_instructions(openai_proxy_url, owner_turn)
@@ -597,7 +757,8 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
     team_uri = "azents://memory/consolidated/team/summary.md"
     user_uri = "azents://memory/consolidated/user/summary.md"
     live = _inspect(server, setup, owner_consumer, operation="read", path=team_uri)
-    assert team_marker in live and "Source-dependent integrated context" in live
+    assert team_marker in live
+    assert "blue" in live and _UNVERIFIED_DELIVERY in live
     assert "CONSOLIDATION_FIXTURE_FINISHED_NOT_THE_PUBLICATION_BODY" not in live
     assert own_marker in _inspect(
         server, setup, owner_consumer, operation="read", path=user_uri
@@ -632,7 +793,8 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
         timeout=10,
     )
     assert archived.status_code == 204
-    assert team_marker not in _inspect(
+    # Archive filters future provided inputs, not already accepted aggregates.
+    assert team_marker in _inspect(
         server, setup, owner_consumer, operation="read", path=team_uri
     )
     assert own_marker in _inspect(
@@ -644,7 +806,8 @@ def test_agentic_consolidation_isolated_runtime_free_and_live_denial(
         timeout=10,
     )
     restored.raise_for_status()
-    assert team_marker not in _inspect(
+    # Archive filters future provided inputs, not already accepted aggregates.
+    assert team_marker in _inspect(
         server, setup, owner_consumer, operation="read", path=team_uri
     )
     assert team_marker in _inspect(
@@ -673,7 +836,7 @@ def test_successive_consolidation_starts_publish_current_work(
     for _ in range(2):
         marker = f"AGENTIC_TEAM_{unique()}_V1"
         markers.append(marker)
-        _create_session(
+        source = _create_session(
             server,
             setup,
             scope="team",
@@ -686,10 +849,31 @@ def test_successive_consolidation_starts_publish_current_work(
             consolidate=True,
         )
         assert sampled.prepared == 1 and sampled.failed == 0, sampled
-        assert sampled.consolidation_due == sampled.consolidation_published == 1, (
-            sampled
-        )
-        assert sampled.consolidation_failed == 0, sampled
+        assert sampled.consolidation_dispatched == 1, sampled
+        current = _wait_current_memory(server, setup, "team", marker)
+        if len(markers) == 1:
+            archived = requests.post(
+                f"{server}/chat/v1/agents/{setup.agent_id}/sessions/{source}/archive",
+                headers=_headers(setup.token),
+                timeout=10,
+            )
+            assert archived.status_code == 204
+        else:
+            # Fresh authoring cannot inherit an archived source through the old result.
+            assert markers[0] not in (current.markdown or "")
+            groups: dict[str, list[ConsolidationProxyRequestObservation]] = {}
+            for item in _journal(openai_proxy_url):
+                if item.fixture_consolidation_chain is not None:
+                    groups.setdefault(item.fixture_consolidation_chain, []).append(item)
+            matching = [
+                group
+                for group in groups.values()
+                if marker in group[-1].model_dump_json(exclude_unset=True)
+            ]
+            assert len(matching) == 1
+            assert markers[0] not in ConsolidationProxyJournalObservation(
+                requests=matching[0]
+            ).model_dump_json(exclude_unset=True)
     consumer_marker = f"Historical Memory E2E continue {unique()}"
     consumer = _create_session(server, setup, scope="team", message=consumer_marker)
     assert markers[-1] in _foreground_instructions(openai_proxy_url, consumer_marker)
@@ -785,9 +969,12 @@ def test_historical_execution_policy_roundtrip_and_custom_consolidation(
         consolidate=True,
     )
     assert sampled.prepared == 1 and sampled.failed == 0, sampled
-    assert sampled.consolidation_due == 1, sampled
-    assert sampled.consolidation_published == 1, sampled
-    assert sampled.consolidation_failed == 0, sampled
+    assert sampled.consolidation_dispatched == 1, sampled
+    accepted_memory = _wait_current_memory(
+        azents_public_server_url, setup, "team", marker
+    )
+    assert "blue" in (accepted_memory.markdown or "")
+    assert _UNVERIFIED_DELIVERY in (accepted_memory.markdown or "")
     groups: dict[str, list[ConsolidationProxyRequestObservation]] = {}
     for item in _journal(openai_proxy_url):
         if item.fixture_consolidation_chain is not None:
@@ -800,7 +987,7 @@ def test_historical_execution_policy_roundtrip_and_custom_consolidation(
     assert len(matching) == 1
     # This journey proves a finite custom policy accepts ordinary multi-round work.
     # Exact turn exhaustion and deadline enforcement have narrower backend coverage.
-    assert 10 <= len(matching[0]) <= 50
+    assert 3 <= len(matching[0]) <= 50
     consumer = _create_session(
         azents_public_server_url,
         setup,
