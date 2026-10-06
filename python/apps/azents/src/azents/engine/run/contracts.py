@@ -10,6 +10,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, NamedTuple, Protocol, TypeVar
 
+from azents.core.agent import SelectableModelCandidate
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelCapabilities
@@ -100,7 +101,8 @@ class RunRequest:
     compaction_provider_integration_id: str | None
     """Provider integration used by the compaction model, when configured."""
     model_assembly_metadata: ModelAssemblyMetadata | None
-    compaction_assembly_metadata: ModelAssemblyMetadata | None
+    compaction_candidate: SelectableModelCandidate
+    """Exact selected summary model and settings frozen for this request."""
     top_k: int | None
     """Exact Agent-local top-k intent, without an inferred provider default."""
     model_capabilities: ModelCapabilities = dataclasses.field(

@@ -250,6 +250,13 @@ class OpenAIResponsesRequest(BaseModel):
         """Estimate the complete logical request size before continuation."""
         return len(str(self.input)) + len(str(self.tools)) + len(str(self.options))
 
+    def native_request_input_bytes(self) -> int:
+        """Measure UTF-8 logical request framing for source input fitting."""
+        return sum(
+            len(str(value).encode("utf-8"))
+            for value in (self.input, self.tools, self.options)
+        )
+
     def continuation_input_items(self) -> list[dict[str, object]]:
         """Return the complete logical input sequence."""
         return self.input

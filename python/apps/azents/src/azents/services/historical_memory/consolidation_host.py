@@ -30,6 +30,7 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     UserMessagePayload,
 )
+from azents.engine.provider_model_operation import PreparedModelOperation
 from azents.repos.historical_memory_consolidation.budget import (
     ConsolidationExecutionRepository,
 )
@@ -49,7 +50,6 @@ from azents.services.historical_memory.consolidation_dispatch import (
 )
 from azents.services.historical_memory.consolidation_model import (
     ConsolidationModelPort,
-    PreparedConsolidationRequest,
 )
 from azents.services.historical_memory.consolidation_tools import (
     ConsolidationAdmittedTool,
@@ -92,7 +92,7 @@ files; there is no submission tool. Never claim publication yourself.
 
 @dataclasses.dataclass(frozen=True)
 class ConsolidationPreparedTurn:
-    model: PreparedConsolidationRequest
+    model: PreparedModelOperation
     dispatch: ConsolidationDispatchAdmission
 
 

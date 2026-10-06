@@ -20,6 +20,10 @@ from azents.engine.model_stream import (
     ModelStreamWatchdog,
     get_model_stream_watchdog,
 )
+from azents.engine.provider_model_operation import (
+    ProviderModelOperation,
+    bind_provider_model_operation,
+)
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
@@ -73,8 +77,6 @@ from azents.services.historical_memory.consolidation_host import (
 )
 from azents.services.historical_memory.consolidation_model import (
     ConsolidationModelCapabilityError,
-    ConsolidationProviderModel,
-    bind_consolidation_provider_model,
 )
 from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
@@ -272,7 +274,7 @@ class ConsolidationAttemptExecution:
     active_host: ConsolidationIterationHost | None = dataclasses.field(
         init=False, default=None
     )
-    active_model: ConsolidationProviderModel | None = dataclasses.field(
+    active_model: ProviderModelOperation | None = dataclasses.field(
         init=False, default=None
     )
 
@@ -318,7 +320,7 @@ class ConsolidationAttemptExecution:
                     "Consolidation Lightweight route is unavailable."
                 )
             resolved = runtime.value
-            model = bind_consolidation_provider_model(
+            model = bind_provider_model_operation(
                 selection=candidate.model_selection,
                 settings=candidate.settings,
                 credential_kwargs=resolved.credential_kwargs,
@@ -326,6 +328,7 @@ class ConsolidationAttemptExecution:
                 sdk_factories=service.sdk_factories,
                 watchdog=service.watchdog,
                 websocket_enabled=service.config.openai_responses_websocket_enabled,
+                transport_state=None,
             )
             self.active_model = model
             work = ConsolidationWorkRepository(service.session_manager)

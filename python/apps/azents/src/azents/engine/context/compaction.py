@@ -10,31 +10,27 @@ from typing import Protocol
 
 from azcommon.logging import bind_extra
 
-from azents.core.enums import LLMProvider
-from azents.engine.events.openai_responses import call_openai_responses_text
-from azents.engine.model_assembly import ModelAssemblyMetadata
+from azents.core.agent import SelectableModelCandidate
 from azents.engine.model_factory_types import ModelSDKFactories
 from azents.engine.model_stream import (
     ModelStreamCallContext,
     ModelStreamWatchdog,
 )
-from azents.engine.model_text import call_provider_text
 from azents.engine.provider_errors import SDK_PROVIDER_ERRORS, map_model_provider_error
-from azents.engine.responses import (
-    DEFAULT_RESPONSES_TEXT_CONFIG,
-    ResponsesOutputError,
-    responses_max_output_tokens,
-)
+from azents.engine.provider_model_operation import call_model_operation_text_with_usage
+from azents.engine.responses import ResponsesOutputError
 from azents.engine.run.errors import (
     CompactionFailedError,
     CompactionModelStreamTimeoutError,
     ModelCallError,
     ModelStreamTimeoutError,
 )
+from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     model_provider_failure,
 )
+from azents.engine.run.resolve import effective_model_output_tokens
 
 logger = logging.getLogger(__name__)
 _SUMMARY_CHARS_PER_TOKEN = 4
@@ -57,7 +53,6 @@ class CompactionSummaryBudget:
     target_chars: int
     limit_chars: int
     truncate_chars: int
-    max_output_tokens: int
 
 
 class SummaryModelCall(Protocol):
@@ -66,15 +61,13 @@ class SummaryModelCall(Protocol):
     def __call__(
         self,
         *,
-        provider: LLMProvider,
-        provider_integration_id: str | None,
-        model: str,
+        candidate: SelectableModelCandidate,
         credential_kwargs: dict[str, object],
-        assembly_metadata: ModelAssemblyMetadata | None,
+        effective_input_tokens: int,
+        transport_state: ModelTransportState,
         system_prompt: str,
         user_prompt: str,
         conversation_text: str,
-        max_output_tokens: int,
         session_id: str | None = None,
     ) -> Awaitable[str]:
         """Call the summary model."""
@@ -210,7 +203,6 @@ def compute_summary_budget(
         target_chars=target_chars,
         limit_chars=limit_chars,
         truncate_chars=truncate_chars,
-        max_output_tokens=limit_chars // _SUMMARY_CHARS_PER_TOKEN,
     )
 
 
@@ -252,34 +244,40 @@ async def summarize_text_with_model(
     *,
     sdk_factories: ModelSDKFactories,
     watchdog: ModelStreamWatchdog,
-    provider: LLMProvider,
-    provider_integration_id: str | None,
-    model: str,
+    candidate: SelectableModelCandidate,
     credential_kwargs: dict[str, object],
-    assembly_metadata: ModelAssemblyMetadata | None,
+    effective_input_tokens: int,
+    websocket_enabled: bool,
+    transport_state: ModelTransportState | None,
     system_prompt: str,
     user_prompt: str,
     conversation_text: str,
-    max_output_tokens: int,
     session_id: str | None = None,
 ) -> str:
-    """Create one compaction summary model attempt."""
-    endpoint_max_output_tokens = responses_max_output_tokens(
-        provider,
-        max_output_tokens,
+    """Create a checkpoint through the captured model's ordinary request contract."""
+    selection = candidate.model_selection
+    call_context = ModelStreamCallContext(
+        call_kind="compaction",
+        provider=selection.provider.value,
+        provider_integration_id=selection.llm_provider_integration_id,
+        model=selection.model_identifier,
+        session_id=session_id,
+        run_id=None,
+        attempt_number=None,
+        check_stop=None,
     )
-
     L = bind_extra(
         logger,
         {
-            "provider": provider.value,
-            "provider_integration_id": provider_integration_id,
-            "model": model,
+            "provider": selection.provider.value,
+            "provider_integration_id": selection.llm_provider_integration_id,
+            "model": selection.model_identifier,
             "session_id": session_id,
             "conversation_chars": len(conversation_text),
             "conversation_estimated_tokens": _estimated_tokens(conversation_text),
-            "requested_max_output_tokens": max_output_tokens,
-            "endpoint_max_output_tokens": endpoint_max_output_tokens,
+            "requested_max_output_tokens": effective_model_output_tokens(
+                selection, candidate.settings
+            ),
         },
     )
     L.info(
@@ -290,20 +288,41 @@ async def summarize_text_with_model(
             "input_estimated_tokens": _estimated_tokens(conversation_text),
         },
     )
-    summary = await _summarize_text_attempt(
-        sdk_factories=sdk_factories,
-        watchdog=watchdog,
-        provider=provider,
-        provider_integration_id=provider_integration_id,
-        model=model,
-        credential_kwargs=credential_kwargs,
-        assembly_metadata=assembly_metadata,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        conversation_text=conversation_text,
-        endpoint_max_output_tokens=endpoint_max_output_tokens,
-        session_id=session_id,
-    )
+    try:
+        result = await call_model_operation_text_with_usage(
+            sdk_factories=sdk_factories,
+            watchdog=watchdog,
+            selection=selection,
+            settings=candidate.settings,
+            credential_kwargs=credential_kwargs,
+            effective_input_tokens=effective_input_tokens,
+            websocket_enabled=websocket_enabled,
+            instructions=system_prompt,
+            input_text=user_prompt + conversation_text,
+            call_context=call_context,
+            transport_state=transport_state,
+        )
+    except ModelProviderFailure:
+        raise
+    except ModelStreamTimeoutError as exc:
+        raise CompactionModelStreamTimeoutError(exc) from exc
+    except ResponsesOutputError as exc:
+        raise model_provider_failure(
+            operation="compaction",
+            provider=selection.provider.value,
+            model=selection.model_identifier,
+            integration=selection.llm_provider_integration_id,
+            provider_message=exc.message,
+            status_code=None,
+            provider_code=exc.code,
+            provider_error_type=exc.event_type,
+            provider_error_param=exc.param,
+        ) from None
+    except ModelCallError as exc:
+        raise CompactionFailedError(exc.user_message) from exc
+    except SDK_PROVIDER_ERRORS as exc:
+        raise map_model_provider_error(exc, call_context=call_context) from None
+    summary = result.text
     L.info(
         "Compaction summary model call completed",
         extra={
@@ -314,92 +333,6 @@ async def summarize_text_with_model(
         },
     )
     return summary
-
-
-async def _summarize_text_attempt(
-    *,
-    sdk_factories: ModelSDKFactories,
-    watchdog: ModelStreamWatchdog,
-    provider: LLMProvider,
-    provider_integration_id: str | None,
-    model: str,
-    credential_kwargs: dict[str, object],
-    assembly_metadata: ModelAssemblyMetadata | None,
-    system_prompt: str,
-    user_prompt: str,
-    conversation_text: str,
-    endpoint_max_output_tokens: int | None,
-    session_id: str | None,
-) -> str:
-    """Create one summary through the authorized provider model."""
-    timeout_policy = watchdog.resolve_policy(
-        provider=provider.value,
-        model=model,
-        inference_profile=None,
-    )
-    call_context = ModelStreamCallContext(
-        call_kind="compaction",
-        provider=provider.value,
-        provider_integration_id=provider_integration_id,
-        model=model,
-        session_id=session_id,
-        run_id=None,
-        attempt_number=None,
-        check_stop=None,
-    )
-    try:
-        input_items: list[dict[str, object]] = [
-            {"role": "user", "content": user_prompt + conversation_text}
-        ]
-        if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
-            return await call_openai_responses_text(
-                client_factory=sdk_factories.openai_responses,
-                provider=provider,
-                model=model,
-                credential_kwargs=credential_kwargs,
-                input_items=input_items,
-                instructions=system_prompt,
-                text=DEFAULT_RESPONSES_TEXT_CONFIG,
-                watchdog=watchdog,
-                timeout_policy=timeout_policy,
-                call_context=call_context,
-            )
-        return await call_provider_text(
-            sdk_factories=sdk_factories,
-            provider=provider,
-            model=model,
-            credential_kwargs=credential_kwargs,
-            assembly_metadata=assembly_metadata,
-            input_text=user_prompt + conversation_text,
-            instructions=system_prompt,
-            max_output_tokens=endpoint_max_output_tokens,
-            watchdog=watchdog,
-            timeout_policy=timeout_policy,
-            call_context=call_context,
-            text=None,
-            extra_body=None,
-        )
-    except ModelProviderFailure:
-        raise
-    except ModelStreamTimeoutError as exc:
-        raise CompactionModelStreamTimeoutError(exc) from exc
-    except ResponsesOutputError as exc:
-        raise model_provider_failure(
-            operation="compaction",
-            provider=provider.value,
-            model=model,
-            integration=provider_integration_id,
-            provider_message=exc.message,
-            status_code=None,
-            provider_code=exc.code,
-            provider_error_type=exc.event_type,
-            provider_error_param=exc.param,
-        ) from None
-    except ModelCallError as exc:
-        raise CompactionFailedError(exc.user_message) from exc
-    except SDK_PROVIDER_ERRORS as exc:
-        failure = map_model_provider_error(exc, call_context=call_context)
-        raise failure from None
 
 
 def _estimated_tokens(text: str) -> int:

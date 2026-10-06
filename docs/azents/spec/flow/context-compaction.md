@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/engine_resolve.py
   - python/apps/azents/src/azents/repos/model_metadata_operations.py
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/services/model_metadata.py
   - python/apps/azents/src/azents/engine/responses.py
@@ -46,8 +47,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-10-05
-spec_version: 52
+last_verified_at: 2026-10-06
+spec_version: 53
 ---
 
 # Context Compaction
@@ -161,15 +162,19 @@ boundary because it does not change the model-input head. See
 
 ## Summary Model
 
-Summary generation is routed by provider from `engine/context/compaction.py`. OpenAI API-key and
-ChatGPT OAuth use an operation-scoped official OpenAI SDK client; the other eight provider identities
-use the public Pydantic AI model/official SDK boundary through `engine/responses.py`.
+Summary generation uses the shared provider operation from
+`engine/provider_model_operation.py`. OpenAI API-key and ChatGPT OAuth use the
+foreground Responses lowerer, adapter and normalizer; other provider identities
+use the foreground Pydantic AI lowerer, adapter and official SDK boundary.
 A NEW compaction operation compiles exact authorized LOCAL metadata for the
 configured Lightweight chain before normalizing controls and freezing candidates.
 An existing compaction operation resolves its current captured candidate without
 mutable metadata lookup; retries and quota progression retain that capture.
-Its model-scoped context cap participates in the effective input window, while its
-model-scoped `max_output_tokens` and built-in tools do not replace internal compaction request policy.
+The Run request carries a deep copy of the complete selected candidate and its
+model settings through fresh resolution, recovery and quota handoff. Its context
+cap participates in the effective input window. Its explicit output setting
+receives the same saved-model maximum clamp as foreground, while an unspecified
+output cap stays unspecified. Summary calls declare no client or hosted tools.
 
 Compaction summary generation is not user-facing streaming output, although the transport uses a
 stream so the common watchdog can enforce parsed-event idle and absolute attempt deadlines. The
@@ -178,11 +183,13 @@ conditions after provider-specific encoding. Genuine effort omission can use a
 known captured default for condition evaluation; cleared, budget-only, disabled
 and adaptive thinking keep their encoded kinds. Native structured output and
 synthetic function output are admitted independently. The standard
-OpenAI-compatible helper sends ordinary user input plus top-level instructions and omits
-`max_output_tokens`; it does not use sampling continuation. ChatGPT OAuth also uses complete input,
-`store=false`, encrypted reasoning inclusion, and no `previous_response_id`.
-Pydantic AI routes receive the dynamic summary token budget through provider-specific model settings
-and validate their protocol-native completion before admitting a summary. Both adapter families
+provider operation sends ordinary user input plus top-level instructions through
+the foreground request contracts. Compaction shares the enclosing Run's keyed
+transport policy and HTTP-only fallback state; the operation-scoped SDK closes
+on every exit. ChatGPT OAuth uses complete input, `store=false`, encrypted
+reasoning inclusion, and no `previous_response_id`. Both provider families
+use the selected output setting and validate protocol-native completion before
+admitting a summary. Both adapter families
 preserve only a bounded redacted provider message and typed safe
 diagnostics for classified provider failures. A normalized compaction `quota_or_billing` failure
 records the candidate outcome, shares its Workspace cooldown, and advances immediately to the next
@@ -193,14 +200,18 @@ unclassified provider outcome bypasses compaction provider retry state and follo
 internal-error path. Manual compaction uses its command Run's same failed-run controller and fresh
 operation chain. Provider retry hints are diagnostic and do not replace the standard backoff schedule.
 
-The summary budget is based on the model context window:
+The stored checkpoint representation budget is based on the model context window:
 
 - target summary chars: 3% of context window tokens, converted with 1 token ≈ 4 chars;
 - limit summary chars: 8% of context window tokens, converted with 1 token ≈ 4 chars;
 - target chars are nearest-rounded to 1000 chars and clamped to 12k–24k chars;
 - limit chars are nearest-rounded to 1000 chars and clamped to 16k–50k chars;
-- `max_output_tokens = limit_chars // 4`;
 - unknown context windows use a 128k token fallback.
+
+This character budget controls the retained checkpoint representation, not
+provider output generation. Input fitting reserves an explicit selected output
+cap when present, plus the existing prompt overhead, within the resolved
+effective window.
 
 The runtime char guard allows a 10% tolerance over `limit_chars`. It computes
 `truncate_chars = ceil_to_1000(limit_chars * 1.1)`. If a model returns more than `truncate_chars`, the

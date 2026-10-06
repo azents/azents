@@ -90,6 +90,14 @@ def make_test_model_settings() -> SelectableModelSettings:
     )
 
 
+def make_test_model_candidate() -> SelectableModelCandidate:
+    """Return one complete captured route for internal model operation fixtures."""
+    return SelectableModelCandidate(
+        model_selection=make_test_model_selection(),
+        settings=make_test_model_settings(),
+    )
+
+
 def make_test_selectable_model_options(
     selection: AgentModelSelection,
     *,

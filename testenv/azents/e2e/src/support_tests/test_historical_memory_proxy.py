@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from support.image_generation_openai_proxy import (
     historical_memory_inspection,
     historical_memory_summary_response,
@@ -13,22 +11,14 @@ from support.image_generation_openai_proxy import (
 def _request(source: str) -> dict[str, object]:
     return {
         "input": [{"role": "user", "content": source}],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "historical_memory",
-                "strict": True,
-                "schema": {
-                    "additionalProperties": False,
-                    "required": ["summary"],
-                    "properties": {"summary": {"type": "string"}},
-                },
-            },
-        },
+        "instructions": (
+            "Create a bounded, self-contained historical account "
+            "from the source Session."
+        ),
     }
 
 
-def test_summary_fixture_requires_schema_and_qualifies_evidence() -> None:
+def test_summary_task_fixture_qualifies_evidence() -> None:
     """Fixture generation preserves corrections and uncertainty, not fake success."""
     response = historical_memory_summary_response(
         _request("Historical Memory E2E source: use blue, red was only a proposal."),
@@ -39,10 +29,6 @@ def test_summary_fixture_requires_schema_and_qualifies_evidence() -> None:
     assert "not a production deployment" in summary
     assert "Unfinished work" in summary
     assert "Delivery uncertainty" in summary
-    request = _request("Historical Memory E2E source")
-    request["text"] = {"format": {"name": "historical_memory", "strict": False}}
-    with pytest.raises(ValueError, match="strict"):
-        historical_memory_summary_response(request)
 
 
 def test_summary_fixture_isolated_and_supports_validation_cases() -> None:

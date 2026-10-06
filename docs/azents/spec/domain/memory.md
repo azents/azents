@@ -49,6 +49,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/builtin.py
   - python/apps/azents/src/azents/engine/tools/readable_storage.py
   - python/apps/azents/src/azents/engine/run/resolve.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/engine/events/iteration.py
   - python/apps/azents/src/azents/engine/events/native_replay.py
   - python/apps/azents/src/azents/engine/events/tools.py
@@ -74,7 +75,7 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/historical-memories/{source_session_id}
 last_verified_at: 2026-10-06
-spec_version: 19
+spec_version: 20
 ---
 
 # Memory
@@ -213,15 +214,27 @@ Redis persistence is not required and cross-process duplicate calls are possible
 
 Preparation uses the Agent Lightweight candidate chain and the truthful
 `historical_memory` operation kind, never the Main chain. Input uses bounded
-semantic event tiers, chronological rendering, 70% of the resolved input window,
-and at most 200 eligible events per tier. Human requests/corrections, Agent
+semantic event tiers, chronological rendering, and at most 200 eligible events
+per tier. Preparation reserves the complete ordinary request's instructions and
+UTF-8 framing, plus any explicit selected output setting, before allocating source
+evidence within the resolved input window on the existing four-byte token-estimate
+basis. It reprojects semantic evidence against
+the fully lowered request when escaping/framing changes the measured size. Human requests/corrections, Agent
 proposals, other Agent messages, contextual failures, and tool outcomes remain
 distinguishable. A declarative durable-name conversational-tool registry
 reconstructs tool-mediated conversation with delivery provenance. Sensitive
 values are redacted from input; hidden reasoning/instructions and raw attachment
 bytes are excluded.
 
-One provider call requests strict JSON containing only `summary`. Service-owned
+One ordinary text-model call asks for JSON containing only `summary`, validated
+strictly by the application after native terminal completion. Preparation,
+consolidation and foreground compaction use the same provider-operation
+composition over the foreground lowerers, adapters, capability admission and
+normalized output contracts. The exact selected model settings control output:
+an unspecified output cap remains unspecified, while an explicit cap receives
+the foreground model-supported clamp. Preparation adds no wire JSON-schema
+requirement, provider routing override or fixed output ceiling.
+Service-owned
 identity/scope/timestamps remain outside model output. Useful context preserves
 scope, consequential reasons, chronology, reported evidence, corrections, and
 unfinished work; empty content means no summary. Valid oversized summaries are

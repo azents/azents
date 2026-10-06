@@ -12,6 +12,7 @@ from azents.engine.events import engine_adapter_test as fixtures
 from azents.engine.run.contracts import RunRequest
 from azents.testing.model_metadata import make_test_model_pricing
 from azents.testing.model_selection import (
+    make_test_model_candidate,
     make_test_model_selection,
     make_test_model_settings,
 )
@@ -93,7 +94,7 @@ async def test_actual_primary_or_fallback_selection_supplies_adapter_pricing(
     request = RunRequest(
         top_k=None,
         model_assembly_metadata=None,
-        compaction_assembly_metadata=None,
+        compaction_candidate=make_test_model_candidate(),
         enabled_execution_options=[],
         session_id="session-1",
         user_messages=[],

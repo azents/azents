@@ -25,6 +25,9 @@ from azents.engine.events.model_messages import transient_model_message
 from azents.engine.events.openai_responses import OpenAIResponsesWebSocketConnection
 from azents.engine.events.types import UserMessagePayload
 from azents.engine.model_factory_types import ModelSDKFactories
+from azents.engine.provider_model_operation import (
+    bind_provider_model_operation,
+)
 from azents.engine.providers.model_factory import ProviderModelFactory
 from azents.rdb.models.historical_memory_consolidation import (
     RDBConsolidationAttempt,
@@ -52,9 +55,6 @@ from azents.repos.historical_memory_consolidation.work import (
 )
 from azents.services.historical_memory.consolidation_dispatch import (
     ConsolidationDispatchAdmission,
-)
-from azents.services.historical_memory.consolidation_model import (
-    bind_consolidation_provider_model,
 )
 from azents.services.historical_memory.consolidation_tools import (
     ConsolidationToolBindings,
@@ -208,7 +208,7 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
     selection = make_test_model_selection()
     selection.normalized_capabilities.tool_calling.supported = True
     selection.normalized_capabilities.parameters.max_output_tokens = True
-    model = bind_consolidation_provider_model(
+    model = bind_provider_model_operation(
         selection=selection,
         settings=make_test_model_settings().model_copy(
             update={"max_output_tokens": selected_output_tokens}
@@ -218,6 +218,7 @@ async def test_http_retry_and_websocket_sends_are_independently_reserved(
         sdk_factories=ModelSDKFactories(factory, _unused_provider),
         watchdog=make_test_model_stream_watchdog(),
         websocket_enabled=websocket,
+        transport_state=None,
     )
     assert model.max_output_tokens == selected_output_tokens
     bindings = ConsolidationToolBindings(

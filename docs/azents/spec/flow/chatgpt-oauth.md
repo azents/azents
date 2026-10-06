@@ -38,13 +38,14 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/model_usage_pricing.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/context/compaction.py
+  - python/apps/azents/src/azents/engine/provider_model_operation.py
   - python/apps/azents/src/azents/services/session_title.py
   - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/shared/subscription-usage/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-10-05
-spec_version: 34
+last_verified_at: 2026-10-06
+spec_version: 35
 ---
 
 # ChatGPT OAuth Flow
@@ -227,8 +228,9 @@ Rules:
 - Primary sampling prefers the persistent Responses WebSocket when
   `AZ_OPENAI_RESPONSES_WEBSOCKET_ENABLED` is enabled and the resolved base URL exactly matches the
   ChatGPT OAuth backend. One sampling execution opens the socket lazily, serially reuses it across its
-  model/tool turns, and closes it on every execution exit. Context compaction and automatic Session
-  title generation remain streaming HTTP operations.
+  model/tool turns, and closes it on every execution exit. Context compaction
+  reuses that execution's keyed transport policy through an operation-scoped
+  SDK; automatic Session title generation remains streaming HTTP.
 - A classified WebSocket transport failure activates HTTP-only state for the resolved ChatGPT OAuth
   integration in the owning `SessionRunner` and fails through the shared failed-Run retry boundary.
   The next attempt sends the complete logical request over HTTP. There is no inline transport replay,
@@ -247,7 +249,11 @@ Rules:
 - Typed terminal events, SDK exceptions, and transport failures use the common `ModelProviderFailure` contract only when their typed status or identifiers map to a known category. Only the bounded, redacted provider-authored reason may reach retry state, UI, or provider-failure logs. Every classified category receives the complete current Run retry budget; category and retryability remain diagnostic metadata. Unclassified outcomes raise through the ordinary internal-error path and do not create provider retry state or generic provider-error presentation.
 - Runtime requests use `originator: azents`, an `azents/<version>` User-Agent, and the connected `ChatGPT-Account-Id` rather than impersonating Codex CLI identity.
 - Sampling always uses the standard Responses contract regardless of model name or backend request-dialect hints. Tools remain in the top-level `tools` field and instructions remain in the top-level `instructions` field.
-- Compaction and title generation use the same standard Responses dialect. They send ordinary user input plus top-level instructions, no sampling tools, and omit `max_output_tokens` while retaining `store=false`, encrypted reasoning inclusion, and common client identity headers.
+- Compaction and title generation use the standard Responses dialect with
+  ordinary user input, top-level instructions, no sampling tools, `store=false`,
+  encrypted reasoning inclusion, and common client identity headers. Compaction
+  uses its captured candidate's selected output setting through foreground
+  lowering and admission; title generation retains its text-helper policy.
 - Completed SDK usage is normalized into the turn marker without retaining native raw usage,
   attribution or hidden parameters. The receipt remains transient through pricing. Azents captures the physical
   candidate's saved normalized ChatGPT-scoped pricing definition and aware call time without a
