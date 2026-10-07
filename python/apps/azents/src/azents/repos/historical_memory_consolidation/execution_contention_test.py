@@ -43,7 +43,9 @@ async def test_real_deadlock_replays_only_completed_db_operation(
         case = await _start(manager)
         principal = case.principal
         files = SessionExecutionFileRepository(manager)
-        await files.write(principal.owner, "result.md", "Before", None, True)
+        await files.write(
+            principal.owner, "result.md", "Before", None, True, overwrite=False
+        )
         first_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
         aborted: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         attempts = 0
@@ -85,7 +87,12 @@ async def test_real_deadlock_replays_only_completed_db_operation(
                     return await repository.start_turn(principal)
                 case "write":
                     return await observed_files.write(
-                        principal.owner, "result.md", "After", "Before", True
+                        principal.owner,
+                        "result.md",
+                        "After",
+                        "Before",
+                        True,
+                        overwrite=True,
                     )
                 case "patch":
                     return await observed_files.atomic_patch(
@@ -169,6 +176,68 @@ async def test_real_deadlock_replays_only_completed_db_operation(
                 await asyncio.gather(task, return_exceptions=True)
 
 
+async def test_concurrent_create_only_writes_preserve_first_committed_content(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """The later creator waits at the owner fence and cannot replace the winner."""
+    del latest_db_schema
+    manager = create_read_write_session_manager(rdb_engine)
+    async with committed_fixture_graph(rdb_engine, RDBModel.metadata):
+        case = await _start(manager)
+        files = SessionExecutionFileRepository(manager)
+        creator_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
+
+        @asynccontextmanager
+        async def observed_manager() -> AsyncIterator[WriteSession]:
+            async with manager() as session:
+                creator_pid.set_result(await _pid(session))
+                yield session
+
+        later = SessionExecutionFileRepository(observed_manager)
+        task: asyncio.Task[object] | None = None
+        try:
+            async with manager() as winner:
+                assert (
+                    await SessionExecutionRecordRepository().fence_owner(
+                        winner, case.principal.owner
+                    )
+                    is not None
+                )
+                holder_pid = await _pid(winner)
+                task = asyncio.create_task(
+                    later.write(
+                        case.principal.owner,
+                        "concurrent.md",
+                        "loser",
+                        None,
+                        True,
+                        overwrite=False,
+                    )
+                )
+                waiter = await asyncio.wait_for(creator_pid, timeout=5)
+                await asyncio.wait_for(
+                    _wait_for_blocker(rdb_engine, waiter=waiter, holder=holder_pid),
+                    timeout=5,
+                )
+                await winner.write_session.execute(
+                    sa.insert(RDBSessionExecutionFile).values(
+                        session_id=case.principal.owner.session_id,
+                        path="concurrent.md",
+                        content="winner",
+                        writable=True,
+                    )
+                )
+            with pytest.raises(FileExistsError, match="already exists"):
+                await asyncio.wait_for(task, timeout=5)
+            current = await files.read(case.principal.owner, "concurrent.md")
+            assert current is not None and current.content == "winner"
+        finally:
+            if task is not None and not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_submit_replay_retains_obtained_markdown_after_confirmed_rollback(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
@@ -180,7 +249,9 @@ async def test_submit_replay_retains_obtained_markdown_after_confirmed_rollback(
         case = await _start(manager)
         principal = case.principal
         files = SessionExecutionFileRepository(manager)
-        await files.write(principal.owner, "result.md", "Original bytes", None, True)
+        await files.write(
+            principal.owner, "result.md", "Original bytes", None, True, overwrite=False
+        )
         attempts = 0
 
         @asynccontextmanager
@@ -208,6 +279,7 @@ async def test_submit_replay_retains_obtained_markdown_after_confirmed_rollback(
                     "Changed bytes",
                     "Original bytes",
                     True,
+                    overwrite=True,
                 )
                 raise
 

@@ -2,15 +2,25 @@
 
 import dataclasses
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 import sqlalchemy as sa
 from fastapi import Depends
+from psycopg.errors import (
+    DeadlockDetected,
+    LockNotAvailable,
+    QueryCanceled,
+    SerializationFailure,
+)
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 
 from azents.core.enums import AgentSessionProductMode, EventKind
 from azents.core.historical_memory_consolidation import ConsolidationScope
 from azents.core.historical_memory_context import (
+    MemoryContextAuthorityUnavailable,
     MemoryContextPrompt,
     build_memory_context_snapshot,
     filter_memory_context_snapshot,
@@ -38,6 +48,30 @@ from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpse
 
 _MEMORY_NAMESPACE = "memory"
 _CONTEXT_SNAPSHOT_STATE = "context_snapshot"
+
+
+@asynccontextmanager
+async def _authority_session[SessionT: ReadSession](
+    manager: SessionManager[SessionT],
+) -> AsyncIterator[SessionT]:
+    """Translate expected storage failures only after the DB scope has closed."""
+    try:
+        async with manager() as session:
+            yield session
+    except OperationalError as error:
+        if not isinstance(
+            error.orig,
+            (
+                DeadlockDetected,
+                LockNotAvailable,
+                QueryCanceled,
+                SerializationFailure,
+            ),
+        ):
+            raise
+        raise MemoryContextAuthorityUnavailable(
+            "Memory context authority could not be confirmed."
+        ) from error
 
 
 @dataclasses.dataclass
@@ -100,7 +134,7 @@ class MemoryContextSnapshotRepository:
         )
 
     async def prompt_for_turn(self, *, session_id: str) -> MemoryContextPrompt:
-        async with self.read_session_manager() as session:
+        async with _authority_session(self.read_session_manager) as session:
             await session.read_session.execute(
                 sa.select(sa.func.set_config("statement_timeout", "2000", True))
             )
@@ -163,7 +197,7 @@ class MemoryContextSnapshotRepository:
         session_id: str,
         after_compaction: bool,
     ) -> bool:
-        async with self.session_manager() as session:
+        async with _authority_session(self.session_manager) as session:
             if self.owner is not None:
                 if self.owner.session_id != session_id:
                     raise ValueError("Memory snapshot Session does not match owner")

@@ -56,6 +56,7 @@ async def publish_context_overview(
         markdown,
         expected_content=None,
         require_observation=False,
+        overwrite=False,
     )
     return await repository.submit(
         principal, tool_call_id=uuid7().hex, authored_path="summary.md"

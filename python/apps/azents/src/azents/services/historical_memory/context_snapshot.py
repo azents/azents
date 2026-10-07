@@ -5,15 +5,9 @@ import logging
 from typing import Annotated
 
 from fastapi import Depends
-from psycopg.errors import (
-    DeadlockDetected,
-    LockNotAvailable,
-    QueryCanceled,
-    SerializationFailure,
-)
-from sqlalchemy.exc import OperationalError
 
 from azents.core.historical_memory_context import (
+    MemoryContextAuthorityUnavailable,
     MemoryContextPrompt,
     prepare_memory_context_prompt,
 )
@@ -45,17 +39,7 @@ class MemoryContextSnapshotService:
         """Return text and exact selected identities from one authority check."""
         try:
             return await self.repository.prompt_for_turn(session_id=session_id)
-        except OperationalError as error:
-            if not isinstance(
-                error.orig,
-                (
-                    DeadlockDetected,
-                    LockNotAvailable,
-                    QueryCanceled,
-                    SerializationFailure,
-                ),
-            ):
-                raise
+        except MemoryContextAuthorityUnavailable:
             logger.warning(
                 "Memory context authority could not be confirmed.",
                 extra={"session_id": session_id},
@@ -74,17 +58,7 @@ class MemoryContextSnapshotService:
                 session_id=session_id,
                 after_compaction=after_compaction,
             )
-        except OperationalError as error:
-            if not isinstance(
-                error.orig,
-                (
-                    DeadlockDetected,
-                    LockNotAvailable,
-                    QueryCanceled,
-                    SerializationFailure,
-                ),
-            ):
-                raise
+        except MemoryContextAuthorityUnavailable:
             logger.warning(
                 "Memory boundary authority could not be confirmed.",
                 extra={"session_id": session_id},

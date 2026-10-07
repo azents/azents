@@ -87,6 +87,7 @@ from azents.services.historical_memory.execution_context import (
     MemoryExecutionContextService,
 )
 from azents.services.model_metadata import ModelMetadataService
+from azents.services.session_execution_files import ExecutionFileObservations
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.supervisor import RunStopController
@@ -535,7 +536,12 @@ class MemoryRunExecutor:
         return ConsolidationIterationHost(
             principal,
             model,
-            ConsolidationToolBindings(principal, self.files, self.executions),
+            ConsolidationToolBindings(
+                principal,
+                self.files,
+                self.executions,
+                ExecutionFileObservations(principal.owner),
+            ),
             self.executions,
             self.context_port,
             check_stop,

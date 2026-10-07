@@ -87,6 +87,8 @@ class SessionExecutionFileRepository:
         content: str,
         expected_content: str | None,
         require_observation: bool,
+        *,
+        overwrite: bool,
     ) -> CurrentExecutionFile:
         require_execution_path(path)
         require_execution_text(content)
@@ -99,6 +101,8 @@ class SessionExecutionFileRepository:
             )
             if row is not None and not row.writable:
                 raise PermissionError("Provided execution inputs are read-only.")
+            if row is not None and not overwrite:
+                raise FileExistsError("File already exists; set overwrite=true.")
             if row is not None and not require_observation:
                 raise ExecutionFileConflict(
                     "Read an existing file before replacing it."
@@ -110,22 +114,33 @@ class SessionExecutionFileRepository:
                 raise ExecutionFileConflict(
                     "Current file content does not match its observation."
                 )
-            await session.write_session.execute(
-                insert(RDBSessionExecutionFile)
-                .values(
-                    session_id=owner.session_id,
-                    path=path,
-                    content=content,
-                    writable=True,
-                )
-                .on_conflict_do_update(
-                    index_elements=[
-                        RDBSessionExecutionFile.session_id,
-                        RDBSessionExecutionFile.path,
-                    ],
-                    set_={"content": content},
-                )
+            statement = insert(RDBSessionExecutionFile).values(
+                session_id=owner.session_id,
+                path=path,
+                content=content,
+                writable=True,
             )
+            if overwrite:
+                await session.write_session.execute(
+                    statement.on_conflict_do_update(
+                        index_elements=[
+                            RDBSessionExecutionFile.session_id,
+                            RDBSessionExecutionFile.path,
+                        ],
+                        set_={"content": content},
+                    )
+                )
+            else:
+                created = await session.write_session.scalar(
+                    statement.on_conflict_do_nothing(
+                        index_elements=[
+                            RDBSessionExecutionFile.session_id,
+                            RDBSessionExecutionFile.path,
+                        ]
+                    ).returning(RDBSessionExecutionFile.path)
+                )
+                if created is None:
+                    raise FileExistsError("File already exists; set overwrite=true.")
             return CurrentExecutionFile(path, content, True)
 
     async def delete(
