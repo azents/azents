@@ -2746,7 +2746,8 @@ class AgentSessionRepository:
                 sa.select(RDBAgentSession.id)
                 .join(RDBConversation, RDBConversation.session_id == RDBAgentSession.id)
                 .where(*predicates)
-                .with_for_update(of=RDBAgentSession)
+                # Serialize owner mutations while allowing live FK references.
+                .with_for_update(of=RDBAgentSession, key_share=True)
                 .cte("locked_conversation_session")
             )
             changed = (
