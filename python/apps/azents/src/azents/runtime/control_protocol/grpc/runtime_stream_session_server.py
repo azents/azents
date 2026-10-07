@@ -863,9 +863,11 @@ class _BoundedEnvelopeQueue:
 
 @dataclasses.dataclass
 class _SourceCredit:
-    """Request consumption belongs to the complete source connection lifetime."""
+    """Upstream credit belongs to the complete source connection lifetime."""
 
     request_consumed_total: int = dataclasses.field(default=0, init=False)
+    response_consumed_total: int = dataclasses.field(default=0, init=False)
+    response_acknowledged_stream_total: int = dataclasses.field(default=0, init=False)
     lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock, init=False)
 
 
@@ -984,11 +986,11 @@ class _RunnerConnection:
         self.source_ids: dict[tuple[str, int], int] = {}
         self.tombstones: deque[int] = deque(maxlen=MAX_STREAM_TOMBSTONES)
         self.tombstone_set: set[int] = set()
-        self.source_response_session_consumed: dict[str, int] = {}
         self.source_response_stream_consumed: dict[int, int] = {}
         self.runner_response_session_consumed = 0
         self.runner_request_stream_consumed: dict[int, int] = {}
         self.runner_request_session_consumed = 0
+        self.runner_request_acknowledged_stream_total = 0
         self.lock = asyncio.Lock()
         self.heartbeat_task: asyncio.Task[None] | None = None
         self.heartbeat_sequence = 0
@@ -1088,16 +1090,7 @@ class _RunnerConnection:
                     raise ValueError(
                         "Runtime Web source response credit direction is invalid"
                     )
-                previous = self.source_response_session_consumed.get(
-                    source.source_key,
-                    0,
-                )
                 current = envelope.window_update.session_consumed_total
-                if current < previous:
-                    raise ValueError(
-                        "Runtime Web source response consumed total decreased"
-                    )
-                self.source_response_session_consumed[source.source_key] = current
                 previous_stream = self.source_response_stream_consumed.get(
                     runner_stream_id, 0
                 )
@@ -1106,13 +1099,27 @@ class _RunnerConnection:
                     raise ValueError(
                         "Runtime Web source response stream consumed total decreased"
                     )
-                self.source_response_stream_consumed[runner_stream_id] = current_stream
-                self.runner_response_session_consumed += (
-                    current_stream - previous_stream
-                )
-                forwarded.window_update.session_consumed_total = (
-                    self.runner_response_session_consumed
-                )
+                delta = current_stream - previous_stream
+                async with source.credit.lock:
+                    if current < source.credit.response_consumed_total:
+                        raise ValueError(
+                            "Runtime Web source response consumed total decreased"
+                        )
+                    acknowledged = source.credit.response_acknowledged_stream_total
+                    if acknowledged + delta > current:
+                        raise ValueError(
+                            "Runtime Web source response session consumption "
+                            "is below stream totals"
+                        )
+                    source.credit.response_consumed_total = current
+                    source.credit.response_acknowledged_stream_total += delta
+                    self.source_response_stream_consumed[runner_stream_id] = (
+                        current_stream
+                    )
+                    self.runner_response_session_consumed += delta
+                    forwarded.window_update.session_consumed_total = (
+                        self.runner_response_session_consumed
+                    )
             await self.queue.put(forwarded, on_dequeued=on_dequeued)
             return runner_stream_id
 
@@ -1178,11 +1185,20 @@ class _RunnerConnection:
                     raise ValueError(
                         "Runtime Web Runner request stream consumed total decreased"
                     )
+                request_delta = current_stream_total - previous_stream_total
+                if (
+                    self.runner_request_acknowledged_stream_total + request_delta
+                    > runner_session_total
+                ):
+                    raise ValueError(
+                        "Runtime Web Runner request session consumption "
+                        "is below stream totals"
+                    )
                 self.runner_request_session_consumed = runner_session_total
+                self.runner_request_acknowledged_stream_total += request_delta
                 self.runner_request_stream_consumed[envelope.stream_id] = (
                     current_stream_total
                 )
-                request_delta = current_stream_total - previous_stream_total
         if payload == "window_update":
             async with source.credit.lock:
                 source.credit.request_consumed_total += request_delta
@@ -1215,11 +1231,6 @@ class _RunnerConnection:
                 self.tombstones.append(runner_stream_id)
                 self.tombstone_set.add(runner_stream_id)
 
-    async def release_source(self, source_key: str) -> None:
-        """Release hop-local credit totals for one closed source session."""
-        async with self.lock:
-            self.source_response_session_consumed.pop(source_key, None)
-
     async def close(self) -> None:
         try:
             heartbeat_task = self.heartbeat_task
@@ -1237,11 +1248,11 @@ class _RunnerConnection:
                 self.source_ids.clear()
                 self.tombstones.clear()
                 self.tombstone_set.clear()
-                self.source_response_session_consumed.clear()
                 self.source_response_stream_consumed.clear()
                 self.runner_response_session_consumed = 0
                 self.runner_request_stream_consumed.clear()
                 self.runner_request_session_consumed = 0
+                self.runner_request_acknowledged_stream_total = 0
             for _runner_stream_id, binding in sources:
                 source = binding.source
                 reset = _base_response(source, self.control_boot_id)
@@ -1375,11 +1386,6 @@ class RuntimeStreamControlDataPlane:
                 source_session_id=source.session_id,
                 source_peer_boot_id=source.peer_boot_id,
             )
-        async with self.lock:
-            runners = tuple(self.runners.values())
-        await asyncio.gather(
-            *(runner.release_source(source.source_key) for runner in runners),
-        )
         await source.queue.close()
 
     async def relay_disconnected(

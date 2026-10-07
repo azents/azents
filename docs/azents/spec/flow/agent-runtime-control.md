@@ -324,7 +324,10 @@ session never inherits the historical absolute total of a still-live Gateway
 connection. Request consumption returned to that Gateway stays cumulative for
 its complete source-connection lifetime, including Runner epoch replacement.
 Duplicate updates contribute zero delta, decreasing totals fail closed, and
-retired per-stream ledgers are removed with the stream.
+retired per-stream ledgers are removed with the stream. Before translation or
+ledger mutation, each upstream connection's acknowledged stream sum must fit
+its advertised session consumption. Source-side validation retains the complete
+source connection history across Runner replacement.
 Shared sender credit uses exact per-stream acknowledgement deltas plus once-only
 terminal debit release in both directions. Closing a stream returns its reserved
 but unacknowledged bytes without lowering absolute sent totals. Later cumulative

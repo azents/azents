@@ -1469,6 +1469,94 @@ async def test_runner_connection_translates_hop_local_session_credit() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["response", "request"])
+async def test_credit_translation_rejects_underreported_totals_atomically(
+    direction: str,
+) -> None:
+    owner = _owner()
+    connection = _RunnerConnection(
+        accepted=RuntimeStreamAcceptedRunnerSession(
+            owner=owner,
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        ),
+        control_boot_id="control-boot",
+    )
+    source = _SourceSession(
+        source_key="gateway-a",
+        session_id="gateway-a",
+        peer_boot_id="gateway-boot",
+        owner=None,
+        queue=_BoundedEnvelopeQueue(),
+    )
+    for stream_id in (1, 2):
+        runner_stream = await connection.send(
+            source,
+            _open_envelope(
+                session_id=source.session_id,
+                peer_boot_id=source.peer_boot_id,
+                stream_id=stream_id,
+            ),
+        )
+        await anext(connection.queue.__aiter__())
+        credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+            session_id=(
+                source.session_id if direction == "response" else owner.session_lease_id
+            ),
+            peer_boot_id=(
+                source.peer_boot_id if direction == "response" else "runner-boot"
+            ),
+            owner_boot_id=owner.owner_boot_id,
+            session_lease_id=owner.session_lease_id,
+            lease_generation=owner.lease_generation,
+            stream_id=stream_id if direction == "response" else runner_stream,
+        )
+        credit.window_update.direction = (
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+            if direction == "response"
+            else runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+        )
+        credit.window_update.stream_consumed_total = 5 if stream_id == 1 else 3
+        credit.window_update.session_consumed_total = 4 if stream_id == 1 else 5
+        acknowledged = 0 if stream_id == 1 else 5
+        with pytest.raises(ValueError, match="below stream totals"):
+            if direction == "response":
+                await connection.send(source, credit)
+            else:
+                await connection.receive(credit)
+        if direction == "response":
+            assert source.credit.response_consumed_total == acknowledged
+            assert source.credit.response_acknowledged_stream_total == acknowledged
+            assert connection.runner_response_session_consumed == acknowledged
+            assert runner_stream not in connection.source_response_stream_consumed
+        else:
+            assert connection.runner_request_session_consumed == acknowledged
+            assert connection.runner_request_acknowledged_stream_total == acknowledged
+            assert source.credit.request_consumed_total == acknowledged
+            assert runner_stream not in connection.runner_request_stream_consumed
+        assert not connection.queue.items
+        assert not source.queue.items
+        credit.window_update.session_consumed_total = 5 if stream_id == 1 else 8
+        if direction == "response":
+            await connection.send(source, credit)
+            forwarded = await anext(connection.queue.__aiter__())
+        else:
+            await connection.receive(credit)
+            forwarded = await anext(source.queue.__aiter__())
+        assert forwarded.window_update.session_consumed_total == (
+            credit.window_update.session_consumed_total
+        )
+        await connection.release(
+            source_session_id=source.source_key,
+            source_stream_id=stream_id,
+        )
+    await connection.close()
+    await source.queue.close()
+
+
+@pytest.mark.asyncio
 async def test_persistent_source_credit_survives_runner_epoch_replacement() -> None:
     source = _SourceSession(
         source_key="gateway-a",
@@ -1509,7 +1597,16 @@ async def test_persistent_source_credit_survives_runner_epoch_replacement() -> N
         )
         response_credit.window_update.stream_consumed_total = consumed
         # The same Gateway carries history from a retired Runner connection.
-        response_credit.window_update.session_consumed_total = 105 + index * 3
+        if index == 1:
+            response_credit.window_update.session_consumed_total = 5
+            with pytest.raises(ValueError, match="below stream totals"):
+                await connection.send(source, response_credit)
+            assert source.credit.response_consumed_total == 5
+            assert source.credit.response_acknowledged_stream_total == 5
+            assert connection.runner_response_session_consumed == 0
+            assert not connection.source_response_stream_consumed
+            assert not connection.queue.items
+        response_credit.window_update.session_consumed_total = 5 + index * 3
         await connection.send(source, response_credit)
         forwarded = await anext(connection.queue.__aiter__())
         assert forwarded.window_update.session_consumed_total == consumed
