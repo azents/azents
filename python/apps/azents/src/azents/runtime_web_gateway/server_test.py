@@ -897,8 +897,8 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
         else ()
     ) + (
         (b"Sec-WebSocket-Extensions", b"permessage-deflate"),
-        (b"Set-Cookie", b"upstream=forbidden"),
-        (b"X-Upstream-Handshake", b"forbidden"),
+        (b"Set-Cookie", b"upstream=application"),
+        (b"X-Upstream-Handshake", b"application"),
     )
     harness = await _websocket_harness(response_headers, response_frames=())
     try:
@@ -917,8 +917,8 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
         else:
             assert websocket._response.headers["Sec-WebSocket-Protocol"] == selected
         assert "Sec-WebSocket-Extensions" not in websocket._response.headers
-        assert "Set-Cookie" not in websocket._response.headers
-        assert "X-Upstream-Handshake" not in websocket._response.headers
+        assert websocket._response.headers["Set-Cookie"] == "upstream=application"
+        assert websocket._response.headers["X-Upstream-Handshake"] == "application"
 
         await websocket.close()
         await asyncio.wait_for(harness.transport.unbound.wait(), timeout=1)
@@ -941,6 +941,60 @@ async def test_public_websocket_handshake_returns_exact_selected_subprotocol(
 
 
 @pytest.mark.asyncio
+async def test_public_websocket_preserves_application_headers_and_cookies() -> None:
+    harness = await _websocket_harness(
+        (
+            (b"Sec-WebSocket-Protocol", b"chat.v1"),
+            (b"Sec-WebSocket-Accept", b"upstream-hop-key"),
+            (b"Content-Length", b"123"),
+            (b"Set-Cookie", b"__Http-Azents-Runtime-Web=replace-platform"),
+            (b"Set-Cookie", b"session=app; HttpOnly; Path=/"),
+            (b"Set-Cookie", b"second=app; Path=/"),
+            (b"X-App", b"first"),
+            (b"X-App", b"second"),
+            (b"Connection", b"Upgrade, X-Transport"),
+            (b"X-Transport", b"hop-only"),
+        ),
+        response_frames=((WebSocketOpcode.TEXT, True, b"app-ready"),),
+    )
+    try:
+        websocket = await harness.client.ws_connect(
+            "/socket",
+            headers={
+                "Host": "endpoint.services.example.net",
+                "Cookie": "__Http-Azents-Runtime-Web=opaque-secret; session=app",
+                "Origin": "https://external.example.com",
+                "Authorization": "Bearer app",
+            },
+            protocols=("chat.v1",),
+        )
+        assert websocket.protocol == "chat.v1"
+        response = websocket._response
+        assert response.headers.getall("Set-Cookie") == [
+            "session=app; HttpOnly; Path=/",
+            "second=app; Path=/",
+        ]
+        assert response.headers.getall("X-App") == ["first", "second"]
+        assert response.headers["Sec-WebSocket-Accept"] != "upstream-hop-key"
+        assert "Content-Length" not in response.headers
+        assert "X-Transport" not in response.headers
+        opened = next(
+            item.open for item in harness.transport.sent if item.HasField("open")
+        )
+        forwarded = {
+            item.name.lower(): item.value for item in opened.request_head.headers
+        }
+        assert forwarded[b"cookie"] == b"session=app"
+        assert forwarded[b"origin"] == b"https://external.example.com"
+        assert forwarded[b"authorization"] == b"Bearer app"
+        assert b"sec-websocket-key" not in forwarded
+        message = await asyncio.wait_for(websocket.receive(), timeout=1)
+        assert message.data == "app-ready"
+        await websocket.close()
+    finally:
+        await harness.client.close()
+
+
 async def test_public_websocket_close_discards_incomplete_response_message() -> None:
     harness = await _websocket_harness(
         (),
@@ -1268,7 +1322,9 @@ async def test_authenticated_application_methods_reach_transport(
     await client.start_server()
     headers = {
         "Host": "endpoint.services.example.net",
-        "Cookie": "__Http-Azents-Runtime-Web=opaque-secret",
+        "Cookie": (
+            "__Http-Azents-Runtime-Web=opaque-secret; session=application-session"
+        ),
         "Sec-Fetch-Site": "cross-site",
         "Access-Control-Request-Method": "POST",
         "Access-Control-Request-Headers": "X-App-Token",
@@ -1289,18 +1345,15 @@ async def test_authenticated_application_methods_reach_transport(
             assert response.headers.getall(name.decode()) == [value.decode()]
         opened = next(item.open for item in transport.sent if item.HasField("open"))
         assert opened.request_head.method == method.encode()
-        forwarded = {item.name: item.value for item in opened.request_head.headers}
+        forwarded = {
+            item.name.lower(): item.value for item in opened.request_head.headers
+        }
         assert forwarded[b"x-app-token"] == b"application-value"
-        assert b"cookie" not in forwarded
+        assert forwarded[b"cookie"] == b"session=application-session"
         if origin is None:
             assert b"origin" not in forwarded
         else:
-            expected = (
-                b"http://localhost:8080"
-                if origin == "https://endpoint.services.example.net"
-                else origin.encode()
-            )
-            assert forwarded[b"origin"] == expected
+            assert forwarded[b"origin"] == origin.encode()
         assert (
             b"".join(item.data.data for item in transport.sent if item.HasField("data"))
             == b"value=example"

@@ -1177,6 +1177,26 @@ async def echo(request):
     body = await request.read()
     return web.json_response({'body': body.decode(), 'method': request.method})
 
+async def app_login(request):
+    response = web.json_response({'logged_in': True})
+    response.set_cookie('session', 'runtime-app-session', httponly=True, secure=True)
+    response.set_cookie('theme', 'dark', secure=True)
+    return response
+
+async def app_session(request):
+    if request.cookies.get('session') != 'runtime-app-session':
+        raise web.HTTPUnauthorized()
+    return web.json_response({
+        'session': request.cookies.get('session'),
+        'theme': request.cookies.get('theme'),
+        'socket_session': request.cookies.get('socket_session'),
+        'platform_cookie_received': '__Http-Azents-Runtime-Web' in request.cookies,
+        'authorization': request.headers.get('Authorization'),
+        'origin': request.headers.get('Origin'),
+        'referer': request.headers.get('Referer'),
+        'custom': request.headers.get('X-App-Test'),
+    })
+
 async def form_result(request):
     body = await request.read()
     return web.json_response({
@@ -1284,6 +1304,9 @@ async def websocket(request):
     active_websockets += 1
     websocket_connections += 1
     socket = web.WebSocketResponse(autoping=False, compress=False)
+    socket.set_cookie(
+        'socket_session', 'runtime-app-socket', httponly=True, secure=True,
+    )
     await socket.prepare(request)
     try:
         async for message in socket:
@@ -1300,6 +1323,8 @@ async def websocket(request):
 application = web.Application()
 application.router.add_get('/', index)
 application.router.add_post('/echo', echo)
+application.router.add_post('/app-login', app_login)
+application.router.add_post('/app-session', app_session)
 application.router.add_post('/form-result', form_result)
 application.router.add_post('/upload', upload)
 application.router.add_get('/download', download)
@@ -1727,6 +1752,26 @@ const done = arguments[arguments.length - 1];
     }
     return response;
   };
+  await checkedFetch('/app-login', {method: 'POST'});
+  const appSession = await checkedFetch('/app-session', {
+    method: 'POST',
+    referrerPolicy: 'origin',
+    headers: {'Authorization': 'Bearer app-test', 'X-App-Test': 'custom-value'},
+  });
+  const appEvidence = await appSession.json();
+  if (
+    appEvidence.session !== 'runtime-app-session' ||
+    appEvidence.theme !== 'dark' ||
+    appEvidence.platform_cookie_received ||
+    appEvidence.authorization !== 'Bearer app-test' ||
+    appEvidence.origin !== location.origin ||
+    appEvidence.referer !== `${location.origin}/` ||
+    appEvidence.custom !== 'custom-value'
+  ) {
+    throw new Error(
+      `App cookie/header round-trip failed: ${JSON.stringify(appEvidence)}`,
+    );
+  }
   const formResult = await new Promise((resolve, reject) => {
     const frame = document.getElementById('form-frame');
     frame.onload = () => {
@@ -1829,6 +1874,11 @@ const done = arguments[arguments.length - 1];
       }
     };
   });
+  const afterSocket = await checkedFetch('/app-session', {method: 'POST'});
+  const socketEvidence = await afterSocket.json();
+  if (socketEvidence.socket_session !== 'runtime-app-socket') {
+    throw new Error('WebSocket Set-Cookie was not retained by the browser');
+  }
   done({
     echoBody,
     expectedUploadDigest,
