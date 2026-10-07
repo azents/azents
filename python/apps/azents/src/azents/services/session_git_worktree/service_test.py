@@ -99,8 +99,6 @@ from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_execution import (
     CanonicalExecutionOwnerGenerationStaleError,
 )
@@ -121,7 +119,6 @@ from azents.repos.session_workspace_project_operations import (
 )
 from azents.repos.skill_state import SkillStateRepository
 from azents.repos.skill_state_store import SkillStateStore
-from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -1094,13 +1091,7 @@ def _mailbox_service(
             session_manager=session_manager,
             mailbox_item_repository=MailboxRepository(),
             agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
         ),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileServiceDouble(),
@@ -1157,13 +1148,7 @@ async def _execute_first_setup_action(
             session_manager=rdb_session_manager,
             mailbox_item_repository=MailboxRepository(),
             agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
         ),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileServiceDouble(),
@@ -1209,13 +1194,7 @@ async def _execute_first_setup_action(
             session_manager=rdb_session_manager,
             mailbox_item_repository=MailboxRepository(),
             agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
         ),
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileServiceDouble(),

@@ -65,8 +65,6 @@ from azents.repos.root_agent_session_creation import (
     RootAgentSessionCreationRepository,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
-from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_lifecycle_participant import (
     ScheduledTaskLifecycleParticipantRepository,
 )
@@ -78,7 +76,6 @@ from azents.repos.session_lifecycle_purge_operations import (
     SessionLifecyclePurgeOperations,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.engine import TodoStateStore
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -249,13 +246,7 @@ def _service(
         exchange_file_service=_ExchangeFileService(),
         model_file_service=_ModelFileService(),
         agent_session_repository=AgentSessionRepository(),
-        event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
-        scheduled_task_repository=ScheduledTaskRepository(),
-        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        action_execution_repository=ActionExecutionRepository(),
         turn_action_capabilities=make_test_turn_action_capabilities(
             rdb_session_manager
         ),
@@ -326,11 +317,7 @@ def _make_mailbox_service(**kwargs: Any) -> MailboxService:  # noqa: ANN401
         "session_manager",
         "mailbox_item_repository",
         "agent_session_repository",
-        "event_transcript_repository",
         "agent_run_repository",
-        "scheduled_task_repository",
-        "scheduled_task_cycle_repository",
-        "action_execution_repository",
     )
     runtime_operations = MailboxRuntimeOperations(
         **{key: kwargs.pop(key) for key in database_keys}
@@ -697,13 +684,7 @@ class TestChatSessionMailboxItem:
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
             turn_action_capabilities=make_test_turn_action_capabilities(
                 rdb_session_manager
             ),

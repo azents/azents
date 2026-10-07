@@ -8,8 +8,11 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.goal.store import GoalStateStore
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.promotion import MailboxPromotionRepository
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.skill_state import SkillStateRepository
 from azents.repos.skill_state_store import SkillStateStore
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.services.turn_action import TurnActionCapabilityRegistry
 
 
@@ -37,5 +40,9 @@ def make_test_mailbox_promotion_repository(
         goal_store=GoalStateStore(session_manager=session_manager, owner=None),
         skill_state_repository=SkillStateRepository(
             session_manager=session_manager,
+        ),
+        scheduled_task_repository=ScheduledTaskRepository(),
+        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+            toolkit_state_repository=ToolkitStateRepository()
         ),
     )

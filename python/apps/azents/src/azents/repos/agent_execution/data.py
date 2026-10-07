@@ -63,6 +63,7 @@ class AgentRunCreate(BaseModel):
 class AgentRunPatch(TypedDict, total=False):
     """Presence-aware run updates; omitted fields retain their current values."""
 
+    scheduled_task_cycle_id: str | None
     phase: AgentRunPhase | None
     status: AgentRunStatus | None
     parent_agent_run_id: str | None
