@@ -788,6 +788,10 @@ class RunnerWebSessionDispatcher:
             if envelope.stream_id in self.tombstone_set:
                 if payload in _IGNORED_TOMBSTONE_PAYLOADS:
                     return
+                if payload in {"data", "direction_end", "websocket"}:
+                    # Input already in flight when an app stream resets belongs
+                    # to that retired stream, not a new session-wide failure.
+                    return
                 raise ValueError("Runner Web tombstoned stream received new data")
             raise ValueError("Runner Web stream is unknown")
         if payload == "window_update":
@@ -1077,7 +1081,9 @@ class RunnerWebSessionDispatcher:
         finally:
             if self.streams.pop(stream_id, None) is stream:
                 self._retire(stream_id)
-            stream.response_credit.close()
+            async with stream.credit_changed:
+                stream.response_credit.close()
+                stream.credit_changed.notify_all()
             await stream.inbound.close()
             if stream.resources_reserved:
                 self.resources.end_tasks()

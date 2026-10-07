@@ -70,6 +70,51 @@ def test_hierarchical_credit_consumption_update_is_atomic_and_closed_fenced() ->
         )
 
 
+def test_retired_stream_credit_is_returned_once_without_double_peer_credit() -> None:
+    session = AbsoluteCreditWindow(initial_bytes=8, maximum_bytes=8)
+    for index in range(5):
+        stream = HierarchicalCredit(
+            stream=AbsoluteCreditWindow(initial_bytes=8, maximum_bytes=8),
+            session=session,
+        )
+        stream.reserve(8)
+        stream.update_consumed(
+            stream_consumed_total=2,
+            session_consumed_total=index * 8 + 2,
+        )
+        stream.close()
+        stream.close()
+        assert session.available_bytes == 8
+        assert session.consumed_total == (index + 1) * 8
+    healthy = HierarchicalCredit(
+        stream=AbsoluteCreditWindow(initial_bytes=8, maximum_bytes=8),
+        session=session,
+    )
+    healthy.reserve(8)
+    healthy.update_consumed(stream_consumed_total=3, session_consumed_total=43)
+    assert session.available_bytes == 3
+    assert not healthy.update_consumed(
+        stream_consumed_total=3, session_consumed_total=43
+    )
+    assert session.available_bytes == 3
+    with pytest.raises(ValueError, match="decrease"):
+        healthy.update_consumed(stream_consumed_total=4, session_consumed_total=42)
+    assert healthy.stream.consumed_total == 3
+    assert session.available_bytes == 3
+    healthy.update_consumed(stream_consumed_total=8, session_consumed_total=48)
+    assert session.available_bytes == 8
+
+
+def test_session_credit_cannot_claim_less_than_validated_stream_consumption() -> None:
+    credit = HierarchicalCredit.approved()
+    credit.reserve(10)
+    with pytest.raises(ValueError, match="below stream totals"):
+        credit.update_consumed(stream_consumed_total=5, session_consumed_total=4)
+    assert credit.stream.consumed_total == 0
+    assert credit.session.consumed_total == 0
+    assert credit.session.peer_session_consumed_total == 0
+
+
 def test_scheduler_prioritizes_control_then_latency() -> None:
     scheduler: FairFrameScheduler[str] = FairFrameScheduler(
         latency_capacity_bytes=1024,

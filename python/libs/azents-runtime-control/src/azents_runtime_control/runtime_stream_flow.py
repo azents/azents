@@ -38,6 +38,8 @@ class AbsoluteCreditWindow:
         self.maximum_bytes = maximum_bytes
         self.sent_total = 0
         self.consumed_total = 0
+        self.peer_session_consumed_total = 0
+        self.acknowledged_stream_total = 0
 
     @property
     def available_bytes(self) -> int:
@@ -128,13 +130,30 @@ class HierarchicalCredit:
         if self.closed:
             raise ValueError("Runtime Web hierarchical credit is closed")
         stream_changed = self.stream.validate_consumed(stream_consumed_total)
-        session_changed = self.session.validate_consumed(session_consumed_total)
+        if session_consumed_total < self.session.peer_session_consumed_total:
+            raise ValueError("Runtime Web consumed total must not decrease")
+        if session_consumed_total > self.session.sent_total:
+            raise ValueError("Runtime Web peer consumed unsent bytes")
+        session_changed = (
+            session_consumed_total != self.session.peer_session_consumed_total
+        )
+        delta = stream_consumed_total - self.stream.consumed_total
+        if self.session.acknowledged_stream_total + delta > session_consumed_total:
+            raise ValueError("Runtime Web session consumption is below stream totals")
+        if self.session.consumed_total + delta > self.session.sent_total:
+            raise ValueError("Runtime Web local session consumption exceeds sent bytes")
         self.stream.consumed_total = stream_consumed_total
-        self.session.consumed_total = session_consumed_total
+        self.session.peer_session_consumed_total = session_consumed_total
+        self.session.acknowledged_stream_total += delta
+        self.session.consumed_total += delta
         return stream_changed or session_changed
 
     def close(self) -> None:
-        """Fence later reservations and WINDOW_UPDATE observations."""
+        """Return this stream's outstanding debit once, then fence later updates."""
+        if self.closed:
+            return
+        outstanding = self.stream.sent_total - self.stream.consumed_total
+        self.session.consumed_total += outstanding
         self.closed = True
 
 

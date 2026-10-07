@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime
 import enum
@@ -727,6 +728,10 @@ class RuntimeStreamTrustedPeerAuthenticator:
         return identities[0]
 
 
+class _RuntimeStreamQueueClosed(RuntimeError):
+    """One expected notification target has already disconnected."""
+
+
 class _BoundedEnvelopeQueue:
     def __init__(
         self,
@@ -772,7 +777,9 @@ class _BoundedEnvelopeQueue:
                     )
                 )
                 if self.closed:
-                    raise RuntimeError("Runtime Web session response queue is closed")
+                    raise _RuntimeStreamQueueClosed(
+                        "Runtime Web session response queue is closed"
+                    )
                 if resources is not None:
                     if not resources.try_reserve_envelope(
                         application_bytes=application_bytes,
@@ -830,22 +837,36 @@ class _BoundedEnvelopeQueue:
             self.items.clear()
             self.bytes = 0
             self.condition.notify_all()
-        results = await asyncio.gather(
-            *(item.on_dequeued() for item in queued if item.on_dequeued is not None),
-            return_exceptions=True,
-        )
-        if self.resources is not None:
-            for item in queued:
-                self.resources.release_envelope(
-                    application_bytes=item.application_bytes,
-                    control_bytes=item.control_bytes,
-                )
+        try:
+            results = await asyncio.gather(
+                *(
+                    item.on_dequeued()
+                    for item in queued
+                    if item.on_dequeued is not None
+                ),
+                return_exceptions=True,
+            )
+        finally:
+            if self.resources is not None:
+                for item in queued:
+                    self.resources.release_envelope(
+                        application_bytes=item.application_bytes,
+                        control_bytes=item.control_bytes,
+                    )
         errors = [result for result in results if isinstance(result, Exception)]
         if errors:
             raise ExceptionGroup(
                 "Runtime Web queue release failed",
                 errors,
             )
+
+
+@dataclasses.dataclass
+class _SourceCredit:
+    """Request consumption belongs to the complete source connection lifetime."""
+
+    request_consumed_total: int = dataclasses.field(default=0, init=False)
+    lock: asyncio.Lock = dataclasses.field(default_factory=asyncio.Lock, init=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -855,6 +876,7 @@ class _SourceSession:
     peer_boot_id: str
     owner: OwnerSessionEpoch | None
     queue: _BoundedEnvelopeQueue
+    credit: _SourceCredit = dataclasses.field(default_factory=_SourceCredit, init=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -963,10 +985,10 @@ class _RunnerConnection:
         self.tombstones: deque[int] = deque(maxlen=MAX_STREAM_TOMBSTONES)
         self.tombstone_set: set[int] = set()
         self.source_response_session_consumed: dict[str, int] = {}
+        self.source_response_stream_consumed: dict[int, int] = {}
         self.runner_response_session_consumed = 0
         self.runner_request_stream_consumed: dict[int, int] = {}
         self.runner_request_session_consumed = 0
-        self.source_request_session_consumed: dict[str, int] = {}
         self.lock = asyncio.Lock()
         self.heartbeat_task: asyncio.Task[None] | None = None
         self.heartbeat_sequence = 0
@@ -1076,7 +1098,18 @@ class _RunnerConnection:
                         "Runtime Web source response consumed total decreased"
                     )
                 self.source_response_session_consumed[source.source_key] = current
-                self.runner_response_session_consumed += current - previous
+                previous_stream = self.source_response_stream_consumed.get(
+                    runner_stream_id, 0
+                )
+                current_stream = envelope.window_update.stream_consumed_total
+                if current_stream < previous_stream:
+                    raise ValueError(
+                        "Runtime Web source response stream consumed total decreased"
+                    )
+                self.source_response_stream_consumed[runner_stream_id] = current_stream
+                self.runner_response_session_consumed += (
+                    current_stream - previous_stream
+                )
                 forwarded.window_update.session_consumed_total = (
                     self.runner_response_session_consumed
                 )
@@ -1149,13 +1182,16 @@ class _RunnerConnection:
                 self.runner_request_stream_consumed[envelope.stream_id] = (
                     current_stream_total
                 )
-                source_total = self.source_request_session_consumed.get(
-                    source.source_key,
-                    0,
-                ) + (current_stream_total - previous_stream_total)
-                self.source_request_session_consumed[source.source_key] = source_total
-                translated.window_update.session_consumed_total = source_total
-        await source.queue.put(translated, on_dequeued=on_dequeued)
+                request_delta = current_stream_total - previous_stream_total
+        if payload == "window_update":
+            async with source.credit.lock:
+                source.credit.request_consumed_total += request_delta
+                translated.window_update.session_consumed_total = (
+                    source.credit.request_consumed_total
+                )
+                await source.queue.put(translated, on_dequeued=on_dequeued)
+        else:
+            await source.queue.put(translated, on_dequeued=on_dequeued)
         return BrokerStreamKey(source.source_key, binding.source_stream_id)
 
     async def release(
@@ -1172,6 +1208,7 @@ class _RunnerConnection:
             if runner_stream_id is not None:
                 self.sources.pop(runner_stream_id, None)
                 self.runner_request_stream_consumed.pop(runner_stream_id, None)
+                self.source_response_stream_consumed.pop(runner_stream_id, None)
                 if len(self.tombstones) == MAX_STREAM_TOMBSTONES:
                     expired = self.tombstones.popleft()
                     self.tombstone_set.remove(expired)
@@ -1182,33 +1219,38 @@ class _RunnerConnection:
         """Release hop-local credit totals for one closed source session."""
         async with self.lock:
             self.source_response_session_consumed.pop(source_key, None)
-            self.source_request_session_consumed.pop(source_key, None)
 
     async def close(self) -> None:
-        heartbeat_task = self.heartbeat_task
-        self.heartbeat_task = None
-        if heartbeat_task is not None and heartbeat_task is not asyncio.current_task():
-            if not heartbeat_task.done():
-                heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
-        async with self.lock:
-            sources = tuple(self.sources.items())
-            self.sources.clear()
-            self.source_ids.clear()
-            self.tombstones.clear()
-            self.tombstone_set.clear()
-            self.source_response_session_consumed.clear()
-            self.runner_response_session_consumed = 0
-            self.runner_request_stream_consumed.clear()
-            self.runner_request_session_consumed = 0
-            self.source_request_session_consumed.clear()
-        for _runner_stream_id, binding in sources:
-            source = binding.source
-            reset = _base_response(source, self.control_boot_id)
-            reset.stream_id = binding.source_stream_id
-            reset.reset.reason = _OWNER_LOST_REASON
-            await source.queue.put(reset)
-        await self.queue.close()
+        try:
+            heartbeat_task = self.heartbeat_task
+            self.heartbeat_task = None
+            if (
+                heartbeat_task is not None
+                and heartbeat_task is not asyncio.current_task()
+            ):
+                if not heartbeat_task.done():
+                    heartbeat_task.cancel()
+                await asyncio.gather(heartbeat_task, return_exceptions=True)
+            async with self.lock:
+                sources = tuple(self.sources.items())
+                self.sources.clear()
+                self.source_ids.clear()
+                self.tombstones.clear()
+                self.tombstone_set.clear()
+                self.source_response_session_consumed.clear()
+                self.source_response_stream_consumed.clear()
+                self.runner_response_session_consumed = 0
+                self.runner_request_stream_consumed.clear()
+                self.runner_request_session_consumed = 0
+            for _runner_stream_id, binding in sources:
+                source = binding.source
+                reset = _base_response(source, self.control_boot_id)
+                reset.stream_id = binding.source_stream_id
+                reset.reset.reason = _OWNER_LOST_REASON
+                with contextlib.suppress(_RuntimeStreamQueueClosed):
+                    await source.queue.put(reset)
+        finally:
+            await self.queue.close()
 
 
 class RuntimeStreamControlDataPlane:
@@ -1431,10 +1473,12 @@ class RuntimeStreamControlDataPlane:
             )
             self.runner_missed_heartbeats += connection.missed_heartbeats
             self.resources.close_session()
-            await connection.close()
-        for key in keys:
-            await self._release(key)
-        await self.capacity_registry.release(accepted.owner)
+        async with contextlib.AsyncExitStack() as releases:
+            releases.push_async_callback(self.capacity_registry.release, accepted.owner)
+            for key in keys:
+                releases.push_async_callback(self._release, key)
+            if connection is not None:
+                releases.push_async_callback(connection.close)
 
     async def handle(
         self,
@@ -2523,14 +2567,25 @@ class RuntimeRunnerStreamSessionGrpcServicer(
                 _acceptance(first, owner.owner_boot_id, self.clock)
             )
         except _RuntimeStreamControlResourceExhausted:
-            await self.data_plane.unregister_runner(accepted)
-            await self.registry.release(accepted)
-            await self.offer_provider.release_owner(owner)
+            await _release_runner_owner(
+                data_plane=self.data_plane,
+                registry=self.registry,
+                offer_provider=self.offer_provider,
+                accepted=accepted,
+            )
             await context.abort(
                 grpc.StatusCode.RESOURCE_EXHAUSTED,
                 "Runtime Web Control hard queue limit is exhausted",
             )
             raise AssertionError("unreachable") from None
+        except BaseException:
+            await _release_runner_owner(
+                data_plane=self.data_plane,
+                registry=self.registry,
+                offer_provider=self.offer_provider,
+                accepted=accepted,
+            )
+            raise
         renewal: asyncio.Task[None] | None = None
         reader: asyncio.Task[None] | None = None
 
@@ -2542,9 +2597,12 @@ class RuntimeRunnerStreamSessionGrpcServicer(
                 *(task for task in (renewal, reader) if task is not None),
                 return_exceptions=True,
             )
-            await self.data_plane.unregister_runner(accepted)
-            await self.registry.release(accepted)
-            await self.offer_provider.release_owner(owner)
+            await _release_runner_owner(
+                data_plane=self.data_plane,
+                registry=self.registry,
+                offer_provider=self.offer_provider,
+                accepted=accepted,
+            )
 
         try:
             connection.start_heartbeats()
@@ -2587,6 +2645,23 @@ class RuntimeRunnerStreamSessionGrpcServicer(
             await cleanup()
 
 
+async def _release_runner_owner(
+    *,
+    data_plane: RuntimeStreamControlDataPlane,
+    registry: RuntimeStreamOwnerSessionRegistry,
+    offer_provider: RuntimeStreamOwnedSessionProvider,
+    accepted: RuntimeStreamAcceptedRunnerSession,
+) -> None:
+    """Finish all exact-epoch releases even if an earlier cleanup fails."""
+    try:
+        await data_plane.unregister_runner(accepted)
+    finally:
+        try:
+            await registry.release(accepted)
+        finally:
+            await offer_provider.release_owner(accepted.owner)
+
+
 async def _register_joined_runner(
     *,
     data_plane: RuntimeStreamControlDataPlane,
@@ -2598,12 +2673,16 @@ async def _register_joined_runner(
     try:
         return await data_plane.register_runner(accepted)
     except asyncio.CancelledError:
-        await registry.release(accepted)
-        await offer_provider.release_owner(accepted.owner)
+        try:
+            await registry.release(accepted)
+        finally:
+            await offer_provider.release_owner(accepted.owner)
         raise
     except Exception:
-        await registry.release(accepted)
-        await offer_provider.release_owner(accepted.owner)
+        try:
+            await registry.release(accepted)
+        finally:
+            await offer_provider.release_owner(accepted.owner)
         raise
 
 

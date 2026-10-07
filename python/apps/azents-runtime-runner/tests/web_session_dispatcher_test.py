@@ -400,7 +400,9 @@ async def test_late_terminal_control_for_completed_stream_preserves_session(
     assert dispatcher.tombstone_set == {7}
 
 
-async def test_tombstoned_stream_rejects_new_data_and_reused_open() -> None:
+async def test_tombstoned_stream_discards_in_flight_data_but_rejects_reused_open() -> (
+    None
+):
     offer = _offer()
     client = _RecordingClient()
     manager = _manager(client_factory=None)
@@ -420,8 +422,9 @@ async def test_tombstoned_stream_rejects_new_data_and_reused_open() -> None:
     opening = _envelope(offer, stream_id=7)
     opening.open.SetInParent()
 
-    with pytest.raises(ValueError, match="tombstoned"):
-        await dispatcher(data)
+    await dispatcher(data)
+    assert dispatcher.accepting_envelopes
+    assert dispatcher.accepting_streams
     with pytest.raises(ValueError, match="stream ID"):
         await dispatcher(opening)
 
@@ -746,6 +749,30 @@ async def test_websocket_protocol_failure_emits_stream_reset(
     )
     assert "Runtime Web Runner WebSocket protocol failed" in caplog.text
     assert "raw handshake detail" not in caplog.text
+
+
+async def test_failed_responses_restore_shared_credit_beyond_one_window() -> None:
+    offer = _offer()
+    client = _RecordingClient()
+    manager = _manager(client_factory=None)
+    manager.loopback = _FailingHandshakePool(maximum_connections=1)
+    dispatcher = _dispatcher(manager)
+    for stream_id in range(1, 11):
+        stream = _stream(
+            offer=offer,
+            client=client,
+            session_credit=dispatcher.response_session_credit,
+        )
+        stream.response_credit.reserve(4 * MANDATORY_DATA_FRAME_BYTES)
+        dispatcher.streams[stream_id] = stream
+        await dispatcher._run(stream_id, stream)
+        assert dispatcher.response_session_credit.available_bytes == (
+            APPROVED_SESSION_PROFILE.response_session_window_bytes
+        )
+    assert dispatcher.response_session_credit.sent_total > (
+        APPROVED_SESSION_PROFILE.response_session_window_bytes
+    )
+    assert not dispatcher.streams
 
 
 @pytest.mark.parametrize(

@@ -17,7 +17,7 @@ import zlib
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -1377,11 +1377,16 @@ def _runtime_application(
     encoded = base64.b64encode(
         zlib.compress(_runtime_application_script().encode(), level=9)
     ).decode()
+    # Terminal invalidation terminates every process group in its session.
+    # The application must outlive that session when Control reconnects.
     commands.command(
         (
-            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib;'
-            "exec(zlib.decompress(base64.b64decode('"
-            f"{encoded}')))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
+            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib,subprocess,sys;'
+            "subprocess.Popen([sys.executable,'-c',"
+            f"zlib.decompress(base64.b64decode('{encoded}')).decode()],"
+            "stdin=subprocess.DEVNULL,"
+            "stdout=open('/tmp/runtime-web-e2e.log','ab'),"
+            'stderr=subprocess.STDOUT,start_new_session=True)"'
         ),
         f"APP_STARTED_{unique()}",
     )
@@ -2237,7 +2242,8 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         maximum_application_buffer_bytes=16 * 1024 * 1024,
         maintenance=False,
         relay_path=True,
-    ) as stack:
+    ) as initial_stack:
+        stack = initial_stack
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -2316,6 +2322,34 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 endpoint_url=service_url,
                 identity_secret=identity_secret,
             )
+            # Keep the Gateway and browser alive while the Runner joins a fresh
+            # Owner epoch; previous transfer totals must not enter the new hop.
+            runtime_web_stack_factory.owner_control.get_wrapped_container().restart(
+                timeout=5,
+            )
+            _wait_for_http(
+                runtime_web_stack_factory.owner_control,
+                port=8033,
+                path="/__azents/runtime-web/ready",
+                name="reconnected Runtime Web Owner",
+            )
+            stack = replace(
+                stack,
+                owner_control_operations_url=(
+                    f"http://{runtime_web_stack_factory.owner_control.get_container_host_ip()}:"
+                    f"{runtime_web_stack_factory.owner_control.get_exposed_port(8033)}"
+                ),
+            )
+            _assert_operations_ready(stack)
+            _browser_neutral_transport_evidence(
+                stack=stack,
+                endpoint_url=service_url,
+                identity_secret=identity_secret,
+            )
+            recovered = _browser_transport_evidence(driver)
+            assert recovered.echo.body == "runtime-web-body"
+            assert recovered.upload.sha256 == recovered.expected_upload_digest
+            _wait_for_runtime_web_stream_release(stack)
             if auth_mode == "shared_cookie":
                 _assert_redis_capacity_fallback(
                     stack=stack,
