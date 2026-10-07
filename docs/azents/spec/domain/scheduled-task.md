@@ -10,6 +10,8 @@ code_paths:
   - python/apps/azents/src/azents/core/scheduled_task.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/mailbox/promotion.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/api/public/scheduled_task/**
   - python/apps/azents/src/azents/api/testenv/scheduler/**
