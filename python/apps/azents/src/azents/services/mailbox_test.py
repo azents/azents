@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import NamedTuple
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -34,7 +34,6 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     ModelFileStatus,
     RuntimeRunnerState,
-    ScheduledTaskScheduleType,
 )
 from azents.core.exchange_file_errors import (
     FileAccessDenied,
@@ -52,12 +51,9 @@ from azents.core.inference_profile import (
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.mailbox_data import (
     AgentCreateGitWorktreeContinuationResult,
-    ExternalChannelMessageMailboxPayload,
     MailboxItem,
     MailboxItemCreate,
     MailboxPresentationItem,
-    ScheduledTaskContinuationMailboxPayload,
-    ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
 )
 from azents.core.mailbox_errors import MailboxPreparationStaleError
@@ -87,12 +83,10 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
-from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
-from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
@@ -106,14 +100,8 @@ from azents.repos.mailbox.admission_data import MailboxEnqueue
 from azents.repos.mailbox.promotion import MailboxPromotionRepository
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
 from azents.repos.model_file.data import ModelFile
-from azents.repos.scheduled_task.data import ScheduledTaskCreate
-from azents.repos.scheduled_task.definition import (
-    RDBScheduledTaskAuthorityValidator,
-    ScheduledTaskDefinitionRepository,
-)
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
 from azents.repos.session_execution import CanonicalExecutionOwnerGenerationStaleError
 from azents.repos.skill_state import SkillStateRepository
 from azents.repos.skill_state_store import SkillStateStore
@@ -150,7 +138,6 @@ from .mailbox import (
     PreparedMailboxFiles,
     TurnEffect,
     _buffer_requires_inference,
-    _PromotedMailboxItem,
     fold_turn_eligibility,
 )
 
@@ -294,118 +281,6 @@ async def _create_fixture(
         return _MailboxFixture(
             agent_session_id=agent_session.id,
             user_id=user.id,
-        )
-
-
-@dataclasses.dataclass(frozen=True)
-class _ScheduledAdmissionFixture:
-    """Persisted Scheduled trigger fixture."""
-
-    session_id: str
-    owner_generation: int
-    agent_id: str
-    task_id: str
-    cycle_id: str
-    buffer_id: str
-    scheduled_for: datetime.datetime
-
-
-async def _create_scheduled_admission_fixture(
-    rdb_session_manager: SessionManager[WriteSession],
-    *,
-    slug: str,
-) -> _ScheduledAdmissionFixture:
-    """Create one Task, admitted cycle, and FIFO trigger."""
-    session_id, _ = await _create_fixture(rdb_session_manager, slug)
-    scheduled_for = datetime.datetime.now(datetime.UTC)
-    async with rdb_session_manager() as session:
-        agent_session = await AgentSessionRepository().get_by_id(session, session_id)
-        assert agent_session is not None
-        task = await ScheduledTaskRepository().create(
-            session,
-            ScheduledTaskCreate(
-                workspace_id=agent_session.workspace_id,
-                agent_id=agent_session.agent_id,
-                session_id=session_id,
-                title="Daily report",
-                objective="Prepare the current report.",
-                schedule_type=ScheduledTaskScheduleType.ONCE,
-                next_eligible_at=scheduled_for,
-                binding_id=None,
-                scheduled_at=scheduled_for,
-                cron_expression=None,
-                timezone=None,
-            ),
-        )
-        cycle_id = f"{task.id[1:]}c"
-        await ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository()
-        ).create_admitted(
-            session,
-            ScheduledTaskCycleSnapshot(
-                cycle_id=cycle_id,
-                task_id=task.id,
-                workspace_id=task.workspace_id,
-                agent_id=task.agent_id,
-                session_id=task.session_id,
-                binding_id=None,
-                title=task.title,
-                objective=task.objective,
-                schedule_type=task.schedule_type,
-                scheduled_at=task.scheduled_at,
-                cron_expression=None,
-                timezone=None,
-                scheduled_for=scheduled_for,
-            ),
-        )
-        await session.write_session.execute(
-            sa.update(RDBScheduledTask)
-            .where(RDBScheduledTask.id == task.id)
-            .values(
-                active_cycle_id=cycle_id,
-                active_scheduled_for=scheduled_for,
-            )
-        )
-        trigger = await MailboxRepository().create(
-            session,
-            MailboxItemCreate(
-                session_id=session_id,
-                kind=MailboxItemKind.SCHEDULED_TASK_TRIGGER,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                sender_user_id=None,
-                order_group=None,
-                order_sequence=0,
-                content="Scheduled Task work is due.",
-                idempotency_key=f"scheduled-task-trigger:{cycle_id}",
-                metadata={"title": task.title},
-                action=None,
-                attachments=[],
-                file_parts=[],
-                payload=ScheduledTaskTriggerMailboxPayload(
-                    type="scheduled_task_trigger",
-                    cycle_id=cycle_id,
-                    items=[
-                        MailboxPresentationItem(
-                            item_key="scheduled_task_trigger:0",
-                            presentation_kind="scheduled_task_trigger",
-                            content="Scheduled Task work is due.",
-                            metadata={"title": task.title},
-                        )
-                    ],
-                ),
-                requested_enabled_execution_options=[],
-            ),
-        )
-        return _ScheduledAdmissionFixture(
-            session_id=session_id,
-            owner_generation=agent_session.owner_generation,
-            agent_id=agent_session.agent_id,
-            task_id=task.id,
-            cycle_id=cycle_id,
-            buffer_id=trigger.id,
-            scheduled_for=scheduled_for,
         )
 
 
@@ -1037,14 +912,7 @@ def _mailbox_item_service(
             session_manager=rdb_session_manager,
             mailbox_item_repository=MailboxRepository(),
             agent_session_repository=agent_session_repository,
-            event_transcript_repository=event_transcript_repository
-            or EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
         ),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
@@ -1066,6 +934,10 @@ def _mailbox_item_service(
             skill_state_repository=SkillStateRepository(
                 session_manager=rdb_session_manager
             ),
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository()
+            ),
         ),
     )
 
@@ -1080,18 +952,6 @@ def _turn_action_capabilities(
     return TurnActionCapabilityRegistry(
         skill_store=SkillStateStore(session_manager=session_manager),
         vfs_projection_service=vfs_projection_service,
-    )
-
-
-def _scheduled_task_service() -> ScheduledTaskDefinitionRepository:
-    """Create the Scheduled Task mutation service for integration tests."""
-    return ScheduledTaskDefinitionRepository(
-        repository=ScheduledTaskRepository(),
-        cycle_repository=ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository(),
-        ),
-        mailbox_repository=MailboxRepository(),
-        authority_validator=RDBScheduledTaskAuthorityValidator(),
     )
 
 
@@ -1194,13 +1054,7 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
             session_manager=_unit_session_manager,
             mailbox_item_repository=mailbox_item_repository,
             agent_session_repository=agent_session_repository,
-            event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
             agent_run_repository=agent_run_repository,
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
         ),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
@@ -1322,13 +1176,7 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
             session_manager=_unit_session_manager,
             mailbox_item_repository=mailbox_item_repository,
             agent_session_repository=agent_session_repository,
-            event_transcript_repository=AsyncMock(spec=EventTranscriptRepository),
             agent_run_repository=agent_run_repository,
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=AsyncMock(spec=ActionExecutionRepository),
         ),
         exchange_file_service=exchange_file_service,
         model_file_service=model_file_service,
@@ -1421,631 +1269,8 @@ async def test_cancelled_attachment_preparation_discards_partial_model_files() -
     assert model_file_service.discarded_model_file_ids == [model_file.id]
 
 
-@pytest.mark.asyncio
-async def test_admit_scheduled_trigger_starts_cycle_and_binds_run(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """Trigger admission atomically starts its cycle and creates one bound Run."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-trigger-admission",
-    )
-
-    result = await _mailbox_item_service(
-        rdb_session_manager
-    ).admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=fixture.buffer_id,
-    )
-
-    assert result is not None
-    assert result.stale is False
-    assert result.run is not None
-    assert result.run.scheduled_task_cycle_id == fixture.cycle_id
-    assert result.promoted is not None
-    assert result.promoted.promoted_event_ids
-    assert result.promoted.events[0].kind is EventKind.SCHEDULED_TASK_TRIGGER
-    assert "Daily report" in result.promoted.user_messages[0].payload.content
-
-    async with rdb_session_manager() as session:
-        cycle = await ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository()
-        ).get(
-            session,
-            agent_id=fixture.agent_id,
-            session_id=fixture.session_id,
-            cycle_id=fixture.cycle_id,
-        )
-        persisted_run = await AgentRunRepository().get_by_id(session, result.run.id)
-        pending_mailbox = await MailboxRepository().list_by_session_id(
-            session, fixture.session_id
-        )
-
-    assert cycle is not None
-    assert cycle.state.phase == "started"
-    assert cycle.state.current_run_id == result.run.id
-    assert cycle.state.started_at is not None
-    assert persisted_run is not None
-    assert persisted_run.scheduled_task_cycle_id == fixture.cycle_id
-    assert pending_mailbox == []
-
-
-@pytest.mark.asyncio
-async def test_generic_flush_preserves_scheduled_trigger_head(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """Generic model-input flush leaves Scheduled Task work to its admission path."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-trigger-generic-flush",
-    )
-
-    result = await _mailbox_item_service(
-        rdb_session_manager
-    ).flush_session_mailbox_items(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        model="gpt-5.4",
-        required_inference_profile=None,
-        expected_buffer_id=fixture.buffer_id,
-        prepared_inference_state=None,
-        profile_resolution_failure=None,
-        active_run_id=None,
-    )
-
-    assert result.claimed_count == 0
-    assert result.deleted_buffer_ids == []
-    assert result.complete_run is False
-    assert result.suppress_parent_result is False
-    async with rdb_session_manager() as session:
-        assert (
-            await MailboxRepository().get_by_id(session, fixture.buffer_id) is not None
-        )
-
-
-@pytest.mark.asyncio
-async def test_active_run_hands_off_scheduled_trigger_and_releases_following_input(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """A turn boundary starts scheduled work before consuming the later FIFO input."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-trigger-turn-handoff",
-    )
-    service = _mailbox_item_service(rdb_session_manager)
-    active_run = await _create_active_run(
-        rdb_session_manager, session_id=fixture.session_id
-    )
-    async with rdb_session_manager() as session:
-        following = await MailboxRepository().create(
-            session,
-            MailboxItemCreate(
-                session_id=fixture.session_id,
-                kind=MailboxItemKind.USER_MESSAGE,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                requested_enabled_execution_options=[],
-                sender_user_id=None,
-                order_group=None,
-                order_sequence=0,
-                content="Keep working on the original request too.",
-                idempotency_key=None,
-                metadata={},
-                action=None,
-                attachments=[],
-                file_parts=[],
-                payload=None,
-            ),
-        )
-
-    handoff = await service.flush_session_mailbox_items(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        model="gpt-5.4",
-        required_inference_profile=None,
-        expected_buffer_id=fixture.buffer_id,
-        prepared_inference_state=None,
-        profile_resolution_failure=None,
-        active_run_id=active_run.id,
-    )
-    assert handoff.complete_run is True
-    assert handoff.suppress_parent_result is True
-    assert handoff.deleted_buffer_ids == []
-    async with rdb_session_manager() as session:
-        pending = await MailboxRepository().list_by_session_id(
-            session, fixture.session_id
-        )
-        assert [item.id for item in pending] == [fixture.buffer_id, following.id]
-        await AgentRunRepository().mark_terminal(
-            session,
-            active_run.id,
-            AgentRunStatus.COMPLETED,
-            ended_at=datetime.datetime.now(datetime.UTC),
-        )
-
-    admission = await service.admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=fixture.buffer_id,
-    )
-    assert admission is not None
-    assert admission.run is not None
-    assert admission.run.scheduled_task_cycle_id == fixture.cycle_id
-    assert admission.promoted is not None
-    assert admission.promoted.deleted_buffer_ids == [fixture.buffer_id]
-    promoted = await service.flush_session_mailbox_items(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        model="gpt-5.4",
-        required_inference_profile=None,
-        expected_buffer_id=following.id,
-        prepared_inference_state=None,
-        profile_resolution_failure=None,
-        active_run_id=admission.run.id,
-    )
-    assert promoted.deleted_buffer_ids == [following.id]
-    assert promoted.user_messages[0].payload.content == following.presentation.content
-    assert promoted.complete_run is False
-    async with rdb_session_manager() as session:
-        assert (
-            await MailboxRepository().list_by_session_id(session, fixture.session_id)
-            == []
-        )
-
-
-@pytest.mark.asyncio
-async def test_delete_scheduled_task_removes_admitted_trigger_and_cycle(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """Task deletion before admission removes all start authority and creates no Run."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-delete-admitted",
-    )
-    async with rdb_session_manager() as session:
-        deleted = await _scheduled_task_service().delete(
-            session,
-            session_id=fixture.session_id,
-            task_id=fixture.task_id,
-        )
-
-    assert deleted is True
-    admission = await _mailbox_item_service(
-        rdb_session_manager
-    ).admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=fixture.buffer_id,
-    )
-    assert admission is None
-
-    async with rdb_session_manager() as session:
-        task = await ScheduledTaskRepository().get_by_id(session, fixture.task_id)
-        cycle = await ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository()
-        ).get(
-            session,
-            agent_id=fixture.agent_id,
-            session_id=fixture.session_id,
-            cycle_id=fixture.cycle_id,
-        )
-        pending_run = await AgentRunRepository().get_pending_by_session_id(
-            session,
-            session_id=fixture.session_id,
-        )
-        pending_mailbox = await MailboxRepository().list_by_session_id(
-            session, fixture.session_id
-        )
-
-    assert task is None
-    assert cycle is None
-    assert pending_run is None
-    assert pending_mailbox == []
-
-
-@pytest.mark.asyncio
-async def test_admit_scheduled_trigger_consumes_deleted_task_without_run(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """Deletion before trigger admission removes the stale envelope and cycle."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-trigger-deleted",
-    )
-    async with rdb_session_manager() as session:
-        assert await ScheduledTaskRepository().delete_by_session_and_id(
-            session,
-            session_id=fixture.session_id,
-            task_id=fixture.task_id,
-        )
-
-    result = await _mailbox_item_service(
-        rdb_session_manager
-    ).admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=fixture.buffer_id,
-    )
-
-    assert result is not None
-    assert result.stale is True
-    assert result.run is None
-    assert result.promoted is None
-
-    async with rdb_session_manager() as session:
-        cycle = await ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository()
-        ).get(
-            session,
-            agent_id=fixture.agent_id,
-            session_id=fixture.session_id,
-            cycle_id=fixture.cycle_id,
-        )
-        pending_run = await AgentRunRepository().get_pending_by_session_id(
-            session,
-            session_id=fixture.session_id,
-        )
-        pending_mailbox = await MailboxRepository().list_by_session_id(
-            session, fixture.session_id
-        )
-
-    assert cycle is None
-    assert pending_run is None
-    assert pending_mailbox == []
-
-
-@pytest.mark.asyncio
-async def test_delete_scheduled_task_preserves_started_cycle_and_run(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """Task deletion after admission preserves independent started work."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-delete-started",
-    )
-    admission = await _mailbox_item_service(
-        rdb_session_manager
-    ).admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=fixture.buffer_id,
-    )
-    assert admission is not None
-    assert admission.run is not None
-
-    async with rdb_session_manager() as session:
-        deleted = await _scheduled_task_service().delete(
-            session,
-            session_id=fixture.session_id,
-            task_id=fixture.task_id,
-        )
-
-    assert deleted is True
-    async with rdb_session_manager() as session:
-        task = await ScheduledTaskRepository().get_by_id(session, fixture.task_id)
-        cycle = await ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository()
-        ).get(
-            session,
-            agent_id=fixture.agent_id,
-            session_id=fixture.session_id,
-            cycle_id=fixture.cycle_id,
-        )
-        persisted_run = await AgentRunRepository().get_by_id(
-            session,
-            admission.run.id,
-        )
-
-    assert task is None
-    assert cycle is not None
-    assert cycle.state.phase == "started"
-    assert cycle.state.current_run_id == admission.run.id
-    assert persisted_run is not None
-    assert persisted_run.scheduled_task_cycle_id == fixture.cycle_id
-
-
-@pytest.mark.asyncio
-async def test_admit_scheduled_continuation_rebinds_started_cycle(
-    rdb_session_manager: SessionManager[WriteSession],
-) -> None:
-    """A continuation creates a new bound Run without restarting the cycle."""
-    fixture = await _create_scheduled_admission_fixture(
-        rdb_session_manager,
-        slug="scheduled-continuation-admission",
-    )
-    service = _mailbox_item_service(rdb_session_manager)
-    trigger_result = await service.admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=fixture.buffer_id,
-    )
-    assert trigger_result is not None
-    assert trigger_result.run is not None
-    async with rdb_session_manager() as session:
-        await AgentRunRepository().mark_terminal(
-            session,
-            trigger_result.run.id,
-            AgentRunStatus.COMPLETED,
-            ended_at=datetime.datetime.now(datetime.UTC),
-        )
-        continuation = await MailboxRepository().create(
-            session,
-            MailboxItemCreate(
-                session_id=fixture.session_id,
-                kind=MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                sender_user_id=None,
-                order_group=None,
-                order_sequence=0,
-                content="Continue the Scheduled Task.",
-                idempotency_key=f"scheduled-task-continuation:{fixture.cycle_id}",
-                metadata={"title": "Daily report"},
-                action=None,
-                attachments=[],
-                file_parts=[],
-                payload=ScheduledTaskContinuationMailboxPayload(
-                    type="scheduled_task_continuation",
-                    cycle_id=fixture.cycle_id,
-                    items=[
-                        MailboxPresentationItem(
-                            item_key="scheduled_task_continuation:0",
-                            presentation_kind="scheduled_task_continuation",
-                            content="Continue the Scheduled Task.",
-                            metadata={"title": "Daily report"},
-                        )
-                    ],
-                ),
-                requested_enabled_execution_options=[],
-            ),
-        )
-
-    active_run = await _create_active_run(
-        rdb_session_manager, session_id=fixture.session_id
-    )
-    handoff = await service.flush_session_mailbox_items(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        model="gpt-5.4",
-        required_inference_profile=None,
-        expected_buffer_id=continuation.id,
-        prepared_inference_state=None,
-        profile_resolution_failure=None,
-        active_run_id=active_run.id,
-    )
-    assert handoff.complete_run is True
-    assert handoff.suppress_parent_result is True
-    assert handoff.deleted_buffer_ids == []
-    async with rdb_session_manager() as session:
-        await AgentRunRepository().mark_terminal(
-            session,
-            active_run.id,
-            AgentRunStatus.COMPLETED,
-            ended_at=datetime.datetime.now(datetime.UTC),
-        )
-
-    continuation_result = await service.admit_scheduled_mailbox_head(
-        session_id=fixture.session_id,
-        owner_generation=fixture.owner_generation,
-        expected_buffer_id=continuation.id,
-    )
-
-    assert continuation_result is not None
-    assert continuation_result.stale is False
-    assert continuation_result.run is not None
-    assert continuation_result.run.id != trigger_result.run.id
-    assert continuation_result.run.scheduled_task_cycle_id == fixture.cycle_id
-    assert continuation_result.promoted is not None
-    assert (
-        continuation_result.promoted.events[0].kind
-        is EventKind.SCHEDULED_TASK_CONTINUATION
-    )
-
-    async with rdb_session_manager() as session:
-        cycle = await ScheduledTaskCycleRepository(
-            toolkit_state_repository=ToolkitStateRepository()
-        ).get(
-            session,
-            agent_id=fixture.agent_id,
-            session_id=fixture.session_id,
-            cycle_id=fixture.cycle_id,
-        )
-        pending_mailbox = await MailboxRepository().list_by_session_id(
-            session, fixture.session_id
-        )
-
-    assert cycle is not None
-    assert cycle.state.phase == "started"
-    assert cycle.state.current_run_id == continuation_result.run.id
-    assert pending_mailbox == []
-
-
 class TestMailboxService:
     """Validate MailboxService behavior."""
-
-    async def test_mailbox_batch_advances_last_user_input_once(self) -> None:
-        """Multiple promoted inputs share one Session projection update."""
-        repository = MagicMock(spec=EventTranscriptRepository)
-        repository.get_by_external_id = AsyncMock(return_value=None)
-        first_at = datetime.datetime(2026, 8, 17, 12, 0, tzinfo=datetime.UTC)
-        second_at = first_at + datetime.timedelta(seconds=1)
-        repository.append_with_deferred_session_projections = AsyncMock(
-            side_effect=[
-                SimpleNamespace(
-                    id="event-1",
-                    kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
-                    created_at=first_at,
-                ),
-                SimpleNamespace(
-                    id="event-2",
-                    kind=EventKind.USER_MESSAGE,
-                    created_at=second_at,
-                ),
-            ]
-        )
-        repository.advance_session_projections = AsyncMock()
-        service = _mailbox_item_service(
-            _unit_session_manager,
-            event_transcript_repository=repository,
-        )
-        session = AsyncMock(spec=AsyncSession)
-
-        def promoted_buffer(buffer_id: str) -> MailboxItem:
-            return MailboxItem(
-                id=buffer_id,
-                session_id="session-1",
-                kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                sender_user_id=None,
-                order_group="buffer-group",
-                order_sequence=0,
-                content="",
-                idempotency_key=None,
-                metadata={},
-                payload=ExternalChannelMessageMailboxPayload(
-                    type="external_channel_message",
-                    items=[
-                        MailboxPresentationItem(
-                            item_key="external_channel_message:0",
-                            presentation_kind="external_channel_message",
-                        )
-                    ],
-                ),
-                action=None,
-                attachments=[],
-                file_parts=[],
-                created_at=first_at,
-                requested_enabled_execution_options=[],
-            )
-
-        promoted = [
-            _PromotedMailboxItem(
-                external_id="external-1",
-                event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
-                payload={},
-                item_key=None,
-                buffer=promoted_buffer("buffer-1"),
-                user_message=None,
-            ),
-            _PromotedMailboxItem(
-                external_id="external-2",
-                event_kind=EventKind.USER_MESSAGE,
-                payload={},
-                item_key=None,
-                buffer=promoted_buffer("buffer-2"),
-                user_message=None,
-            ),
-        ]
-
-        inserted = await service.runtime_operations.append_events_in_session(
-            session,
-            "session-1",
-            [
-                EventCreate(
-                    session_id="session-1",
-                    kind=item.event_kind,
-                    payload={
-                        **item.payload,
-                        "mailbox_item_id": item.buffer.id,
-                        "mailbox_item_key": item.item_key
-                        or item.buffer.presentation.item_key,
-                    },
-                    external_id=item.external_id,
-                )
-                for item in promoted
-            ],
-        )
-
-        assert [event.id for event in inserted] == ["event-1", "event-2"]
-        assert repository.append_with_deferred_session_projections.await_count == 2
-        repository.advance_session_projections.assert_awaited_once_with(
-            session,
-            session_id="session-1",
-            events=inserted,
-        )
-
-    async def test_deduplicated_mailbox_batch_skips_session_projection_update(
-        self,
-    ) -> None:
-        """Replayed mailbox events do not advance Session projections again."""
-        repository = MagicMock(spec=EventTranscriptRepository)
-        repository.get_by_external_id = AsyncMock(
-            return_value=SimpleNamespace(id="existing-event")
-        )
-        repository.append_with_deferred_session_projections = AsyncMock()
-        repository.advance_session_projections = AsyncMock()
-        service = _mailbox_item_service(
-            _unit_session_manager,
-            event_transcript_repository=repository,
-        )
-        session = AsyncMock(spec=AsyncSession)
-        promoted = [
-            _PromotedMailboxItem(
-                external_id="external-1",
-                event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
-                payload={},
-                item_key=None,
-                buffer=MailboxItem(
-                    id="buffer-1",
-                    session_id="session-1",
-                    kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
-                    sender_user_id=None,
-                    order_group="buffer-group",
-                    order_sequence=0,
-                    content="",
-                    idempotency_key=None,
-                    metadata={},
-                    payload=ExternalChannelMessageMailboxPayload(
-                        type="external_channel_message",
-                        items=[
-                            MailboxPresentationItem(
-                                item_key="external_channel_message:0",
-                                presentation_kind="external_channel_message",
-                            )
-                        ],
-                    ),
-                    action=None,
-                    attachments=[],
-                    file_parts=[],
-                    created_at=datetime.datetime(
-                        2026, 8, 17, 12, 0, tzinfo=datetime.UTC
-                    ),
-                    requested_enabled_execution_options=[],
-                ),
-                user_message=None,
-            )
-        ]
-
-        inserted = await service.runtime_operations.append_events_in_session(
-            session,
-            "session-1",
-            [
-                EventCreate(
-                    session_id="session-1",
-                    kind=item.event_kind,
-                    payload={
-                        **item.payload,
-                        "mailbox_item_id": item.buffer.id,
-                        "mailbox_item_key": item.item_key
-                        or item.buffer.presentation.item_key,
-                    },
-                    external_id=item.external_id,
-                )
-                for item in promoted
-            ],
-        )
-
-        assert inserted == []
-        repository.append_with_deferred_session_projections.assert_not_awaited()
-        repository.advance_session_projections.assert_not_awaited()
 
     async def test_flush_admits_agent_remove_as_operation_action(
         self,

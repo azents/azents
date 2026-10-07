@@ -28,6 +28,8 @@ from azents.core.mailbox_data import (
     AgentRemoveGitWorktreeContinuationResult,
     ExternalChannelMessageMailboxPayload,
     MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
 )
 from azents.core.mailbox_errors import (
@@ -40,7 +42,6 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import (
     AgentMessagePayload,
-    AgentRunState,
     Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
@@ -64,10 +65,6 @@ from azents.repos.mailbox.promotion import (
     MailboxPromotionRepository,
 )
 from azents.repos.mailbox_runtime_operations import MailboxRuntimeOperations
-from azents.repos.scheduled_task.presentation import (
-    render_scheduled_task_runtime_message,
-)
-from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleRecord
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.session_title import (
@@ -146,15 +143,6 @@ class PromotedMailboxItems:
     deduped_count: int
     complete_run: bool
     suppress_parent_result: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class ScheduledMailboxAdmission:
-    """Result of one atomic Scheduled trigger/continuation admission."""
-
-    run: AgentRunState | None
-    promoted: PromotedMailboxItems | None
-    stale: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -268,45 +256,6 @@ class MailboxService:
         """Check whether the session mailbox has pending agent input."""
         return await self.runtime_operations.has_pending_agent_messages(session_id)
 
-    async def admit_scheduled_mailbox_head(
-        self, *, session_id: str, owner_generation: int, expected_buffer_id: str | None
-    ) -> ScheduledMailboxAdmission | None:
-        """Render the detached result of one atomic Scheduled FIFO admission."""
-        admission = await self.runtime_operations.admit_scheduled_head(
-            session_id=session_id,
-            owner_generation=owner_generation,
-            expected_buffer_id=expected_buffer_id,
-        )
-        if admission is None:
-            return None
-        if admission.stale:
-            return ScheduledMailboxAdmission(run=None, promoted=None, stale=True)
-        assert admission.run is not None
-        assert admission.buffer is not None
-        assert admission.cycle is not None
-        promoted = self._scheduled_promoted_item(admission.buffer, admission.cycle)
-        return ScheduledMailboxAdmission(
-            run=admission.run,
-            promoted=PromotedMailboxItems(
-                turn_effect=TurnEffect.ELIGIBLE,
-                operation_action=None,
-                requested_inference_profile=None,
-                user_messages=[promoted.user_message]
-                if promoted.user_message is not None
-                else [],
-                events=admission.events,
-                promoted_event_ids=[event.id for event in admission.events],
-                deleted_buffer_ids=[admission.buffer.id],
-                changed_session_agent_ids=[],
-                claimed_count=1,
-                inserted_count=len(admission.events),
-                deduped_count=0,
-                complete_run=False,
-                suppress_parent_result=False,
-            ),
-            stale=False,
-        )
-
     async def flush_session_mailbox_items(
         self,
         *,
@@ -411,7 +360,7 @@ class MailboxService:
                 ) from exc
 
         if committed.deferred:
-            complete_run = outcome.complete_run or (
+            complete_run = (
                 predecessor_run_id is not None and active_run_id == predecessor_run_id
             )
             return PromotedMailboxItems(
@@ -435,7 +384,11 @@ class MailboxService:
             )
         return PromotedMailboxItems(
             turn_effect=(
-                TurnEffect.FAILED if committed.handled_failure else outcome.turn_effect
+                TurnEffect.FAILED
+                if committed.handled_failure
+                else outcome.turn_effect
+                if committed.promoted_event_ids
+                else TurnEffect.NEUTRAL
             ),
             operation_action=operation,
             requested_inference_profile=(
@@ -449,7 +402,7 @@ class MailboxService:
                 else [
                     item.user_message
                     for item in outcome.promoted
-                    if item.user_message is not None
+                    if item.user_message is not None and committed.promoted_event_ids
                 ]
             ),
             events=committed.events,
@@ -466,19 +419,19 @@ class MailboxService:
     def _scheduled_promoted_item(
         self,
         buffer: MailboxItem,
-        cycle: ScheduledTaskCycleRecord,
     ) -> _PromotedMailboxItem:
-        """Render Scheduled input from the immutable cycle snapshot."""
-        state = cycle.state
-        content = render_scheduled_task_runtime_message(
-            title=state.title,
-            objective=state.objective,
-            schedule_type=state.schedule_type,
-            scheduled_at=state.scheduled_at,
-            cron_expression=state.cron_expression,
-            timezone=state.timezone,
-            scheduled_for=state.scheduled_for,
-        )
+        """Convert the admitted Scheduled envelope to ordinary typed turn input."""
+        scheduled = buffer.payload
+        if not isinstance(
+            scheduled,
+            ScheduledTaskTriggerMailboxPayload
+            | ScheduledTaskContinuationMailboxPayload,
+        ):
+            raise ValueError("Scheduled Task mailbox payload is malformed.")
+        content = buffer.presentation.content
+        title = buffer.presentation.metadata["title"]
+        if not isinstance(title, str):
+            raise ValueError("Scheduled Task mailbox title is malformed.")
         user_message = make_run_user_message(
             sender_user_id=None,
             content=content,
@@ -491,15 +444,15 @@ class MailboxService:
         if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
             event_kind = EventKind.SCHEDULED_TASK_TRIGGER
             payload = ScheduledTaskTriggerPayload(
-                cycle_id=state.cycle_id,
-                title=state.title,
+                cycle_id=scheduled.cycle_id,
+                title=title,
                 content=content,
             )
         else:
             event_kind = EventKind.SCHEDULED_TASK_CONTINUATION
             payload = ScheduledTaskContinuationPayload(
-                cycle_id=state.cycle_id,
-                title=state.title,
+                cycle_id=scheduled.cycle_id,
+                title=title,
                 content=content,
             )
         return _PromotedMailboxItem(
@@ -875,7 +828,7 @@ class _ExternalChannelContinuationMailboxProcessor:
 
 @dataclasses.dataclass(frozen=True)
 class _ScheduledTaskMailboxProcessor:
-    """Hand off at the model boundary so Scheduled input starts its bound Run."""
+    """Promote Scheduled input through the common FIFO turn path."""
 
     service: MailboxService
 
@@ -884,14 +837,9 @@ class _ScheduledTaskMailboxProcessor:
         context: MailboxPreparationContext,
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
-        del buffer
-        handoff = context.active_run_id is not None
-        return MailboxPreparationOutcome(
-            promoted=[],
-            turn_effect=TurnEffect.NEUTRAL,
-            operation_action=None,
-            complete_run=handoff,
-            suppress_parent_result=handoff,
+        del context
+        return _preparation_outcome(
+            [self.service._scheduled_promoted_item(buffer)], TurnEffect.ELIGIBLE
         )
 
 
@@ -1145,13 +1093,10 @@ def _buffer_requires_inference(
             | MailboxItemKind.TURN_ACTION_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
             | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
-        ):
-            return True
-        case (
-            MailboxItemKind.SCHEDULED_TASK_TRIGGER
+            | MailboxItemKind.SCHEDULED_TASK_TRIGGER
             | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
         ):
-            return False
+            return True
         case MailboxItemKind.ACTION_MESSAGE:
             if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")

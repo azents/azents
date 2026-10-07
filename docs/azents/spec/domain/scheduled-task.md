@@ -10,6 +10,8 @@ code_paths:
   - python/apps/azents/src/azents/core/scheduled_task.py
   - python/apps/azents/src/azents/core/session_resource_authority.py
   - python/apps/azents/src/azents/repos/scheduled_task_terminal_operations.py
+  - python/apps/azents/src/azents/repos/mailbox/promotion.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/097a97177350_create_operational_schema_baseline.py
   - python/apps/azents/src/azents/api/public/scheduled_task/**
   - python/apps/azents/src/azents/api/testenv/scheduler/**
@@ -193,19 +195,19 @@ An already-active recurring Task coalesces later due work into at most one
 scheduling work rather than choosing another target.
 
 Mailbox promotion is the exact start boundary. Promotion changes the cycle from
-`admitted` to `started`, binds the new AgentRun to that cycle, and appends a typed
+`admitted` to `started`, binds the consuming AgentRun to that cycle, and appends a typed
 `scheduled_task_trigger` Event. Deleting a Task or removing its owner before this
 boundary removes the trigger and admitted cycle. After this boundary, Task
 deletion does not interrupt the already-started AgentRun or its canonical Session
 result.
 
 Scheduled triggers and continuations participate in every model-boundary Mailbox
-poll. When an active Run reaches Scheduled input at the FIFO head, it completes
-without a parent result at that boundary and hands off to the Scheduled admission
-path. The next Run consumes that head and binds the cycle before model inference.
-The current task does not need to finish naturally. Later FIFO inputs remain
-ordered and can be consumed by the new Run; a Scheduled head cannot repeatedly
-produce a neutral no-op while the current Run continues model execution.
+poll through the common FIFO promotion transaction. The existing Run consumes
+Scheduled input before its next model inference, without being completed or
+replaced to admit the input. Cycle validation, start or continuation binding,
+Run binding, event append, and mailbox deletion commit together. Stale Scheduled
+input is consumed without starting its cycle or delivering it to the model.
+Later FIFO inputs remain ordered and can be consumed in the same bulk poll.
 
 ## Continuation and Compaction
 
@@ -215,9 +217,10 @@ normal Session idle-hook boundary. `ScheduledToolkit` returns one typed
 order. The worker atomically consumes the pending idle-continuation pointer,
 enqueues the continuation Mailbox items, and keeps the Session running.
 
-The continuation promotes to a dedicated Event and begins a fresh AgentRun still
-bound to the same cycle. The Session and cycle identity remain stable across any
-number of Runs.
+The continuation promotes to a dedicated Event and binds the consuming AgentRun
+back to the same cycle. An idle Session creates its Run through the ordinary
+execution path. The Session and cycle identity remain stable across any number
+of Runs.
 
 Before continuity history is appended, the compaction summary hook replaces the
 bounded Scheduled Task section with sanitized snapshots of every current started

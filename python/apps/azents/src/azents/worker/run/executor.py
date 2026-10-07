@@ -93,7 +93,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
     SubagentTreeChanged,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.types import Event, ScheduledTaskTriggerPayload
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -211,7 +211,6 @@ from azents.services.mailbox import (
     OperationActionInput,
     PendingInputInferenceProfile,
     PromotedMailboxItems,
-    ScheduledMailboxAdmission,
     TurnEffect,
     fold_turn_eligibility,
 )
@@ -851,7 +850,6 @@ class RunExecutor:
                 "Canonical recoverable AgentRun claim is stale"
             )
         actionable_transcript_pending = False
-        scheduled_admission: ScheduledMailboxAdmission | None = None
         created_run = recoverable_run is None
         session_state = await self.read_repository.get_session(snapshot.session_id)
         if session_state is None:
@@ -957,50 +955,15 @@ class RunExecutor:
                 )
             turn_inference_state = None
 
-            scheduled_admission = None
-            if command is None and recoverable_run is None:
-                scheduled_admission = (
-                    await self.mailbox_item_service.admit_scheduled_mailbox_head(
-                        session_id=snapshot.session_id,
-                        owner_generation=owner_generation,
-                        expected_buffer_id=pending_input.mailbox_item_id,
-                    )
+            agent_run = recoverable_run or (
+                await self.session_lifecycle.create_pending_agent_run(
+                    snapshot.session_id,
+                    owner_generation=owner_generation,
+                    input_event_ids=[],
                 )
-            if scheduled_admission is not None:
-                if scheduled_admission.stale or scheduled_admission.run is None:
-                    return RunExecutionResult(
-                        toolkits=[],
-                        terminal_event_observed=False,
-                        no_actionable_work=True,
-                    )
-                agent_run = scheduled_admission.run
-            else:
-                agent_run = recoverable_run or (
-                    await self.session_lifecycle.create_pending_agent_run(
-                        snapshot.session_id,
-                        owner_generation=owner_generation,
-                        input_event_ids=[],
-                    )
-                )
+            )
 
         run_id = agent_run.id
-        if (
-            scheduled_admission is not None
-            and agent_run.scheduled_task_cycle_id is not None
-        ):
-            channel_service = (
-                self.scheduled_toolkit_provider.channel_service.for_execution(
-                    SessionExecutionOwner(
-                        session_id=snapshot.session_id,
-                        owner_generation=owner_generation,
-                    )
-                )
-            )
-            await channel_service.create_initial_tracker(
-                agent_id=snapshot.agent_id,
-                session_id=snapshot.session_id,
-                cycle_id=agent_run.scheduled_task_cycle_id,
-            )
         execution_vfs_projection_service = self.vfs_projection_service.for_execution(
             SessionExecutionOwner(
                 session_id=snapshot.session_id,
@@ -1019,33 +982,19 @@ class RunExecutor:
             ),
         )
         if command is None:
-            if scheduled_admission is not None:
-                promoted = scheduled_admission.promoted
-                if promoted is None:
-                    raise RuntimeError("Scheduled admission returned no promotion")
-                initial_input = RunInputPollResult(
-                    user_messages=promoted.user_messages,
-                    requested_inference_profile=None,
-                    promoted_event_ids=promoted.promoted_event_ids,
-                    has_actionable_work=True,
-                    context_invalidated=False,
-                    complete_run=False,
-                    suppress_parent_result=False,
-                )
-            else:
-                initial_input = await self.poll_run_inputs(
-                    agent_id=snapshot.agent_id,
-                    session_id=snapshot.session_id,
-                    model=None,
-                    required_inference_profile=selected_profile.profile,
-                    active_run_id=run_id,
-                    owner_generation=owner_generation,
-                    tool_admission_barrier=tool_admission_barrier,
-                    initial_turn_eligible=actionable_transcript_pending,
-                    poll_fn=None,
-                    process_actions=True,
-                    dispatch_event=dispatch_event,
-                )
+            initial_input = await self.poll_run_inputs(
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                model=None,
+                required_inference_profile=selected_profile.profile,
+                active_run_id=run_id,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
+                initial_turn_eligible=actionable_transcript_pending,
+                poll_fn=None,
+                process_actions=True,
+                dispatch_event=dispatch_event,
+            )
             if initial_input.requested_inference_profile is not None:
                 selected_profile = RequestedProfileSelection(
                     profile=initial_input.requested_inference_profile,
@@ -3485,6 +3434,17 @@ class RunExecutor:
         )
         for event in promoted.events:
             self._schedule_initial_prompt_title_generation(session_id, event)
+            if isinstance(event.payload, ScheduledTaskTriggerPayload):
+                channel_service = (
+                    self.scheduled_toolkit_provider.channel_service.for_execution(
+                        SessionExecutionOwner(session_id, owner_generation)
+                    )
+                )
+                await channel_service.create_initial_tracker(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    cycle_id=event.payload.cycle_id,
+                )
         try:
             for event in promoted.events:
                 await self.broadcast.publish(

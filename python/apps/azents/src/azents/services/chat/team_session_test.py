@@ -489,13 +489,7 @@ def _service(
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),
             agent_session_repository=AgentSessionRepository(),
-            event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
-            scheduled_task_repository=ScheduledTaskRepository(),
-            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
-                toolkit_state_repository=ToolkitStateRepository(),
-            ),
-            action_execution_repository=ActionExecutionRepository(),
             turn_action_capabilities=make_test_turn_action_capabilities(
                 rdb_session_manager
             ),
@@ -555,11 +549,7 @@ def _make_mailbox_service(**kwargs: Any) -> MailboxService:  # noqa: ANN401
         "session_manager",
         "mailbox_item_repository",
         "agent_session_repository",
-        "event_transcript_repository",
         "agent_run_repository",
-        "scheduled_task_repository",
-        "scheduled_task_cycle_repository",
-        "action_execution_repository",
     )
     runtime_operations = MailboxRuntimeOperations(
         **{key: kwargs.pop(key) for key in database_keys}

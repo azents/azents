@@ -234,10 +234,10 @@ Main steps:
    another execution boundary stops consumption. The canonical
    execution snapshot does not pin a mailbox head. For each row, the Worker resolves the requested
    profile and attachment metadata outside a database session and then locks the same head for atomic
-   preparation. Scheduled trigger/continuation heads encountered during an active Run end that
-   Run at the current model boundary without emitting a parent result. The next Run admits and
-   consumes the Scheduled head before inference, so later FIFO inputs are not blocked until the
-   original task finishes naturally. After the Worker creates or claims the AgentRun, it ensures
+   preparation. Scheduled triggers and continuations use the same FIFO promotion path as other
+   inputs, binding their cycle to the consuming Run and appending their typed Event atomically
+   with mailbox consumption. Reading Scheduled input does not complete or replace an active Run.
+   After the Worker creates or claims the AgentRun, it ensures
    that run's immutable managed-file projection before calling input promotion or resolving a managed
    SkillAction.
 2. A closed TurnAction capability registry classifies inference requirements and
@@ -1933,7 +1933,7 @@ Scheduled Toolkit is another idle hook provider. It returns one
 deterministic order. The common idle-continuation transaction converts each input
 to a typed `scheduled_task_continuation` Mailbox item with a deterministic
 provider-local identity. Promotion appends the corresponding dedicated Event and
-binds the fresh AgentRun back to the same cycle. Admitted or terminalized cycles
+binds the consuming AgentRun back to the same cycle. Admitted or terminalized cycles
 do not continue.
 
 When `submit_scheduled_task_result` returns a terminal client-tool result, the

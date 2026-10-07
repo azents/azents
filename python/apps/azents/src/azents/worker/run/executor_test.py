@@ -106,7 +106,6 @@ from azents.engine.events.engine_events import (
 )
 from azents.engine.events.types import (
     ActiveToolCall,
-    AgentRunState,
     AssistantMessagePayload,
     Event,
     ExternalChannelMessagePayload,
@@ -202,7 +201,6 @@ from azents.services.mailbox import (
     PendingInputInferenceProfile,
     PreparedMailboxFiles,
     PromotedMailboxItems,
-    ScheduledMailboxAdmission,
     TurnEffect,
 )
 from azents.services.oauth_runtime_clients import create_runtime_oauth_client_factories
@@ -758,25 +756,9 @@ class _MailboxService:
 
     def __init__(
         self,
-        scheduled_admission: ScheduledMailboxAdmission | None,
         mailbox_item_id: str,
     ) -> None:
-        self.scheduled_admission = scheduled_admission
         self.mailbox_item_id = mailbox_item_id
-        self.scheduled_admission_calls: list[tuple[str, int, str | None]] = []
-
-    async def admit_scheduled_mailbox_head(
-        self,
-        *,
-        session_id: str,
-        owner_generation: int,
-        expected_buffer_id: str | None,
-    ) -> ScheduledMailboxAdmission | None:
-        """Return the configured Scheduled admission result."""
-        self.scheduled_admission_calls.append(
-            (session_id, owner_generation, expected_buffer_id)
-        )
-        return self.scheduled_admission
 
     async def peek_pending_inference_profile(
         self,
@@ -2086,7 +2068,6 @@ def _executor(
         live_event_projector = _LiveEventProjector()
     if mailbox_item_service is None:
         mailbox_item_service = _MailboxService(
-            scheduled_admission=None,
             mailbox_item_id="buffer-1",
         )
     if session_git_worktree_service is None:
@@ -2723,151 +2704,6 @@ async def test_execute_classifies_new_recoverable_run_as_snapshot_drift() -> Non
             tool_admission_barrier=ToolAdmissionBarrier(),
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         )
-
-
-@pytest.mark.asyncio
-async def test_execute_uses_atomic_scheduled_admission(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A Scheduled FIFO head supplies its pre-created Run and promoted input."""
-    now = datetime.datetime.now(datetime.UTC)
-    scheduled_run = AgentRunState(
-        id="1234567890abcdef1234567890abcdef",
-        session_id="session-001",
-        scheduled_task_cycle_id="abcdef1234567890abcdef1234567890",
-        run_index=1,
-        phase=AgentRunPhase.IDLE,
-        status=AgentRunStatus.PENDING,
-        parent_agent_run_id=None,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        active_tool_calls=[],
-        parent_result_delivery_state=None,
-        parent_result_mailbox_item_id=None,
-        parent_result_enqueued_at=None,
-        created_at=now,
-        started_at=None,
-        model_call_started_at=None,
-        updated_at=now,
-        requested_enabled_execution_options=[],
-    )
-    scheduled_message = make_run_user_message(
-        sender_user_id=None,
-        content="Scheduled task input",
-        metadata={"scheduled_task": "true"},
-        attachments=[],
-        external_id="scheduled-buffer-001:scheduled_task",
-        attachment_source="mailbox_item",
-        requested_inference_profile=None,
-    )
-    mailbox_service = _MailboxService(
-        scheduled_admission=ScheduledMailboxAdmission(
-            run=scheduled_run,
-            promoted=PromotedMailboxItems(
-                operation_action=None,
-                turn_effect=TurnEffect.ELIGIBLE,
-                requested_inference_profile=None,
-                promoted_event_ids=["scheduled-event-001"],
-                user_messages=[scheduled_message],
-                events=[],
-                deleted_buffer_ids=["scheduled-buffer-001"],
-                changed_session_agent_ids=[],
-                claimed_count=1,
-                inserted_count=1,
-                deduped_count=0,
-                complete_run=False,
-                suppress_parent_result=False,
-            ),
-            stale=False,
-        ),
-        mailbox_item_id="scheduled-buffer-001",
-    )
-    order: list[str] = []
-    lifecycle = _SessionLifecycle(order)
-    executor = _executor(
-        session_lifecycle=lifecycle,
-        engine=_RecordingEngine(order),
-        mailbox_item_service=mailbox_service,
-        vfs_projection_service=_VfsProjectionService(order),
-    )
-
-    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
-        del args, kwargs
-        raise AssertionError("Scheduled admission must bypass ordinary FIFO promotion")
-
-    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    _patch_successful_resolution(monkeypatch)
-
-    result = await executor.execute(
-        _message(),
-        poll_fn=None,
-        check_stop=None,
-        prepare_toolkits=None,
-        shutdown_event=asyncio.Event(),
-        dispatch_event=_noop_dispatch_event,
-        owner_generation=1,
-        tool_admission_barrier=ToolAdmissionBarrier(),
-        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-    )
-
-    assert mailbox_service.scheduled_admission_calls == [
-        ("session-001", 1, "scheduled-buffer-001")
-    ]
-    assert lifecycle.pending_run_create_calls == 0
-    assert lifecycle.activation_calls == 1
-    assert lifecycle.activation_profiles == [
-        RequestedInferenceProfile(
-            model_target_label="default",
-            reasoning_effort=None,
-            enabled_execution_options=[],
-        )
-    ]
-    assert result.run_id == scheduled_run.id
-    assert result.terminal_run_status is AgentRunStatus.COMPLETED
-    assert order[:3] == ["vfs", "activate_pending", "provider"]
-
-
-@pytest.mark.asyncio
-async def test_execute_discards_stale_scheduled_admission() -> None:
-    """A stale Scheduled trigger is consumed without creating another Run."""
-    mailbox_service = _MailboxService(
-        scheduled_admission=ScheduledMailboxAdmission(
-            run=None,
-            promoted=None,
-            stale=True,
-        ),
-        mailbox_item_id="scheduled-buffer-001",
-    )
-    lifecycle = _SessionLifecycle()
-    vfs_projection_service = _VfsProjectionService()
-    executor = _executor(
-        session_lifecycle=lifecycle,
-        mailbox_item_service=mailbox_service,
-        vfs_projection_service=vfs_projection_service,
-    )
-
-    result = await executor.execute(
-        _message(),
-        poll_fn=None,
-        check_stop=None,
-        prepare_toolkits=None,
-        shutdown_event=asyncio.Event(),
-        dispatch_event=_noop_dispatch_event,
-        owner_generation=1,
-        tool_admission_barrier=ToolAdmissionBarrier(),
-        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
-    )
-
-    assert result == RunExecutionResult(
-        toolkits=[],
-        terminal_event_observed=False,
-        no_actionable_work=True,
-    )
-    assert mailbox_service.scheduled_admission_calls == [
-        ("session-001", 1, "scheduled-buffer-001")
-    ]
-    assert lifecycle.pending_run_create_calls == 0
-    assert vfs_projection_service.calls == []
 
 
 @pytest.mark.asyncio
