@@ -73,6 +73,7 @@ from azents.services.historical_memory.consolidation_tools import (
 from azents.services.historical_memory.execution_context import (
     MemoryExecutionContextService,
 )
+from azents.services.session_execution_files import ExecutionFileObservations
 from azents.testing.consolidation import (
     memory_execution_repository,
     seed_consolidation_corpus,
@@ -260,7 +261,10 @@ async def _host(
         principal,
         model,
         ConsolidationToolBindings(
-            principal, SessionExecutionFileRepository(manager), executions
+            principal,
+            SessionExecutionFileRepository(manager),
+            executions,
+            ExecutionFileObservations(principal.owner),
         ),
         executions,
         context,

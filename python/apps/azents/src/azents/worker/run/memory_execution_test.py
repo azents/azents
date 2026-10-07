@@ -74,6 +74,7 @@ from azents.services.historical_memory.execution_context import (
     MemoryExecutionContextService,
 )
 from azents.services.model_metadata import ModelMetadataService
+from azents.services.session_execution_files import ExecutionFileObservations
 from azents.testing.consolidation import memory_execution_repository
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -152,7 +153,12 @@ class _ScriptedExecutor(MemoryRunExecutor):
         return ConsolidationIterationHost(
             principal,
             model,
-            ConsolidationToolBindings(principal, self.files, self.executions),
+            ConsolidationToolBindings(
+                principal,
+                self.files,
+                self.executions,
+                ExecutionFileObservations(principal.owner),
+            ),
             self.executions,
             self.context_port,
             check_stop,

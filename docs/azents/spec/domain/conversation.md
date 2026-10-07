@@ -137,7 +137,6 @@ code_paths:
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
-  - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
   - python/apps/azents/src/azents/api/public/terminal/**
@@ -197,7 +196,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
 last_verified_at: 2026-10-07
-spec_version: 186
+spec_version: 187
 ---
 
 # Conversation & Events

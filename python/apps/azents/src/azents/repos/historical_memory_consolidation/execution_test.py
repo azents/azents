@@ -99,13 +99,20 @@ async def test_last_allowed_turn_submit_settles_only_admitted_work(
     with pytest.raises(MemoryExecutionAuthorityError, match="turn limit"):
         await case.repository.start_turn(principal)
     files = SessionExecutionFileRepository(case.manager)
-    await files.write(principal.owner, "result.md", "x" * 10001, None, True)
+    await files.write(
+        principal.owner, "result.md", "x" * 10001, None, True, overwrite=False
+    )
     with pytest.raises(MemorySubmissionError):
         await case.repository.submit(
             principal, tool_call_id="wrong", authored_path="result.md"
         )
     await files.write(
-        principal.owner, "result.md", "Corrected integrated body", "x" * 10001, True
+        principal.owner,
+        "result.md",
+        "Corrected integrated body",
+        "x" * 10001,
+        True,
+        overwrite=True,
     )
     async with case.manager() as session:
         late = await enroll_memory_work(
@@ -131,7 +138,9 @@ async def test_last_allowed_turn_submit_settles_only_admitted_work(
         == accepted
     )
     with pytest.raises(PermissionError):
-        await files.write(principal.owner, "late.md", "must not write", None, True)
+        await files.write(
+            principal.owner, "late.md", "must not write", None, True, overwrite=False
+        )
     async with case.manager() as session:
         pending = list(
             await session.read_session.scalars(
@@ -162,7 +171,12 @@ async def test_two_connection_owner_handover_fences_waiting_submission(
         principal = case.principal
         await case.repository.start_turn(principal)
         await SessionExecutionFileRepository(manager).write(
-            principal.owner, "result.md", "Unaccepted authored body", None, True
+            principal.owner,
+            "result.md",
+            "Unaccepted authored body",
+            None,
+            True,
+            overwrite=False,
         )
         waiter_pid: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
@@ -342,7 +356,12 @@ async def test_missing_removed_source_is_admitted_without_agent_action_ledger(
     assert len(provided.files) == 1
     assert removed_id not in provided.files[0].content
     await SessionExecutionFileRepository(rdb_session_manager).write(
-        principal.owner, "result.md", "Integrated current corpus", None, True
+        principal.owner,
+        "result.md",
+        "Integrated current corpus",
+        None,
+        True,
+        overwrite=False,
     )
     accepted = await repository.submit(
         principal, tool_call_id="remove-aware", authored_path="result.md"
@@ -360,7 +379,9 @@ async def test_lost_commit_ack_resolves_original_call_after_later_publication(
     """Resolve the original accepted scalar instead of inferring from current text."""
     case = await _start(rdb_session_manager)
     files = SessionExecutionFileRepository(case.manager)
-    await files.write(case.principal.owner, "first.md", "First result", None, True)
+    await files.write(
+        case.principal.owner, "first.md", "First result", None, True, overwrite=False
+    )
 
     @asynccontextmanager
     async def lost_ack_manager() -> AsyncIterator[WriteSession]:
@@ -404,7 +425,9 @@ async def test_lost_commit_ack_resolves_original_call_after_later_publication(
         second_binding, SessionExecutionOwner(second_binding.session_id, generation)
     )
     await case.repository.provision_inputs(second)
-    await files.write(second.owner, "second.md", "Different later result", None, True)
+    await files.write(
+        second.owner, "second.md", "Different later result", None, True, overwrite=False
+    )
     newer = await case.repository.submit(
         second, tool_call_id="second-exact-call", authored_path="second.md"
     )

@@ -16,10 +16,30 @@ from azents.engine.events.types import (
 from azents.engine.provider_model_operation import prepare_model_operation_request
 from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import WriteSession
+from azents.services.historical_memory.consolidation_tools import (
+    ConsolidationToolBindings,
+)
+from azents.services.session_execution_files import ExecutionFileObservations
 from azents.testing.consolidation_vfs import bind_consolidation_test_vfs
 from azents.testing.model_selection import make_test_model_selection
 
 _URI = "azents://execution/summary.md"
+
+
+async def test_bindings_retain_the_injected_current_owner_observations(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    binding = await bind_consolidation_test_vfs(rdb_session_manager)
+    observations = ExecutionFileObservations(binding.principal.owner)
+    observations.files[_URI] = "already observed"
+    tools = ConsolidationToolBindings(
+        binding.principal,
+        binding.bindings.files,
+        binding.bindings.executions,
+        observations,
+    )
+    assert tools.observations is observations
+    assert tools.observations.files[_URI] == "already observed"
 
 
 async def test_sibling_mutations_do_not_inherit_each_others_observations(

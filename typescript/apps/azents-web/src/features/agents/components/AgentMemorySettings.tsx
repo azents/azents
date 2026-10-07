@@ -36,6 +36,7 @@ import Link from "next/link";
 import { MarkdownContent } from "@/features/chat/components/MarkdownContent";
 import type {
   ConsolidatedMemoryState,
+  DraftState,
   HistoricalMemoryListState,
   HistoricalMemoryScopeValue,
   HistoricalMemoryView,
@@ -44,18 +45,13 @@ import type {
   MemoryPaginationState,
   SavedMemoryListState,
   SavedMemoryScopeValue,
-} from "../containers/useAgentMemorySettingsContainer";
+} from "../types";
 import type {
   AgentResponse,
   HistoricalMemoryResponse,
   MemoryResponse,
 } from "@azents/public-client";
 import type { RefCallback } from "react";
-
-type DraftState =
-  | { type: "create"; draft: MemoryDraft }
-  | { type: "edit"; memoryId: string; draft: MemoryDraft }
-  | null;
 
 interface AgentMemorySettingsProps {
   handle: string;

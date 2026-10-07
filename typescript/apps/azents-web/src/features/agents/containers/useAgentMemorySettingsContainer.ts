@@ -6,54 +6,19 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type {
-  AgentResponse,
-  HistoricalMemoryResponse,
-  MemoryResponse,
-} from "@azents/public-client";
+  ConsolidatedMemoryState,
+  DraftState,
+  HistoricalMemoryListState,
+  HistoricalMemoryScopeValue,
+  HistoricalMemoryView,
+  MemoryDraft,
+  MemoryKindValue,
+  MemoryPaginationState,
+  SavedMemoryListState,
+  SavedMemoryScopeValue,
+} from "../types";
+import type { AgentResponse, MemoryResponse } from "@azents/public-client";
 import type { RefCallback } from "react";
-
-export type MemoryKindValue = "saved" | "historical";
-export type SavedMemoryScopeValue = "agent" | "user";
-export type HistoricalMemoryScopeValue = "team" | "user";
-
-export interface MemoryDraft {
-  type: string;
-  name: string;
-  description: string;
-  content: string;
-}
-
-type DraftState =
-  | { type: "create"; draft: MemoryDraft }
-  | { type: "edit"; memoryId: string; draft: MemoryDraft }
-  | null;
-
-export type SavedMemoryListState =
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | { type: "LOADED"; memories: MemoryResponse[] };
-
-export type ConsolidatedMemoryState =
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | { type: "LOADED"; markdown: string | null; publishedAt: string | null };
-
-export type MemoryPaginationState =
-  | { type: "IDLE" }
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | { type: "END" };
-
-export type HistoricalMemoryView = "overview" | "sessions";
-
-export type HistoricalMemoryListState =
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | {
-      type: "LOADED";
-      memories: HistoricalMemoryResponse[];
-      hasMore: boolean;
-    };
 
 export interface AgentMemorySettingsContainerProps {
   handle: string;

@@ -242,7 +242,12 @@ async def test_accepted_execution_retains_canonical_audit_under_common_policy(
     repository = _repository(rdb_session_manager)
     principal = await _start(rdb_session_manager, corpus.key)
     await SessionExecutionFileRepository(rdb_session_manager).write(
-        principal.owner, "result.md", "Integrated result.", None, True
+        principal.owner,
+        "result.md",
+        "Integrated result.",
+        None,
+        True,
+        overwrite=False,
     )
     async with rdb_session_manager() as session:
         await ArchivedSessionRetentionRepository().get_settings(session)
@@ -322,7 +327,12 @@ async def test_shared_purge_preserves_original_acceptance_result_and_unadmitted_
     repository = _repository(rdb_session_manager)
     principal = await _start(rdb_session_manager, corpus.key)
     await SessionExecutionFileRepository(rdb_session_manager).write(
-        principal.owner, "result.md", "Accepted original integrated result.", None, True
+        principal.owner,
+        "result.md",
+        "Accepted original integrated result.",
+        None,
+        True,
+        overwrite=False,
     )
     async with rdb_session_manager() as session:
         late_work = await enroll_memory_work(
@@ -446,7 +456,14 @@ async def test_fresh_execution_has_only_current_inputs_and_exact_unit_predecesso
         )
     personal = await _start(rdb_session_manager, personal_key)
     files = SessionExecutionFileRepository(rdb_session_manager)
-    await files.write(first.owner, "old-draft.md", "Old integrated result.", None, True)
+    await files.write(
+        first.owner,
+        "old-draft.md",
+        "Old integrated result.",
+        None,
+        True,
+        overwrite=False,
+    )
     async with rdb_session_manager() as session:
         session.write_session.add(
             RDBEvent(
@@ -513,7 +530,9 @@ async def test_fresh_execution_has_only_current_inputs_and_exact_unit_predecesso
         assert personal_common is not None
         assert personal_common.status is AgentSessionStatus.ACTIVE
         assert personal_common.run_state is AgentSessionRunState.RUNNING
-    await files.write(second.owner, "new.md", "New accepted result.", None, True)
+    await files.write(
+        second.owner, "new.md", "New accepted result.", None, True, overwrite=False
+    )
     await repository.submit(second, tool_call_id="new-call", authored_path="new.md")
     result = await repository.current_result(corpus.key)
     assert result is not None and result.markdown == "New accepted result."
@@ -533,7 +552,9 @@ async def test_terminal_takeover_fences_old_files_and_submission_without_reset(
     repository = _repository(rdb_session_manager)
     old = await _start(rdb_session_manager, corpus.key)
     files = SessionExecutionFileRepository(rdb_session_manager)
-    await files.write(old.owner, "unfinished.md", "Unfinished draft.", None, True)
+    await files.write(
+        old.owner, "unfinished.md", "Unfinished draft.", None, True, overwrite=False
+    )
     await repository.start_turn(old)
     started = await repository.start_turn(old)
     admission = TakeoverMemoryAdmission(
@@ -566,7 +587,9 @@ async def test_terminal_takeover_fences_old_files_and_submission_without_reset(
     assert replacement.execution_policy == started.execution_policy
     assert replacement.started_turns == started.started_turns == 2
     with pytest.raises(PermissionError):
-        await files.write(old.owner, "unfinished.md", "Stale overwrite.", None, False)
+        await files.write(
+            old.owner, "unfinished.md", "Stale overwrite.", None, False, overwrite=False
+        )
     with pytest.raises(MemoryExecutionAuthorityError):
         await repository.submit(
             old, tool_call_id="stale-submit", authored_path="unfinished.md"
@@ -592,7 +615,12 @@ async def test_worker_owned_recovery_atomically_settles_predecessor_before_archi
     old = await _start(rdb_session_manager, corpus.key)
     files = SessionExecutionFileRepository(rdb_session_manager)
     await files.write(
-        old.owner, "unfinished.md", "Private abandoned draft.", None, True
+        old.owner,
+        "unfinished.md",
+        "Private abandoned draft.",
+        None,
+        True,
+        overwrite=False,
     )
     await repository.start_turn(old)
     started = await repository.start_turn(old)

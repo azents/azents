@@ -5,12 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
-from psycopg.errors import LockNotAvailable, QueryCanceled
-from sqlalchemy.exc import OperationalError
 from uuid6 import uuid7
 
 from azents.core.enums import EventKind
 from azents.core.historical_memory import HistoricalMemoryCompletion
+from azents.core.historical_memory_context import MemoryContextAuthorityUnavailable
 from azents.core.historical_memory_snapshot import MemoryContextSnapshotState
 from azents.engine.events.types import CompactionSummaryPayload
 from azents.rdb.models.agent import RDBAgent
@@ -360,17 +359,13 @@ async def test_refresh_cas_conflict_and_memory_disablement_do_not_claim_preparat
     assert await service.prompt_for_turn(session_id=corpus.team_source) == ""
 
 
-@pytest.mark.parametrize("failure", [LockNotAvailable, QueryCanceled])
-async def test_unconfirmed_authority_omits_context_without_failing_conversation(
-    rdb_session_manager: SessionManager[WriteSession],
-    failure: type[LockNotAvailable] | type[QueryCanceled],
-) -> None:
+async def test_unconfirmed_authority_omits_context() -> None:
     repository = AsyncMock(spec=MemoryContextSnapshotRepository)
-    repository.prompt_for_turn.side_effect = OperationalError(
-        "read", {}, failure("Expected authority failure")
+    repository.prompt_for_turn.side_effect = MemoryContextAuthorityUnavailable(
+        "Expected authority failure"
     )
-    repository.refresh_snapshot.side_effect = OperationalError(
-        "read", {}, failure("Expected authority failure")
+    repository.refresh_snapshot.side_effect = MemoryContextAuthorityUnavailable(
+        "Expected authority failure"
     )
     service = MemoryContextSnapshotService(repository)
     assert await service.prompt_for_turn(session_id="a" * 32) == ""
@@ -381,3 +376,9 @@ async def test_unconfirmed_authority_omits_context_without_failing_conversation(
     repository.prompt_for_turn.side_effect = RuntimeError("Unexpected failure")
     with pytest.raises(RuntimeError, match="Unexpected"):
         await service.prompt_for_turn(session_id="a" * 32)
+    repository.refresh_snapshot.side_effect = RuntimeError("Unexpected failure")
+    with pytest.raises(RuntimeError, match="Unexpected"):
+        await service.refresh_snapshot(
+            session_id="a" * 32,
+            after_compaction=False,
+        )

@@ -32,6 +32,7 @@ from azents.services.historical_memory.consolidation_tools import (
     MemoryFileAuthority,
 )
 from azents.services.session_execution_files import (
+    ExecutionFileObservations,
     SessionExecutionFileBackend,
 )
 from azents.services.vfs_mutation import (
@@ -110,7 +111,9 @@ async def bind_consolidation_test_vfs(
     executions = memory_execution_repository(manager)
     await executions.provision_inputs(principal)
     files = SessionExecutionFileRepository(manager)
-    bindings = ConsolidationToolBindings(principal, files, executions)
+    bindings = ConsolidationToolBindings(
+        principal, files, executions, ExecutionFileObservations(principal.owner)
+    )
     backend = SessionExecutionFileBackend(files, bindings.observations)
     authority = MemoryFileAuthority(executions)
     mutations = VfsMutationRouter(

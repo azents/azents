@@ -13,6 +13,10 @@ from azents.core.historical_memory_snapshot import (
 )
 
 
+class MemoryContextAuthorityUnavailable(RuntimeError):
+    """An expected database contention/deadline prevented current authority."""
+
+
 @dataclasses.dataclass(frozen=True)
 class MemoryContextPrompt:
     """Atomic visible text and exact admitted Historical replay compatibility."""

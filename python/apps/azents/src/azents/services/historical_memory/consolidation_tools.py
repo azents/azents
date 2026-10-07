@@ -182,10 +182,7 @@ class ConsolidationToolBindings:
     principal: MemoryExecutionPrincipal
     files: SessionExecutionFileRepository
     executions: MemoryExecutionRepository
-    observations: ExecutionFileObservations = dataclasses.field(init=False)
-
-    def __post_init__(self) -> None:
-        self.observations = ExecutionFileObservations(self.principal.owner)
+    observations: ExecutionFileObservations
 
     def _catalog(
         self,

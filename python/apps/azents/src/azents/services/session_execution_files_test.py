@@ -58,6 +58,39 @@ async def test_create_observe_edit_delete_and_independent_paths(
         await read_consolidation_test_uri(binding, _URI)
 
 
+async def test_create_only_write_rejects_observed_existing_file(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    binding = await bind_consolidation_test_vfs(rdb_session_manager)
+    location = parse_vfs_exact_uri(_URI)
+    await binding.mutations.execute(
+        binding.mutations.admit(
+            binding.principal,
+            VfsWriteRequest(location, "original", False),
+            tool_call_id="create-original",
+        )
+    )
+    await read_consolidation_test_uri(binding, _URI)
+    with pytest.raises(VfsMutationError, match="already exists") as rejected:
+        await binding.mutations.execute(
+            binding.mutations.admit(
+                binding.principal,
+                VfsWriteRequest(location, "replacement", False),
+                tool_call_id="create-existing",
+            )
+        )
+    assert rejected.value.code == "already_exists"
+    assert (await read_consolidation_test_uri(binding, _URI)).text == "original"
+    await binding.mutations.execute(
+        binding.mutations.admit(
+            binding.principal,
+            VfsWriteRequest(location, "replacement", True),
+            tool_call_id="explicit-overwrite",
+        )
+    )
+    assert (await read_consolidation_test_uri(binding, _URI)).text == "replacement"
+
+
 async def test_unread_and_stale_same_target_mutations_are_correctable(
     rdb_session_manager: SessionManager[WriteSession],
 ) -> None:
@@ -77,7 +110,12 @@ async def test_unread_and_stale_same_target_mutations_are_correctable(
     await read_consolidation_test_uri(binding, _URI)
     old = binding.mutations.admit(binding.principal, edit, tool_call_id="stale")
     await binding.bindings.files.write(
-        binding.principal.owner, "summary.md", "other", "old", True
+        binding.principal.owner,
+        "summary.md",
+        "other",
+        "old",
+        True,
+        overwrite=True,
     )
     with pytest.raises(VfsMutationError, match="observation"):
         await binding.mutations.execute(old)
@@ -169,7 +207,12 @@ async def test_atomic_patch_and_applicability_failure_change_all_or_none(
         binding.principal, update, tool_call_id="update"
     )
     await binding.bindings.files.write(
-        binding.principal.owner, "notes.md", "changed", "notes\n", True
+        binding.principal.owner,
+        "notes.md",
+        "changed",
+        "notes\n",
+        True,
+        overwrite=True,
     )
     with pytest.raises(VfsMutationError, match="applicability"):
         await binding.mutations.execute_patch(admitted)

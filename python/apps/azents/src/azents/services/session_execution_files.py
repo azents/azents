@@ -249,6 +249,7 @@ class SessionExecutionFileBackend:
                         content,
                         expected_content=(observed.content if observed else None),
                         require_observation=True,
+                        overwrite=request.overwrite,
                     )
                 case VfsEditRequest():
                     if observed is None or observed.content is None:
@@ -276,6 +277,7 @@ class SessionExecutionFileBackend:
                         content,
                         expected_content=observed.content,
                         require_observation=True,
+                        overwrite=True,
                     )
                 case VfsDeleteRequest():
                     if observed is None or observed.content is None:
@@ -288,6 +290,8 @@ class SessionExecutionFileBackend:
                     )
                 case _:
                     assert_never(request)
+        except FileExistsError as error:
+            raise VfsMutationError("already_exists", str(error)) from None
         except PermissionError as error:
             raise VfsMutationError("unavailable", str(error)) from None
         except ExecutionFileConflict as error:
