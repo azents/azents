@@ -8,6 +8,7 @@
 /** Login step: Email input */
 export type LoginState =
   | { type: "IDLE"; error: string | null }
+  | { type: "SUBMITTING" }
   | { type: "CHECKING_METHODS" }
   | { type: "SENDING" };
 

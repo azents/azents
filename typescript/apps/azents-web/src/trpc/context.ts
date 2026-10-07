@@ -89,6 +89,11 @@ function getInternalApiClientConfig(): ReturnType<typeof createConfig> {
   });
 }
 
+/** Public capability reads must not refresh or depend on authentication cookies. */
+export function createAnonymousApiClient(): Client {
+  return withApiErrorInterceptor(createClient(getInternalApiClientConfig()));
+}
+
 /** Route handler also obtains access token with same refresh policy as tRPC. */
 export async function getFreshAccessToken(
   resHeaders: Headers,

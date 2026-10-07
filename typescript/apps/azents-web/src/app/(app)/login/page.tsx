@@ -45,5 +45,6 @@ export default async function Page({
     }
   }
 
-  return <LoginPage />;
+  const methods = await trpc.auth.getLoginMethods({});
+  return <LoginPage emailAvailable={methods.email_available} />;
 }

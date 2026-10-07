@@ -332,11 +332,16 @@ class AuthService:
         )
 
     async def get_login_methods(self, input: LoginMethodsInput) -> LoginMethodsOutput:
-        """Fetch login methods available for email.
+        """Fetch instance availability and optional email-specific login methods.
 
         :param input: Login method lookup input data
         :return: Login method information
         """
+        if input.email is None:
+            return LoginMethodsOutput(
+                has_password=False,
+                email_available=self.email_service.configured,
+            )
         projection = await self.credential_service.get_login_projection(
             email=input.email
         )

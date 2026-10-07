@@ -33,6 +33,7 @@ import {
   getSharedRuntimeWebIdentity,
 } from "@/shared/lib/runtime-web-auth";
 import { mapExpectedError } from "../api-error";
+import { createAnonymousApiClient } from "../context";
 import { publicProcedure, router } from "../init";
 
 export const authRouter = router({
@@ -129,11 +130,11 @@ export const authRouter = router({
    * email to use available login methods fetch
    */
   getLoginMethods: publicProcedure
-    .input(z.object({ email: z.string().email() }))
-    .query(async ({ ctx, input }) => {
+    .input(z.object({ email: z.string().email().optional() }))
+    .query(async ({ input }) => {
       try {
         const { data } = await authV1GetLoginMethods({
-          client: ctx.apiClient,
+          client: createAnonymousApiClient(),
           query: { email: input.email },
           throwOnError: true,
         });
