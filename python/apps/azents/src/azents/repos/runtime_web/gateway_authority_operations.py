@@ -145,33 +145,6 @@ class RuntimeWebGatewayAuthorityOperationsRepository:
                 service_id,
             )
 
-    async def source_service_matches_agent(
-        self,
-        *,
-        source_hostname_key: str,
-        target_service: RuntimeWebServiceRecord,
-    ) -> bool:
-        """Return whether two current On services belong to the same Agent."""
-        async with self.session_manager() as session:
-            now = await self._database_now(session)
-            source = await self.runtime_web_repository.get_service_by_hostname(
-                session,
-                hostname_key=source_hostname_key,
-            )
-            target = await self.runtime_web_repository.get_service_by_id(
-                session,
-                target_service.id,
-            )
-            return (
-                source is not None
-                and target is not None
-                and source.agent_id == target.agent_id
-                and source.exposure_deadline_at is not None
-                and source.exposure_deadline_at > now
-                and target.exposure_deadline_at is not None
-                and target.exposure_deadline_at > now
-            )
-
     async def identity_and_access_current(
         self,
         *,

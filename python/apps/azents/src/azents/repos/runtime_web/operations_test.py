@@ -350,10 +350,6 @@ async def test_completed_gateway_ticket_and_current_runtime_authority(
     assert sessions.active == 0
     assert authority.runner_generation == 987654
     assert await authority_service.identity_and_access_current(authority=authority)
-    assert await authority_service.source_service_matches_agent(
-        source_hostname_key=resolved.hostname_key,
-        target_service=resolved,
-    )
     async with rdb_session_manager() as session:
         runtime = await session.write_session.get(RDBAgentRuntime, authority.runtime_id)
         assert runtime is not None

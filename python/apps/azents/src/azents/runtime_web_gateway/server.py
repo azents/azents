@@ -83,12 +83,8 @@ from azents.runtime_web_gateway.operations import (
     render_openmetrics,
 )
 from azents.runtime_web_gateway.policy import (
-    RuntimeWebCorsDecision,
     RuntimeWebPolicyCode,
     RuntimeWebPolicyError,
-    canonical_origin,
-    evaluate_actual_origin,
-    evaluate_preflight,
     normalize_request_headers,
     normalize_response_headers,
     parse_target_host,
@@ -219,13 +215,6 @@ class RuntimeWebGatewayAuthorityProvider(Protocol):
         *,
         service_id: str,
     ) -> RuntimeWebServiceRecord | None: ...
-
-    async def source_service_matches_agent(
-        self,
-        *,
-        source_hostname_key: str,
-        target_service: RuntimeWebServiceRecord,
-    ) -> bool: ...
 
     async def authorize(
         self,
@@ -823,25 +812,6 @@ async def _endpoint(
             status=404,
             code="not_found",
         )
-    origin = request.headers.get("Origin")
-    requested_method = request.headers.get("Access-Control-Request-Method")
-    if request.method == "OPTIONS" and origin and requested_method:
-        source_key = _source_endpoint_key(origin, state.config)
-        if source_key is None or not await state.authority.source_service_matches_agent(
-            source_hostname_key=source_key,
-            target_service=service,
-        ):
-            raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-        decision = evaluate_preflight(
-            origin=origin,
-            requested_method=requested_method,
-            requested_headers=request.headers.get("Access-Control-Request-Headers"),
-            source_origins=frozenset({canonical_origin(origin)}),
-        )
-        return web.Response(
-            status=204,
-            headers=(dict(decision.headers) | _security_headers(state.config)),
-        )
     identity_secret = _exact_cookie(
         request,
         state.config.identity_cookie_name,
@@ -877,23 +847,6 @@ async def _endpoint(
     target_origin = (
         f"{_public_scheme(state.config)}://"
         f"{service.hostname_key}.{state.config.service_suffix}"
-    )
-    source_origins: frozenset[str] = frozenset()
-    if origin is not None and canonical_origin(origin) != target_origin:
-        source_key = _source_endpoint_key(origin, state.config)
-        if source_key is None or not await state.authority.source_service_matches_agent(
-            source_hostname_key=source_key,
-            target_service=service,
-        ):
-            raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-        source_origins = frozenset({canonical_origin(origin)})
-    cors = evaluate_actual_origin(
-        origin=origin,
-        fetch_site=request.headers.get("Sec-Fetch-Site"),
-        fetch_mode=request.headers.get("Sec-Fetch-Mode"),
-        method=request.method,
-        target_origin=target_origin,
-        source_origins=source_origins,
     )
     now = datetime.datetime.now(datetime.UTC)
     headers = normalize_request_headers(
@@ -961,7 +914,6 @@ async def _endpoint(
                 state,
                 bridge=bridge,
                 head=head,
-                cors=cors,
                 target_origin=target_origin,
                 authority=authority,
             )
@@ -971,7 +923,6 @@ async def _endpoint(
             bridge=bridge,
             head=head,
             registration=registration,
-            cors=cors,
             target_origin=target_origin,
             authority=authority,
         )
@@ -1003,7 +954,6 @@ async def _proxy_http(
     bridge: RuntimeWebBrowserStreamBridge,
     head: RequestHead,
     registration: RuntimeWebDrainRegistration,
-    cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
 ) -> web.StreamResponse:
@@ -1052,8 +1002,6 @@ async def _proxy_http(
                         status=event.status,
                         headers=normalize_response_headers(
                             ((header.name, header.value) for header in event.headers),
-                            config=state.config,
-                            cors=cors,
                             target_origin=target_origin,
                             port=authority.service.port,
                         ),
@@ -1238,7 +1186,6 @@ async def _proxy_websocket(
     *,
     bridge: RuntimeWebBrowserStreamBridge,
     head: RequestHead,
-    cors: RuntimeWebCorsDecision,
     target_origin: str,
     authority: RuntimeWebGatewayAuthorityData,
 ) -> web.StreamResponse:
@@ -1274,8 +1221,6 @@ async def _proxy_websocket(
                                     (header.name, header.value)
                                     for header in event.headers
                                 ),
-                                config=state.config,
-                                cors=cors,
                                 target_origin=target_origin,
                                 port=authority.service.port,
                             ),
@@ -1630,7 +1575,6 @@ def _policy_error(
         RuntimeWebPolicyCode.BAD_REQUEST: 400,
         RuntimeWebPolicyCode.FORBIDDEN: 403,
         RuntimeWebPolicyCode.HEADER_TOO_LARGE: 431,
-        RuntimeWebPolicyCode.METHOD_NOT_ALLOWED: 405,
     }[code]
     return _bounded_error(request, config, status=status, code=code.value)
 
@@ -1766,23 +1710,6 @@ def _completion_document(destination: str) -> str:
 
 def _public_scheme(config: RuntimeWebGatewayConfig) -> str:
     return urllib.parse.urlparse(config.broker_origin).scheme
-
-
-def _source_endpoint_key(
-    origin: str,
-    config: RuntimeWebGatewayConfig,
-) -> str | None:
-    canonical = canonical_origin(origin)
-    parsed = urllib.parse.urlparse(canonical)
-    if parsed.scheme != _public_scheme(config) or parsed.port is not None:
-        return None
-    try:
-        target = parse_target_host(parsed.netloc, config=config)
-    except RuntimeWebPolicyError:
-        return None
-    if target.broker:
-        return None
-    return target.endpoint_label
 
 
 def _public_request_secure(

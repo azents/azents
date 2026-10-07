@@ -158,14 +158,6 @@ class _Authority:
     ) -> RuntimeWebServiceRecord | None:
         return _SERVICE if hostname_key == "endpoint" else None
 
-    async def source_service_matches_agent(
-        self,
-        *,
-        source_hostname_key: str,
-        target_service: RuntimeWebServiceRecord,
-    ) -> bool:
-        return source_hostname_key == "source" and target_service.id == _SERVICE.id
-
     async def resolve_service_by_id(
         self,
         *,
@@ -1195,26 +1187,124 @@ async def test_websocket_input_rejects_application_buffer_ceiling_without_leak()
     assert resources.scheduler_waiters == 0
 
 
-async def test_valid_same_root_preflight_is_local_and_credentialed() -> None:
+class _HttpTransport(_WebSocketTransport):
+    async def send(
+        self, envelope: runtime_stream_session_pb2.RuntimeStreamSessionEnvelope
+    ) -> None:
+        copied = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
+        copied.CopyFrom(envelope)
+        self.sent.append(copied)
+        handler = self.handlers.get(envelope.stream_id)
+        if handler is None:
+            return
+        payload = envelope.WhichOneof("payload")
+        if payload == "open":
+            await handler.receive(self._accepted(envelope.stream_id))
+        elif payload == "direction_end":
+            head = self._response_head(envelope.stream_id)
+            head.response_head.status = 200
+            await handler.receive(head)
+            end = self._base(envelope.stream_id)
+            end.direction_end.direction = (
+                runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+            )
+            end.direction_end.final_sequence = 0
+            await handler.receive(end)
+            terminal = self._base(envelope.stream_id)
+            terminal.stream_end.SetInParent()
+            await handler.receive(terminal)
+
+
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@pytest.mark.parametrize(
+    "origin",
+    [
+        None,
+        "null",
+        "https://external.example.com",
+        "https://endpoint.services.example.net",
+    ],
+)
+async def test_authenticated_application_methods_reach_transport(
+    method: str,
+    origin: str | None,
+) -> None:
+    operations, operational_state = _operations()
     proxy = _ControlSessions()
-    client = await _client(proxy)
+    transport = _HttpTransport(
+        resources=operational_state.resources,
+        response_headers=(
+            (b"Access-Control-Allow-Origin", b"https://external.example.com"),
+            (b"Access-Control-Allow-Headers", b"X-App-Token"),
+            (b"Referrer-Policy", b"strict-origin-when-cross-origin"),
+            (b"Cache-Control", b"private, max-age=60"),
+            (b"Permissions-Policy", b"camera=(self)"),
+            (b"Cross-Origin-Opener-Policy", b"unsafe-none"),
+        ),
+        response_frames=(),
+    )
+    await proxy.pool.register(
+        identity=SessionIdentity(
+            session_id="gateway-session",
+            peer_boot_id="gateway-boot",
+            role=SessionPeerRole.GATEWAY,
+            owner=None,
+            session_nonce="nonce",
+            deadline_at=_NOW + timedelta(minutes=5),
+        ),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=transport,
+    )
+    application = create_runtime_web_gateway_application(
+        config=_CONFIG,
+        settings=_SETTINGS,
+        auth=_Auth(),
+        authority=_HttpAuthority(),
+        control_sessions=proxy,
+        operations=operations,
+        operational_state=operational_state,
+    )
+    client = TestClient(TestServer(application))
+    await client.start_server()
+    headers = {
+        "Host": "endpoint.services.example.net",
+        "Cookie": "__Http-Azents-Runtime-Web=opaque-secret",
+        "Sec-Fetch-Site": "cross-site",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "X-App-Token",
+        "X-App-Token": "application-value",
+    }
+    if origin is not None:
+        headers["Origin"] = origin
     try:
-        response = await client.options(
-            "/api",
-            headers={
-                "Host": "endpoint.services.example.net",
-                "Origin": "https://source.services.example.net",
-                "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "Content-Type, Authorization",
-            },
+        response = await client.request(
+            method,
+            "/create",
+            headers=headers,
+            data=b"value=example",
         )
-        assert response.status == 204
+        assert response.status == 200
+        await response.read()
+        for name, value in transport.response_headers:
+            assert response.headers.getall(name.decode()) == [value.decode()]
+        opened = next(item.open for item in transport.sent if item.HasField("open"))
+        assert opened.request_head.method == method.encode()
+        forwarded = {item.name: item.value for item in opened.request_head.headers}
+        assert forwarded[b"x-app-token"] == b"application-value"
+        assert b"cookie" not in forwarded
+        if origin is None:
+            assert b"origin" not in forwarded
+        else:
+            expected = (
+                b"http://localhost:8080"
+                if origin == "https://endpoint.services.example.net"
+                else origin.encode()
+            )
+            assert forwarded[b"origin"] == expected
         assert (
-            response.headers["Access-Control-Allow-Origin"]
-            == "https://source.services.example.net"
+            b"".join(item.data.data for item in transport.sent if item.HasField("data"))
+            == b"value=example"
         )
-        assert response.headers["Access-Control-Allow-Credentials"] == "true"
-        assert not proxy.opened
     finally:
         await client.close()
 
@@ -1254,7 +1344,7 @@ async def test_broker_auto_post_preserves_only_its_origin() -> None:
         "http://source.services.example.net:443",
     ],
 )
-async def test_preflight_rejects_origin_aliases_before_authority_lookup(
+async def test_application_preflight_requires_platform_identity(
     origin: str,
 ) -> None:
     proxy = _ControlSessions()
@@ -1268,7 +1358,7 @@ async def test_preflight_rejects_origin_aliases_before_authority_lookup(
                 "Access-Control-Request-Method": "POST",
             },
         )
-        assert response.status == 403
+        assert response.status == 401
         assert "Access-Control-Allow-Origin" not in response.headers
         assert not proxy.opened
     finally:
