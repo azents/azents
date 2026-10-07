@@ -198,6 +198,32 @@ class _RuntimeApplicationCommands:
                 message="Runtime Web fixture Terminal did not detach after command",
             )
 
+    def terminate(self) -> None:
+        """End the setup PTY so later commands acquire current Runner authority."""
+        terminal = _TerminalSocket.connect(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            server_url=self.server_url,
+            origin=_TERMINAL_ORIGIN,
+            last_output_sequence=self.last_output_sequence,
+        )
+        terminal_id = terminal.accepted.terminal_id
+        try:
+            terminal.terminate()
+        finally:
+            terminal.close()
+        _wait_terminal_projection(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            predicate=lambda projection: (
+                projection.state == "ended"
+                and projection.terminal is not None
+                and projection.terminal.terminal_id == terminal_id
+            ),
+            message="Runtime Web setup Terminal did not end",
+        )
+        self.last_output_sequence = None
+
 
 @dataclass(frozen=True)
 class _RuntimeWebApplication:
@@ -1416,6 +1442,7 @@ while True:
         f"APP_PROBE_DONE_{unique()}",
     )
     assert ready_marker.encode() in probe_output, probe_output[-4_096:]
+    commands.terminate()
     yield commands
 
 
