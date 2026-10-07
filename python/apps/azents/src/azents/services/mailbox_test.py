@@ -1496,9 +1496,102 @@ async def test_generic_flush_preserves_scheduled_trigger_head(
 
     assert result.claimed_count == 0
     assert result.deleted_buffer_ids == []
+    assert result.complete_run is False
+    assert result.suppress_parent_result is False
     async with rdb_session_manager() as session:
         assert (
             await MailboxRepository().get_by_id(session, fixture.buffer_id) is not None
+        )
+
+
+@pytest.mark.asyncio
+async def test_active_run_hands_off_scheduled_trigger_and_releases_following_input(
+    rdb_session_manager: SessionManager[WriteSession],
+) -> None:
+    """A turn boundary starts scheduled work before consuming the later FIFO input."""
+    fixture = await _create_scheduled_admission_fixture(
+        rdb_session_manager,
+        slug="scheduled-trigger-turn-handoff",
+    )
+    service = _mailbox_item_service(rdb_session_manager)
+    active_run = await _create_active_run(
+        rdb_session_manager, session_id=fixture.session_id
+    )
+    async with rdb_session_manager() as session:
+        following = await MailboxRepository().create(
+            session,
+            MailboxItemCreate(
+                session_id=fixture.session_id,
+                kind=MailboxItemKind.USER_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                requested_enabled_execution_options=[],
+                sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
+                content="Keep working on the original request too.",
+                idempotency_key=None,
+                metadata={},
+                action=None,
+                attachments=[],
+                file_parts=[],
+                payload=None,
+            ),
+        )
+
+    handoff = await service.flush_session_mailbox_items(
+        session_id=fixture.session_id,
+        owner_generation=fixture.owner_generation,
+        model="gpt-5.4",
+        required_inference_profile=None,
+        expected_buffer_id=fixture.buffer_id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
+        active_run_id=active_run.id,
+    )
+    assert handoff.complete_run is True
+    assert handoff.suppress_parent_result is True
+    assert handoff.deleted_buffer_ids == []
+    async with rdb_session_manager() as session:
+        pending = await MailboxRepository().list_by_session_id(
+            session, fixture.session_id
+        )
+        assert [item.id for item in pending] == [fixture.buffer_id, following.id]
+        await AgentRunRepository().mark_terminal(
+            session,
+            active_run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+    admission = await service.admit_scheduled_mailbox_head(
+        session_id=fixture.session_id,
+        owner_generation=fixture.owner_generation,
+        expected_buffer_id=fixture.buffer_id,
+    )
+    assert admission is not None
+    assert admission.run is not None
+    assert admission.run.scheduled_task_cycle_id == fixture.cycle_id
+    assert admission.promoted is not None
+    assert admission.promoted.deleted_buffer_ids == [fixture.buffer_id]
+    promoted = await service.flush_session_mailbox_items(
+        session_id=fixture.session_id,
+        owner_generation=fixture.owner_generation,
+        model="gpt-5.4",
+        required_inference_profile=None,
+        expected_buffer_id=following.id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
+        active_run_id=admission.run.id,
+    )
+    assert promoted.deleted_buffer_ids == [following.id]
+    assert promoted.user_messages[0].payload.content == following.presentation.content
+    assert promoted.complete_run is False
+    async with rdb_session_manager() as session:
+        assert (
+            await MailboxRepository().list_by_session_id(session, fixture.session_id)
+            == []
         )
 
 
@@ -1708,6 +1801,30 @@ async def test_admit_scheduled_continuation_rebinds_started_cycle(
                 ),
                 requested_enabled_execution_options=[],
             ),
+        )
+
+    active_run = await _create_active_run(
+        rdb_session_manager, session_id=fixture.session_id
+    )
+    handoff = await service.flush_session_mailbox_items(
+        session_id=fixture.session_id,
+        owner_generation=fixture.owner_generation,
+        model="gpt-5.4",
+        required_inference_profile=None,
+        expected_buffer_id=continuation.id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
+        active_run_id=active_run.id,
+    )
+    assert handoff.complete_run is True
+    assert handoff.suppress_parent_result is True
+    assert handoff.deleted_buffer_ids == []
+    async with rdb_session_manager() as session:
+        await AgentRunRepository().mark_terminal(
+            session,
+            active_run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
         )
 
     continuation_result = await service.admit_scheduled_mailbox_head(

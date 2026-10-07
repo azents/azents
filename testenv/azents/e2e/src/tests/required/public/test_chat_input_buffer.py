@@ -12,6 +12,7 @@ from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
+from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
@@ -27,6 +28,9 @@ from azentspublicclient.models.create_workspace_request import CreateWorkspaceRe
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.scheduled_task_create_request import (
+    ScheduledTaskCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.toolkit_config_create_request import (
@@ -834,6 +838,114 @@ def _wait_for_mock_openai_journal_contains(
 
 class TestChatInputBuffer:
     """Verify chat input buffer behavior through user-facing E2E paths."""
+
+    def test_scheduled_input_hands_off_running_turn_before_next_model_response(
+        self,
+        request: pytest.FixtureRequest,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_admin_server_url: str,
+        azents_engine_worker_container: DockerContainer,
+    ) -> None:
+        """Scheduled input and its FIFO follower arrive before the next response."""
+        release_file_path = f"/tmp/azents-scheduled-handoff-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container, release_file_path, present=False
+        )
+        request.addfinalizer(
+            lambda: _set_release_file(
+                azents_engine_worker_container, release_file_path, present=True
+            )
+        )
+        workspace = _setup_workspace(
+            public_api_client, admin_api_client, azents_public_server_url
+        )
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            delay_seconds=0.0,
+            release_file_path=release_file_path,
+        )
+        initial = _write_new_session_message(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_INITIAL_MESSAGE,
+            client_request_id=f"scheduled-initial-{unique()}",
+        )
+        session_id = _session_id_from_write(initial)
+        _wait_for_tool_release_barrier(
+            azents_engine_worker_container, release_file_path
+        )
+        scheduled_at = "2099-01-02T03:04:05Z"
+        ScheduledTaskV1Api(public_api_client).scheduled_task_v1_create_scheduled_task(
+            agent_id,
+            workspace.handle,
+            ScheduledTaskCreateRequest(
+                session_id=session_id,
+                title="Scheduled Task E2E once",
+                objective="Submit the deterministic Scheduled Task E2E result.",
+                at=scheduled_at,
+                cron=None,
+                timezone=None,
+                channel_id=None,
+            ),
+            _headers=_headers(workspace.token),
+        )
+        dispatch = requests.post(
+            f"{azents_admin_server_url}/scheduler/v1/scheduled-tasks/dispatch",
+            json={"now": scheduled_at},
+            timeout=30,
+        )
+        dispatch.raise_for_status()
+        assert _response_object(dispatch, label="Scheduled dispatch")["admitted"] == 1
+        follow_up = "Buffered follow-up should survive"
+        _write_session_message(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session_id,
+            agent_id=agent_id,
+            message=follow_up,
+            client_request_id=f"scheduled-follow-up-{unique()}",
+        )
+        pending = _list_live(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session_id,
+        )
+        envelopes = _object_items(pending.get("mailbox_items"), label="pending mailbox")
+        assert [item["kind"] for item in envelopes] == [
+            "scheduled_task_trigger",
+            "user_message",
+        ]
+        _set_release_file(
+            azents_engine_worker_container, release_file_path, present=True
+        )
+        final = _wait_for_rest_state(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=session_id,
+            expected_message=follow_up,
+            expected_pending=[],
+        )
+        history = _object_item(final.get("history"), label="final history")
+        events = _object_items(history.get("items"), label="history events")
+        scheduled_index = next(
+            index
+            for index, event in enumerate(events)
+            if event["kind"] == "scheduled_task_trigger"
+        )
+        assert all(
+            event["kind"] != "assistant_message" for event in events[:scheduled_index]
+        )
+        assert events[scheduled_index + 1]["kind"] == "user_message"
+        assert (
+            _object_item(
+                events[scheduled_index + 1]["payload"], label="following input"
+            )["content"]
+            == follow_up
+        )
 
     def test_running_follow_ups_are_buffered_then_promoted_in_fifo_order(
         self,
