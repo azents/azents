@@ -225,3 +225,38 @@ def test_only_exact_platform_set_cookie_names_are_reserved() -> None:
         port=8080,
         websocket=False,
     ) == tuple((name.decode(), value.decode()) for name, value in cookies[2:])
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        b"__Http-Azents-Runtime-Web",
+        b"__Host-Azents-Runtime-Web-Broker-Binding",
+        b"__Host-Azents-Runtime-Web-Binding",
+        b"__Host-Azents-Access",
+        b"__Host-Azents-Refresh",
+        b"__Host-Azents-Access-Expires-At",
+        b"az-token",
+        b"az-refresh",
+        b"az-token-expires-at",
+        b"az-admin-token",
+        b"az-admin-refresh",
+        b"az-admin-token-expires-at",
+    ],
+)
+def test_all_platform_cookie_names_remain_isolated(name: bytes) -> None:
+    assert normalize_request_headers(
+        ((b"Cookie", name + b"=platform; app=owned"),),
+        port=8080,
+        websocket=False,
+        maximum_bytes=32768,
+    ) == ((b"host", b"localhost:8080"), (b"Cookie", b"app=owned"))
+    assert (
+        normalize_response_headers(
+            ((b"Set-Cookie", name + b"=replace; Path=/"),),
+            target_origin="https://abc.services.example.net",
+            port=8080,
+            websocket=False,
+        )
+        == ()
+    )

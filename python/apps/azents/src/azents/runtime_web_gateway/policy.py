@@ -41,6 +41,9 @@ _PLATFORM_COOKIE_NAMES = frozenset(
         b"az-token",
         b"az-refresh",
         b"az-token-expires-at",
+        b"az-admin-token",
+        b"az-admin-refresh",
+        b"az-admin-token-expires-at",
     }
 )
 
