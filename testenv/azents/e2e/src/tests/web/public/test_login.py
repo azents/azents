@@ -1,5 +1,6 @@
 """Login entrypoint browser regressions."""
 
+from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
@@ -25,10 +26,12 @@ def test_login_renders_with_invalid_refresh_cookie(
 
     try:
         browser_driver.get(f"{azents_main_web_url}/login")
-        email_input = WebDriverWait(browser_driver, 20, poll_frequency=0.1).until(
-            ec.element_to_be_clickable((By.NAME, "email"))
-        )
-        assert email_input.is_displayed()
+        WebDriverWait(
+            browser_driver,
+            20,
+            poll_frequency=0.1,
+            ignored_exceptions=(StaleElementReferenceException,),
+        ).until(ec.element_to_be_clickable((By.NAME, "email")))
         assert "/login" in browser_driver.current_url
     finally:
         browser_driver.delete_all_cookies()
