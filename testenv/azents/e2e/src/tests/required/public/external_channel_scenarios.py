@@ -5999,6 +5999,22 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
 
     relocated_state = _discord_provider_observation(discord_provider_fake_url)
     relocation_deliveries = relocated_state.deliveries[quiet_delivery_count:]
+    reply_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if delivery.operation == "create_message"
+        and delivery.outcome in {"delivered", "created", "duplicate"}
+        and delivery.safe_category is None
+    )
+    status_update_index = next(
+        index
+        for index, delivery in enumerate(relocation_deliveries)
+        if index > reply_index
+        and delivery.operation == "update_message"
+        and delivery.message_id == quiet_tracker_message_id
+        and delivery.safe_category == "activity_tracker"
+        and delivery.outcome == "delivered"
+    )
     remove_index = next(
         index
         for index, delivery in enumerate(relocation_deliveries)
@@ -6014,31 +6030,16 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         and delivery.safe_category == "activity_tracker"
         and delivery.outcome in {"delivered", "created", "duplicate"}
     )
-    reply_index = next(
-        index
-        for index, delivery in enumerate(relocation_deliveries)
-        if index > create_index
-        and delivery.operation == "create_message"
-        and delivery.outcome in {"delivered", "created", "duplicate"}
-        and delivery.safe_category is None
-    )
     recreated_tracker_message_id = _string(
         relocation_deliveries[create_index].message_id
     )
-    task_only_update_index = next(
-        index
-        for index, delivery in enumerate(relocation_deliveries)
-        if index > create_index
-        and delivery.operation == "update_message"
-        and delivery.message_id == recreated_tracker_message_id
-        and delivery.safe_category == "activity_tracker"
-        and delivery.outcome == "delivered"
-    )
     assert recreated_tracker_message_id != quiet_tracker_message_id
-    assert remove_index < create_index < reply_index < task_only_update_index
+    # Status changes retain the host despite a reply; the following message-free
+    # title change relocates it using confirmed removal-before-create.
+    assert reply_index < status_update_index < remove_index < create_index
     assert relocation_deliveries[reply_index].suppress_embeds is True
     assert relocation_deliveries[create_index].suppress_embeds is False
-    assert relocation_deliveries[task_only_update_index].suppress_embeds is False
+    assert relocation_deliveries[status_update_index].suppress_embeds is False
     assert not any(
         delivery.safe_category == "activity_tracker"
         and delivery.message_id != recreated_tracker_message_id

@@ -3730,7 +3730,7 @@ class _Handler(BaseHTTPRequestHandler):
                                 },
                                 {
                                     "id": "summarize",
-                                    "title": "Summarize the incident",
+                                    "title": "Summarize the confirmed incident",
                                     "status": "pending",
                                     "details": "Preparing the incident summary.",
                                 },
