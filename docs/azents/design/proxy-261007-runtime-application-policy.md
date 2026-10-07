@@ -1,6 +1,7 @@
 ---
 title: "Runtime Application Policy Ownership Design"
 created: 2026-10-07
+implemented: 2026-10-07
 tags: [runtime, security, gateway]
 document_role: primary
 document_type: design
