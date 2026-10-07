@@ -234,6 +234,94 @@ async def test_loopback_http_preserves_raw_target_headers_and_connection() -> No
         assert b"Referer: https://app.example/login\r\n" in request
 
 
+@pytest.mark.parametrize("method", [b"GET", b"POST"])
+@pytest.mark.parametrize("content_length", [0, 7, None])
+async def test_loopback_stream_preserves_zero_fixed_and_unknown_lengths(
+    method: bytes,
+    content_length: int | None,
+) -> None:
+    request_head = b""
+    request_body = b""
+    received_head = asyncio.Event()
+    permit_body = asyncio.Event()
+    payload = b"" if content_length == 0 else b"example"
+
+    async def body() -> AsyncIterator[bytes]:
+        await permit_body.wait()
+        if payload:
+            yield payload[:3]
+            yield payload[3:]
+
+    async def handle(
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        nonlocal request_head, request_body
+        try:
+            request_head = await reader.readuntil(b"\r\n\r\n")
+            received_head.set()
+            if content_length is not None:
+                request_body = await reader.readexactly(content_length)
+            else:
+                chunks = []
+                while True:
+                    size = int(await reader.readline(), 16)
+                    if size == 0:
+                        await reader.readline()
+                        break
+                    chunks.append(await reader.readexactly(size))
+                    assert await reader.readexactly(2) == b"\r\n"
+                request_body = b"".join(chunks)
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    pool = RunnerWebLoopbackPool(maximum_connections=1)
+
+    async def request() -> None:
+        async with pool.request(
+            method=method,
+            target=b"/",
+            headers=(
+                ((b"Content-Length", str(content_length).encode()),)
+                if content_length is not None
+                else ()
+            ),
+            port=port,
+            body=body(),
+            timeout_seconds=5,
+        ) as response:
+            assert response.status == 200
+            assert b"".join([chunk async for chunk in response.body]) == b"ok"
+
+    await pool.start()
+    task = asyncio.create_task(request())
+    try:
+        await asyncio.wait_for(received_head.wait(), timeout=2)
+        # Headers reach the app before the producer yields a body chunk.
+        assert not permit_body.is_set()
+        permit_body.set()
+        await task
+        assert request_body == payload
+        if content_length is None:
+            assert b"transfer-encoding: chunked" in request_head.lower()
+        else:
+            assert b"transfer-encoding:" not in request_head.lower()
+            assert f"content-length: {content_length}".encode() in request_head.lower()
+    finally:
+        permit_body.set()
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await pool.close()
+        server.close()
+        await server.wait_closed()
+
+
 async def test_loopback_http_does_not_follow_redirects() -> None:
     requests = 0
 

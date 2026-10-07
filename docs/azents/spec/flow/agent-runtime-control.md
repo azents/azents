@@ -110,7 +110,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-07
-spec_version: 101
+spec_version: 102
 ---
 
 # Agent Runtime Control
@@ -359,6 +359,13 @@ reserved by prefix. Application Set-Cookie fields remain separate and retain
 their attributes except existing exact localhost/loopback Domain adaptation.
 Standard hop-by-hop fields and all fields nominated by repeated Connection
 headers are consumed. The Gateway regenerates the local Host for HTTP routing.
+HTTP request framing is regenerated from parsed ingress framing: a request with
+neither Content-Length nor Transfer-Encoding is bodyless and carries
+Content-Length zero to the Runner, rather than an unknown-length body. Explicit
+Content-Length is preserved even when Connection nominates that field; framing
+is proxy-owned. Actual chunked bodies remain streamed without a fixed length.
+HTTP method does not determine body presence: GET bodies are preserved. No
+whole-request buffering or content encoding/decompression is introduced.
 WebSocket handshake fields are consumed only for regenerated WebSocket handshakes;
 ordinary HTTP retains unrelated WebSocket-named fields. Application WebSocket 101
 headers and cookies reach the browser after handshake-field consumption.
@@ -1351,6 +1358,9 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-07 (spec_version=102)** — Preserved parsed request body framing so
+  unframed bodyless HTTP requests no longer acquire chunked transfer encoding.
 
 - **2026-10-07 (spec_version=101)** — Preserved application cookies and all
   end-to-end headers, consumed dynamic Connection fields and protocol-specific

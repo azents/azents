@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -1269,7 +1270,10 @@ class _HttpTransport(_WebSocketTransport):
             await handler.receive(terminal)
 
 
-@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@pytest.mark.parametrize(
+    "method", ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+)
+@pytest.mark.parametrize("body_mode", ["absent", "fixed", "chunked"])
 @pytest.mark.parametrize(
     "origin",
     [
@@ -1292,6 +1296,7 @@ async def test_authenticated_application_methods_reach_transport(
     method: str,
     origin: str | None,
     destination_headers: dict[str, str],
+    body_mode: str,
 ) -> None:
     operations, operational_state = _operations()
     proxy = _ControlSessions()
@@ -1343,12 +1348,24 @@ async def test_authenticated_application_methods_reach_transport(
     if origin is not None:
         headers["Origin"] = origin
     headers.update(destination_headers)
+    body = b"value=example"
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield body[:5]
+        yield body[5:]
+
     try:
         response = await client.request(
             method,
             "/create",
             headers=headers,
-            data=b"value=example",
+            data=(
+                chunks()
+                if body_mode == "chunked"
+                else body
+                if body_mode == "fixed"
+                else None
+            ),
         )
         assert response.status == 200
         await response.read()
@@ -1361,16 +1378,22 @@ async def test_authenticated_application_methods_reach_transport(
         }
         assert forwarded[b"x-app-token"] == b"application-value"
         assert forwarded[b"cookie"] == b"session=application-session"
+        assert b"transfer-encoding" not in forwarded
+        if body_mode == "chunked":
+            assert b"content-length" not in forwarded
+        else:
+            assert forwarded[b"content-length"] == (
+                str(len(body)).encode() if body_mode == "fixed" else b"0"
+            )
         for name, value in destination_headers.items():
             assert forwarded[name.lower().encode()] == value.encode()
         if origin is None:
             assert b"origin" not in forwarded
         else:
             assert forwarded[b"origin"] == origin.encode()
-        assert (
-            b"".join(item.data.data for item in transport.sent if item.HasField("data"))
-            == b"value=example"
-        )
+        assert b"".join(
+            item.data.data for item in transport.sent if item.HasField("data")
+        ) == (b"" if body_mode == "absent" else body)
     finally:
         await client.close()
 

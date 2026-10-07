@@ -1177,6 +1177,15 @@ async def echo(request):
     body = await request.read()
     return web.json_response({'body': body.decode(), 'method': request.method})
 
+async def framing(request):
+    body = await request.read()
+    return web.json_response({
+        'method': request.method,
+        'bytes': len(body),
+        'content_length': request.headers.get('Content-Length'),
+        'transfer_encoding': request.headers.get('Transfer-Encoding'),
+    })
+
 async def app_login(request):
     response = web.json_response({'logged_in': True})
     response.set_cookie('session', 'runtime-app-session', httponly=True, secure=True)
@@ -1323,6 +1332,7 @@ async def websocket(request):
 application = web.Application()
 application.router.add_get('/', index)
 application.router.add_post('/echo', echo)
+application.router.add_route('*', '/framing', framing)
 application.router.add_post('/app-login', app_login)
 application.router.add_post('/app-session', app_session)
 application.router.add_post('/form-result', form_result)
@@ -1752,6 +1762,15 @@ const done = arguments[arguments.length - 1];
     }
     return response;
   };
+  const bodyless = await checkedFetch('/framing');
+  const bodylessEvidence = await bodyless.json();
+  if (
+    bodylessEvidence.bytes !== 0 ||
+    bodylessEvidence.content_length !== '0' ||
+    bodylessEvidence.transfer_encoding !== null
+  ) {
+    throw new Error(`Bodyless framing changed: ${JSON.stringify(bodylessEvidence)}`);
+  }
   await checkedFetch('/app-login', {method: 'POST'});
   const appSession = await checkedFetch('/app-session', {
     method: 'POST',
