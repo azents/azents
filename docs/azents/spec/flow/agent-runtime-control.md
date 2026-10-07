@@ -110,7 +110,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-07
-spec_version: 100
+spec_version: 101
 ---
 
 # Agent Runtime Control
@@ -341,7 +341,7 @@ configured Main Web authentication or Off-service activation route.
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
 use the same exact identity-cookie contract. Gateway policy independently rejects
-Service Worker requests, ambiguous hosts,
+ambiguous hosts,
 non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
 upgrades before application content is returned. Runtime applications own their
 CSRF and CORS policy: authenticated requests are forwarded without an Origin or
@@ -350,10 +350,24 @@ OPTIONS follows the same platform identity and access checks as other requests;
 the Gateway does not synthesize anonymous browser preflight responses.
 Application access-control, cache, referrer, opener, permission, and framing response
 headers remain authoritative. The Gateway does not inject application security or
-cache policy. Hop-by-hop headers and platform request cookies are removed, reserved
-platform response cookies are blocked, and application cookies and loopback URLs are
-rewritten for the service host. Same-service Origin and Referer values are translated
-to the loopback target without rejecting opaque or external values.
+cache policy. Ordered end-to-end fields, including Authorization, Origin, Referer,
+custom headers, and repeated values, are preserved. Each request Cookie field
+loses only exact platform-owned cookie pairs; application cookies retain their
+names, values, and order, enabling application login sessions. Only exact
+platform-owned Set-Cookie names are blocked; lookalike application names are not
+reserved by prefix. Application Set-Cookie fields remain separate and retain
+their attributes except existing exact localhost/loopback Domain adaptation.
+Standard hop-by-hop fields and all fields nominated by repeated Connection
+headers are consumed. The Gateway regenerates the local Host for HTTP routing.
+WebSocket handshake fields are consumed only for regenerated WebSocket handshakes;
+ordinary HTTP retains unrelated WebSocket-named fields. Application WebSocket 101
+headers and cookies reach the browser after handshake-field consumption.
+Loopback Location URLs retain their existing public-service adaptation.
+Service-Worker and worker-destination Fetch Metadata are application fields and do
+not trigger Gateway rejection. An app-origin Worker can persist across service
+re-exposure and application replacement; application owners own that browser
+lifecycle and caching risk. Workers cannot control distinct Main Web/broker
+origins, read HttpOnly cookie values, or bypass Gateway network authority.
 Gateway security responses are content-free.
 Gateway-generated authentication, activation, transfer, and error documents deny
 framing and retain platform security headers. Broker and Main Web authentication
@@ -1337,6 +1351,11 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-07 (spec_version=101)** — Preserved application cookies and all
+  end-to-end headers, consumed dynamic Connection fields and protocol-specific
+  handshake fields, forwarded application WebSocket 101 headers, and removed
+  the app Worker-destination header rejection.
 
 - **2026-10-07 (spec_version=100)** — Made authenticated Runtime application traffic
   transparent to app-owned CSRF/CORS and response-header policies while retaining

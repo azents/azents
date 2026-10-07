@@ -1,15 +1,13 @@
-"""Security-policy tests that prove rejection happens before proxying."""
+"""Proxy-consumed field and application-header preservation tests."""
 
 import pytest
 
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
 from azents.runtime_web_gateway.policy import (
-    RuntimeWebPolicyCode,
     RuntimeWebPolicyError,
     normalize_request_headers,
     normalize_response_headers,
     parse_target_host,
-    reject_service_worker_request,
 )
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
@@ -47,16 +45,6 @@ def test_host_parser_accepts_one_lowercase_endpoint_label_or_broker() -> None:
             parse_target_host(host, config=_CONFIG)
 
 
-def test_service_worker_requests_are_rejected() -> None:
-    for headers in (
-        {"Sec-Fetch-Dest": "serviceworker"},
-        {"Service-Worker": "script"},
-    ):
-        with pytest.raises(RuntimeWebPolicyError) as captured:
-            reject_service_worker_request(headers)
-        assert captured.value.code is RuntimeWebPolicyCode.FORBIDDEN
-
-
 @pytest.mark.parametrize(
     "origin",
     [b"null", b"https://external.example.com", b"file://", b"https://bad:port"],
@@ -65,12 +53,12 @@ def test_application_origin_values_are_preserved(origin: bytes) -> None:
     headers = normalize_request_headers(
         ((b"Origin", origin), (b"Referer", origin)),
         port=8080,
-        target_origin="https://abc.services.example.net",
+        websocket=False,
         maximum_bytes=32 * 1024,
     )
 
-    assert (b"origin", origin) in headers
-    assert (b"referer", origin) in headers
+    assert (b"Origin", origin) in headers
+    assert (b"Referer", origin) in headers
 
 
 def test_header_normalization_strips_platform_authority_and_preserves_app_policy() -> (
@@ -86,7 +74,7 @@ def test_header_normalization_strips_platform_authority_and_preserves_app_policy
             (b"Sec-WebSocket-Extensions", b"permessage-deflate"),
         ),
         port=8080,
-        target_origin="https://abc.services.example.net",
+        websocket=True,
         maximum_bytes=32 * 1024,
     )
     response_headers = normalize_response_headers(
@@ -99,14 +87,15 @@ def test_header_normalization_strips_platform_authority_and_preserves_app_policy
         ),
         target_origin="https://abc.services.example.net",
         port=8080,
+        websocket=False,
     )
 
     assert (b"host", b"localhost:8080") in request_headers
-    assert not any(name == b"cookie" for name, _value in request_headers)
+    assert (b"Cookie", b"app=value") in request_headers
     assert not any(
-        name.startswith(b"sec-websocket-") for name, _value in request_headers
+        name.lower().startswith(b"sec-websocket-") for name, _value in request_headers
     )
-    assert (b"authorization", b"Bearer application-token") in request_headers
+    assert (b"Authorization", b"Bearer application-token") in request_headers
     assert ("Set-Cookie", "app=value; Path=/") in response_headers
     assert (
         "Location",
@@ -114,7 +103,7 @@ def test_header_normalization_strips_platform_authority_and_preserves_app_policy
     ) in response_headers
     assert ("Cache-Control", "public, max-age=3600") in response_headers
     assert ("Access-Control-Allow-Origin", "*") in response_headers
-    assert (b"origin", b"http://localhost:8080") in request_headers
+    assert (b"Origin", b"https://abc.services.example.net") in request_headers
     assert not any(
         name in {"Referrer-Policy", "Cross-Origin-Opener-Policy", "Permissions-Policy"}
         for name, _value in response_headers
@@ -122,4 +111,152 @@ def test_header_normalization_strips_platform_authority_and_preserves_app_policy
     assert not any(
         name == "Set-Cookie" and "__Http-Azents" in value
         for name, value in response_headers
+    )
+
+
+@pytest.mark.parametrize("websocket", [False, True])
+def test_repeated_application_cookies_keep_order_and_exact_values(
+    websocket: bool,
+) -> None:
+    headers = normalize_request_headers(
+        (
+            (
+                b"Cookie",
+                b'__Http-Azents-Runtime-Web=platform; session="a=b"; session=second',
+            ),
+            (
+                b"Cookie",
+                b"az-token=platform; az-token-app=lookalike; __Host-session=app",
+            ),
+            (b"Cookie", b"__Host-Azents-Access=platform"),
+            (b"Cookie", b"__Host-Azents-App=owned; AZ-TOKEN=case-sensitive"),
+        ),
+        port=8080,
+        websocket=websocket,
+        maximum_bytes=32768,
+    )
+    assert headers == (
+        (b"host", b"localhost:8080"),
+        (b"Cookie", b'session="a=b"; session=second'),
+        (b"Cookie", b"az-token-app=lookalike; __Host-session=app"),
+        (b"Cookie", b"__Host-Azents-App=owned; AZ-TOKEN=case-sensitive"),
+    )
+
+
+@pytest.mark.parametrize("websocket", [False, True])
+def test_connection_nominated_fields_are_consumed_in_both_directions(
+    websocket: bool,
+) -> None:
+    headers = (
+        (b"X-Hop-One", b"consume"),
+        (b"Connection", b"keep-alive, X-Hop-One"),
+        (b"connection", b" X-HOP-TWO "),
+        (b"x-hop-two", b"consume"),
+        (b"Proxy-Connection", b"keep-alive"),
+        (b"Authorization", b"Bearer app"),
+        (b"WWW-Authenticate", b"Basic realm=app"),
+        (b"Origin", b"https://abc.services.example.net"),
+        (b"Referer", b"https://abc.services.example.net/login?next=home"),
+        (b"X-App", b"one"),
+        (b"X-App", b"two"),
+    )
+    forwarded = headers[5:]
+    assert normalize_request_headers(
+        headers,
+        port=8080,
+        websocket=websocket,
+        maximum_bytes=32768,
+    ) == ((b"host", b"localhost:8080"), *forwarded)
+    assert normalize_response_headers(
+        iter(headers),
+        target_origin="https://abc.services.example.net",
+        port=8080,
+        websocket=websocket,
+    ) == tuple((name.decode(), value.decode()) for name, value in forwarded)
+
+
+@pytest.mark.parametrize("websocket", [False, True])
+def test_websocket_fields_are_consumed_only_for_regenerated_handshakes(
+    websocket: bool,
+) -> None:
+    headers = (
+        (b"Sec-WebSocket-Key", b"key"),
+        (b"Sec-WebSocket-Accept", b"accept"),
+        (b"Sec-WebSocket-Extensions", b"permessage-deflate"),
+        (b"Sec-WebSocket-Version", b"13"),
+        (b"Sec-WebSocket-Protocol", b"chat.v1"),
+        (b"Content-Length", b"0"),
+    )
+    request = normalize_request_headers(
+        headers,
+        port=8080,
+        websocket=websocket,
+        maximum_bytes=32768,
+    )
+    assert request == (
+        (b"host", b"localhost:8080"),
+        *(headers[4:5] if websocket else headers),
+    )
+    response = normalize_response_headers(
+        headers,
+        target_origin="https://abc.services.example.net",
+        port=8080,
+        websocket=websocket,
+    )
+    assert response == (
+        ()
+        if websocket
+        else tuple((name.decode(), value.decode()) for name, value in headers)
+    )
+
+
+def test_only_exact_platform_set_cookie_names_are_reserved() -> None:
+    cookies = (
+        (b"Set-Cookie", b"az-token=platform; Path=/"),
+        (b"Set-Cookie", b"__Http-Azents-Runtime-Web=platform; Path=/"),
+        (b"Set-Cookie", b'session="a=b";  Path=/; HttpOnly'),
+        (b"Set-Cookie", b"session=second; Path=/other"),
+        (b"Set-Cookie", b"az-token-app=owned; Domain=localhost.example"),
+        (b"Set-Cookie", b"__Host-Azents-App=owned; Secure; Path=/"),
+    )
+    assert normalize_response_headers(
+        cookies,
+        target_origin="https://abc.services.example.net",
+        port=8080,
+        websocket=False,
+    ) == tuple((name.decode(), value.decode()) for name, value in cookies[2:])
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        b"__Http-Azents-Runtime-Web",
+        b"__Host-Azents-Runtime-Web-Broker-Binding",
+        b"__Host-Azents-Runtime-Web-Binding",
+        b"__Host-Azents-Access",
+        b"__Host-Azents-Refresh",
+        b"__Host-Azents-Access-Expires-At",
+        b"az-token",
+        b"az-refresh",
+        b"az-token-expires-at",
+        b"az-admin-token",
+        b"az-admin-refresh",
+        b"az-admin-token-expires-at",
+    ],
+)
+def test_all_platform_cookie_names_remain_isolated(name: bytes) -> None:
+    assert normalize_request_headers(
+        ((b"Cookie", name + b"=platform; app=owned"),),
+        port=8080,
+        websocket=False,
+        maximum_bytes=32768,
+    ) == ((b"host", b"localhost:8080"), (b"Cookie", b"app=owned"))
+    assert (
+        normalize_response_headers(
+            ((b"Set-Cookie", name + b"=replace; Path=/"),),
+            target_origin="https://abc.services.example.net",
+            port=8080,
+            websocket=False,
+        )
+        == ()
     )

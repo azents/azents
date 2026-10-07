@@ -4,52 +4,48 @@ import dataclasses
 import enum
 import re
 import urllib.parse
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
 _ENDPOINT_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-_FORBIDDEN_REQUEST_HEADERS = frozenset(
+_HOP_HEADERS = frozenset(
     {
         b"connection",
-        b"cookie",
-        b"host",
         b"keep-alive",
         b"proxy-authenticate",
         b"proxy-authorization",
-        b"sec-websocket-accept",
-        b"sec-websocket-extensions",
-        b"sec-websocket-key",
-        b"sec-websocket-version",
+        b"proxy-connection",
         b"te",
         b"trailer",
         b"transfer-encoding",
         b"upgrade",
     }
 )
-_FORBIDDEN_RESPONSE_HEADERS = frozenset(
+_WEBSOCKET_HANDSHAKE_HEADERS = frozenset(
     {
-        b"connection",
-        b"keep-alive",
-        b"proxy-authenticate",
-        b"proxy-authorization",
         b"sec-websocket-accept",
         b"sec-websocket-extensions",
         b"sec-websocket-key",
         b"sec-websocket-version",
-        b"te",
-        b"trailer",
-        b"transfer-encoding",
-        b"upgrade",
     }
 )
-_PLATFORM_COOKIE_PREFIXES = (
-    "__host-azents-",
-    "__http-azents-",
-    "az-token",
-    "az-refresh",
+_PLATFORM_COOKIE_NAMES = frozenset(
+    {
+        b"__Http-Azents-Runtime-Web",
+        b"__Host-Azents-Runtime-Web-Broker-Binding",
+        b"__Host-Azents-Runtime-Web-Binding",
+        b"__Host-Azents-Access",
+        b"__Host-Azents-Refresh",
+        b"__Host-Azents-Access-Expires-At",
+        b"az-token",
+        b"az-refresh",
+        b"az-token-expires-at",
+        b"az-admin-token",
+        b"az-admin-refresh",
+        b"az-admin-token-expires-at",
+    }
 )
-_SERVICE_WORKER_DESTINATIONS = frozenset({"serviceworker", "sharedworker"})
 
 
 class RuntimeWebPolicyCode(enum.StrEnum):
@@ -114,48 +110,36 @@ def parse_target_host(
     return RuntimeWebTarget(endpoint_label=label, broker=False)
 
 
-def reject_service_worker_request(headers: Mapping[str, str]) -> None:
-    """Reject service-worker script or update traffic before cache/proxy work."""
-    destination = headers.get("Sec-Fetch-Dest", "").lower()
-    service_worker = headers.get("Service-Worker", "").lower()
-    if destination in _SERVICE_WORKER_DESTINATIONS or service_worker == "script":
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-
-
 def normalize_request_headers(
     headers: Sequence[tuple[bytes, bytes]],
     *,
     port: int,
-    target_origin: str,
+    websocket: bool,
     maximum_bytes: int,
 ) -> tuple[tuple[bytes, bytes], ...]:
     """Strip platform and hop-by-hop fields while retaining ordered app headers."""
     size = sum(len(name) + len(value) + 4 for name, value in headers)
     if size > maximum_bytes:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.HEADER_TOO_LARGE)
+    consumed = _HOP_HEADERS | _connection_headers(headers) | {b"host"}
+    if websocket:
+        consumed |= _WEBSOCKET_HANDSHAKE_HEADERS | {b"content-length"}
     output: list[tuple[bytes, bytes]] = [(b"host", f"localhost:{port}".encode())]
     for name, value in headers:
         lowered = name.lower()
-        if lowered in _FORBIDDEN_REQUEST_HEADERS:
+        if lowered in consumed:
             continue
-        if lowered == b"authorization":
-            output.append((lowered, value))
-            continue
-        if lowered == b"origin":
-            if _http_origin(value.decode("latin-1")) == target_origin:
-                output.append((lowered, f"http://localhost:{port}".encode()))
-            else:
-                output.append((lowered, value))
-            continue
-        if lowered == b"referer":
-            output.append(
-                (
-                    lowered,
-                    _normalized_referer(value, target_origin=target_origin, port=port),
-                )
+        if lowered == b"cookie":
+            pairs = (
+                pair.strip()
+                for pair in value.split(b";")
+                if pair.split(b"=", 1)[0].strip() not in _PLATFORM_COOKIE_NAMES
             )
+            application_cookie = b"; ".join(pair for pair in pairs if pair)
+            if application_cookie:
+                output.append((name, application_cookie))
             continue
-        output.append((lowered, value))
+        output.append((name, value))
     return tuple(output)
 
 
@@ -164,12 +148,20 @@ def normalize_response_headers(
     *,
     target_origin: str,
     port: int,
+    websocket: bool,
 ) -> tuple[tuple[str, str], ...]:
     """Preserve application policy while normalizing transport and local URLs."""
+    ordered = tuple(headers)
+    consumed = _HOP_HEADERS | _connection_headers(ordered)
+    if websocket:
+        consumed |= _WEBSOCKET_HANDSHAKE_HEADERS | {
+            b"sec-websocket-protocol",
+            b"content-length",
+        }
     output: list[tuple[str, str]] = []
-    for name, value in headers:
+    for name, value in ordered:
         lowered = name.lower()
-        if lowered in _FORBIDDEN_RESPONSE_HEADERS:
+        if lowered in consumed:
             continue
         if lowered == b"set-cookie" and _reserved_set_cookie(value):
             continue
@@ -186,34 +178,21 @@ def normalize_response_headers(
     return tuple(output)
 
 
-def _http_origin(value: str) -> str | None:
-    """Return an HTTP origin for local rewriting, or preserve opaque values."""
-    try:
-        parsed = urllib.parse.urlparse(value)
-        hostname = parsed.hostname
-        port = parsed.port
-    except ValueError:
-        return None
-    if (
-        parsed.scheme not in {"http", "https"}
-        or hostname is None
-        or parsed.username is not None
-        or parsed.password is not None
-        or parsed.path not in {"", "/"}
-        or parsed.params
-        or parsed.query
-        or parsed.fragment
-    ):
-        return None
-    default_port = 443 if parsed.scheme == "https" else 80
-    if port in {None, default_port}:
-        return f"{parsed.scheme}://{hostname.lower()}"
-    return f"{parsed.scheme}://{hostname.lower()}:{port}"
+def _connection_headers(
+    headers: Sequence[tuple[bytes, bytes]],
+) -> frozenset[bytes]:
+    """Gather connection-local field names across all Connection headers."""
+    return frozenset(
+        token.strip().lower()
+        for name, value in headers
+        if name.lower() == b"connection"
+        for token in value.split(b",")
+        if token.strip()
+    )
 
 
 def _reserved_set_cookie(value: bytes) -> bool:
-    name = value.split(b"=", 1)[0].strip().decode("latin-1").lower()
-    return any(name.startswith(prefix) for prefix in _PLATFORM_COOKIE_PREFIXES)
+    return value.split(b"=", 1)[0].strip() in _PLATFORM_COOKIE_NAMES
 
 
 def _normalize_application_cookie(value: str) -> str:
@@ -221,10 +200,13 @@ def _normalize_application_cookie(value: str) -> str:
     normalized = [
         part
         for part in parts
-        if not part.lower().startswith("domain=localhost")
-        and not part.lower().startswith("domain=127.0.0.1")
+        if not (
+            part.partition("=")[0].strip().lower() == "domain"
+            and part.partition("=")[2].strip().lower().lstrip(".")
+            in {"localhost", "127.0.0.1"}
+        )
     ]
-    return "; ".join(normalized)
+    return "; ".join(normalized) if len(normalized) != len(parts) else value
 
 
 def _normalize_location(
@@ -253,16 +235,3 @@ def _normalize_location(
             )
         )
     return value
-
-
-def _normalized_referer(value: bytes, *, target_origin: str, port: int) -> bytes:
-    try:
-        text = value.decode("latin-1")
-        parsed = urllib.parse.urlparse(text)
-        if _http_origin(f"{parsed.scheme}://{parsed.netloc}") != target_origin:
-            return value
-        return urllib.parse.urlunparse(
-            ("http", f"localhost:{port}", parsed.path, "", parsed.query, "")
-        ).encode("latin-1")
-    except ValueError:
-        return value

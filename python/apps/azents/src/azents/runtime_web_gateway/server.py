@@ -88,7 +88,6 @@ from azents.runtime_web_gateway.policy import (
     normalize_request_headers,
     normalize_response_headers,
     parse_target_host,
-    reject_service_worker_request,
 )
 from azents.runtime_web_gateway.session_runtime import (
     RuntimeWebGatewayControlSessions,
@@ -803,7 +802,6 @@ async def _endpoint(
     *,
     endpoint_key: str,
 ) -> web.StreamResponse:
-    reject_service_worker_request(request.headers)
     service = await state.authority.resolve_service(hostname_key=endpoint_key)
     if service is None:
         return _bounded_error(
@@ -852,7 +850,7 @@ async def _endpoint(
     headers = normalize_request_headers(
         request.raw_headers,
         port=service.port,
-        target_origin=target_origin,
+        websocket=protocol is StreamProtocol.WEBSOCKET,
         maximum_bytes=state.config.request_header_bytes,
     )
     target = request.raw_path.encode("ascii", errors="strict")
@@ -1004,6 +1002,7 @@ async def _proxy_http(
                             ((header.name, header.value) for header in event.headers),
                             target_origin=target_origin,
                             port=authority.service.port,
+                            websocket=False,
                         ),
                     )
                     await response.prepare(request)
@@ -1223,6 +1222,7 @@ async def _proxy_websocket(
                                 ),
                                 target_origin=target_origin,
                                 port=authority.service.port,
+                                websocket=False,
                             ),
                         )
                     try:
@@ -1247,6 +1247,14 @@ async def _proxy_websocket(
                         ),
                         max_msg_size=MAX_WEBSOCKET_MESSAGE_BYTES,
                         compress=False,
+                    )
+                    websocket.headers.extend(
+                        normalize_response_headers(
+                            ((header.name, header.value) for header in event.headers),
+                            target_origin=target_origin,
+                            port=authority.service.port,
+                            websocket=True,
+                        )
                     )
                     await websocket.prepare(request)
                     client_task = asyncio.create_task(
