@@ -853,6 +853,23 @@ async def _endpoint(
         websocket=protocol is StreamProtocol.WEBSOCKET,
         maximum_bytes=state.config.request_header_bytes,
     )
+    if (
+        protocol is StreamProtocol.HTTP
+        and request.headers.get("Transfer-Encoding") is None
+    ):
+        content_length = request.content_length
+        # Carry parsed ingress framing across the stream rather than treating an
+        # unframed, bodyless request as an unknown-length body at the next hop.
+        headers = tuple(
+            (name, value)
+            for name, value in headers
+            if name.lower() != b"content-length"
+        ) + (
+            (
+                b"Content-Length",
+                str(content_length if content_length is not None else 0).encode(),
+            ),
+        )
     target = request.raw_path.encode("ascii", errors="strict")
     if not target.startswith(b"/") or target.startswith(b"//"):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
