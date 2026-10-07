@@ -15,16 +15,8 @@ import {
   getSafeLoginNext,
 } from "@/shared/lib/login-redirect";
 import { trpc } from "@/trpc/client";
-import type { LoginState } from "../types";
-
-export interface LoginStepContainerProps {
-  state: LoginState;
-  emailAvailable: boolean;
-  signupEmailAvailable: boolean;
-  signupEmailSent: boolean;
-  onSubmit: (email: string, password: string) => void;
-  onRequestSignupEmail: (email: string) => void;
-}
+import { useLoginStepForm } from "./useLoginStepForm";
+import type { LoginState, LoginStepContainerProps } from "../types";
 
 export function useLoginStep({
   emailAvailable,
@@ -131,6 +123,12 @@ export function useLoginStep({
     [requestSignupEmailMutation],
   );
 
+  const form = useLoginStepForm({
+    emailAvailable,
+    onSubmit,
+    onRequestSignupEmail,
+  });
+
   return {
     state,
     emailAvailable,
@@ -139,5 +137,6 @@ export function useLoginStep({
     signupEmailSent,
     onSubmit,
     onRequestSignupEmail,
+    form,
   };
 }
