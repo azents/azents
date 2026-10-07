@@ -25,6 +25,7 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -83,6 +84,7 @@ from tests.required.public.test_runtime_terminal import (
     _start_runtime,
     _TerminalSocket,
     _TerminalWorkspace,
+    _wait_runtime,
     _wait_terminal_projection,
 )
 
@@ -2324,6 +2326,15 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
             )
             # Keep the Gateway and browser alive while the Runner joins a fresh
             # Owner epoch; previous transfer totals must not enter the new hop.
+            runtime_api = AgentRuntimeV1Api(runtime_web_api_client)
+            previous_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+                handle=workspace.handle,
+                agent_id=workspace.agent_id,
+                _headers=_headers(workspace.token),
+            )
+            assert previous_runtime.runtime is not None
+            previous_runner_generation = previous_runtime.runtime.runner_generation
+            assert previous_runner_generation is not None
             runtime_web_stack_factory.owner_control.get_wrapped_container().restart(
                 timeout=5,
             )
@@ -2341,6 +2352,25 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 ),
             )
             _assert_operations_ready(stack)
+            _wait_runtime(
+                runtime_api=runtime_api,
+                workspace=_TerminalWorkspace(
+                    token=workspace.token,
+                    handle=workspace.handle,
+                    agent_id=workspace.agent_id,
+                    session_id=workspace.session_id,
+                ),
+                predicate=lambda runtime: (
+                    runtime.runtime is not None
+                    and runtime.runtime.runner_generation is not None
+                    and runtime.runtime.runner_generation != previous_runner_generation
+                    and runtime.lifecycle is not None
+                    and runtime.lifecycle.availability == "ready"
+                    and runtime.lifecycle.runner.state == "ready"
+                    and runtime.actions.use_runner
+                ),
+                message="Runtime Web Runner did not become ready in a new generation",
+            )
             _browser_neutral_transport_evidence(
                 stack=stack,
                 endpoint_url=service_url,
