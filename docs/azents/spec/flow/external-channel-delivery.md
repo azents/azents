@@ -63,8 +63,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/file_access.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-10-05
-spec_version: 67
+last_verified_at: 2026-10-07
+spec_version: 68
 ---
 
 # External Channel Delivery and Channel Work
@@ -433,25 +433,27 @@ unchanged.
   Channel Work Embed. A Scheduled Task-owned initial Tracker instead uses
   `Scheduled Task` as the Embed title and places the Schedule title followed by the
   human-readable schedule timing in its body.
-  A state-only conversational progress change updates the current Tracker host in
-  place even when tasks changed, or creates one notification-suppressed standalone
-  Tracker when none exists.
+  A conversational progress change with the same ordered task titles updates the
+  current Tracker host in place, or creates one notification-suppressed standalone
+  Tracker when none exists. Completion, reopening, task IDs, details, output, and
+  sources do not affect the title-list comparison.
   A message-only Action delivers the reply without changing Tracker presentation.
   A confirmed `message_not_found` failure when updating a Tracker retires that
   missing host identity while retaining the failed outcome and canonical Work.
   The next ordinary progress Action creates a notification-suppressed standalone
   replacement. Permission, rate-limit, ambiguous, and stale-revision outcomes
   retain their existing identity and recovery boundaries.
-  When an explicitly supplied ordered task snapshot differs from the canonical
-  pre-transition tasks and the Action also contains a conversational message, Tracker
-  relocation runs before the reply: it removes the previous host first:
+  When the ordered titles of explicitly supplied tasks differ from the canonical
+  pre-transition task titles, Tracker relocation runs whether or not the Action
+  contains a conversational message. Renaming, adding, removing, or reordering task
+  titles triggers relocation. It removes the previous host first:
   standalone hosts are deleted, while reply hosts keep their conversational content
   and have only Tracker Embeds and controls cleared. Confirmed removal permits
   notification-suppressed standalone creation with the complete latest Tracker.
-  Reply delivery follows the relocation attempt and is not gated by Tracker
-  success. An identical task replacement or title-only progress change updates the
+  Any reply delivery follows the relocation attempt and is not gated by Tracker
+  success. An unchanged task-title list or work-title-only progress change updates the
   current standalone or reply host in place. The normal successful relocation path
-  therefore exposes at most one Tracker immediately before the reply, while
+  therefore exposes at most one Tracker, before any requested reply, while
   temporary absence is allowed between removal and creation. Creation and update
   both send a `View session` link derived from the current canonical Workspace,
   Agent, and Session target. Conversational Tracker creation and update also derive
@@ -475,7 +477,7 @@ snapshot, desired revision, retained provider identity, and whether each Tracker
 is hosted by a standalone message or a conversational reply. Every progress effect is
 revalidated against its exact desired revision before provider I/O; a newer canonical
 snapshot makes an older pending progress effect not attempted. For changed Discord
-tasks accompanied by a message, process-local effect dependencies require confirmed
+task-title lists, process-local effect dependencies require confirmed
 previous-host removal before silent standalone Tracker creation when a current host
 exists; otherwise creation proceeds directly. Reply delivery does not gate relocation.
 Failed or
@@ -677,6 +679,10 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 68) — Recreate Discord Trackers for ordered task-title
+  list changes regardless of reply presence; retain in-place edits for status and
+  metadata changes.
 - **2026-10-05** (spec_version 67) — Completed exact thread-title authority in a native read-only repository before credential decoding and the one-shot Discord effect.
 
 

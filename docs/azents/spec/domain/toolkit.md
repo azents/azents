@@ -109,8 +109,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-10-05
-spec_version: 137
+last_verified_at: 2026-10-07
+spec_version: 138
 ---
 
 # Toolkit
@@ -1261,14 +1261,16 @@ supports at most 49 tasks, and its complete desired progress snapshot must fit t
 64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
 projects the complete latest Tracker; every continue invalidates older awaiting
 settlement, while message-only continuation leaves progress and Tracker position
-unchanged. For Discord, an explicitly supplied complete ordered task snapshot is
-compared with the canonical pre-transition tasks. A changed snapshot accompanied by a
-message removes or detaches the current Tracker, creates the complete latest Tracker
-as a notification-suppressed standalone message, and then attempts the reply parts.
+unchanged. For Discord, the ordered titles of explicitly supplied tasks are compared
+with the canonical pre-transition task titles. A renamed, added, removed, or reordered
+title removes or detaches the current Tracker and creates the complete latest Tracker
+as a notification-suppressed standalone message, regardless of message presence.
+Any requested reply parts are attempted after relocation.
 Replacement creation depends on confirmed current-host removal but not on reply
-delivery. A changed snapshot without a message updates the current standalone or reply
-host in place, or creates a missing standalone host. Identical task replacements and
-title-only changes also update the current host in place. Later progress changes
+delivery. Completion, reopening, IDs, details, output, and sources are excluded from
+this comparison. An unchanged task-title list or work-title-only change updates the
+current standalone or reply host in place, or creates a missing standalone host.
+Later progress changes
 repair failed or ambiguous best-effort projection without durable retry work.
 `request_input` requires a
 participant-visible message, preserves active Work, and establishes binding-scoped
@@ -1321,6 +1323,9 @@ an admitted trigger/cycle with its Task. Channel registration and deletion
 notification execute only after the operation returns.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 138) — Compare ordered task titles for Discord Tracker
+  relocation regardless of reply presence; status and metadata changes edit the host.
 
 - **2026-10-05** (spec_version 137) — Reconciled code-path discovery with current
   defining modules; system behavior is unchanged.

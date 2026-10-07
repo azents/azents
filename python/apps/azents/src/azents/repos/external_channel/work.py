@@ -1358,16 +1358,16 @@ class ExternalChannelWorkRepository:
                 )
                 return effect_index
 
-            move_tracker_before_reply = (
+            recreate_discord_tracker = (
                 connection.provider is ExternalChannelProvider.DISCORD
                 and mode
                 in {
                     ExternalChannelActionMode.CONTINUE,
                     ExternalChannelActionMode.REQUEST_INPUT,
                 }
-                and message is not None
                 and requested_tasks is not None
-                and requested_tasks != work.tasks
+                and [task.title for task in requested_tasks]
+                != [task.title for task in work.tasks]
             )
             reply_parts = (
                 _reply_parts(
@@ -1391,7 +1391,7 @@ class ExternalChannelWorkRepository:
                         projection_host_kind=None,
                     )
 
-            if message is not None and not move_tracker_before_reply:
+            if message is not None and not recreate_discord_tracker:
                 append_reply_effects()
 
             projection_parts = {
@@ -1467,7 +1467,6 @@ class ExternalChannelWorkRepository:
                         desired_pages = tuple(
                             (page.text, page.embeds) for page in rendered_discord.pages
                         )
-                    recreate_discord_tracker = move_tracker_before_reply
                     for part_ordinal, (text, presentation) in enumerate(desired_pages):
                         part = projection_parts.pop(part_ordinal, None)
                         if recreate_discord_tracker:
@@ -1650,7 +1649,7 @@ class ExternalChannelWorkRepository:
                             dependencies=(),
                             projection_host_kind=part.host_kind,
                         )
-            if move_tracker_before_reply:
+            if recreate_discord_tracker:
                 append_reply_effects()
             result = ChannelActionTransition(
                 binding_id=binding.id,

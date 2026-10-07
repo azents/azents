@@ -122,8 +122,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-10-05
-spec_version: 85
+last_verified_at: 2026-10-07
+spec_version: 86
 ---
 
 # External Channel
@@ -334,14 +334,15 @@ provider effects and durable-ingestion orchestration run after completion.
   never moves back to hidden within that cycle. Existing Work rows retain their current
   visibility through schema migration, and Scheduled Task-owned Trackers keep their
   separate unconditional lifecycle.
-- Discord compares each explicitly supplied ordered task snapshot with the canonical
-  pre-transition tasks. A changed snapshot accompanied by a conversational message
-  removes or detaches the current Tracker, creates the complete latest Tracker as a
-  notification-suppressed standalone message, and then sends the reply. A changed
-  snapshot without a message updates the current standalone or reply host in place,
-  or creates a missing standalone host. An identical task replacement or title-only
-  change also updates the current host in place; a message-only Action leaves it
-  unchanged.
+- Discord compares the ordered titles of explicitly supplied tasks with the canonical
+  pre-transition task titles. Renaming, adding, removing, or reordering titles
+  removes or detaches the current Tracker and creates the complete latest Tracker as
+  a notification-suppressed standalone message, whether or not a conversational
+  message is supplied. Any reply follows the relocation attempt. Completion,
+  reopening, IDs, details, output, and sources do not affect this comparison.
+  An unchanged task-title list or work-title-only change updates the current
+  standalone or reply host in place, or creates a missing standalone host;
+  a message-only Action leaves the Tracker unchanged.
 - Every model input boundary exposes `request_input` and `ignore` beside `finish` and
   `continue`. `request_input` requires an ordinary participant-visible message,
   preserves active Work, and stores nullable requesting Run identity in version-4
@@ -710,6 +711,9 @@ already admitted for immediate one-attempt delivery. No cross-I/O lock, provider
 history, queue, retry, or fallback target is part of this boundary.
 
 ## Changelog
+
+- **2026-10-07** (spec_version 86) — Base Discord Tracker relocation on ordered task
+  titles independently of reply presence, retaining hosts for status and metadata edits.
 
 - **2026-10-05** (spec_version 85) — Completed Slack presence/Socket lease
   repository operations, preserving lease fencing, CAS and health bookkeeping
