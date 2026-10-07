@@ -1162,14 +1162,28 @@ async def index(request):
         text=(
             '<!doctype html><title>Runtime Web E2E</title>'
             '<h1 id="ready">Runtime Web E2E ready</h1>'
+            '<form id="native-form" method="post" action="/form-result" '
+            'target="form-frame"><input name="value" value="native-form"></form>'
+            '<iframe id="form-frame" name="form-frame"></iframe>'
         ),
         content_type='text/html',
-        headers={'X-Runtime-App': 'loopback'},
+        headers={
+            'X-Runtime-App': 'loopback',
+            'Referrer-Policy': 'no-referrer',
+        },
     )
 
 async def echo(request):
     body = await request.read()
     return web.json_response({'body': body.decode(), 'method': request.method})
+
+async def form_result(request):
+    body = await request.read()
+    return web.json_response({
+        'body': body.decode(),
+        'method': request.method,
+        'origin': request.headers.get('Origin'),
+    })
 
 async def upload(request):
     global upload_invocations
@@ -1286,6 +1300,7 @@ async def websocket(request):
 application = web.Application()
 application.router.add_get('/', index)
 application.router.add_post('/echo', echo)
+application.router.add_post('/form-result', form_result)
 application.router.add_post('/upload', upload)
 application.router.add_get('/download', download)
 application.router.add_get('/hold', hold)
@@ -1712,6 +1727,25 @@ const done = arguments[arguments.length - 1];
     }
     return response;
   };
+  const formResult = await new Promise((resolve, reject) => {
+    const frame = document.getElementById('form-frame');
+    frame.onload = () => {
+      try {
+        if (frame.contentWindow.location.pathname !== '/form-result') return;
+        resolve(JSON.parse(frame.contentDocument.body.textContent));
+      } catch (error) {
+        reject(error);
+      }
+    };
+    document.getElementById('native-form').submit();
+  });
+  if (
+    formResult.body !== 'value=native-form' ||
+    formResult.method !== 'POST' ||
+    formResult.origin !== 'null'
+  ) {
+    throw new Error(`Native form POST failed: ${JSON.stringify(formResult)}`);
+  }
   const echo = await checkedFetch(
     '/echo',
     {method: 'POST', body: 'runtime-web-body'},
@@ -1949,8 +1983,6 @@ def _browser_neutral_transport_evidence(
         "Host": endpoint_host,
         "Cookie": cookie,
         "User-Agent": firefox_user_agent,
-        "Sec-Fetch-Site": "same-origin",
-        "Sec-Fetch-Mode": "cors",
     }
     response = requests.post(
         f"{stack.edge_host_url}/echo",

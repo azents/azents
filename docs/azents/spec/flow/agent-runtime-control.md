@@ -109,8 +109,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-05
-spec_version: 99
+last_verified_at: 2026-10-07
+spec_version: 100
 ---
 
 # Agent Runtime Control
@@ -341,15 +341,23 @@ configured Main Web authentication or Off-service activation route.
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
 use the same exact identity-cookie contract. Gateway policy independently rejects
-Service Worker requests, cross-root origins, invalid Fetch Metadata, ambiguous hosts,
+Service Worker requests, ambiguous hosts,
 non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
-upgrades before application content is returned. Upstream access-control headers are
-replaced by Gateway policy, hop-by-hop headers are removed, cookies are bounded and
-rewritten for the service host, and security responses are content-free.
+upgrades before application content is returned. Runtime applications own their
+CSRF and CORS policy: authenticated requests are forwarded without an Origin or
+Fetch Metadata admission gate, including null/absent origins and form POST.
+OPTIONS follows the same platform identity and access checks as other requests;
+the Gateway does not synthesize anonymous browser preflight responses.
+Application access-control, cache, referrer, opener, permission, and framing response
+headers remain authoritative. The Gateway does not inject application security or
+cache policy. Hop-by-hop headers and platform request cookies are removed, reserved
+platform response cookies are blocked, and application cookies and loopback URLs are
+rewritten for the service host. Same-service Origin and Referer values are translated
+to the loopback target without rejecting opaque or external values.
+Gateway security responses are content-free.
 Gateway-generated authentication, activation, transfer, and error documents deny
-framing. Proxied application responses receive no Gateway-invented framing policy;
-application-provided `X-Frame-Options` and Content Security Policy remain
-authoritative for application content.
+framing and retain platform security headers. Broker and Main Web authentication
+routes retain their exact-origin protections independently of application traffic.
 
 The Runner owns one pooled loopback HTTP client per accepted generation. It connects
 only to the requested numeric `127.0.0.1` port with an origin-form target, disables
@@ -1329,6 +1337,10 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-07 (spec_version=100)** — Made authenticated Runtime application traffic
+  transparent to app-owned CSRF/CORS and response-header policies while retaining
+  platform identity, access, exposure, transport, and broker protections.
 
 - **2026-10-05** (spec_version 98) — Narrowed direct-object storage failure
   classification while preserving cancellation and durable cleanup evidence;

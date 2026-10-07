@@ -1,4 +1,4 @@
-"""Pure browser, origin, header, and response policy for Runtime Web."""
+"""Platform isolation and transport header normalization for Runtime Web."""
 
 import dataclasses
 import enum
@@ -29,12 +29,6 @@ _FORBIDDEN_REQUEST_HEADERS = frozenset(
 )
 _FORBIDDEN_RESPONSE_HEADERS = frozenset(
     {
-        b"access-control-allow-credentials",
-        b"access-control-allow-headers",
-        b"access-control-allow-methods",
-        b"access-control-allow-origin",
-        b"access-control-expose-headers",
-        b"access-control-max-age",
         b"connection",
         b"keep-alive",
         b"proxy-authenticate",
@@ -55,18 +49,6 @@ _PLATFORM_COOKIE_PREFIXES = (
     "az-token",
     "az-refresh",
 )
-_CORS_REQUEST_HEADERS = frozenset(
-    {
-        "accept",
-        "accept-language",
-        "authorization",
-        "content-language",
-        "content-type",
-        "range",
-        "x-requested-with",
-    }
-)
-_CORS_METHODS = frozenset({"DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"})
 _SERVICE_WORKER_DESTINATIONS = frozenset({"serviceworker", "sharedworker"})
 
 
@@ -76,7 +58,6 @@ class RuntimeWebPolicyCode(enum.StrEnum):
     BAD_REQUEST = "bad_request"
     FORBIDDEN = "forbidden"
     HEADER_TOO_LARGE = "header_too_large"
-    METHOD_NOT_ALLOWED = "method_not_allowed"
 
 
 class RuntimeWebPolicyError(ValueError):
@@ -93,14 +74,6 @@ class RuntimeWebTarget:
 
     endpoint_label: str | None
     broker: bool
-
-
-@dataclasses.dataclass(frozen=True)
-class RuntimeWebCorsDecision:
-    """Validated CORS source and response fields."""
-
-    origin: str | None
-    headers: tuple[tuple[str, str], ...]
 
 
 def parse_target_host(
@@ -149,71 +122,6 @@ def reject_service_worker_request(headers: Mapping[str, str]) -> None:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
 
 
-def evaluate_actual_origin(
-    *,
-    origin: str | None,
-    fetch_site: str | None,
-    fetch_mode: str | None,
-    method: str,
-    target_origin: str,
-    source_origins: frozenset[str],
-) -> RuntimeWebCorsDecision:
-    """Authorize same-target or same-root credentialed browser traffic."""
-    normalized_method = method.upper()
-    if origin is None:
-        if normalized_method in {"GET", "HEAD"} and fetch_mode == "navigate":
-            return RuntimeWebCorsDecision(origin=None, headers=())
-        if fetch_site == "same-origin":
-            return RuntimeWebCorsDecision(origin=None, headers=())
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-    canonical = canonical_origin(origin)
-    if canonical == target_origin:
-        return RuntimeWebCorsDecision(origin=canonical, headers=())
-    if canonical not in source_origins:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-    return RuntimeWebCorsDecision(
-        origin=canonical,
-        headers=_cors_response_headers(canonical),
-    )
-
-
-def evaluate_preflight(
-    *,
-    origin: str,
-    requested_method: str,
-    requested_headers: str | None,
-    source_origins: frozenset[str],
-) -> RuntimeWebCorsDecision:
-    """Validate one structural same-root CORS preflight locally."""
-    canonical = canonical_origin(origin)
-    if canonical not in source_origins:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-    method = requested_method.upper()
-    if method not in _CORS_METHODS:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.METHOD_NOT_ALLOWED)
-    requested = (
-        frozenset(
-            item.strip().lower()
-            for item in requested_headers.split(",")
-            if item.strip()
-        )
-        if requested_headers is not None
-        else frozenset()
-    )
-    if not requested.issubset(_CORS_REQUEST_HEADERS):
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
-    headers = list(_cors_response_headers(canonical))
-    headers.extend(
-        [
-            ("Access-Control-Allow-Methods", method),
-            ("Access-Control-Max-Age", "600"),
-        ]
-    )
-    if requested:
-        headers.append(("Access-Control-Allow-Headers", ", ".join(sorted(requested))))
-    return RuntimeWebCorsDecision(origin=canonical, headers=tuple(headers))
-
-
 def normalize_request_headers(
     headers: Sequence[tuple[bytes, bytes]],
     *,
@@ -234,7 +142,7 @@ def normalize_request_headers(
             output.append((lowered, value))
             continue
         if lowered == b"origin":
-            if canonical_origin(value.decode("ascii")) == target_origin:
+            if _http_origin(value.decode("latin-1")) == target_origin:
                 output.append((lowered, f"http://localhost:{port}".encode()))
             else:
                 output.append((lowered, value))
@@ -254,12 +162,10 @@ def normalize_request_headers(
 def normalize_response_headers(
     headers: Iterable[tuple[bytes, bytes]],
     *,
-    config: RuntimeWebGatewayConfig,
-    cors: RuntimeWebCorsDecision,
     target_origin: str,
     port: int,
 ) -> tuple[tuple[str, str], ...]:
-    """Normalize application response fields and add Gateway-owned policy."""
+    """Preserve application policy while normalizing transport and local URLs."""
     output: list[tuple[str, str]] = []
     for name, value in headers:
         lowered = name.lower()
@@ -277,24 +183,20 @@ def normalize_response_headers(
                 port=port,
             )
         output.append((name.decode("latin-1"), text))
-    output.extend(cors.headers)
-    output.extend(
-        [
-            ("Cache-Control", "no-store"),
-            ("Referrer-Policy", "no-referrer"),
-            ("Cross-Origin-Opener-Policy", "same-origin"),
-            ("Permissions-Policy", config.permissions_policy),
-        ]
-    )
     return tuple(output)
 
 
-def canonical_origin(value: str) -> str:
-    """Return one exact canonical HTTP origin."""
-    parsed = urllib.parse.urlparse(value)
+def _http_origin(value: str) -> str | None:
+    """Return an HTTP origin for local rewriting, or preserve opaque values."""
+    try:
+        parsed = urllib.parse.urlparse(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return None
     if (
         parsed.scheme not in {"http", "https"}
-        or parsed.hostname is None
+        or hostname is None
         or parsed.username is not None
         or parsed.password is not None
         or parsed.path not in {"", "/"}
@@ -302,19 +204,11 @@ def canonical_origin(value: str) -> str:
         or parsed.query
         or parsed.fragment
     ):
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
+        return None
     default_port = 443 if parsed.scheme == "https" else 80
-    if parsed.port in {None, default_port}:
-        return f"{parsed.scheme}://{parsed.hostname.lower()}"
-    return f"{parsed.scheme}://{parsed.hostname.lower()}:{parsed.port}"
-
-
-def _cors_response_headers(origin: str) -> tuple[tuple[str, str], ...]:
-    return (
-        ("Access-Control-Allow-Origin", origin),
-        ("Access-Control-Allow-Credentials", "true"),
-        ("Vary", "Origin"),
-    )
+    if port in {None, default_port}:
+        return f"{parsed.scheme}://{hostname.lower()}"
+    return f"{parsed.scheme}://{hostname.lower()}:{port}"
 
 
 def _reserved_set_cookie(value: bytes) -> bool:
@@ -363,12 +257,12 @@ def _normalize_location(
 
 def _normalized_referer(value: bytes, *, target_origin: str, port: int) -> bytes:
     try:
-        text = value.decode("ascii")
+        text = value.decode("latin-1")
         parsed = urllib.parse.urlparse(text)
-        if canonical_origin(f"{parsed.scheme}://{parsed.netloc}") != target_origin:
+        if _http_origin(f"{parsed.scheme}://{parsed.netloc}") != target_origin:
             return value
         return urllib.parse.urlunparse(
             ("http", f"localhost:{port}", parsed.path, "", parsed.query, "")
-        ).encode()
-    except UnicodeDecodeError, ValueError, RuntimeWebPolicyError:
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN) from None
+        ).encode("latin-1")
+    except ValueError:
+        return value
