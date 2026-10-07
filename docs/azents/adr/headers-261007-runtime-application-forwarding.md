@@ -30,3 +30,18 @@ them; app-controlled cookie names cannot collide with exact platform names;
 Connection may intentionally nominate otherwise normal fields for hop consumption.
 App CSRF/CORS remain app-owned under the prior transparent-policy decision.
 No persisted-state or configuration changes are required.
+
+## Coverage clarification for ADR-D1
+
+The earlier Service-Worker/worker-destination ingress rejection is an application
+browser-lifecycle policy, not proxy transport or authentication consumption.
+Removing it follows REQ-1 and the already-selected ADR-D1 boundary; it introduces
+no additional transport mechanism or authentication mode. Retaining it would be
+an exception to the requester's explicit forwarding rule.
+
+The original initial-release restriction was coupled to forced app no-store,
+which the preceding transparency change removed. A Worker on a stable service
+origin can persist and intercept app responses after re-exposure or app
+replacement. That application-origin code/data-persistence risk is real and
+app-owned. Distinct Main Web/broker origins, HttpOnly cookie visibility, and every
+Gateway network authority check remain separate platform boundaries.

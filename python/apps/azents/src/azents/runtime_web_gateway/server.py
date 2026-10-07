@@ -88,7 +88,6 @@ from azents.runtime_web_gateway.policy import (
     normalize_request_headers,
     normalize_response_headers,
     parse_target_host,
-    reject_service_worker_request,
 )
 from azents.runtime_web_gateway.session_runtime import (
     RuntimeWebGatewayControlSessions,
@@ -803,7 +802,6 @@ async def _endpoint(
     *,
     endpoint_key: str,
 ) -> web.StreamResponse:
-    reject_service_worker_request(request.headers)
     service = await state.authority.resolve_service(hostname_key=endpoint_key)
     if service is None:
         return _bounded_error(

@@ -341,7 +341,7 @@ configured Main Web authentication or Off-service activation route.
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket
 use the same exact identity-cookie contract. Gateway policy independently rejects
-Service Worker requests, ambiguous hosts,
+ambiguous hosts,
 non-origin-form targets, oversized headers or bodies, and unauthorized WebSocket
 upgrades before application content is returned. Runtime applications own their
 CSRF and CORS policy: authenticated requests are forwarded without an Origin or
@@ -363,6 +363,11 @@ WebSocket handshake fields are consumed only for regenerated WebSocket handshake
 ordinary HTTP retains unrelated WebSocket-named fields. Application WebSocket 101
 headers and cookies reach the browser after handshake-field consumption.
 Loopback Location URLs retain their existing public-service adaptation.
+Service-Worker and worker-destination Fetch Metadata are application fields and do
+not trigger Gateway rejection. An app-origin Worker can persist across service
+re-exposure and application replacement; application owners own that browser
+lifecycle and caching risk. Workers cannot control distinct Main Web/broker
+origins, read HttpOnly cookie values, or bypass Gateway network authority.
 Gateway security responses are content-free.
 Gateway-generated authentication, activation, transfer, and error documents deny
 framing and retain platform security headers. Broker and Main Web authentication
@@ -1349,7 +1354,8 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 - **2026-10-07 (spec_version=101)** — Preserved application cookies and all
   end-to-end headers, consumed dynamic Connection fields and protocol-specific
-  handshake fields, and forwarded application WebSocket 101 headers.
+  handshake fields, forwarded application WebSocket 101 headers, and removed
+  the app Worker-destination header rejection.
 
 - **2026-10-07 (spec_version=100)** — Made authenticated Runtime application traffic
   transparent to app-owned CSRF/CORS and response-header policies while retaining

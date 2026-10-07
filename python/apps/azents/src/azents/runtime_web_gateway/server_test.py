@@ -1279,9 +1279,19 @@ class _HttpTransport(_WebSocketTransport):
         "https://endpoint.services.example.net",
     ],
 )
+@pytest.mark.parametrize(
+    "destination_headers",
+    [
+        {},
+        {"Service-Worker": "script"},
+        {"Sec-Fetch-Dest": "serviceworker"},
+        {"Sec-Fetch-Dest": "sharedworker"},
+    ],
+)
 async def test_authenticated_application_methods_reach_transport(
     method: str,
     origin: str | None,
+    destination_headers: dict[str, str],
 ) -> None:
     operations, operational_state = _operations()
     proxy = _ControlSessions()
@@ -1332,6 +1342,7 @@ async def test_authenticated_application_methods_reach_transport(
     }
     if origin is not None:
         headers["Origin"] = origin
+    headers.update(destination_headers)
     try:
         response = await client.request(
             method,
@@ -1350,6 +1361,8 @@ async def test_authenticated_application_methods_reach_transport(
         }
         assert forwarded[b"x-app-token"] == b"application-value"
         assert forwarded[b"cookie"] == b"session=application-session"
+        for name, value in destination_headers.items():
+            assert forwarded[name.lower().encode()] == value.encode()
         if origin is None:
             assert b"origin" not in forwarded
         else:
@@ -1426,7 +1439,7 @@ async def test_application_preflight_requires_platform_identity(
                 "Host": "endpoint.services.example.net",
                 "Service-Worker": "script",
             },
-            403,
+            401,
         ),
         (
             {

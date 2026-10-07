@@ -4,12 +4,10 @@ import pytest
 
 from azents.rdb.models.runtime_web import RuntimeWebAuthMode
 from azents.runtime_web_gateway.policy import (
-    RuntimeWebPolicyCode,
     RuntimeWebPolicyError,
     normalize_request_headers,
     normalize_response_headers,
     parse_target_host,
-    reject_service_worker_request,
 )
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
@@ -45,16 +43,6 @@ def test_host_parser_accepts_one_lowercase_endpoint_label_or_broker() -> None:
     ):
         with pytest.raises(RuntimeWebPolicyError):
             parse_target_host(host, config=_CONFIG)
-
-
-def test_service_worker_requests_are_rejected() -> None:
-    for headers in (
-        {"Sec-Fetch-Dest": "serviceworker"},
-        {"Service-Worker": "script"},
-    ):
-        with pytest.raises(RuntimeWebPolicyError) as captured:
-            reject_service_worker_request(headers)
-        assert captured.value.code is RuntimeWebPolicyCode.FORBIDDEN
 
 
 @pytest.mark.parametrize(

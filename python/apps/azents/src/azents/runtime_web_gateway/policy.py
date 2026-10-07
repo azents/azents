@@ -4,7 +4,7 @@ import dataclasses
 import enum
 import re
 import urllib.parse
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Sequence
 
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
 
@@ -43,7 +43,6 @@ _PLATFORM_COOKIE_NAMES = frozenset(
         b"az-token-expires-at",
     }
 )
-_SERVICE_WORKER_DESTINATIONS = frozenset({"serviceworker", "sharedworker"})
 
 
 class RuntimeWebPolicyCode(enum.StrEnum):
@@ -106,14 +105,6 @@ def parse_target_host(
     if "." in label or _ENDPOINT_LABEL.fullmatch(label) is None:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
     return RuntimeWebTarget(endpoint_label=label, broker=False)
-
-
-def reject_service_worker_request(headers: Mapping[str, str]) -> None:
-    """Reject service-worker script or update traffic before cache/proxy work."""
-    destination = headers.get("Sec-Fetch-Dest", "").lower()
-    service_worker = headers.get("Service-Worker", "").lower()
-    if destination in _SERVICE_WORKER_DESTINATIONS or service_worker == "script":
-        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.FORBIDDEN)
 
 
 def normalize_request_headers(
