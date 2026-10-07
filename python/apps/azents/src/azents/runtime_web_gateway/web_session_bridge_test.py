@@ -263,6 +263,35 @@ class _BlockingTransport(_CaptureTransport):
         await super().send(envelope)
 
 
+async def test_failed_uploads_restore_shared_request_credit_beyond_one_window() -> None:
+    pool = RuntimeWebGatewaySessionPool(maximum_sessions=1)
+    transport = _CaptureTransport()
+    await pool.register(
+        identity=_identity(),
+        profile=APPROVED_SESSION_PROFILE,
+        transport=transport,
+    )
+    for stream_id in range(1, 11):
+        bridge = await RuntimeWebBrowserStreamBridge.open(
+            pool=pool,
+            stream_id=stream_id,
+            authority=_authority(),
+            request_head=RequestHead(
+                protocol=StreamProtocol.HTTP,
+                method=b"POST",
+                target=b"/",
+                headers=(),
+            ),
+        )
+        await bridge.receive(_accepted_response(stream_id=stream_id))
+        for _ in range(4):
+            await bridge.send_request_data(b"x" * MANDATORY_DATA_FRAME_BYTES)
+        await bridge.cancel()
+        assert transport.request_session_credit.available_bytes == SESSION_WINDOW_BYTES
+    assert transport.request_session_credit.sent_total > SESSION_WINDOW_BYTES
+    assert not transport.handlers
+
+
 class _DisconnectTransport(_CaptureTransport):
     def __init__(self) -> None:
         super().__init__()

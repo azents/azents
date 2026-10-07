@@ -17,7 +17,7 @@ import zlib
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -25,6 +25,7 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -83,6 +84,7 @@ from tests.required.public.test_runtime_terminal import (
     _start_runtime,
     _TerminalSocket,
     _TerminalWorkspace,
+    _wait_runtime,
     _wait_terminal_projection,
 )
 
@@ -195,6 +197,32 @@ class _RuntimeApplicationCommands:
                 ),
                 message="Runtime Web fixture Terminal did not detach after command",
             )
+
+    def terminate(self) -> None:
+        """End the setup PTY so later commands acquire current Runner authority."""
+        terminal = _TerminalSocket.connect(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            server_url=self.server_url,
+            origin=_TERMINAL_ORIGIN,
+            last_output_sequence=self.last_output_sequence,
+        )
+        terminal_id = terminal.accepted.terminal_id
+        try:
+            terminal.terminate()
+        finally:
+            terminal.close()
+        _wait_terminal_projection(
+            public_api_client=self.public_api_client,
+            workspace=self.workspace,
+            predicate=lambda projection: (
+                projection.state == "ended"
+                and projection.terminal is not None
+                and projection.terminal.terminal_id == terminal_id
+            ),
+            message="Runtime Web setup Terminal did not end",
+        )
+        self.last_output_sequence = None
 
 
 @dataclass(frozen=True)
@@ -1377,11 +1405,16 @@ def _runtime_application(
     encoded = base64.b64encode(
         zlib.compress(_runtime_application_script().encode(), level=9)
     ).decode()
+    # Terminal invalidation terminates every process group in its session.
+    # The application must outlive that session when Control reconnects.
     commands.command(
         (
-            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib;'
-            "exec(zlib.decompress(base64.b64decode('"
-            f"{encoded}')))\" >/tmp/runtime-web-e2e.log 2>&1 & disown"
+            f'{_RUNTIME_RUNNER_PYTHON} -c "import base64,zlib,subprocess,sys;'
+            "subprocess.Popen([sys.executable,'-c',"
+            f"zlib.decompress(base64.b64decode('{encoded}')).decode()],"
+            "stdin=subprocess.DEVNULL,"
+            "stdout=open('/tmp/runtime-web-e2e.log','ab'),"
+            'stderr=subprocess.STDOUT,start_new_session=True)"'
         ),
         f"APP_STARTED_{unique()}",
     )
@@ -1409,6 +1442,7 @@ while True:
         f"APP_PROBE_DONE_{unique()}",
     )
     assert ready_marker.encode() in probe_output, probe_output[-4_096:]
+    commands.terminate()
     yield commands
 
 
@@ -2237,7 +2271,8 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
         maximum_application_buffer_bytes=16 * 1024 * 1024,
         maintenance=False,
         relay_path=True,
-    ) as stack:
+    ) as initial_stack:
+        stack = initial_stack
         runtime_web_api_client = azentspublicclient.ApiClient(
             configuration=azentspublicclient.Configuration(host=stack.public_api_url)
         )
@@ -2316,6 +2351,62 @@ def test_runtime_web_gateway_real_runtime_browser_and_cross_replica_relay(
                 endpoint_url=service_url,
                 identity_secret=identity_secret,
             )
+            # Keep the Gateway and browser alive while the Runner joins a fresh
+            # Owner epoch; previous transfer totals must not enter the new hop.
+            runtime_api = AgentRuntimeV1Api(runtime_web_api_client)
+            previous_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+                handle=workspace.handle,
+                agent_id=workspace.agent_id,
+                _headers=_headers(workspace.token),
+            )
+            assert previous_runtime.runtime is not None
+            previous_runner_generation = previous_runtime.runtime.runner_generation
+            assert previous_runner_generation is not None
+            runtime_web_stack_factory.owner_control.get_wrapped_container().restart(
+                timeout=5,
+            )
+            _wait_for_http(
+                runtime_web_stack_factory.owner_control,
+                port=8033,
+                path="/__azents/runtime-web/ready",
+                name="reconnected Runtime Web Owner",
+            )
+            stack = replace(
+                stack,
+                owner_control_operations_url=(
+                    f"http://{runtime_web_stack_factory.owner_control.get_container_host_ip()}:"
+                    f"{runtime_web_stack_factory.owner_control.get_exposed_port(8033)}"
+                ),
+            )
+            _assert_operations_ready(stack)
+            _wait_runtime(
+                runtime_api=runtime_api,
+                workspace=_TerminalWorkspace(
+                    token=workspace.token,
+                    handle=workspace.handle,
+                    agent_id=workspace.agent_id,
+                    session_id=workspace.session_id,
+                ),
+                predicate=lambda runtime: (
+                    runtime.runtime is not None
+                    and runtime.runtime.runner_generation is not None
+                    and runtime.runtime.runner_generation != previous_runner_generation
+                    and runtime.lifecycle is not None
+                    and runtime.lifecycle.availability == "ready"
+                    and runtime.lifecycle.runner.state == "ready"
+                    and runtime.actions.use_runner
+                ),
+                message="Runtime Web Runner did not become ready in a new generation",
+            )
+            _browser_neutral_transport_evidence(
+                stack=stack,
+                endpoint_url=service_url,
+                identity_secret=identity_secret,
+            )
+            recovered = _browser_transport_evidence(driver)
+            assert recovered.echo.body == "runtime-web-body"
+            assert recovered.upload.sha256 == recovered.expected_upload_digest
+            _wait_for_runtime_web_stream_release(stack)
             if auth_mode == "shared_cookie":
                 _assert_redis_capacity_fallback(
                     stack=stack,

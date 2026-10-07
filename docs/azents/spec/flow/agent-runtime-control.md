@@ -110,7 +110,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
 last_verified_at: 2026-10-07
-spec_version: 102
+spec_version: 103
 ---
 
 # Agent Runtime Control
@@ -314,6 +314,27 @@ time remains lease authority. Renewal does not extend the original one-time offe
 Registry admission checks the local deadline again after committed nonce consumption:
 expiry at that boundary rejects the join without restoring its consumed nonce. Cleanup
 releases only the original exact epoch and cannot delete replacement ownership.
+Disconnected source notification queues do not interrupt Runner/registry/owner
+release. All binding and capacity releases run even if an earlier cleanup fails;
+unexpected errors remain observable. Joined owner state is removed when its
+Runner Web connection ends so same-generation reconnect can acquire a new epoch.
+
+Hop credit translation uses per-stream consumed-byte deltas. A fresh Runner
+session never inherits the historical absolute total of a still-live Gateway
+connection. Request consumption returned to that Gateway stays cumulative for
+its complete source-connection lifetime, including Runner epoch replacement.
+Duplicate updates contribute zero delta, decreasing totals fail closed, and
+retired per-stream ledgers are removed with the stream. Before translation or
+ledger mutation, each upstream connection's acknowledged stream sum must fit
+its advertised session consumption. Source-side validation retains the complete
+source connection history across Runner replacement.
+Shared sender credit uses exact per-stream acknowledgement deltas plus once-only
+terminal debit release in both directions. Closing a stream returns its reserved
+but unacknowledged bytes without lowering absolute sent totals. Later cumulative
+peer session totals are validated separately (monotonic and not beyond sent bytes)
+and cannot double-credit those retired bytes. Retirement wakes shared-window
+waiters; repeated failed uploads or aborted downloads cannot permanently consume
+the session window. Queue resource release also completes if callbacks cancel.
 
 Runtime capacity is Owner-scoped ephemeral operational state, not durable product
 authority. It bounds active HTTP, SSE, and WebSocket streams, pending opens, buffered
@@ -400,6 +421,10 @@ The binding insertion is linearized with the drain state so an open racing route
 capacity admission cannot enter after the drain boundary. Owner loss, route-lease
 loss, generation replacement, authority revocation, relay failure, overload, or
 protocol ambiguity terminates affected work without replay or active-stream resume.
+Bounded late input frames for a known retired Runner stream are discarded rather
+than failing unrelated streams or the entire Runner session. Unknown stream IDs,
+reused opens, and stale owner authority remain protocol errors; failed requests
+are not replayed.
 
 Gateway readiness requires valid configuration, database authority, exact protocol
 compatibility, at least one active Control session, acceptable local pressure, and a
@@ -1358,6 +1383,10 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-10-07 (spec_version=103)** — Corrected hop-credit accounting across
+  Runner replacement, completed exact-owner cleanup after dead source queues,
+  and isolated late input on known retired streams.
 
 - **2026-10-07 (spec_version=102)** — Preserved parsed request body framing so
   unframed bodyless HTTP requests no longer acquire chunked transfer encoding.

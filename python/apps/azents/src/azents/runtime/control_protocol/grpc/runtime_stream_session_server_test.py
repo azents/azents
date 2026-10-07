@@ -6,7 +6,7 @@ import asyncio
 import dataclasses
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from datetime import UTC, datetime, timedelta
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -63,6 +63,7 @@ from azents.runtime.control_protocol.grpc.runtime_stream_session_server import (
     _BoundedEnvelopeQueue,
     _read_runner,
     _register_joined_runner,
+    _release_runner_owner,
     _renew_owner_session,
     _RunnerConnection,
     _SourceSession,
@@ -1468,6 +1469,330 @@ async def test_runner_connection_translates_hop_local_session_credit() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["response", "request"])
+async def test_credit_translation_rejects_underreported_totals_atomically(
+    direction: str,
+) -> None:
+    owner = _owner()
+    connection = _RunnerConnection(
+        accepted=RuntimeStreamAcceptedRunnerSession(
+            owner=owner,
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        ),
+        control_boot_id="control-boot",
+    )
+    source = _SourceSession(
+        source_key="gateway-a",
+        session_id="gateway-a",
+        peer_boot_id="gateway-boot",
+        owner=None,
+        queue=_BoundedEnvelopeQueue(),
+    )
+    for stream_id in (1, 2):
+        runner_stream = await connection.send(
+            source,
+            _open_envelope(
+                session_id=source.session_id,
+                peer_boot_id=source.peer_boot_id,
+                stream_id=stream_id,
+            ),
+        )
+        await anext(connection.queue.__aiter__())
+        credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+            session_id=(
+                source.session_id if direction == "response" else owner.session_lease_id
+            ),
+            peer_boot_id=(
+                source.peer_boot_id if direction == "response" else "runner-boot"
+            ),
+            owner_boot_id=owner.owner_boot_id,
+            session_lease_id=owner.session_lease_id,
+            lease_generation=owner.lease_generation,
+            stream_id=stream_id if direction == "response" else runner_stream,
+        )
+        credit.window_update.direction = (
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+            if direction == "response"
+            else runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+        )
+        credit.window_update.stream_consumed_total = 5 if stream_id == 1 else 3
+        credit.window_update.session_consumed_total = 4 if stream_id == 1 else 5
+        acknowledged = 0 if stream_id == 1 else 5
+        with pytest.raises(ValueError, match="below stream totals"):
+            if direction == "response":
+                await connection.send(source, credit)
+            else:
+                await connection.receive(credit)
+        if direction == "response":
+            assert source.credit.response_consumed_total == acknowledged
+            assert source.credit.response_acknowledged_stream_total == acknowledged
+            assert connection.runner_response_session_consumed == acknowledged
+            assert runner_stream not in connection.source_response_stream_consumed
+        else:
+            assert connection.runner_request_session_consumed == acknowledged
+            assert connection.runner_request_acknowledged_stream_total == acknowledged
+            assert source.credit.request_consumed_total == acknowledged
+            assert runner_stream not in connection.runner_request_stream_consumed
+        assert not connection.queue.items
+        assert not source.queue.items
+        credit.window_update.session_consumed_total = 5 if stream_id == 1 else 8
+        if direction == "response":
+            await connection.send(source, credit)
+            forwarded = await anext(connection.queue.__aiter__())
+        else:
+            await connection.receive(credit)
+            forwarded = await anext(source.queue.__aiter__())
+        assert forwarded.window_update.session_consumed_total == (
+            credit.window_update.session_consumed_total
+        )
+        await connection.release(
+            source_session_id=source.source_key,
+            source_stream_id=stream_id,
+        )
+    await connection.close()
+    await source.queue.close()
+
+
+@pytest.mark.asyncio
+async def test_persistent_source_credit_survives_runner_epoch_replacement() -> None:
+    source = _SourceSession(
+        source_key="gateway-a",
+        session_id="gateway-a",
+        peer_boot_id="gateway-boot",
+        owner=None,
+        queue=_BoundedEnvelopeQueue(),
+    )
+    owners = [_owner(), dataclasses.replace(_owner(), session_lease_id="new-lease")]
+    for index, owner in enumerate(owners):
+        connection = _RunnerConnection(
+            accepted=RuntimeStreamAcceptedRunnerSession(
+                owner=owner,
+                runner_boot_id="runner-boot",
+                profile=APPROVED_SESSION_PROFILE,
+                connected_at=datetime.now(UTC),
+            ),
+            control_boot_id="control-boot",
+        )
+        runner_id = await connection.send(
+            source,
+            _open_envelope(
+                session_id=source.session_id,
+                peer_boot_id=source.peer_boot_id,
+                stream_id=index + 1,
+            ),
+        )
+        await anext(connection.queue.__aiter__())
+        consumed = 5 if index == 0 else 3
+        response_credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+            session_id=source.session_id,
+            peer_boot_id=source.peer_boot_id,
+            stream_id=index + 1,
+        )
+        response_credit.window_update.direction = (
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_RESPONSE
+        )
+        response_credit.window_update.stream_consumed_total = consumed
+        # The same Gateway carries history from a retired Runner connection.
+        if index == 1:
+            response_credit.window_update.session_consumed_total = 5
+            with pytest.raises(ValueError, match="below stream totals"):
+                await connection.send(source, response_credit)
+            assert source.credit.response_consumed_total == 5
+            assert source.credit.response_acknowledged_stream_total == 5
+            assert connection.runner_response_session_consumed == 0
+            assert not connection.source_response_stream_consumed
+            assert not connection.queue.items
+        response_credit.window_update.session_consumed_total = 5 + index * 3
+        await connection.send(source, response_credit)
+        forwarded = await anext(connection.queue.__aiter__())
+        assert forwarded.window_update.session_consumed_total == consumed
+        await connection.send(source, response_credit)
+        duplicate = await anext(connection.queue.__aiter__())
+        assert duplicate.window_update.session_consumed_total == consumed
+
+        request_credit = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope(
+            protocol_fingerprint=RUNTIME_STREAM_PROTOCOL_FINGERPRINT,
+            session_id=owner.session_lease_id,
+            peer_boot_id="runner-boot",
+            owner_boot_id=owner.owner_boot_id,
+            session_lease_id=owner.session_lease_id,
+            lease_generation=owner.lease_generation,
+            stream_id=runner_id,
+        )
+        request_credit.window_update.direction = (
+            runtime_stream_session_pb2.RUNTIME_STREAM_SESSION_DIRECTION_REQUEST
+        )
+        request_credit.window_update.stream_consumed_total = consumed
+        request_credit.window_update.session_consumed_total = consumed
+        await connection.receive(request_credit)
+        translated = await anext(source.queue.__aiter__())
+        assert translated.window_update.session_consumed_total == (
+            5 if index == 0 else 8
+        )
+        await connection.close()
+        reset = await anext(source.queue.__aiter__())
+        assert reset.HasField("reset")
+    await source.queue.close()
+
+
+async def test_cancelled_queue_callback_still_releases_process_bytes() -> None:
+    tracker = RuntimeStreamControlResourceTracker(
+        limits=_hard_limits(),
+        resident_memory_bytes=lambda: 1,
+    )
+    queue = _BoundedEnvelopeQueue(tracker)
+    started = asyncio.Event()
+
+    async def blocked() -> None:
+        started.set()
+        await asyncio.Future[None]()
+
+    envelope = runtime_stream_session_pb2.RuntimeStreamSessionEnvelope()
+    envelope.data.data = b"discarded"
+    await queue.put(envelope, on_dequeued=blocked)
+    task = asyncio.create_task(queue.close())
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert queue.closed
+    assert tracker.snapshot().queued_envelopes == 0
+    assert tracker.snapshot().application_buffer_bytes == 0
+    assert tracker.snapshot().control_buffer_bytes == 0
+
+
+async def test_cancelled_runner_close_still_closes_its_queue() -> None:
+    tracker = RuntimeStreamControlResourceTracker(
+        limits=_hard_limits(),
+        resident_memory_bytes=lambda: 1,
+    )
+    connection = _RunnerConnection(
+        accepted=RuntimeStreamAcceptedRunnerSession(
+            owner=_owner(),
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        ),
+        control_boot_id="control-boot",
+    )
+    connection.queue = _BoundedEnvelopeQueue(tracker)
+    put = _open_envelope(
+        session_id="gateway-a", peer_boot_id="gateway-boot", stream_id=1
+    )
+    await connection.queue.put(put)
+    acquired = asyncio.Event()
+
+    class BlockedLock(asyncio.Lock):
+        async def acquire(self) -> Literal[True]:
+            if self.locked():
+                acquired.set()
+            return await super().acquire()
+
+    connection.lock = BlockedLock()
+    await connection.lock.acquire()
+    task = asyncio.create_task(connection.close())
+    await acquired.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert connection.queue.closed
+    assert not connection.queue.items
+    assert connection.queue.bytes == 0
+    assert tracker.snapshot().queued_envelopes == 0
+    assert tracker.snapshot().control_buffer_bytes == 0
+    connection.lock.release()
+
+
+async def test_runner_close_skips_dead_sources_and_resets_live_sources() -> None:
+    connection = _RunnerConnection(
+        accepted=RuntimeStreamAcceptedRunnerSession(
+            owner=_owner(),
+            runner_boot_id="runner-boot",
+            profile=APPROVED_SESSION_PROFILE,
+            connected_at=datetime.now(UTC),
+        ),
+        control_boot_id="control-boot",
+    )
+    dead = _SourceSession(
+        source_key="dead",
+        session_id="dead",
+        peer_boot_id="gateway-boot",
+        owner=None,
+        queue=_BoundedEnvelopeQueue(),
+    )
+    live = dataclasses.replace(
+        dead, source_key="live", session_id="live", queue=_BoundedEnvelopeQueue()
+    )
+    for source in (dead, live):
+        await connection.send(
+            source,
+            _open_envelope(
+                session_id=source.session_id,
+                peer_boot_id=source.peer_boot_id,
+                stream_id=1,
+            ),
+        )
+    await dead.queue.close()
+    await connection.close()
+    assert connection.queue.closed
+    assert not connection.sources
+    assert not connection.queue.items
+    assert (await anext(live.queue.__aiter__())).HasField("reset")
+    await live.queue.close()
+
+
+@pytest.mark.parametrize(
+    "error", [RuntimeError("close failed"), asyncio.CancelledError()]
+)
+async def test_owner_release_finishes_after_data_plane_failure(
+    error: BaseException,
+) -> None:
+    accepted = RuntimeStreamAcceptedRunnerSession(
+        owner=_owner(),
+        runner_boot_id="runner-boot",
+        profile=APPROVED_SESSION_PROFILE,
+        connected_at=datetime.now(UTC),
+    )
+    released: list[str] = []
+
+    class FailedDataPlane(RuntimeStreamControlDataPlane):
+        def __init__(self) -> None:
+            pass
+
+        async def unregister_runner(
+            self, accepted: RuntimeStreamAcceptedRunnerSession
+        ) -> None:
+            released.append("data")
+            raise error
+
+    class Registry(RuntimeStreamOwnerSessionRegistry):
+        def __init__(self) -> None:
+            pass
+
+        async def release(self, accepted: RuntimeStreamAcceptedRunnerSession) -> bool:
+            released.append("registry")
+            return True
+
+    class Lifecycle(_OwnerLifecycle):
+        async def release_owner(self, owner: OwnerSessionEpoch) -> bool:
+            released.append("owner")
+            return True
+
+    with pytest.raises(type(error)) as observed:
+        await _release_runner_owner(
+            data_plane=FailedDataPlane(),
+            registry=Registry(),
+            offer_provider=Lifecycle(),
+            accepted=accepted,
+        )
+    assert observed.value is error
+    assert released == ["data", "registry", "owner"]
+
+
 async def test_runner_connection_enqueues_concurrent_opens_in_stream_id_order() -> None:
     class _FirstPutGateQueue(_BoundedEnvelopeQueue):
         def __init__(self) -> None:
