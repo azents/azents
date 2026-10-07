@@ -234,8 +234,12 @@ Main steps:
    another execution boundary stops consumption. The canonical
    execution snapshot does not pin a mailbox head. For each row, the Worker resolves the requested
    profile and attachment metadata outside a database session and then locks the same head for atomic
-   preparation. After the Worker creates or claims the AgentRun, it ensures that run's immutable
-   managed-file projection before calling input promotion or resolving a managed SkillAction.
+   preparation. Scheduled trigger/continuation heads encountered during an active Run end that
+   Run at the current model boundary without emitting a parent result. The next Run admits and
+   consumes the Scheduled head before inference, so later FIFO inputs are not blocked until the
+   original task finishes naturally. After the Worker creates or claims the AgentRun, it ensures
+   that run's immutable managed-file projection before calling input promotion or resolving a managed
+   SkillAction.
 2. A closed TurnAction capability registry classifies inference requirements and
    prepares attachments, managed VFS Skills, and detached Goal/Skill semantics
    without holding the final database transaction. A composing Mailbox repository

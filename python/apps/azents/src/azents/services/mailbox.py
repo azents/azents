@@ -411,7 +411,9 @@ class MailboxService:
                 ) from exc
 
         if committed.deferred:
-            complete_run = active_run_id == predecessor_run_id
+            complete_run = outcome.complete_run or (
+                predecessor_run_id is not None and active_run_id == predecessor_run_id
+            )
             return PromotedMailboxItems(
                 turn_effect=TurnEffect.NEUTRAL,
                 operation_action=None,
@@ -873,7 +875,7 @@ class _ExternalChannelContinuationMailboxProcessor:
 
 @dataclasses.dataclass(frozen=True)
 class _ScheduledTaskMailboxProcessor:
-    """Promote a Scheduled Task trigger or continuation as typed input."""
+    """Hand off at the model boundary so Scheduled input starts its bound Run."""
 
     service: MailboxService
 
@@ -882,8 +884,15 @@ class _ScheduledTaskMailboxProcessor:
         context: MailboxPreparationContext,
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
-        del context, buffer
-        return _preparation_outcome([], TurnEffect.NEUTRAL)
+        del buffer
+        handoff = context.active_run_id is not None
+        return MailboxPreparationOutcome(
+            promoted=[],
+            turn_effect=TurnEffect.NEUTRAL,
+            operation_action=None,
+            complete_run=handoff,
+            suppress_parent_result=handoff,
+        )
 
 
 @dataclasses.dataclass(frozen=True)

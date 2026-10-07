@@ -37,7 +37,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-07
 spec_version: 16
 ---
 
@@ -198,6 +198,14 @@ Mailbox promotion is the exact start boundary. Promotion changes the cycle from
 boundary removes the trigger and admitted cycle. After this boundary, Task
 deletion does not interrupt the already-started AgentRun or its canonical Session
 result.
+
+Scheduled triggers and continuations participate in every model-boundary Mailbox
+poll. When an active Run reaches Scheduled input at the FIFO head, it completes
+without a parent result at that boundary and hands off to the Scheduled admission
+path. The next Run consumes that head and binds the cycle before model inference.
+The current task does not need to finish naturally. Later FIFO inputs remain
+ordered and can be consumed by the new Run; a Scheduled head cannot repeatedly
+produce a neutral no-op while the current Run continues model execution.
 
 ## Continuation and Compaction
 
