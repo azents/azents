@@ -49,8 +49,10 @@ def _login_main_web(
     driver.delete_all_cookies()
     driver.get(f"{base_url}/login")
     email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    _wait(driver).until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        _wait(driver).until(ec.url_contains("/login/password"))
     password_input = _wait(driver).until(
         ec.element_to_be_clickable((By.NAME, "password"))
     )

@@ -19,11 +19,11 @@ Method | HTTP request | Description
 
 
 # **auth_v1_get_login_methods**
-> LoginMethodsResponse auth_v1_get_login_methods(email)
+> LoginMethodsResponse auth_v1_get_login_methods(email=email)
 
 Get Login Methods
 
-Get available login methods for an email.
+Get login availability, optionally including an email's password status.
 
 ### Example
 
@@ -45,11 +45,11 @@ configuration = azentspublicclient.Configuration(
 with azentspublicclient.ApiClient(configuration) as api_client:
     # Create an instance of the API class
     api_instance = azentspublicclient.AuthV1Api(api_client)
-    email = 'email_example' # str | 
+    email = 'email_example' # str |  (optional)
 
     try:
         # Get Login Methods
-        api_response = api_instance.auth_v1_get_login_methods(email)
+        api_response = api_instance.auth_v1_get_login_methods(email=email)
         print("The response of AuthV1Api->auth_v1_get_login_methods:\n")
         pprint(api_response)
     except Exception as e:
@@ -63,7 +63,7 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
- **email** | **str**|  | 
+ **email** | **str**|  | [optional] 
 
 ### Return type
 

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
 from pydantic import StrictStr
+from typing import Optional
 from azentspublicclient.models.login_methods_response import LoginMethodsResponse
 from azentspublicclient.models.password_login_request import PasswordLoginRequest
 from azentspublicclient.models.password_login_response import PasswordLoginResponse
@@ -59,7 +60,7 @@ class AuthV1Api:
     @validate_call
     def auth_v1_get_login_methods(
         self,
-        email: StrictStr,
+        email: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -75,9 +76,9 @@ class AuthV1Api:
     ) -> LoginMethodsResponse:
         """Get Login Methods
 
-        Get available login methods for an email.
+        Get login availability, optionally including an email's password status.
 
-        :param email: (required)
+        :param email:
         :type email: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -127,7 +128,7 @@ class AuthV1Api:
     @validate_call
     def auth_v1_get_login_methods_with_http_info(
         self,
-        email: StrictStr,
+        email: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -143,9 +144,9 @@ class AuthV1Api:
     ) -> ApiResponse[LoginMethodsResponse]:
         """Get Login Methods
 
-        Get available login methods for an email.
+        Get login availability, optionally including an email's password status.
 
-        :param email: (required)
+        :param email:
         :type email: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request
@@ -195,7 +196,7 @@ class AuthV1Api:
     @validate_call
     def auth_v1_get_login_methods_without_preload_content(
         self,
-        email: StrictStr,
+        email: Optional[StrictStr] = None,
         _request_timeout: Union[
             None,
             Annotated[StrictFloat, Field(gt=0)],
@@ -211,9 +212,9 @@ class AuthV1Api:
     ) -> RESTResponseType:
         """Get Login Methods
 
-        Get available login methods for an email.
+        Get login availability, optionally including an email's password status.
 
-        :param email: (required)
+        :param email:
         :type email: str
         :param _request_timeout: timeout setting for this request. If one
                                  number provided, it will be total request

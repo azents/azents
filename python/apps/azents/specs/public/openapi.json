@@ -2497,15 +2497,22 @@
           "Auth v1"
         ],
         "summary": "Get Login Methods",
-        "description": "Get available login methods for an email.",
+        "description": "Get login availability, optionally including an email's password status.",
         "operationId": "auth_v1_get_login_methods",
         "parameters": [
           {
             "name": "email",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Email"
             }
           }

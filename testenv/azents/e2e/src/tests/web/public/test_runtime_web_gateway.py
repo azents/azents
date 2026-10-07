@@ -1507,8 +1507,10 @@ def _login(driver: WebDriver, *, email: str) -> None:
     wait = WebDriverWait(driver, 30)
     driver.get(f"{_MAIN_ORIGIN}/login")
     email_input = wait.until(ec.element_to_be_clickable((By.NAME, "email")))
-    email_input.send_keys(email, Keys.ENTER)
-    wait.until(ec.url_contains("/login/password"))
+    email_input.send_keys(email)
+    if not driver.find_elements(By.NAME, "password"):
+        email_input.send_keys(Keys.ENTER)
+        wait.until(ec.url_contains("/login/password"))
     password = wait.until(ec.element_to_be_clickable((By.NAME, "password")))
     password.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
     wait.until(ec.url_contains("/workspaces"))

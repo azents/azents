@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-10-05
+updated: 2026-10-07
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -125,7 +125,7 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-10-05
+last_verified_at: 2026-10-07
 spec_version: 29
 ---
 
@@ -681,7 +681,10 @@ Session lookup does not inherit it.
 - `POST /token/refresh` → `{ access_token, refresh_token, expires_in }`
 - `POST /logout` → 204
 - `POST /login/password` → `{ access_token, refresh_token, expires_in }`
-- `GET /login/methods?email=` → `{ has_password, email_available }`
+- `GET /login/methods` → `{ has_password, email_available }`. Optional `email`
+  adds the existing email-specific password lookup. Without `email`, it returns
+  instance email-delivery availability with `has_password=false` and performs no
+  user lookup.
 - `POST /password-reset-tokens/preview` → `{ valid, email, expires_at }` (`email` is a masked current email hint)
 - `POST /password-reset-tokens/redeem` → `{ success }`
 
@@ -725,7 +728,13 @@ All other Admin API operations, including `/auth/v1` token operations, `/system-
 ## 8. Frontend Routes
 
 - `/` — has no presentation surface. Requests with Main Web authentication cookies redirect to `/workspaces`; requests without them redirect to `/login`. Protected routes retain authoritative downstream session checks.
-- `/login` — existing login page. Existing users continue with password or email OTP. It exposes a signup-link request action only when registration policy and email delivery allow it.
+- `/login` — server rendering checks instance email-delivery availability before
+  displaying the form. When delivery is disabled, the first screen contains editable
+  email and password inputs and submits directly to password login, without code
+  delivery guidance or an email-only intermediate step. When delivery is enabled,
+  existing users continue with the existing email-first password or email OTP flow.
+  It exposes a signup-link request action only when registration policy and email
+  delivery allow it. Password login retains cookie issuance and safe `next` navigation.
 - `/signup?token=...` — previews a signup token, shows a masked email hint, and redeems it with user-entered email and password.
 - `/reset-password?token=...` — previews an admin-issued reset token and submits a new password. Success does not auto-login; user signs in separately.
 Main Web has no setup route. It shows the configured Admin Web URL only when the authenticated Public API self-role projection includes `system_admin`; it never imports or calls the Admin API client.
@@ -735,6 +744,9 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
+
+- **2026-10-07** — Added instance login availability lookup without an email and
+  single-screen email/password login when email delivery is disabled.
 
 - **2026-10-05** (v29) — Integrated completed owner-lifecycle transaction ownership
   with password reset and first-admin bootstrap. Preserved root retirement,

@@ -47,6 +47,7 @@ from . import AuthService
 from .data import (
     InvalidRefreshToken,
     InvalidVerificationCode,
+    LoginMethodsInput,
     LogoutInput,
     PasswordLoginInput,
     RefreshTokenInput,
@@ -118,6 +119,25 @@ def _make_auth_service(
         auth_config=_TEST_AUTH_CONFIG,
         email_config=None,
     )
+
+
+@pytest.mark.parametrize("email_available", [False, True])
+async def test_instance_login_methods_skip_user_lookup(email_available: bool) -> None:
+    """Instance capability lookup needs no email address or database operation."""
+    email_service = Mock(spec=EmailService)
+    email_service.configured = email_available
+    service = _make_auth_service(
+        Mock(spec=SessionManager),
+        email_service=email_service,
+    )
+    lookup = AsyncMock()
+    service.credential_service.get_login_projection = lookup
+
+    output = await service.get_login_methods(LoginMethodsInput(email=None))
+
+    assert output.email_available is email_available
+    assert output.has_password is False
+    lookup.assert_not_awaited()
 
 
 class _ObservedSessionManager:

@@ -310,9 +310,9 @@ async def login_with_password(
 @router.get("/login/methods")
 async def get_login_methods(
     auth_service: Annotated[AuthService, Depends()],
-    email: str,
+    email: str | None = None,
 ) -> LoginMethodsResponse:
-    """Get available login methods for an email."""
+    """Get login availability, optionally including an email's password status."""
     output = await auth_service.get_login_methods(LoginMethodsInput(email=email))
     return LoginMethodsResponse(
         has_password=output.has_password,
