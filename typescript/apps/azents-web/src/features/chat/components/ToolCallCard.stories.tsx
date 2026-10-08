@@ -356,6 +356,65 @@ export const FailedWriteExpanded = {
   },
 } satisfies Story;
 
+export const MultilineFailureVariants = {
+  args: { toolCall: failedToolCall },
+  render: () => (
+    <Box w={rem(320)} maw="100%">
+      {[
+        {
+          name: "write",
+          arguments: '{"path":"/workspace/file","content":"x"}',
+        },
+        { name: "read", arguments: '{"path":"/workspace/file"}' },
+        { name: "custom_tool", arguments: "{}" },
+        { name: "exec_command", arguments: '{"command":"run-job"}' },
+      ].map((input) => (
+        <ToolCallCard
+          key={input.name}
+          toolCall={{
+            ...input,
+            id: `multiline-${input.name}`,
+            status: "failed",
+            result: `Request failed: ${"very-long-error-".repeat(35)}\nCheck permissions.`,
+            ...(input.name === "exec_command"
+              ? {
+                  resultMetadata: {
+                    kind: "exec_command_result",
+                    status: "failed",
+                    exit_code: 1,
+                    stdout_truncated: false,
+                    stderr_truncated: false,
+                  },
+                }
+              : {}),
+          }}
+        />
+      ))}
+    </Box>
+  ),
+  play: async ({ canvasElement }) => {
+    for (const button of canvasElement.querySelectorAll(
+      'button[aria-expanded="false"]',
+    )) {
+      await userEvent.click(button);
+    }
+    await waitFor(() =>
+      expect(canvasElement.querySelectorAll("pre")).toHaveLength(5),
+    );
+    const errors = Array.from(canvasElement.querySelectorAll("pre")).filter(
+      (code) => code.textContent.includes("Request failed:"),
+    );
+    await expect(errors).toHaveLength(4);
+    for (const code of errors) {
+      await expect(code).toHaveStyle({
+        whiteSpace: "pre-wrap",
+        overflowWrap: "anywhere",
+      });
+      await expect(code.scrollWidth).toBeLessThanOrEqual(code.clientWidth + 1);
+    }
+  },
+} satisfies Story;
+
 export const FailedEditExpanded = {
   args: {
     toolCall: {
@@ -568,7 +627,7 @@ export const KnownReadWithRawData = {
     await waitFor(() =>
       expect(within(document.body).getByText("read")).toBeVisible(),
     );
-    const dialog = within(within(document.body).getByRole("dialog"));
+    const dialog = within(await within(document.body).findByRole("dialog"));
     await expect(dialog.getByText("path")).toBeVisible();
     await expect(dialog.getByText("offset")).toBeVisible();
     await expect(dialog.getByText("1200")).toBeVisible();
@@ -593,7 +652,7 @@ export const GenericObjectInputDetails = {
     await userEvent.click(
       canvas.getByRole("button", { name: "View raw data for custom_tool" }),
     );
-    const dialog = within(within(document.body).getByRole("dialog"));
+    const dialog = within(await within(document.body).findByRole("dialog"));
     await expect(dialog.getAllByRole("term")).toHaveLength(3);
     await waitFor(() => expect(dialog.getByText("content")).toBeVisible());
     await expect(dialog.getByText(/first line/)).toHaveTextContent(
@@ -623,7 +682,7 @@ export const GenericRawDataWithoutPayload = {
       expect(within(document.body).getByText("Raw data")).toBeVisible(),
     );
     await expect(within(document.body).getByText("Tool name")).toBeVisible();
-    const dialog = within(within(document.body).getByRole("dialog"));
+    const dialog = within(await within(document.body).findByRole("dialog"));
     await expect(dialog.getByText("custom_database_query")).toBeVisible();
   },
 } satisfies Story;

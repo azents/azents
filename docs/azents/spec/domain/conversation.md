@@ -1017,6 +1017,9 @@ arrays remain indented JSON, and scalar values retain their JSON representation.
 remain visible as `{}`; freeform, incomplete, and non-object input remains unchanged.
 Expanded failed tool rows also show their retained failure output even when a specialized detail
 would otherwise omit it; existing output details do not repeat the same failure message.
+Failure output preserves line breaks and wraps long lines and unbroken strings to the available
+width rather than requiring horizontal scrolling, including in the detail dialog. Successful
+output retains its existing presentation.
 A validated specialized
 client tool row shows its localized action, privacy-reviewed resource identity or bounded qualifier, and
 minimal semantic detail. Memory content, Goal/Todo text, Skill bodies, messages, tasks, tool-search queries,

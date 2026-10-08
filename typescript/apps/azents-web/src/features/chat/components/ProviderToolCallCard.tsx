@@ -27,6 +27,7 @@ import {
 } from "./providerToolCallPresentation";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
+import { ToolFailureOutput } from "./ToolFailureOutput";
 import { ToolInputContent } from "./ToolInputContent";
 import type { ProviderToolCall } from "../types";
 import type { ReactElement } from "react";
@@ -69,13 +70,17 @@ function RawProviderToolDetails({
           <Text size="xs" c="dimmed" mb="xs">
             {t("result")}
           </Text>
-          <ScrollArea.Autosize
-            mah={rem(240)}
-            scrollbarSize={activityDetailScrollbarSize}
-            {...activityDetailScrollAreaProps}
-          >
-            <Code block>{toolCall.output}</Code>
-          </ScrollArea.Autosize>
+          {toolCall.status === "failed" ? (
+            <ToolFailureOutput output={toolCall.output ?? ""} />
+          ) : (
+            <ScrollArea.Autosize
+              mah={rem(240)}
+              scrollbarSize={activityDetailScrollbarSize}
+              {...activityDetailScrollAreaProps}
+            >
+              <Code block>{toolCall.output}</Code>
+            </ScrollArea.Autosize>
+          )}
         </Box>
       ) : null}
     </Stack>

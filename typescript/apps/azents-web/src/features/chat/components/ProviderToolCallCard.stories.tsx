@@ -1,3 +1,4 @@
+import { Box, rem } from "@mantine/core";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { binaryAttachment, imageAttachment } from "../story-fixtures";
@@ -170,7 +171,7 @@ export const FailedSearchExpanded = {
     await userEvent.click(
       canvas.getByRole("button", { name: "View raw data for Web search" }),
     );
-    const dialog = within(within(document.body).getByRole("dialog"));
+    const dialog = within(await within(document.body).findByRole("dialog"));
     await waitFor(() => expect(dialog.getByText("query")).toBeVisible());
     await expect(dialog.getByText("Azents")).toBeVisible();
   },
@@ -192,12 +193,48 @@ export const ObjectInputDetails = {
         name: "View raw data for Image generation",
       }),
     );
-    const dialog = within(within(document.body).getByRole("dialog"));
+    const dialog = within(await within(document.body).findByRole("dialog"));
     await waitFor(() => expect(dialog.getByText("prompt")).toBeVisible());
     await expect(dialog.getByText("count")).toBeVisible();
     await expect(dialog.getByText(/first line/)).toHaveTextContent(
       "first line second line",
     );
+  },
+} satisfies Story;
+
+export const MultilineFailure = {
+  decorators: [
+    (Story) => (
+      <Box w={rem(320)} maw="100%">
+        <Story />
+      </Box>
+    ),
+  ],
+  args: {
+    toolCall: {
+      id: "provider-multiline-failure",
+      name: "custom_retrieval",
+      arguments: "",
+      status: "failed",
+      output: `Provider rejected request: ${"long-error-message-".repeat(35)}\nTry again.`,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Custom retrieval/ }),
+    );
+    await waitFor(() =>
+      expect(canvasElement.querySelector("pre")).toHaveTextContent(
+        "Provider rejected request:",
+      ),
+    );
+    const code = canvasElement.querySelector("pre");
+    if (code === null) {
+      throw new Error("Expected provider failure output");
+    }
+    await expect(code).toHaveStyle({ whiteSpace: "pre-wrap" });
+    await expect(code.scrollWidth).toBeLessThanOrEqual(code.clientWidth + 1);
   },
 } satisfies Story;
 

@@ -47,6 +47,7 @@ import { ChatCodeBlock } from "./ChatCodeBlock";
 import { FileAttachmentList } from "./FileAttachmentList";
 import { SkillContentPanel } from "./SkillContentPanel";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
+import { ToolFailureOutput } from "./ToolFailureOutput";
 import { ToolInputContent } from "./ToolInputContent";
 import type {
   KnownToolDetailLabel,
@@ -616,12 +617,16 @@ function TodoChecklistDetail({
 function presentationDetail(
   presentation: KnownToolPresentation,
   t: ToolCallTranslations,
+  failed: boolean,
 ): ReactElement | null {
   if (presentation.detail === null) {
     return null;
   }
   switch (presentation.detail.type) {
     case "output":
+      if (failed) {
+        return <ToolFailureOutput output={presentation.detail.output} />;
+      }
       return (
         <ChatCodeBlock
           code={presentation.detail.output}
@@ -650,7 +655,9 @@ function presentationDetail(
         .join("\n\n");
       return (
         <Stack gap="xs">
-          {consoleOutput.length > 0 ? (
+          {failed && consoleOutput.length > 0 ? (
+            <ToolFailureOutput output={consoleOutput} />
+          ) : consoleOutput.length > 0 ? (
             <ScrollArea.Autosize
               mah={rem(240)}
               scrollbarSize={activityDetailScrollbarSize}
@@ -764,11 +771,13 @@ function RawPayloadContent({
   formatJsonValues = true,
   outputText,
   toolName,
+  failed = false,
 }: {
   argumentsText: string;
   formatJsonValues?: boolean;
   outputText: string;
   toolName?: string;
+  failed?: boolean;
 }): ReactElement {
   const t = useTranslations("chat.toolCall");
   const rawText = (value: string): string =>
@@ -796,13 +805,17 @@ function RawPayloadContent({
           <Text size="xs" c="dimmed" mb="xs">
             {t("result")}
           </Text>
-          <ScrollArea.Autosize
-            mah={rem(240)}
-            scrollbarSize={activityDetailScrollbarSize}
-            {...activityDetailScrollAreaProps}
-          >
-            <Code block>{rawText(outputText)}</Code>
-          </ScrollArea.Autosize>
+          {failed ? (
+            <ToolFailureOutput output={outputText} />
+          ) : (
+            <ScrollArea.Autosize
+              mah={rem(240)}
+              scrollbarSize={activityDetailScrollbarSize}
+              {...activityDetailScrollAreaProps}
+            >
+              <Code block>{rawText(outputText)}</Code>
+            </ScrollArea.Autosize>
+          )}
         </Box>
       ) : null}
     </Stack>
@@ -824,6 +837,7 @@ function GenericToolCallCard({
       <RawPayloadContent
         argumentsText={toolCall.arguments}
         outputText={toolCall.result ?? ""}
+        failed={toolCall.status === "failed"}
       />
     ) : null;
   const status = t(toolCall.status);
@@ -864,6 +878,7 @@ function GenericToolCallCard({
           formatJsonValues={false}
           outputText={toolCall.result ?? ""}
           toolName={toolCall.name}
+          failed={toolCall.status === "failed"}
         />
       </Modal>
     </>
@@ -881,7 +896,11 @@ function StandardSpecializedToolCallCard({
 }): ReactElement {
   const t = useTranslations("chat.toolCall");
   const [rawOpened, setRawOpened] = useState(false);
-  const semanticDetail = presentationDetail(presentation, t);
+  const semanticDetail = presentationDetail(
+    presentation,
+    t,
+    toolCall.status === "failed",
+  );
   const output = toolCall.result ?? "";
   const alreadyShowsOutput =
     ((presentation.detail?.type === "output" ||
@@ -894,7 +913,7 @@ function StandardSpecializedToolCallCard({
   const detail =
     toolCall.status === "failed" && output.length > 0 && !alreadyShowsOutput ? (
       <Stack gap="sm">
-        <RawPayloadContent argumentsText="" outputText={output} />
+        <RawPayloadContent argumentsText="" outputText={output} failed />
         {semanticDetail}
       </Stack>
     ) : (
@@ -953,6 +972,7 @@ function StandardSpecializedToolCallCard({
           formatJsonValues={false}
           outputText={toolCall.result ?? ""}
           toolName={toolCall.name}
+          failed={toolCall.status === "failed"}
         />
       </Modal>
     </>
