@@ -192,7 +192,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
   - typescript/apps/azents-web/messages/*/chat.json
-last_verified_at: 2026-10-07
+last_verified_at: 2026-10-08
 spec_version: 219
 ---
 
@@ -650,6 +650,11 @@ existing request because this refresh applies only to model execution. This keep
 and prevents durable failed history until retry is finalized. `max_retries` counts retries after the
 initial attempt, so a budget of three permits four total attempts and terminal attempt numbers remain
 one-based within each model turn.
+
+For xAI API-key and OAuth calls, HTTP 403 with a sanitized scalar provider message beginning
+`You have run out of credits or need a Grok subscription.` normalizes to `quota_or_billing`,
+even when the SDK reports `PermissionDeniedError`. Other 403 permission failures and ordinary
+429 rate limits keep their existing classifications.
 
 Normalized `quota_or_billing` bypasses same-candidate retry publication. `RunExecutor` records the
 candidate outcome, renews the Workspace cooldown generation, advances the frozen operation cursor,
