@@ -1,18 +1,24 @@
-import { rem } from "@mantine/core";
+import { Modal, rem, Stack } from "@mantine/core";
 import { useForm } from "@mantine/form";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TRPCClientError } from "@trpc/client";
+import { observable } from "@trpc/server/observable";
+import { useState } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import {
   resolveDefaultToolkitSlug,
   trimToolkitWhitespace,
 } from "@/shared/lib/toolkit-identifiers";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { trpc } from "@/trpc/client";
 import { projectToolkitConfig } from "../toolkit-config-projection";
+import { GithubConfigFields } from "./GithubConfigFields";
 import { ToolkitForm } from "./ToolkitForm";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitFormProps } from "./ToolkitForm";
 import type { ToolkitConfigResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 
 type ToolkitFormStoryProps = Omit<
   ToolkitFormProps,
@@ -28,7 +34,7 @@ function ToolkitFormStory(props: ToolkitFormStoryProps): ReactElement {
       toolkitType: props.currentToolSlug,
       slug: props.formState.type === "EDIT" ? props.formState.config.slug : "",
       name: props.formState.type === "EDIT" ? props.formState.config.name : "",
-      description: "Read-only shell access for workspace diagnostics.",
+      description: `${props.namePlaceholder} configuration for workspace diagnostics.`,
       prompt: "Use the available shell tools for diagnostics.",
       config:
         props.formState.type === "EDIT"
@@ -58,7 +64,7 @@ function ToolkitFormStory(props: ToolkitFormStoryProps): ReactElement {
         props.currentToolSlug,
         form.values.config,
       )}
-      configurationFields={null}
+      configurationFields={props.configurationFields ?? null}
       form={form}
       onSubmit={form.onSubmit((values) => {
         props.onSubmitValues?.(values);
@@ -288,5 +294,155 @@ export const CancelDelegatesWithoutSubmission = {
     await expect(
       within(canvasElement).getByRole("button", { name: "Add" }),
     ).not.toHaveAttribute("data-loading");
+  },
+} satisfies Story;
+
+function StaticGithubProvider({
+  children,
+}: {
+  children: ReactNode;
+}): ReactElement {
+  const [queryClient] = useState(() => new QueryClient());
+  const [client] = useState(() =>
+    trpc.createClient({
+      links: [
+        () => () =>
+          observable((observer) => {
+            observer.error(
+              new TRPCClientError(
+                "Network operations are disabled in this static story.",
+              ),
+            );
+          }),
+      ],
+    }),
+  );
+  return (
+    <trpc.Provider client={client} queryClient={queryClient}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </trpc.Provider>
+  );
+}
+
+export const MobileEmbeddedGithub = {
+  parameters: { testViewport: { width: 390, height: 844 } },
+  decorators: [
+    (Story) => (
+      <StaticGithubProvider>
+        <Modal
+          opened
+          onClose={() => {}}
+          title="Toolkit settings"
+          size="lg"
+          centered
+        >
+          <Stack gap="md">
+            <Story />
+          </Stack>
+        </Modal>
+      </StaticGithubProvider>
+    ),
+  ],
+  args: {
+    embedded: true,
+    agentId: "agent-1",
+    toolkitTypeLocked: true,
+    currentToolSlug: "github",
+    toolOptions: [{ value: "github", label: "GitHub" }],
+    namePlaceholder: "GitHub",
+    slugPlaceholder: "github",
+    configurationFields: (
+      <GithubConfigFields
+        config={{ github_auth_type: "pat" }}
+        credentials={null}
+        hasCredentials={false}
+        authorizationState={null}
+        onConfigChange={fn()}
+        onCredentialsChange={fn()}
+      />
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    const dialog = body.getByRole("dialog", { name: "Toolkit settings" });
+    await expect(
+      within(dialog).getByRole("textbox", { name: "Name" }),
+    ).toBeVisible();
+    await expect(dialog.scrollWidth).toBeLessThanOrEqual(dialog.clientWidth);
+    for (const element of dialog.querySelectorAll(
+      ".mantine-Container-root, form, [role='alert']",
+    )) {
+      await expect(element.scrollWidth).toBeLessThanOrEqual(
+        element.clientWidth,
+      );
+    }
+    await expect(
+      within(dialog).getByText(/When enabled, GitHub tokens are injected/),
+    ).toBeVisible();
+    await expect(
+      within(dialog).queryByText(
+        "workspace.toolkits.github.runtimeEnvironmentWarningBody",
+      ),
+    ).not.toBeInTheDocument();
+    const bounds = dialog.getBoundingClientRect();
+    for (const control of dialog.querySelectorAll(
+      "input, textarea, button, [role='alert'] *",
+    )) {
+      const controlBounds = control.getBoundingClientRect();
+      await expect(controlBounds.right).toBeLessThanOrEqual(bounds.right);
+      await expect(controlBounds.left).toBeGreaterThanOrEqual(bounds.left);
+    }
+  },
+} satisfies Story;
+
+export const NarrowEmbeddedGithub = {
+  ...MobileEmbeddedGithub,
+  parameters: { testViewport: { width: 360, height: 800 } },
+} satisfies Story;
+
+export const DesktopEmbeddedGithub = {
+  ...MobileEmbeddedGithub,
+  parameters: { testViewport: { width: 1280, height: 1000 } },
+} satisfies Story;
+
+export const MobileEmbeddedMcp = {
+  ...MobileEmbeddedGithub,
+  args: {
+    ...GenericMcpRequiresName.args,
+    embedded: true,
+    toolkitTypeLocked: true,
+    configurationFields: null,
+  },
+  play: async ({ canvasElement }) => {
+    const dialog = within(canvasElement.ownerDocument.body).getByRole(
+      "dialog",
+      {
+        name: "Toolkit settings",
+      },
+    );
+    await expect(
+      within(dialog).getByRole("textbox", { name: "Name" }),
+    ).toBeVisible();
+    await expect(dialog.scrollWidth).toBeLessThanOrEqual(dialog.clientWidth);
+    for (const element of dialog.querySelectorAll(
+      ".mantine-Container-root, form",
+    )) {
+      await expect(element.scrollWidth).toBeLessThanOrEqual(
+        element.clientWidth,
+      );
+    }
+  },
+} satisfies Story;
+
+export const MobileStandalone = {
+  parameters: { testViewport: { width: 390, height: 844 } },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole("textbox", { name: "Name" }),
+    ).toBeVisible();
+    const documentElement = canvasElement.ownerDocument.documentElement;
+    await expect(documentElement.scrollWidth).toBeLessThanOrEqual(
+      documentElement.clientWidth,
+    );
   },
 } satisfies Story;

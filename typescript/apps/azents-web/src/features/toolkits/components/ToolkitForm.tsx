@@ -157,7 +157,13 @@ export function ToolkitForm({
   }
 
   return (
-    <Container size="md" py={embedded ? 0 : "xl"} px={embedded ? 0 : "md"}>
+    <Container
+      size="md"
+      w="100%"
+      miw={0}
+      py={embedded ? 0 : "xl"}
+      px={embedded ? 0 : "md"}
+    >
       <Stack gap="lg">
         {!embedded && (
           <Anchor component={Link} href={backPath} size="sm">
