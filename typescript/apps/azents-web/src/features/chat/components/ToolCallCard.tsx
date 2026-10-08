@@ -33,8 +33,6 @@ import {
   IconWorld,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { Component, useState } from "react";
-import { knownToolPresentation } from "../knownToolPresentation";
 import { toolCallActionMessageKey } from "../toolCallActionPresentation";
 import { ActivityRow } from "./ActivityRow";
 import {
@@ -60,47 +58,9 @@ import type {
   V4APatchHunk,
   V4APatchLine,
 } from "../v4aPatchPresentation";
-import type { ReactElement, ReactNode } from "react";
-
-interface ToolCallCardProps {
-  toolCall: ActiveToolCall;
-  hiddenAttachmentUris?: readonly string[];
-}
-
-interface SpecializedToolCallBoundaryProps {
-  children: ReactNode;
-  fallback: ReactNode;
-  resetKey: string;
-}
-
-interface SpecializedToolCallBoundaryState {
-  failed: boolean;
-}
+import type { ReactElement } from "react";
 
 type ToolCallTranslations = ReturnType<typeof useTranslations<"chat.toolCall">>;
-
-class SpecializedToolCallBoundary extends Component<
-  SpecializedToolCallBoundaryProps,
-  SpecializedToolCallBoundaryState
-> {
-  public state: SpecializedToolCallBoundaryState = { failed: false };
-
-  public static getDerivedStateFromError(): SpecializedToolCallBoundaryState {
-    return { failed: true };
-  }
-
-  public componentDidUpdate(
-    previousProps: SpecializedToolCallBoundaryProps,
-  ): void {
-    if (this.state.failed && previousProps.resetKey !== this.props.resetKey) {
-      this.setState({ failed: false });
-    }
-  }
-
-  public render(): ReactNode {
-    return this.state.failed ? this.props.fallback : this.props.children;
-  }
-}
 
 /** Format JSON string. Return original when parsing fails. */
 function formatJson(value: string): string {
@@ -822,12 +782,14 @@ function RawPayloadContent({
   );
 }
 
-function GenericToolCallCard({
+export function GenericToolCallCard({
   toolCall,
   hiddenAttachmentUris,
-}: Required<ToolCallCardProps>): ReactElement {
+  rawOpened,
+  onOpenRaw,
+  onCloseRaw,
+}: GenericToolCallCardViewProps): ReactElement {
   const t = useTranslations("chat.toolCall");
-  const [rawOpened, setRawOpened] = useState(false);
   const visibleAttachments = genericVisibleAttachments(
     toolCall,
     hiddenAttachmentUris,
@@ -852,7 +814,7 @@ function GenericToolCallCard({
             variant="subtle"
             color="gray"
             aria-label={t("viewRawDataFor", { action: toolCall.name })}
-            onClick={() => setRawOpened(true)}
+            onClick={onOpenRaw}
           >
             <IconDots size={activityRowIconSize} />
           </ActionIcon>
@@ -868,7 +830,7 @@ function GenericToolCallCard({
       ) : null}
       <Modal
         opened={rawOpened}
-        onClose={() => setRawOpened(false)}
+        onClose={onCloseRaw}
         title={t("rawData")}
         centered
         size="lg"
@@ -885,17 +847,15 @@ function GenericToolCallCard({
   );
 }
 
-function StandardSpecializedToolCallCard({
+export function StandardSpecializedToolCallCard({
   toolCall,
   presentation,
   hiddenAttachmentUris,
-}: {
-  toolCall: ActiveToolCall;
-  presentation: KnownToolPresentation;
-  hiddenAttachmentUris: readonly string[];
-}): ReactElement {
+  rawOpened,
+  onOpenRaw,
+  onCloseRaw,
+}: StandardToolCallCardViewProps): ReactElement {
   const t = useTranslations("chat.toolCall");
-  const [rawOpened, setRawOpened] = useState(false);
   const semanticDetail = presentationDetail(
     presentation,
     t,
@@ -944,7 +904,7 @@ function StandardSpecializedToolCallCard({
             variant="subtle"
             color="gray"
             aria-label={t("viewRawDataFor", { action })}
-            onClick={() => setRawOpened(true)}
+            onClick={onOpenRaw}
           >
             <IconDots size={activityRowIconSize} />
           </ActionIcon>
@@ -962,7 +922,7 @@ function StandardSpecializedToolCallCard({
       ) : null}
       <Modal
         opened={rawOpened}
-        onClose={() => setRawOpened(false)}
+        onClose={onCloseRaw}
         title={t("rawData")}
         centered
         size="lg"
@@ -979,48 +939,7 @@ function StandardSpecializedToolCallCard({
   );
 }
 
-function SpecializedToolCallCard({
-  toolCall,
-  presentation,
-  hiddenAttachmentUris,
-}: {
-  toolCall: ActiveToolCall;
-  presentation: KnownToolPresentation;
-  hiddenAttachmentUris: readonly string[];
-}): ReactElement {
-  return (
-    <StandardSpecializedToolCallCard
-      toolCall={toolCall}
-      presentation={presentation}
-      hiddenAttachmentUris={hiddenAttachmentUris}
-    />
-  );
-}
-
-export function ToolCallCard({
-  toolCall,
-  hiddenAttachmentUris = [],
-}: ToolCallCardProps): ReactElement {
-  const result = knownToolPresentation(toolCall);
-  const generic = (
-    <GenericToolCallCard
-      toolCall={toolCall}
-      hiddenAttachmentUris={hiddenAttachmentUris}
-    />
-  );
-  if (result.type === "generic") {
-    return generic;
-  }
-  return (
-    <SpecializedToolCallBoundary
-      resetKey={`${toolCall.id}:${toolCall.status}:${toolCall.result ?? ""}`}
-      fallback={generic}
-    >
-      <SpecializedToolCallCard
-        toolCall={toolCall}
-        presentation={result.presentation}
-        hiddenAttachmentUris={hiddenAttachmentUris}
-      />
-    </SpecializedToolCallBoundary>
-  );
-}
+import type {
+  GenericToolCallCardViewProps,
+  StandardToolCallCardViewProps,
+} from "../types";

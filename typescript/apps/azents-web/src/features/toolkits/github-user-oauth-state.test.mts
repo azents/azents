@@ -9,8 +9,8 @@ import {
   isGitHubUserMode,
   mergeGitHubUserAccess,
   parseGitHubUserState,
-} from "./github-user-oauth-state.ts";
-import type { GitHubUserPopupHandoff } from "./github-user-oauth-state.ts";
+} from "../../shared/toolkits/github-user-oauth-state.ts";
+import type { GitHubUserPopupHandoff } from "../../shared/toolkits/github-user-oauth-state.ts";
 import type {
   GitHubUserInstallation,
   GitHubUserRepository,

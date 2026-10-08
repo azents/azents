@@ -851,3 +851,31 @@ export type ChatTimelineState =
       hasNewer: boolean;
       newestCursor: string | null;
     };
+
+export interface RawToolDialogProps {
+  rawOpened: boolean;
+  onOpenRaw: () => void;
+  onCloseRaw: () => void;
+}
+export interface ToolCallCardInput {
+  toolCall: ActiveToolCall;
+  hiddenAttachmentUris?: readonly string[];
+}
+export interface GenericToolCallCardViewProps extends RawToolDialogProps {
+  toolCall: ActiveToolCall;
+  hiddenAttachmentUris: readonly string[];
+}
+export interface StandardToolCallCardInput extends ToolCallCardInput {
+  presentation: KnownToolPresentation;
+}
+export interface StandardToolCallCardViewProps extends GenericToolCallCardViewProps {
+  presentation: KnownToolPresentation;
+}
+export interface ProviderToolCallCardInput {
+  toolCall: ProviderToolCall;
+  hiddenAttachmentUris?: readonly string[];
+}
+export interface ProviderToolCallCardViewProps
+  extends ProviderToolCallCardInput, RawToolDialogProps {}
+
+import type { KnownToolPresentation } from "./knownToolPresentation";

@@ -1,7 +1,7 @@
 "use client";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
-import { GitHubUserAuthorization } from "./components/GitHubUserAuthorization";
-import { useGitHubUserAuthorizationContainer } from "./containers/useGitHubUserAuthorizationContainer";
+import { GitHubUserAuthorization } from "../../shared/toolkits/components/GitHubUserAuthorization";
+import { useGitHubUserAuthorizationContainer } from "../../shared/toolkits/containers/useGitHubUserAuthorizationContainer";
 
 export const GitHubUserAuthorizationPage = createReactContainer(
   "GitHubUserAuthorizationPage",

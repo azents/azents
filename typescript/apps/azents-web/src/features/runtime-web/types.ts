@@ -5,6 +5,11 @@ export type RuntimeWebAuthState =
 
 export type RuntimeWebDurationSeconds = 3600 | 21_600 | 86_400;
 
+export interface RuntimeWebActivationDurationProps {
+  duration: RuntimeWebDurationSeconds;
+  onDurationChange: (duration: RuntimeWebDurationSeconds) => void;
+}
+
 export type RuntimeWebServicesState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }

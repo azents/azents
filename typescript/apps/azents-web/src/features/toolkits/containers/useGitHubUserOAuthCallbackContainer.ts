@@ -9,9 +9,9 @@ import {
   GITHUB_USER_CONTEXT_KEY,
   githubUserErrorReason,
   parseGitHubUserState,
-} from "../github-user-oauth-state";
+} from "../../../shared/toolkits/github-user-oauth-state";
+import type { GitHubUserContext } from "../../../shared/toolkits/github-user-oauth-state";
 import type { GitHubUserOAuthCallbackResultProps } from "../components/GitHubUserOAuthCallbackResult";
-import type { GitHubUserContext } from "../github-user-oauth-state";
 
 export interface GitHubUserOAuthCallbackContainerProps {
   code: string | null;

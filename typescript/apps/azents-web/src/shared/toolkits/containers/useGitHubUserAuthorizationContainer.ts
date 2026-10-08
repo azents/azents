@@ -10,12 +10,12 @@ import {
   mergeGitHubUserAccess,
 } from "../github-user-oauth-state";
 import type { GitHubUserAuthorizationProps } from "../components/GitHubUserAuthorization";
+import type { GitHubUserContext } from "../github-user-oauth-state";
 import type {
   GitHubUserAccessState,
-  GitHubUserContext,
   GitHubUserOperationState,
   GitHubUserSetupState,
-} from "../github-user-oauth-state";
+} from "../types";
 import type { ToolkitConfigResponse } from "@azents/public-client";
 
 export interface GitHubUserAuthorizationContainerProps {

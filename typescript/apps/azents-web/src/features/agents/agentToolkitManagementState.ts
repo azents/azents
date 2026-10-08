@@ -1,15 +1,5 @@
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
-export type AgentToolkitEditorState =
-  | { type: "CLOSED" }
-  | { type: "CATALOG"; tab: "new" | "workspace" }
-  | { type: "CREATE"; toolkitType: string }
-  | { type: "DETAIL"; toolkitConfigId: string }
-  | { type: "EDIT"; toolkitConfigId: string };
-
-export type AgentToolkitMutationState =
-  { type: "IDLE" } | { type: "ERROR"; message: string };
-
 /** A write completes only the editor that submitted it. */
 export function completedToolkitEditor(
   current: AgentToolkitEditorState,
@@ -22,23 +12,6 @@ export function completedToolkitEditor(
     ? { type: "DETAIL", toolkitConfigId: submitted.toolkitConfigId }
     : { type: "CLOSED" };
 }
-
-export interface AgentToolkitSharedOption {
-  value: string;
-  label: string;
-  toolkitType: string;
-  description?: string | null;
-}
-
-export type AgentToolkitManagementState =
-  | { type: "LOADING" }
-  | { type: "ERROR"; message: string }
-  | {
-      type: "READY";
-      items: AgentToolkitManagementItemResponse[];
-      toolkitTypes: Array<{ value: string; label: string }>;
-      availableShared: AgentToolkitSharedOption[];
-    };
 
 export function canAuthorizeAgentToolkitOAuth(
   item: AgentToolkitManagementItemResponse,
@@ -129,3 +102,8 @@ export function projectAgentToolkitManagementState({
     })),
   };
 }
+
+import type {
+  AgentToolkitEditorState,
+  AgentToolkitManagementState,
+} from "./types";

@@ -1,5 +1,4 @@
 "use client";
-
 import { useSessionStorage, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -8,18 +7,20 @@ import {
   deserializeGitHubUserContext,
   GITHUB_USER_CONTEXT_KEY,
   isGitHubUserMode,
-} from "@/features/toolkits/github-user-oauth-state";
+} from "@/shared/toolkits/github-user-oauth-state";
 import { trpc } from "@/trpc/client";
 import {
-  type AgentToolkitEditorState,
-  type AgentToolkitManagementState,
-  type AgentToolkitMutationState,
   canAuthorizeAgentToolkitOAuth,
   completedToolkitEditor,
   decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
 } from "../agentToolkitManagementState";
-import type { GitHubUserContext } from "@/features/toolkits/github-user-oauth-state";
+import type {
+  AgentToolkitEditorState,
+  AgentToolkitManagementState,
+  AgentToolkitMutationState,
+} from "../types";
+import type { GitHubUserContext } from "@/shared/toolkits/github-user-oauth-state";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
 export interface AgentToolkitManagementContainerProps {

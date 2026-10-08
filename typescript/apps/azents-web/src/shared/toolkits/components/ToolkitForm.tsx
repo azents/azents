@@ -28,7 +28,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { normalizeGitHubUserCredentialEdits } from "../github-user-credentials";
 import { isGitHubUserMode } from "../github-user-oauth-state";
-import { GitHubUserAuthorizationPage } from "../GitHubUserAuthorizationPage";
+import { GitHubUserAuthorizationContainer } from "../GitHubUserAuthorizationContainer";
 import { AwsConfigFields } from "./AwsConfigFields";
 import { BraveSearchConfigFields } from "./BraveSearchConfigFields";
 import { EnvVarConfigFields } from "./EnvVarConfigFields";
@@ -293,7 +293,7 @@ export function ToolkitForm({
                   isGitHubUserMode(
                     formState.config.config.github_auth_type,
                   ) && (
-                    <GitHubUserAuthorizationPage
+                    <GitHubUserAuthorizationContainer
                       toolkit={formState.config}
                       onPendingChange={onUserSetupPendingChange}
                       context={{

@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   missingNewGitHubUserRegistration,
   normalizeGitHubUserCredentialEdits,
-} from "./github-user-credentials.ts";
+} from "../../shared/toolkits/github-user-credentials.ts";
 void test("blank write-only registration inputs are omitted individually", () => {
   assert.deepEqual(
     normalizeGitHubUserCredentialEdits({

@@ -17,7 +17,6 @@ import {
 } from "@mantine/core";
 import { IconExternalLink, IconPower, IconWorld } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
 import type { RuntimeWebActivationContainerOutput } from "../containers/useRuntimeWebActivationContainer";
 import type { RuntimeWebDurationSeconds } from "../types";
 
@@ -37,17 +36,12 @@ function durationValue(value: string | null): RuntimeWebDurationSeconds | null {
 export function RuntimeWebActivation({
   state,
   applicationUrl,
+  duration,
+  onDurationChange,
   onTurnOn,
   onRetry,
 }: RuntimeWebActivationContainerOutput): React.ReactElement {
   const t = useTranslations("runtimeWeb");
-  const [duration, setDuration] = useState<RuntimeWebDurationSeconds>(3600);
-
-  useEffect(() => {
-    if (state.type === "READY") {
-      setDuration(state.service.selected_duration_seconds);
-    }
-  }, [state]);
 
   if (state.type === "LOADING") {
     return (
@@ -141,7 +135,7 @@ export function RuntimeWebActivation({
                 onChange={(value) => {
                   const selected = durationValue(value);
                   if (selected !== null) {
-                    setDuration(selected);
+                    onDurationChange(selected);
                   }
                 }}
               />

@@ -1,8 +1,8 @@
 import { rem, Text } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { githubUserAuthorizationFixture } from "@/features/toolkits/components/github-user-story-fixtures";
-import { GitHubUserAuthorization } from "@/features/toolkits/components/GitHubUserAuthorization";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { githubUserAuthorizationFixture } from "@/shared/toolkits/components/github-user-story-fixtures";
+import { GitHubUserAuthorization } from "@/shared/toolkits/components/GitHubUserAuthorization";
 import { ManagedAgentToolkitSectionView } from "./ManagedAgentToolkitSection";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";

@@ -8,7 +8,7 @@ touches_domains: []
 code_paths:
   - typescript/apps/azents-web/src/shared/model-options/model-option-editor.ts
   - typescript/apps/azents-web/src/shared/model-options/image-generation-config.ts
-  - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.ts
+  - typescript/apps/azents-web/src/shared/toolkits/toolkit-config-projection.ts
   - python/apps/azents/src/azents/api/public/chat/v1/validation_audit_test.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/validation_audit_test.py
   - python/apps/azents/src/azents/repos/toolkit/validation_audit_test.py
@@ -19,7 +19,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/model-options/components/ModelCatalogPicker.stories.tsx
   - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.stories.tsx
   - typescript/apps/azents-web/src/features/llm-settings/components/WorkspaceModelSettingsCard.stories.tsx
-  - typescript/apps/azents-web/src/features/toolkits/components/ToolkitForm.stories.tsx
+  - typescript/apps/azents-web/src/shared/toolkits/components/ToolkitForm.stories.tsx
   - typescript/apps/azents-web/src/shared/model-options/image-generation-config.test.mts
   - typescript/apps/azents-web/src/shared/model-options/model-selection.test.mts
   - typescript/apps/azents-web/src/features/toolkits/toolkit-config-projection.test.mts
@@ -46,8 +46,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-10-04
-spec_version: 84
+last_verified_at: 2026-10-09
+spec_version: 85
 ---
 
 # E2E Primary Test Strategy
@@ -64,6 +64,14 @@ External Channel live observations likewise use the native live-response factory
 after primitive wire serialization, preserving nested `JSONValue` conversion,
 explicit nulls and opaque extension fields. Focused deterministic helper tests
 cover these decoding boundaries; they do not replace assembled product E2E.
+
+The synthetic GitHub validation proxy decodes scenario, OAuth, revocation, and
+MCP control input into runtime-validated immutable operations before dispatch.
+Malformed or unknown control fields are rejected without issuing credentials,
+revoking tokens, or executing tools. MCP initialization metadata remains an
+opaque extensible object, and omitted or null request IDs retain the fixture's
+acknowledgement contract. In-process support tests cover these boundaries without
+opening a listener; assembled GitHub SDK and browser journeys remain E2E-owned.
 
 ## Overview
 

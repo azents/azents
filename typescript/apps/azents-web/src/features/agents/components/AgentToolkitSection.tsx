@@ -14,84 +14,19 @@ import {
 } from "@mantine/core";
 import { IconLink, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
-import { trpc } from "@/trpc/client";
-import { ManagedAgentToolkitSection } from "./ManagedAgentToolkitSection";
-import type {
-  AgentToolkitResponse,
-  ToolkitConfigResponse,
-} from "@azents/public-client";
+import type { LegacyAgentToolkitSectionProps } from "../types";
 
-interface AgentToolkitSectionProps {
-  handle: string;
-  agentId: string;
-  managementAvailable: boolean;
-}
-
-export function AgentToolkitSection({
-  handle,
-  agentId,
-  managementAvailable,
-}: AgentToolkitSectionProps): React.ReactElement {
-  return managementAvailable ? (
-    <ManagedAgentToolkitSection handle={handle} agentId={agentId} />
-  ) : (
-    <LegacyAgentToolkitSection handle={handle} agentId={agentId} />
-  );
-}
-
-function LegacyAgentToolkitSection({
-  handle,
-  agentId,
-}: Omit<AgentToolkitSectionProps, "managementAvailable">): React.ReactElement {
+export function LegacyAgentToolkitSection({
+  state,
+  selectedToolkitId,
+  onSelectionChange,
+  onAttach,
+  onDetach,
+}: LegacyAgentToolkitSectionProps): React.ReactElement {
   const t = useTranslations("workspace.agents");
-  const utils = trpc.useUtils();
-  const [selectedToolkitId, setSelectedToolkitId] = useState<string | null>(
-    null,
-  );
-  const agentToolkitsQuery = trpc.toolkit.listAgentToolkits.useQuery({
-    handle,
-    agentId,
-  });
-  const availableToolkitsQuery = trpc.toolkit.listAvailableConfigs.useQuery({
-    handle,
-  });
-  const agentToolkits: AgentToolkitResponse[] = useMemo(
-    () => agentToolkitsQuery.data?.items ?? [],
-    [agentToolkitsQuery.data],
-  );
-  const availableToolkits: ToolkitConfigResponse[] = useMemo(
-    () => availableToolkitsQuery.data?.items ?? [],
-    [availableToolkitsQuery.data],
-  );
-  const attachedToolkitIds = useMemo(
-    () => new Set(agentToolkits.map((item) => item.toolkit_id)),
-    [agentToolkits],
-  );
-  const selectOptions = useMemo(
-    () =>
-      availableToolkits
-        .filter((toolkit) => !attachedToolkitIds.has(toolkit.id))
-        .map((toolkit) => ({
-          value: toolkit.id,
-          label: `${toolkit.name} (${toolkit.toolkit_type})`,
-        })),
-    [attachedToolkitIds, availableToolkits],
-  );
-  const attachMutation = trpc.toolkit.attachToAgent.useMutation({
-    onSuccess: () => {
-      void utils.toolkit.listAgentToolkits.invalidate({ handle, agentId });
-      setSelectedToolkitId(null);
-    },
-  });
-  const detachMutation = trpc.toolkit.detachFromAgent.useMutation({
-    onSuccess: () => {
-      void utils.toolkit.listAgentToolkits.invalidate({ handle, agentId });
-    },
-  });
-  const loading =
-    agentToolkitsQuery.isLoading || availableToolkitsQuery.isLoading;
-  const failed = agentToolkitsQuery.isError || availableToolkitsQuery.isError;
+  const loading = state.type === "LOADING" || state.type === "LOADING_ERROR";
+  const failed = state.type === "ERROR" || state.type === "LOADING_ERROR";
+  const { agentToolkits, availableToolkits, selectOptions } = state;
   return (
     <Stack id="agent-toolkits" gap="sm">
       <Title order={5}>{t("toolkitsSection")}</Title>
@@ -116,13 +51,7 @@ function LegacyAgentToolkitSection({
             color="red"
             size="sm"
             aria-label={t("toolkitManagement.detach")}
-            onClick={() =>
-              detachMutation.mutate({
-                handle,
-                agentId,
-                agentToolkitId: item.id,
-              })
-            }
+            onClick={() => onDetach(item.id)}
           >
             <IconTrash size={14} />
           </ActionIcon>
@@ -134,7 +63,7 @@ function LegacyAgentToolkitSection({
             placeholder={t("attachToolkit")}
             data={selectOptions}
             value={selectedToolkitId}
-            onChange={setSelectedToolkitId}
+            onChange={onSelectionChange}
             size="sm"
             style={{ flex: 1 }}
           />
@@ -145,11 +74,7 @@ function LegacyAgentToolkitSection({
             disabled={selectedToolkitId == null}
             onClick={() => {
               if (selectedToolkitId) {
-                attachMutation.mutate({
-                  handle,
-                  agentId,
-                  toolkitId: selectedToolkitId,
-                });
+                onAttach(selectedToolkitId);
               }
             }}
           >

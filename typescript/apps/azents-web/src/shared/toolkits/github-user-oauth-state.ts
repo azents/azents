@@ -1,10 +1,5 @@
 import { z } from "zod/v4";
-import type {
-  GitHubSetupAvailability,
-  GitHubUserCandidateSummary,
-  GitHubUserConnectionSummary,
-  GitHubUserInstallation,
-} from "@azents/public-client";
+import type { GitHubUserInstallation } from "@azents/public-client";
 
 export const GITHUB_USER_CONTEXT_KEY = "azents.github-user.origin";
 export const GITHUB_USER_COMPLETION_EVENT = "azents-github-user-complete";
@@ -89,59 +84,6 @@ export function decodeGitHubUserCompletion(
   return data.success && data.data.attempt_id === attemptId;
 }
 
-export type GitHubAvailabilityState =
-  | { type: "LOADING" }
-  | { type: "ERROR" }
-  | { type: "READY"; availability: GitHubSetupAvailability };
-export type GitHubUserSetupState =
-  | { type: "IDLE" }
-  | { type: "STARTING" }
-  | { type: "WAITING"; attemptId: string; installUrl: string }
-  | { type: "REVIEW_LOADING"; attemptId: string }
-  | { type: "REVIEW"; candidate: GitHubUserCandidateSummary }
-  | { type: "CONFIRMING"; candidate: GitHubUserCandidateSummary }
-  | { type: "CANCELLING"; attemptId: string }
-  | { type: "ERROR"; reason: GitHubUserUiError; attemptId: string | null };
-export type GitHubUserUiError =
-  | "popupBlocked"
-  | "popupClosed"
-  | "setupFailed"
-  | "reviewFailed"
-  | "stale"
-  | "authority"
-  | "incompatible"
-  | "disconnectFailed";
-export type GitHubUserStatusState =
-  | { type: "LOADING" }
-  | { type: "ERROR" }
-  | {
-      type: "READY";
-      connection: GitHubUserConnectionSummary | null;
-    };
-export type GitHubUserAccessState =
-  | { type: "IDLE" }
-  | { type: "LOADING" }
-  | {
-      type: "READY";
-      installations: GitHubUserInstallation[];
-      nextCursor: string | null;
-    }
-  | {
-      type: "MORE";
-      installations: GitHubUserInstallation[];
-      nextCursor: string;
-    }
-  | {
-      type: "ERROR";
-      installations: GitHubUserInstallation[];
-      nextCursor: string | null;
-    };
-export type GitHubUserOperationState =
-  | { type: "IDLE" }
-  | { type: "DISCONNECT_CONFIRM" }
-  | { type: "DISCONNECTING" }
-  | { type: "ERROR"; reason: GitHubUserUiError };
-
 /** A continuation can repeat an owner, including within the same response. */
 export function mergeGitHubUserAccess(
   existing: GitHubUserInstallation[],
@@ -190,3 +132,5 @@ export function githubUserErrorReason(
       return fallback;
   }
 }
+
+import type { GitHubUserUiError } from "./types";

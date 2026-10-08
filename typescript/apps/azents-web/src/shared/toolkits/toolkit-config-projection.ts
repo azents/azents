@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { isRecord, isString } from "../../shared/lib/unknown-value.ts";
+import { isRecord, isString } from "../lib/unknown-value.ts";
 
 const text = z.string().catch("");
 const historicalNumber = z

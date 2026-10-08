@@ -30,9 +30,9 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import Link from "next/link";
 import { useId } from "react";
 import { hasInvalidImageGenerationSelections } from "@/shared/model-options/model-selection";
+import { AgentToolkitSectionPage } from "../AgentToolkitSectionPage";
 import { shouldShowAgentTerminalSettings } from "../terminalSettingsVisibility";
 import { AgentAdminSection } from "./AgentAdminSection";
-import { AgentToolkitSection } from "./AgentToolkitSection";
 import type { MemberItem } from "../containers/useAgentFormContainer";
 import type { AgentFormTranslator } from "../containers/useAgentFormTranslations";
 import type { AgentFormValues } from "../schemas";
@@ -555,7 +555,7 @@ export function AgentForm({
         {includeToolkitSection &&
           showCapabilities &&
           formState.type === "EDIT" && (
-            <AgentToolkitSection
+            <AgentToolkitSectionPage
               handle={handle}
               agentId={formState.agent.id}
               managementAvailable={formState.agent.toolkit_management_available}

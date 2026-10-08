@@ -1,14 +1,12 @@
 "use client";
+
 import { useInterval, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
-import type {
-  GithubFieldsViewProps,
-  InstallationItem,
-  InstallationTarget,
-} from "../components/GithubFieldsView";
+import type { GithubFieldsViewProps } from "../components/GithubFieldsView";
+import type { GithubInstallationState, InstallationTarget } from "../types";
 import type { GitHubPlatformAuthorizationStateResponse } from "@azents/public-client";
 
 export interface GithubConfigFieldsProps {
@@ -59,16 +57,18 @@ export function useGithubConfigFieldsContainer(
   const getInstallations = trpc.toolkit.getGithubInstallations.useMutation();
   const test = trpc.toolkit.testConnection.useMutation();
   const [runtimeAcknowledged, setRuntimeAcknowledged] = useState(false);
-  const [installations, setInstallations] = useState<InstallationItem[]>([]);
   const [installationState, setInstallationState] =
-    useState<GithubFieldsViewProps["installationState"]>("IDLE");
+    useState<GithubInstallationState>({ type: "IDLE", installations: [] });
   const popup = useRef<Window | null>(null);
   const afterClose = useRef<(() => void) | null>(null);
   const { start, stop } = useInterval(() => {
     if (popup.current?.closed) {
       popup.current = null;
       stop();
-      setInstallationState("IDLE");
+      setInstallationState((current) => ({
+        type: "IDLE",
+        installations: current.installations,
+      }));
       afterClose.current?.();
       afterClose.current = null;
     }
@@ -90,11 +90,17 @@ export function useGithubConfigFieldsContainer(
     if (popup.current) {
       start();
     } else {
-      setInstallationState("ERROR");
+      setInstallationState((current) => ({
+        type: "ERROR",
+        installations: current.installations,
+      }));
     }
   }
   async function connectInstallations(): Promise<void> {
-    setInstallationState("LOADING");
+    setInstallationState((current) => ({
+      type: "LOADING",
+      installations: current.installations,
+    }));
     try {
       const data = await utils.toolkit.getGithubOauthUrl.fetch({
         handle: props.handle ?? "",
@@ -102,7 +108,10 @@ export function useGithubConfigFieldsContainer(
       });
       open(data.oauth_url);
     } catch {
-      setInstallationState("ERROR");
+      setInstallationState((current) => ({
+        type: "ERROR",
+        installations: current.installations,
+      }));
     }
   }
   useWindowEvent("message", (event: MessageEvent<unknown>): void => {
@@ -121,7 +130,10 @@ export function useGithubConfigFieldsContainer(
     ) {
       popup.current = null;
       stop();
-      setInstallationState("LOADING");
+      setInstallationState((current) => ({
+        type: "LOADING",
+        installations: current.installations,
+      }));
       void getInstallations
         .mutateAsync({
           handle: props.handle ?? "",
@@ -130,10 +142,17 @@ export function useGithubConfigFieldsContainer(
           state: event.data.state,
         })
         .then((data) => {
-          setInstallations(data.installations);
-          setInstallationState("READY");
+          setInstallationState({
+            type: "READY",
+            installations: data.installations,
+          });
         })
-        .catch(() => setInstallationState("ERROR"));
+        .catch(() =>
+          setInstallationState((current) => ({
+            type: "ERROR",
+            installations: current.installations,
+          })),
+        );
     } else if (event.data.type === "azents-github-app-installed") {
       popup.current = null;
       stop();
@@ -149,7 +168,6 @@ export function useGithubConfigFieldsContainer(
       : availability.data
         ? { type: "READY", availability: availability.data }
         : { type: "LOADING" },
-    installations,
     selectedInstallations: targets(props.credentials?.installations),
     installationState,
     runtimeAcknowledged,
@@ -195,7 +213,12 @@ export function useGithubConfigFieldsContainer(
             void connectInstallations();
           }),
         )
-        .catch(() => setInstallationState("ERROR"));
+        .catch(() =>
+          setInstallationState((current) => ({
+            type: "ERROR",
+            installations: current.installations,
+          })),
+        );
     },
     onTest: () =>
       test.mutate({

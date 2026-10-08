@@ -103,6 +103,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
   - typescript/apps/azents-web/src/features/agents/agentToolkitManagementState.ts
+  - typescript/apps/azents-web/src/features/agents/types.ts
+  - typescript/apps/azents-web/src/features/agents/AgentToolkitSectionPage.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentForm.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
@@ -110,6 +112,8 @@ code_paths:
   - typescript/apps/azents-web/src/shared/model-options/components/SelectableModelOptionsEditor.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/agents/containers/useAgentToolkitManagementContainer.ts
+  - typescript/apps/azents-web/src/features/agents/containers/useLegacyAgentToolkitSection.ts
+  - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/shared/model-options/model-selection.ts
   - typescript/apps/azents-web/src/features/agents/terminalSettingsVisibility.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
@@ -149,8 +153,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-10-08
-spec_version: 96
+last_verified_at: 2026-10-09
+spec_version: 97
 ---
 
 # Agent Domain Spec

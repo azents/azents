@@ -18,21 +18,13 @@ import {
 import { useTranslations } from "next-intl";
 import { getString, getStringArray } from "@/shared/lib/unknown-value";
 import { isGitHubUserMode } from "../github-user-oauth-state";
-import type { GitHubAvailabilityState } from "../github-user-oauth-state";
+import type { GithubInstallationState, InstallationTarget } from "../types";
+import type {
+  GitHubAvailabilityState,
+  GithubConnectionTestState,
+} from "../types";
 import type { GitHubPlatformAuthorizationStateResponse } from "@azents/public-client";
 
-export interface InstallationTarget {
-  installation_id: string;
-  account_login: string;
-  account_type: string;
-  account_avatar_url: string | null;
-}
-export interface InstallationItem {
-  id: number;
-  account_login: string;
-  account_type: string;
-  account_avatar_url: string;
-}
 export interface GithubFieldsViewProps {
   config: Record<string, unknown>;
   credentials: Record<string, unknown> | null;
@@ -40,13 +32,9 @@ export interface GithubFieldsViewProps {
   savedUserRegistration: boolean;
   authorizationState: GitHubPlatformAuthorizationStateResponse | null;
   availability: GitHubAvailabilityState;
-  installations: InstallationItem[];
   selectedInstallations: InstallationTarget[];
-  installationState: "IDLE" | "LOADING" | "READY" | "ERROR";
-  testState:
-    | { type: "IDLE" }
-    | { type: "TESTING" }
-    | { type: "RESULT"; success: boolean; message: string };
+  installationState: GithubInstallationState;
+  testState: GithubConnectionTestState;
   runtimeAcknowledged: boolean;
   canTest: boolean;
   onRetryAvailability: () => void;
@@ -114,7 +102,7 @@ export function GithubFieldsView(
         .filter((target) => values.includes(target.installation_id))
         .map((target) => [target.installation_id, target]),
     );
-    for (const item of props.installations) {
+    for (const item of props.installationState.installations) {
       if (values.includes(String(item.id))) {
         targets.set(String(item.id), {
           installation_id: String(item.id),
@@ -370,13 +358,13 @@ export function GithubFieldsView(
             </Alert>
           )}
           <Alert color="blue">{t("platformDescription")}</Alert>
-          {props.installationState === "ERROR" && (
+          {props.installationState.type === "ERROR" && (
             <Alert color="red">{t("installationLoadError")}</Alert>
           )}
           <Button
             variant="light"
             onClick={props.onConnectInstallations}
-            loading={props.installationState === "LOADING"}
+            loading={props.installationState.type === "LOADING"}
             disabled={unavailable}
           >
             {t(
@@ -385,12 +373,12 @@ export function GithubFieldsView(
                 : "connectGithub",
             )}
           </Button>
-          {props.installationState === "READY" &&
-            (props.installations.length > 0 ? (
+          {props.installationState.type === "READY" &&
+            (props.installationState.installations.length > 0 ? (
               <MultiSelect
                 label={t("selectInstallationLabel")}
                 description={t("selectInstallationDescription")}
-                data={props.installations.map((item) => ({
+                data={props.installationState.installations.map((item) => ({
                   value: String(item.id),
                   label: `${item.account_login} (${item.account_type})`,
                 }))}

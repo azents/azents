@@ -25,9 +25,10 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/agents/components/ManagedAgentToolkitSection.tsx
   - typescript/apps/azents-web/src/features/toolkits/**
+  - typescript/apps/azents-web/src/shared/toolkits/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-last_verified_at: 2026-10-08
-spec_version: 13
+last_verified_at: 2026-10-09
+spec_version: 14
 ---
 
 # MCP OAuth Flow

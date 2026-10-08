@@ -4,7 +4,7 @@ import {
   hydrateToolkitConfig,
   projectToolkitConfig,
   toolkitProjectionUsesOauth,
-} from "./toolkit-config-projection.ts";
+} from "../../shared/toolkits/toolkit-config-projection.ts";
 
 void test("all five GitHub modes hydrate without falling back or generic OAuth discovery", () => {
   for (const mode of [
