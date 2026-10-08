@@ -138,9 +138,13 @@ export function ProviderToolCallCard({
           </Box>
         ) : null}
         {webSearch.summary !== null ? (
-          <Text size="xs" c="dimmed">
-            {webSearch.summary}
-          </Text>
+          toolCall.status === "failed" ? (
+            <ToolFailureOutput output={webSearch.summary} />
+          ) : (
+            <Text size="xs" c="dimmed">
+              {webSearch.summary}
+            </Text>
+          )
         ) : null}
         {webSearch.results.map((result) => (
           <Box

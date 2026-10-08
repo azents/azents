@@ -27,8 +27,8 @@ export function ToolInputContent({ input }: { input: string }): ReactElement {
   }
   return (
     <Stack component="dl" gap="sm" m={0}>
-      {presentation.fields.map((field) => (
-        <Box key={field.name}>
+      {presentation.fields.map((field, index) => (
+        <Box key={`${index}:${field.name}`}>
           <Text
             component="dt"
             size="xs"

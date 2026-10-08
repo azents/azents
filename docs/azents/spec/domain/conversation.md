@@ -140,7 +140,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-01
+last_verified_at: 2026-10-08
 spec_version: 176
 ---
 
@@ -1013,7 +1013,8 @@ sibling Raw data `…` action even when its retained arguments and result are em
 the canonical technical tool name before retained arguments and result. JSON object arguments
 render as individually labeled top-level fields in both client-tool and provider-tool details.
 String values preserve literal line breaks without JSON quoting or escaping; nested objects and
-arrays remain indented JSON, and scalar values retain their JSON representation. Empty objects
+arrays remain indented JSON, and scalar values retain their JSON representation. Numeric tokens,
+including large identifiers and precise decimals, preserve their original lexemes without rounding. Empty objects
 remain visible as `{}`; freeform, incomplete, and non-object input remains unchanged.
 Expanded failed tool rows also show their retained failure output even when a specialized detail
 would otherwise omit it; existing output details do not repeat the same failure message.

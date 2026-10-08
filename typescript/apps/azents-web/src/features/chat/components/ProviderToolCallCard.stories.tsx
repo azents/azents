@@ -238,6 +238,35 @@ export const MultilineFailure = {
   },
 } satisfies Story;
 
+export const MatchingFailureSummary = {
+  decorators: MultilineFailure.decorators,
+  args: {
+    toolCall: {
+      ...MultilineFailure.args.toolCall,
+      name: "web_search",
+      arguments: '{"query":"Azents"}',
+      semanticOutput: MultilineFailure.args.toolCall.output,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /^Web search/ }));
+    await waitFor(() =>
+      expect(canvasElement.querySelectorAll("pre")).toHaveLength(1),
+    );
+    const code = canvasElement.querySelector("pre");
+    if (code === null) {
+      throw new Error("Expected wrapped failure summary");
+    }
+    await expect(code).toHaveStyle({
+      whiteSpace: "pre-wrap",
+      overflowWrap: "anywhere",
+    });
+    await expect(code.scrollWidth).toBeLessThanOrEqual(code.clientWidth + 1);
+    await expect(code.textContent).toContain("\nTry again.");
+  },
+} satisfies Story;
+
 export const UnknownHistoricalStatus = {
   args: {
     toolCall: {
