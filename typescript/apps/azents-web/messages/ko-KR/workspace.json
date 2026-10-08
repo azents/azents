@@ -1614,9 +1614,6 @@
     "enabledLabel": "활성 상태",
     "alwaysExposeToolsLabel": "도구 항상 노출",
     "alwaysExposeToolsDescription": "이 툴킷의 모든 도구를 Tool Search 없이 모델에 항상 노출합니다.",
-    "scopesSection": "범위",
-    "noScopes": "설정된 범위가 없습니다",
-    "scopeWorkspace": "워크스페이스",
     "deleteConfirm": "이 툴킷을 삭제하시겠습니까?",
     "cancel": "취소",
     "delete": "삭제",
@@ -1726,7 +1723,6 @@
       "addEntry": "환경변수 추가",
       "entryLimitReached": "최대 {max}개까지 등록 가능합니다"
     },
-    "addWorkspaceScope": "워크스페이스 범위 추가",
     "oauthConnection": {
       "title": "OAuth 연결",
       "statusNotConnected": "연결되지 않음",

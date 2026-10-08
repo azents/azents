@@ -1,11 +1,10 @@
 /**
  * Toolkit tRPC router
  *
- * Provides workspace Toolkit CRUD, Scope management, and Agent attachments:
+ * Provides workspace Toolkit CRUD and Agent attachments:
  * - list / get: fetch Toolkit configurations (manager or higher)
  * - listAvailable: fetch Toolkit configurations available to the current user
  * - create / update / remove: manage Toolkit configurations (manager or higher)
- * - listScopes / createScope / deleteScope: manage Scopes (manager or higher)
  * - listAgentToolkits / attachToAgent / detachFromAgent: manage Agent attachments
  */
 import {
@@ -26,10 +25,8 @@ import {
   toolkitV1AttachToolkitToAgent,
   toolkitV1CreateAgentToolkitConfig,
   toolkitV1CreateToolkitConfig,
-  toolkitV1CreateToolkitScope,
   toolkitV1DeleteAgentToolkitConfig,
   toolkitV1DeleteToolkitConfig,
-  toolkitV1DeleteToolkitScope,
   toolkitV1DetachToolkitFromAgent,
   toolkitV1GetAgentToolkitConfig,
   toolkitV1GetToolkitConfig,
@@ -38,7 +35,6 @@ import {
   toolkitV1ListAvailableToolkitConfigs,
   toolkitV1ListToolkitConfigs,
   toolkitV1ListToolkits,
-  toolkitV1ListToolkitScopes,
   toolkitV1UpdateAgentToolkitConfig,
   toolkitV1UpdateToolkitConfig,
 } from "@azents/public-client";
@@ -254,93 +250,6 @@ export const toolkitRouter = router({
           path: {
             handle: input.handle,
             toolkit_config_id: input.toolkitId,
-          },
-          throwOnError: true,
-        });
-        return null;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  /**
-   * Toolkit Scope list fetch
-   */
-  listScopes: publicProcedure
-    .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitId: z.string().min(1),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      try {
-        const { data } = await toolkitV1ListToolkitScopes({
-          client: ctx.apiClient,
-          path: { handle: input.handle, toolkit_config_id: input.toolkitId },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-        });
-      }
-    }),
-
-  /**
-   * Toolkit Scope add
-   */
-  createScope: publicProcedure
-    .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitId: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        const { data } = await toolkitV1CreateToolkitScope({
-          client: ctx.apiClient,
-          path: { handle: input.handle, toolkit_config_id: input.toolkitId },
-          throwOnError: true,
-        });
-        return data;
-      } catch (e) {
-        throw mapExpectedError(e, {
-          401: "UNAUTHORIZED",
-          403: "FORBIDDEN",
-          404: "NOT_FOUND",
-          409: "CONFLICT",
-        });
-      }
-    }),
-
-  /**
-   * Toolkit Scope delete
-   */
-  deleteScope: publicProcedure
-    .input(
-      z.object({
-        handle: z.string().min(1),
-        toolkitId: z.string().min(1),
-        scopeId: z.string().min(1),
-      }),
-    )
-    .mutation(async ({ ctx, input }) => {
-      try {
-        await toolkitV1DeleteToolkitScope({
-          client: ctx.apiClient,
-          path: {
-            handle: input.handle,
-            toolkit_config_id: input.toolkitId,
-            scope_id: input.scopeId,
           },
           throwOnError: true,
         });

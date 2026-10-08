@@ -8,17 +8,15 @@ from fastapi import Depends
 
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import ToolkitScopeType
 from azents.core.github_system_setting import PlatformGitHubAppConfig
 from azents.core.system_setting import (
     SystemSettingFieldSource,
     SystemSettingSection,
 )
 from azents.core.toolkit_errors import (
+    AgentToolkitNotFound,
     DuplicateAgentToolkit,
-    DuplicateScope,
     NotFound,
-    ScopeNotFound,
 )
 from azents.core.toolkit_identifiers import resolve_default_toolkit_slug
 from azents.rdb.deps import get_session_manager
@@ -32,15 +30,12 @@ from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import (
     AgentToolkitRepository,
     ToolkitRepository,
-    ToolkitScopeRepository,
 )
 from azents.repos.toolkit.data import (
     AgentToolkit,
     AgentToolkitCreate,
     ToolkitConfig,
     ToolkitCreate,
-    ToolkitScope,
-    ToolkitScopeCreate,
     ToolkitUpdate,
 )
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
@@ -52,7 +47,6 @@ from .data import (
     AgentWorkspaceMismatch,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
-    ScopeToolkitMismatch,
     ToolkitUnavailable,
     ToolkitWithOAuth,
     ToolkitWorkspaceMismatch,
@@ -64,8 +58,6 @@ _INSTALLATION_NOT_ACCESSIBLE = "GitHub installation is not accessible to this us
 
 ToolkitReadError = NotFound | ToolkitWorkspaceMismatch
 ToolkitMutationError = ToolkitReadError | PlatformAuthorityRejected
-ToolkitScopeMutationError = ToolkitReadError | DuplicateScope
-ToolkitScopeDeleteError = ToolkitReadError | ScopeNotFound | ScopeToolkitMismatch
 AgentToolkitListError = AgentWorkspaceMismatch
 AgentToolkitAttachError = (
     NotFound
@@ -74,7 +66,9 @@ AgentToolkitAttachError = (
     | DuplicateAgentToolkit
     | AgentWorkspaceMismatch
 )
-AgentToolkitDetachError = ScopeNotFound | AgentToolkitMismatch | AgentWorkspaceMismatch
+AgentToolkitDetachError = (
+    AgentToolkitNotFound | AgentToolkitMismatch | AgentWorkspaceMismatch
+)
 
 
 def get_encrypted_toolkit_repository(
@@ -98,10 +92,6 @@ class ToolkitOperationsRepository:
     toolkit_repository: Annotated[
         ToolkitRepository,
         Depends(get_encrypted_toolkit_repository),
-    ]
-    scope_repository: Annotated[
-        ToolkitScopeRepository,
-        Depends(ToolkitScopeRepository),
     ]
     agent_toolkit_repository: Annotated[
         AgentToolkitRepository,
@@ -140,7 +130,7 @@ class ToolkitOperationsRepository:
         *,
         platform_authority: PlatformToolkitAuthority | None,
     ) -> Result[ToolkitWithOAuth, PlatformAuthorityRejected]:
-        """Atomically create a Toolkit, Workspace scope, and response snapshot."""
+        """Atomically create a shared Toolkit and response snapshot."""
         async with self.session_manager() as session:
             workspace = await self.workspace_repository.get_by_id(
                 session,
@@ -156,16 +146,6 @@ class ToolkitOperationsRepository:
                 if authority_error is not None:
                     return Failure(authority_error)
             toolkit = await self.toolkit_repository.create(session, create)
-            scope_result = await self.scope_repository.create(
-                session,
-                ToolkitScopeCreate(
-                    toolkit_id=toolkit.id,
-                    scope_type=ToolkitScopeType.WORKSPACE,
-                    scope_id=create.workspace_id,
-                ),
-            )
-            if isinstance(scope_result, Failure):
-                raise RuntimeError("Initial Toolkit Workspace scope already exists.")
             summary = await self.oauth_connection_repository.get_summary_by_toolkit_id(
                 session,
                 toolkit.id,
@@ -320,76 +300,6 @@ class ToolkitOperationsRepository:
             await self.toolkit_repository.delete_by_id(session, toolkit_id)
             return Success(None)
 
-    async def create_scope(
-        self,
-        *,
-        toolkit_id: str,
-        workspace_id: str,
-    ) -> Result[ToolkitScope, ToolkitScopeMutationError]:
-        """Revalidate Toolkit ownership and create its Workspace scope."""
-        async with self.session_manager() as session:
-            toolkit_result = await self._get_workspace_toolkit(
-                session,
-                toolkit_id=toolkit_id,
-                workspace_id=workspace_id,
-            )
-            if isinstance(toolkit_result, Failure):
-                return Failure(toolkit_result.error)
-            create_result = await self.scope_repository.create(
-                session,
-                ToolkitScopeCreate(
-                    toolkit_id=toolkit_id,
-                    scope_type=ToolkitScopeType.WORKSPACE,
-                    scope_id=workspace_id,
-                ),
-            )
-            if isinstance(create_result, Failure):
-                return Failure(create_result.error)
-            return Success(create_result.value)
-
-    async def list_scopes(
-        self,
-        toolkit_id: str,
-        *,
-        workspace_id: str,
-    ) -> Result[list[ToolkitScope], ToolkitReadError]:
-        """List scopes only after validating current Toolkit ownership."""
-        async with self.session_manager() as session:
-            toolkit_result = await self._get_workspace_toolkit(
-                session,
-                toolkit_id=toolkit_id,
-                workspace_id=workspace_id,
-            )
-            if isinstance(toolkit_result, Failure):
-                return Failure(toolkit_result.error)
-            return Success(
-                await self.scope_repository.list_by_toolkit(session, toolkit_id)
-            )
-
-    async def delete_scope(
-        self,
-        scope_id: str,
-        *,
-        toolkit_id: str,
-        workspace_id: str,
-    ) -> Result[None, ToolkitScopeDeleteError]:
-        """Revalidate Toolkit and Scope identity before deleting the Scope."""
-        async with self.session_manager() as session:
-            toolkit_result = await self._get_workspace_toolkit(
-                session,
-                toolkit_id=toolkit_id,
-                workspace_id=workspace_id,
-            )
-            if isinstance(toolkit_result, Failure):
-                return Failure(toolkit_result.error)
-            scope = await self.scope_repository.get_by_id(session, scope_id)
-            if scope is None:
-                return Failure(ScopeNotFound(scope_id=scope_id))
-            if scope.toolkit_id != toolkit_id:
-                return Failure(ScopeToolkitMismatch(scope_id=scope_id))
-            await self.scope_repository.delete_by_id(session, scope_id)
-            return Success(None)
-
     async def list_available(
         self,
         workspace_id: str,
@@ -493,7 +403,7 @@ class ToolkitOperationsRepository:
                 agent_toolkit_id,
             )
             if agent_toolkit is None:
-                return Failure(ScopeNotFound(scope_id=agent_toolkit_id))
+                return Failure(AgentToolkitNotFound(agent_toolkit_id=agent_toolkit_id))
             if agent_toolkit.agent_id != agent_id:
                 return Failure(AgentToolkitMismatch(agent_toolkit_id=agent_toolkit_id))
             await self.agent_toolkit_repository.delete_by_id(

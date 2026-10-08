@@ -1,6 +1,6 @@
 """Toolkit v1 Public API.
 
-Workspace-scoped Toolkit CRUD, scope management, and Agent Toolkit endpoints.
+Workspace-owned Toolkit CRUD and Agent Toolkit endpoints.
 """
 
 from textwrap import dedent
@@ -11,10 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
 from azents.core.toolkit_errors import (
+    AgentToolkitNotFound,
     DuplicateAgentToolkit,
-    DuplicateScope,
     NotFound,
-    ScopeNotFound,
 )
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
@@ -28,10 +27,8 @@ from azents.services.toolkit.data import (
     InvalidIdentifier,
     InvalidToolkitType,
     NotBelongToWorkspace,
-    ScopeNotBelongToToolkit,
     ToolkitCreateInput,
     ToolkitNotAvailable,
-    ToolkitScopeCreateInput,
 )
 from azents.utils.fastapi.route import RouteMounter
 
@@ -49,8 +46,6 @@ from .data import (
     ToolkitConfigUpdateRequest,
     ToolkitListResponse,
     ToolkitResponse,
-    ToolkitScopeListResponse,
-    ToolkitScopeResponse,
 )
 from .oauth import router as oauth_router
 
@@ -575,136 +570,6 @@ async def delete_agent_toolkit_config(
 
 
 # ------------------------------------------------------------------ #
-# Scope management (Manager+)
-# ------------------------------------------------------------------ #
-
-
-@router.post(
-    "/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes",
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_toolkit_scope(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[ToolkitService, Depends()],
-    *,
-    toolkit_config_id: str,
-) -> ToolkitScopeResponse:
-    """Create a Toolkit Scope.
-
-    Requires Toolkit write permission.
-    """
-    if not member.has_permission(Permissions.TOOLKITS_WRITE):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Toolkit management permission required.",
-        )
-
-    create_input = ToolkitScopeCreateInput(toolkit_id=toolkit_config_id)
-    result = await service.create_scope(create_input, workspace_id=member.workspace_id)
-    if result.success:
-        value = result.value
-        return ToolkitScopeResponse.model_validate(value, from_attributes=True)
-    else:
-        error = result.error
-        match error:
-            case NotFound() | NotBelongToWorkspace():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Toolkit not found.",
-                )
-            case DuplicateScope():
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Scope already exists.",
-                )
-            case _:
-                assert_never(error)
-
-
-@router.get("/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes")
-async def list_toolkit_scopes(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[ToolkitService, Depends()],
-    *,
-    toolkit_config_id: str,
-) -> ToolkitScopeListResponse:
-    """List Scopes for a Toolkit.
-
-    Requires Toolkit write permission.
-    """
-    if not member.has_permission(Permissions.TOOLKITS_WRITE):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Toolkit management permission required.",
-        )
-
-    result = await service.list_scopes(
-        toolkit_config_id, workspace_id=member.workspace_id
-    )
-    if result.success:
-        value = result.value
-        return ToolkitScopeListResponse(
-            items=[
-                ToolkitScopeResponse.model_validate(s, from_attributes=True)
-                for s in value.items
-            ]
-        )
-    else:
-        error = result.error
-        match error:
-            case NotFound() | NotBelongToWorkspace():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Toolkit not found.",
-                )
-            case _:
-                assert_never(error)
-
-
-@router.delete(
-    "/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes/{scope_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-async def delete_toolkit_scope(
-    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
-    service: Annotated[ToolkitService, Depends()],
-    *,
-    toolkit_config_id: str,
-    scope_id: str,
-) -> None:
-    """Delete a Toolkit Scope.
-
-    Requires Toolkit write permission.
-    """
-    if not member.has_permission(Permissions.TOOLKITS_WRITE):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Toolkit management permission required.",
-        )
-
-    result = await service.delete_scope(
-        scope_id, toolkit_id=toolkit_config_id, workspace_id=member.workspace_id
-    )
-    if result.success:
-        return
-    else:
-        error = result.error
-        match error:
-            case (
-                NotFound()
-                | NotBelongToWorkspace()
-                | ScopeNotFound()
-                | ScopeNotBelongToToolkit()
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Toolkit or scope not found.",
-                )
-            case _:
-                assert_never(error)
-
-
-# ------------------------------------------------------------------ #
 # Agent Toolkit (Member+)
 # ------------------------------------------------------------------ #
 
@@ -831,7 +696,7 @@ async def detach_toolkit_from_agent(
         error = result.error
         match error:
             case (
-                ScopeNotFound()
+                AgentToolkitNotFound()
                 | AgentToolkitNotBelongToAgent()
                 | AgentNotBelongToWorkspace()
             ):
@@ -882,7 +747,7 @@ def mount(mounter: RouteMounter) -> None:
             """
             Toolkit API (Public)
 
-            Manager: Toolkit CRUD and scope management.
+            Manager: Toolkit CRUD.
             Member: available Toolkit lookup and Agent Toolkit attach/detach.
             """
         ),

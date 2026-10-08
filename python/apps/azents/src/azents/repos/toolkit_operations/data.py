@@ -33,13 +33,6 @@ class ToolkitWorkspaceMismatch:
 
 
 @dataclasses.dataclass(frozen=True)
-class ScopeToolkitMismatch:
-    """Scope does not belong to the requested Toolkit."""
-
-    scope_id: str
-
-
-@dataclasses.dataclass(frozen=True)
 class AgentWorkspaceMismatch:
     """Agent does not belong to the requested Workspace."""
 

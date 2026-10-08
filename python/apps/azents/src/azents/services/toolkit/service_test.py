@@ -26,7 +26,6 @@ from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import (
     AgentToolkitRepository,
     ToolkitRepository,
-    ToolkitScopeRepository,
 )
 from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
@@ -121,7 +120,6 @@ class TestMergeEnvVarCredentials:
         service = _build_service(
             toolkit_repo=toolkit_repo,
             mcp_oauth_connection_repo=MagicMock(),
-            scope_repo=MagicMock(),
             agent_toolkit_repo=MagicMock(),
             agent_repo=MagicMock(),
             agent_admin_repo=MagicMock(),
@@ -182,7 +180,6 @@ def _service(
     return _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
-        scope_repo=MagicMock(),
         agent_toolkit_repo=agent_toolkit_repo,
         agent_repo=agent_repo,
         agent_admin_repo=MagicMock(),
@@ -220,7 +217,6 @@ def _agent_management_service(
     return _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
-        scope_repo=MagicMock(),
         agent_toolkit_repo=agent_toolkit_repo,
         agent_repo=agent_repo,
         agent_admin_repo=agent_admin_repo,
@@ -334,7 +330,7 @@ async def test_cross_workspace_agent_is_hidden_even_from_owner() -> None:
     agent_admin_repo.is_admin.assert_not_awaited()
 
 
-async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> None:
+async def test_agent_owned_create_sets_owner_without_shared_attachment() -> None:
     """Agent-owned creation writes only the canonical owner relation."""
     agent = _active_agent()
     agent_repo = MagicMock()
@@ -344,8 +340,6 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
     agent_admin_repo.is_admin = AsyncMock()
     agent_toolkit_repo = MagicMock()
     agent_toolkit_repo.create = AsyncMock()
-    scope_repo = MagicMock()
-    scope_repo.create = AsyncMock()
     created = _toolkit_config(slug="private")
     created = created.model_copy(
         update={"id": "toolkit-owned", "owner_agent_id": "agent-1"}
@@ -360,7 +354,6 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
         agent_toolkit_repo=agent_toolkit_repo,
         toolkit_registry={"mcp": provider},
     )
-    service.operations_repository.scope_repository = scope_repo
     namespace_repo = AsyncMock(spec=ToolkitNamespaceRepository)
     service.owned_operations.namespace_repo = namespace_repo
 
@@ -389,7 +382,6 @@ async def test_agent_owned_create_sets_owner_without_scope_or_attachment() -> No
     create = create_args.args[1]
     assert create.workspace_id == "workspace-1"
     assert create.owner_agent_id == "agent-1"
-    scope_repo.create.assert_not_awaited()
     agent_toolkit_repo.create.assert_not_awaited()
     namespace_repo.ensure_active.assert_awaited_once()
     namespace_call = namespace_repo.ensure_active.await_args
@@ -814,7 +806,6 @@ async def test_concurrent_shared_attach_and_slug_update_preserve_unique_namespac
     service = _build_service(
         toolkit_repo=toolkit_repo,
         mcp_oauth_connection_repo=MagicMock(),
-        scope_repo=MagicMock(),
         agent_toolkit_repo=AgentToolkitRepository(),
         agent_repo=agent_repo,
         agent_admin_repo=MagicMock(),
@@ -876,7 +867,6 @@ def _build_service(
     *,
     toolkit_repo: ToolkitRepository,
     mcp_oauth_connection_repo: MCPOAuthConnectionRepository,
-    scope_repo: ToolkitScopeRepository,
     agent_toolkit_repo: AgentToolkitRepository,
     agent_repo: AgentRepository,
     agent_admin_repo: AgentAdminRepository,
@@ -890,7 +880,6 @@ def _build_service(
     workspace_repository.get_by_id.return_value = SimpleNamespace()
     operations = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repo,
-        scope_repository=scope_repo,
         agent_toolkit_repository=agent_toolkit_repo,
         agent_repository=agent_repo,
         namespace_repository=AsyncMock(spec=ToolkitNamespaceRepository),

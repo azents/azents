@@ -330,10 +330,8 @@ Class | Method | HTTP request | Description
 *ToolkitV1Api* | [**toolkit_v1_attach_toolkit_to_agent**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_attach_toolkit_to_agent) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | Attach Toolkit To Agent
 *ToolkitV1Api* | [**toolkit_v1_create_agent_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_create_agent_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs | Create Agent Toolkit Config
 *ToolkitV1Api* | [**toolkit_v1_create_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_create_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs | Create Toolkit Config
-*ToolkitV1Api* | [**toolkit_v1_create_toolkit_scope**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_create_toolkit_scope) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | Create Toolkit Scope
 *ToolkitV1Api* | [**toolkit_v1_delete_agent_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_delete_agent_toolkit_config) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Delete Agent Toolkit Config
 *ToolkitV1Api* | [**toolkit_v1_delete_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_delete_toolkit_config) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Delete Toolkit Config
-*ToolkitV1Api* | [**toolkit_v1_delete_toolkit_scope**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_delete_toolkit_scope) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes/{scope_id} | Delete Toolkit Scope
 *ToolkitV1Api* | [**toolkit_v1_detach_toolkit_from_agent**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_detach_toolkit_from_agent) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits/{agent_toolkit_id} | Detach Toolkit From Agent
 *ToolkitV1Api* | [**toolkit_v1_get_agent_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_get_agent_toolkit_config) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Get Agent Toolkit Config
 *ToolkitV1Api* | [**toolkit_v1_get_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_get_toolkit_config) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Get Toolkit Config
@@ -341,7 +339,6 @@ Class | Method | HTTP request | Description
 *ToolkitV1Api* | [**toolkit_v1_list_agent_toolkits**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_agent_toolkits) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | List Agent Toolkits
 *ToolkitV1Api* | [**toolkit_v1_list_available_toolkit_configs**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_available_toolkit_configs) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/available | List Available Toolkit Configs
 *ToolkitV1Api* | [**toolkit_v1_list_toolkit_configs**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_toolkit_configs) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs | List Toolkit Configs
-*ToolkitV1Api* | [**toolkit_v1_list_toolkit_scopes**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_toolkit_scopes) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | List Toolkit Scopes
 *ToolkitV1Api* | [**toolkit_v1_list_toolkits**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_list_toolkits) | **GET** /toolkit/v1/toolkits | List Toolkits
 *ToolkitV1Api* | [**toolkit_v1_update_agent_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_update_agent_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Update Agent Toolkit Config
 *ToolkitV1Api* | [**toolkit_v1_update_toolkit_config**](azentspublicclient/docs/ToolkitV1Api.md#toolkit_v1_update_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Update Toolkit Config
@@ -861,9 +858,6 @@ Class | Method | HTTP request | Description
  - [ToolkitConfigUpdateRequest](azentspublicclient/docs/ToolkitConfigUpdateRequest.md)
  - [ToolkitListResponse](azentspublicclient/docs/ToolkitListResponse.md)
  - [ToolkitResponse](azentspublicclient/docs/ToolkitResponse.md)
- - [ToolkitScopeListResponse](azentspublicclient/docs/ToolkitScopeListResponse.md)
- - [ToolkitScopeResponse](azentspublicclient/docs/ToolkitScopeResponse.md)
- - [ToolkitScopeType](azentspublicclient/docs/ToolkitScopeType.md)
  - [UnsupportedMediaPolicy](azentspublicclient/docs/UnsupportedMediaPolicy.md)
  - [UpdateMyProfileRequest](azentspublicclient/docs/UpdateMyProfileRequest.md)
  - [UpdateMyUserRequest](azentspublicclient/docs/UpdateMyUserRequest.md)

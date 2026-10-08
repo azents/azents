@@ -14,10 +14,9 @@ from azents.core.github_credentials import GitHubSecrets, GitHubSecretsAppPlatfo
 from azents.core.github_installation import GitHubInstallationSnapshot
 from azents.core.mcp_credentials import McpSecrets
 from azents.core.toolkit_errors import (
+    AgentToolkitNotFound,
     DuplicateAgentToolkit,
-    DuplicateScope,
     NotFound,
-    ScopeNotFound,
 )
 from azents.core.toolkit_identifiers import (
     IdentifierValidationError,
@@ -37,7 +36,6 @@ from azents.repos.toolkit_operations.data import (
     AgentWorkspaceMismatch,
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
-    ScopeToolkitMismatch,
     ToolkitUnavailable,
     ToolkitWithOAuth,
     ToolkitWorkspaceMismatch,
@@ -68,15 +66,11 @@ from .data import (
     InvalidIdentifier,
     InvalidToolkitType,
     NotBelongToWorkspace,
-    ScopeNotBelongToToolkit,
     ToolkitCreateInput,
     ToolkitListOutput,
     ToolkitNotAvailable,
     ToolkitOutput,
     ToolkitReadiness,
-    ToolkitScopeCreateInput,
-    ToolkitScopeListOutput,
-    ToolkitScopeOutput,
     ToolkitUpdateInput,
 )
 
@@ -173,7 +167,7 @@ def merge_envvar_credentials(
 
 @dataclasses.dataclass
 class ToolkitService:
-    """Toolkit CRUD, Scope, and Agent attachment orchestration."""
+    """Toolkit CRUD and Agent attachment orchestration."""
 
     operations_repository: Annotated[
         ToolkitOperationsRepository,
@@ -191,7 +185,7 @@ class ToolkitService:
         ToolkitOutput,
         InvalidToolkitType | InvalidConfig | InvalidIdentifier | InvalidCredentials,
     ]:
-        """Create a Toolkit and its Workspace scope atomically."""
+        """Create a Workspace-shared Toolkit with validated configuration."""
         type_error = self._validate_toolkit_type(create.toolkit_type)
         if type_error is not None:
             return Failure(type_error)
@@ -426,65 +420,6 @@ class ToolkitService:
             return Failure(self._map_toolkit_read_error(result.error))
         return Success(None)
 
-    async def create_scope(
-        self, create: ToolkitScopeCreateInput, *, workspace_id: str
-    ) -> Result[ToolkitScopeOutput, NotFound | NotBelongToWorkspace | DuplicateScope]:
-        """Create one Workspace Scope with current Toolkit authority."""
-        result = await self.operations_repository.create_scope(
-            toolkit_id=create.toolkit_id,
-            workspace_id=workspace_id,
-        )
-        if isinstance(result, Success):
-            return Success(
-                ToolkitScopeOutput.model_validate(result.value, from_attributes=True)
-            )
-        if isinstance(result.error, (NotFound, ToolkitWorkspaceMismatch)):
-            return Failure(self._map_toolkit_read_error(result.error))
-        return Failure(result.error)
-
-    async def list_scopes(
-        self, toolkit_id: str, *, workspace_id: str
-    ) -> Result[ToolkitScopeListOutput, NotFound | NotBelongToWorkspace]:
-        """Fetch Scopes for one Workspace Toolkit."""
-        result = await self.operations_repository.list_scopes(
-            toolkit_id,
-            workspace_id=workspace_id,
-        )
-        if isinstance(result, Failure):
-            return Failure(self._map_toolkit_read_error(result.error))
-        return Success(
-            ToolkitScopeListOutput(
-                items=[
-                    ToolkitScopeOutput.model_validate(scope, from_attributes=True)
-                    for scope in result.value
-                ]
-            )
-        )
-
-    async def delete_scope(
-        self,
-        scope_id: str,
-        *,
-        toolkit_id: str,
-        workspace_id: str,
-    ) -> Result[
-        None, NotFound | NotBelongToWorkspace | ScopeNotFound | ScopeNotBelongToToolkit
-    ]:
-        """Delete one Scope after final Toolkit and Scope identity validation."""
-        result = await self.operations_repository.delete_scope(
-            scope_id,
-            toolkit_id=toolkit_id,
-            workspace_id=workspace_id,
-        )
-        if isinstance(result, Success):
-            return Success(None)
-        error = result.error
-        if isinstance(error, (NotFound, ToolkitWorkspaceMismatch)):
-            return Failure(self._map_toolkit_read_error(error))
-        if isinstance(error, ScopeToolkitMismatch):
-            return Failure(ScopeNotBelongToToolkit(scope_id=error.scope_id))
-        return Failure(error)
-
     async def list_available(
         self, workspace_id: str, user_id: str
     ) -> ToolkitListOutput:
@@ -555,7 +490,7 @@ class ToolkitService:
         workspace_id: str,
     ) -> Result[
         None,
-        AgentToolkitNotBelongToAgent | AgentNotBelongToWorkspace | ScopeNotFound,
+        AgentToolkitNotBelongToAgent | AgentNotBelongToWorkspace | AgentToolkitNotFound,
     ]:
         """Detach one Toolkit after final Agent and attachment validation."""
         result = await self.operations_repository.detach_from_agent(

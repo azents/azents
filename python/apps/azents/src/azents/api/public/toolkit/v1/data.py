@@ -6,7 +6,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
+from azents.core.enums import MCPOAuthConnectionStatus
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationReason,
 )
@@ -140,22 +140,6 @@ class AgentToolkitConfigUpdateRequest(TypedDict, total=False):
             description="Whether every tool bypasses Tool Search and remains visible"
         ),
     ]
-
-
-class ToolkitScopeResponse(BaseModel):
-    """ToolkitScope response model."""
-
-    id: str
-    toolkit_id: str
-    scope_type: ToolkitScopeType
-    scope_id: str
-    created_at: datetime.datetime
-
-
-class ToolkitScopeListResponse(BaseModel):
-    """ToolkitScope list response model."""
-
-    items: list[ToolkitScopeResponse]
 
 
 class AgentToolkitResponse(BaseModel):

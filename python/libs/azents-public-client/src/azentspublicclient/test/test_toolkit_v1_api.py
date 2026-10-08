@@ -47,13 +47,6 @@ class TestToolkitV1Api(unittest.TestCase):
         """
         pass
 
-    def test_toolkit_v1_create_toolkit_scope(self) -> None:
-        """Test case for toolkit_v1_create_toolkit_scope
-
-        Create Toolkit Scope
-        """
-        pass
-
     def test_toolkit_v1_delete_agent_toolkit_config(self) -> None:
         """Test case for toolkit_v1_delete_agent_toolkit_config
 
@@ -65,13 +58,6 @@ class TestToolkitV1Api(unittest.TestCase):
         """Test case for toolkit_v1_delete_toolkit_config
 
         Delete Toolkit Config
-        """
-        pass
-
-    def test_toolkit_v1_delete_toolkit_scope(self) -> None:
-        """Test case for toolkit_v1_delete_toolkit_scope
-
-        Delete Toolkit Scope
         """
         pass
 
@@ -121,13 +107,6 @@ class TestToolkitV1Api(unittest.TestCase):
         """Test case for toolkit_v1_list_toolkit_configs
 
         List Toolkit Configs
-        """
-        pass
-
-    def test_toolkit_v1_list_toolkit_scopes(self) -> None:
-        """Test case for toolkit_v1_list_toolkit_scopes
-
-        List Toolkit Scopes
         """
         pass
 

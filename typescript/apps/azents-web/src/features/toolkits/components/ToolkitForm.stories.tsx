@@ -88,7 +88,6 @@ const meta = {
     toolkitTypeLocked: false,
     formState: { type: "CREATE" },
     mutationState: { type: "IDLE", error: null },
-    scopeListState: { type: "READY", scopes: [] },
     isEdit: false,
     backPath: "/w/acme/toolkits",
     toolOptions: [{ value: "shell", label: "Shell" }],
@@ -103,8 +102,6 @@ const meta = {
     onCredentialsChange: () => {},
     onConnectOauth: () => {},
     onDisconnectOauth: () => {},
-    onAddScope: () => {},
-    onDeleteScope: () => {},
     onCancel: () => {},
   },
 } satisfies Meta<typeof ToolkitFormStory>;
@@ -207,6 +204,15 @@ export const Editing = {
     const canvas = within(canvasElement);
     await expect(canvas.getByLabelText("Name")).toHaveValue("Production MCP");
     await expect(canvas.getByRole("combobox", { name: "Tool" })).toBeDisabled();
+    await expect(
+      canvas.queryByRole("heading", { name: "Scopes" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByRole("button", { name: "Add workspace scope" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      canvas.queryByText("No scopes configured"),
+    ).not.toBeInTheDocument();
   },
 } satisfies Story;
 
@@ -239,13 +245,17 @@ export const OAuthConnected = {
     showOauthConnection: true,
     formState: {
       type: "EDIT",
-      config: { ...editedConfig, oauth_connection: { status: "connected" } },
+      config: {
+        ...editedConfig,
+        oauth_connection: { status: "connected", scope: "read:resources" },
+      },
     },
     onDisconnectOauth: fn(),
   },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Connected")).toBeVisible();
+    await expect(canvas.getByText("Scope: read:resources")).toBeVisible();
     await userEvent.click(canvas.getByRole("button", { name: "Disconnect" }));
     await expect(args.onDisconnectOauth).toHaveBeenCalledTimes(1);
   },

@@ -11,7 +11,7 @@ from azents.repos.mcp_oauth_connection.data import (
     MCPOAuthConnection,
     MCPOAuthConnectionSummary,
 )
-from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig, ToolkitScope
+from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppAuthorizationState,
 )
@@ -47,12 +47,6 @@ class ToolkitOutput(ToolkitConfig):
         return self.credentials is not None
 
 
-class ToolkitScopeOutput(ToolkitScope):
-    """ToolkitScope output model."""
-
-    pass
-
-
 class AgentToolkitOutput(AgentToolkit):
     """AgentToolkit output model."""
 
@@ -63,12 +57,6 @@ class ToolkitListOutput(BaseModel):
     """Toolkit list output model."""
 
     items: list[ToolkitOutput] = Field(description="Toolkit list")
-
-
-class ToolkitScopeListOutput(BaseModel):
-    """ToolkitScope list output model."""
-
-    items: list[ToolkitScopeOutput] = Field(description="ToolkitScope list")
 
 
 class AgentToolkitListOutput(BaseModel):
@@ -178,12 +166,6 @@ class ToolkitUpdateInput(TypedDict, total=False):
     ]
 
 
-class ToolkitScopeCreateInput(BaseModel):
-    """ToolkitScope create input model."""
-
-    toolkit_id: str = Field(description="Toolkit ID")
-
-
 class AgentToolkitCreateInput(BaseModel):
     """AgentToolkit create input model."""
 
@@ -196,13 +178,6 @@ class NotBelongToWorkspace:
     """Resource does not belong to requested workspace."""
 
     toolkit_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class ScopeNotBelongToToolkit:
-    """Scope does not belong to requested Toolkit."""
-
-    scope_id: str
 
 
 @dataclasses.dataclass(frozen=True)

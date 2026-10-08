@@ -11,8 +11,9 @@ import pytest
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
+from azents.core.enums import MCPOAuthConnectionStatus
 from azents.core.system_setting import SystemSettingFieldSource
+from azents.core.toolkit_errors import AgentToolkitNotFound
 from azents.rdb.session_capabilities import ReadWriteSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
@@ -22,12 +23,10 @@ from azents.repos.system_setting.repository import SystemSettingRepository
 from azents.repos.toolkit import (
     AgentToolkitRepository,
     ToolkitRepository,
-    ToolkitScopeRepository,
 )
 from azents.repos.toolkit.data import (
     ToolkitConfig,
     ToolkitCreate,
-    ToolkitScope,
     ToolkitUpdate,
 )
 from azents.repos.toolkit_namespace import ToolkitNamespaceRepository
@@ -88,16 +87,6 @@ def _toolkit(*, workspace_id: str = "workspace-1") -> ToolkitConfig:
     )
 
 
-def _scope() -> ToolkitScope:
-    return ToolkitScope(
-        id="scope-1",
-        toolkit_id="toolkit-1",
-        scope_type=ToolkitScopeType.WORKSPACE,
-        scope_id="workspace-1",
-        created_at=datetime.datetime.now(datetime.UTC),
-    )
-
-
 def _create() -> ToolkitCreate:
     return ToolkitCreate(
         workspace_id="workspace-1",
@@ -116,7 +105,6 @@ class _ToolkitFixture(NamedTuple):
 
     repository: ToolkitOperationsRepository
     toolkits: AsyncMock
-    scopes: AsyncMock
     oauth: AsyncMock
     github: AsyncMock
     settings: AsyncMock
@@ -126,7 +114,6 @@ def _repository(
     session_manager: _TrackedSessionManager,
 ) -> _ToolkitFixture:
     toolkit_repository = AsyncMock(spec=ToolkitRepository)
-    scope_repository = AsyncMock(spec=ToolkitScopeRepository)
     oauth_repository = AsyncMock(spec=MCPOAuthConnectionRepository)
     github_repository = AsyncMock(spec=GithubUserInstallationRepository)
     system_setting_repository = AsyncMock(spec=SystemSettingRepository)
@@ -136,7 +123,6 @@ def _repository(
     workspace_repository.get_by_id.return_value = SimpleNamespace()
     repository = ToolkitOperationsRepository(
         toolkit_repository=toolkit_repository,
-        scope_repository=scope_repository,
         agent_toolkit_repository=agent_toolkit_repository,
         agent_repository=AsyncMock(spec=AgentRepository),
         namespace_repository=AsyncMock(spec=ToolkitNamespaceRepository),
@@ -150,7 +136,6 @@ def _repository(
     return _ToolkitFixture(
         repository=repository,
         toolkits=toolkit_repository,
-        scopes=scope_repository,
         oauth=oauth_repository,
         github=github_repository,
         settings=system_setting_repository,
@@ -166,14 +151,11 @@ def _platform_authority() -> PlatformToolkitAuthority:
     )
 
 
-async def test_create_composes_scope_and_oauth_summary_in_one_transaction() -> None:
-    """Create, default Scope, and OAuth projection share one DB lifetime."""
+async def test_create_composes_toolkit_and_oauth_summary_in_one_transaction() -> None:
+    """Shared Toolkit creation and OAuth projection share one DB lifetime."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, scope_repo, oauth_repo, _, _ = _repository(
-        session_manager
-    )
+    repository, toolkit_repo, oauth_repo, _, _ = _repository(session_manager)
     toolkit_repo.create.return_value = _toolkit()
-    scope_repo.create.return_value = Success(_scope())
     summary = MCPOAuthConnectionSummary(
         status=MCPOAuthConnectionStatus.CONNECTED,
         issuer="https://issuer.example",
@@ -188,23 +170,18 @@ async def test_create_composes_scope_and_oauth_summary_in_one_transaction() -> N
     assert isinstance(result, Success)
     assert result.value.oauth_connection == summary
     create_session = toolkit_repo.create.await_args.args[0]
-    scope_session = scope_repo.create.await_args.args[0]
     oauth_session = oauth_repo.get_summary_by_toolkit_id.await_args.args[0]
     assert create_session is session_manager.session
-    assert scope_session is session_manager.session
     assert oauth_session is session_manager.session
     assert session_manager.committed is True
     assert session_manager.rolled_back is False
 
 
 async def test_create_rolls_back_when_oauth_attach_fails() -> None:
-    """OAuth projection failure cannot commit Toolkit without its Scope."""
+    """OAuth projection failure rolls back the new shared Toolkit."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, scope_repo, oauth_repo, _, _ = _repository(
-        session_manager
-    )
+    repository, toolkit_repo, oauth_repo, _, _ = _repository(session_manager)
     toolkit_repo.create.return_value = _toolkit()
-    scope_repo.create.return_value = Success(_scope())
     oauth_repo.get_summary_by_toolkit_id.side_effect = _OAuthAttachFailure
 
     with pytest.raises(_OAuthAttachFailure):
@@ -213,7 +190,29 @@ async def test_create_rolls_back_when_oauth_attach_fails() -> None:
     assert session_manager.rolled_back is True
     assert session_manager.committed is False
     toolkit_repo.create.assert_awaited_once()
-    scope_repo.create.assert_awaited_once()
+
+
+async def test_detach_reports_missing_attachment_without_deleting() -> None:
+    """A missing attachment retains its resource-specific domain failure."""
+    session_manager = _TrackedSessionManager()
+    repository = _repository(session_manager).repository
+    attachments = AsyncMock(spec=AgentToolkitRepository)
+    attachments.get_by_id.return_value = None
+    repository.agent_toolkit_repository = attachments
+    agents = AsyncMock(spec=AgentRepository)
+    agents.get_by_id.return_value = SimpleNamespace(workspace_id="workspace-1")
+    repository.agent_repository = agents
+
+    result = await repository.detach_from_agent(
+        "missing-attachment",
+        agent_id="agent-1",
+        workspace_id="workspace-1",
+    )
+
+    assert result == Failure(
+        AgentToolkitNotFound(agent_toolkit_id="missing-attachment")
+    )
+    attachments.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -229,7 +228,7 @@ async def test_update_revalidates_current_toolkit_and_workspace(
 ) -> None:
     """A stale preflight cannot authorize a deleted or moved Toolkit mutation."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
+    repository, toolkit_repo, _, _, _ = _repository(session_manager)
     toolkit_repo.get_shared_by_id.return_value = locked_toolkit
 
     result = await repository.update(
@@ -252,7 +251,7 @@ async def test_update_revalidates_current_toolkit_and_workspace(
 async def test_update_rejects_platform_reconnect_race_before_mutation() -> None:
     """A changed effective App identity invalidates prepared credentials."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, _, _, github_repo, setting_repo = _repository(
+    repository, toolkit_repo, _, github_repo, setting_repo = _repository(
         session_manager
     )
     setting_repo.get_current.return_value = SimpleNamespace(config={"app_id": "999"})
@@ -277,7 +276,7 @@ async def test_update_rejects_platform_reconnect_race_before_mutation() -> None:
 async def test_slug_update_reallocates_attached_agents_in_sorted_order() -> None:
     """Only actual namespace allocation owns per-Agent claim serialization."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
+    repository, toolkit_repo, _, _, _ = _repository(session_manager)
     toolkit_repo.get_shared_by_id.return_value = _toolkit()
     toolkit_repo.claim_shared_namespace_mutation.return_value = _toolkit()
     repository.agent_toolkit_repository = AsyncMock(spec=AgentToolkitRepository)
@@ -320,7 +319,7 @@ async def test_slug_update_reallocates_attached_agents_in_sorted_order() -> None
 async def test_blank_slug_reset_uses_locked_current_name() -> None:
     """Derive a reset Slug from the Name in the locked mutation snapshot."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, _, _, _, _ = _repository(session_manager)
+    repository, toolkit_repo, _, _, _ = _repository(session_manager)
     current = _toolkit().model_copy(
         update={"name": "Current Production", "slug": "old"}
     )
@@ -348,7 +347,7 @@ async def test_blank_slug_reset_uses_locked_current_name() -> None:
 async def test_update_rejects_revoked_installation_before_mutation() -> None:
     """Final validation rejects access revoked after provider preparation."""
     session_manager = _TrackedSessionManager()
-    repository, toolkit_repo, _, _, github_repo, setting_repo = _repository(
+    repository, toolkit_repo, _, github_repo, setting_repo = _repository(
         session_manager
     )
     setting_repo.get_current.return_value = SimpleNamespace(config={"app_id": "123"})

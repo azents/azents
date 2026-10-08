@@ -1614,9 +1614,6 @@
     "enabledLabel": "Enabled",
     "alwaysExposeToolsLabel": "Always expose tools",
     "alwaysExposeToolsDescription": "Keep every tool from this toolkit visible to the model instead of requiring Tool Search.",
-    "scopesSection": "Scopes",
-    "noScopes": "No scopes configured",
-    "scopeWorkspace": "Workspace",
     "deleteConfirm": "Are you sure you want to delete this toolkit?",
     "cancel": "Cancel",
     "delete": "Delete",
@@ -1726,7 +1723,6 @@
       "addEntry": "Add variable",
       "entryLimitReached": "At most {max} entries allowed"
     },
-    "addWorkspaceScope": "Add workspace scope",
     "oauthConnection": {
       "title": "OAuth connection",
       "statusNotConnected": "Not connected",

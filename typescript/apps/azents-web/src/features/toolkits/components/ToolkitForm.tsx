@@ -4,7 +4,6 @@
  * Toolkit create/update Full Page form component.
  *
  * Inputs tool selection (Select), name, description, tool-specific settings form, and enabled state.
- * Scope management section is added in edit mode.
  */
 
 import {
@@ -38,14 +37,9 @@ import { McpConfigFields } from "./McpConfigFields";
 import { NotionConfigFields } from "./NotionConfigFields";
 import { SentryConfigFields } from "./SentryConfigFields";
 import { ShellConfigFields } from "./ShellConfigFields";
-import { ToolkitScopeSection } from "./ToolkitScopeSection";
 import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
-import type {
-  MutationState,
-  ScopeListState,
-  ToolkitConfigFormState,
-} from "../types";
+import type { MutationState, ToolkitConfigFormState } from "../types";
 import type { UseFormReturnType } from "@mantine/form";
 import type { FormEventHandler, ReactNode } from "react";
 
@@ -58,7 +52,6 @@ export interface ToolkitFormProps {
   toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
   mutationState: MutationState;
-  scopeListState: ScopeListState;
   form: UseFormReturnType<ToolkitFormValues>;
   isEdit: boolean;
   backPath: string;
@@ -78,8 +71,6 @@ export interface ToolkitFormProps {
   onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
   onConnectOauth: () => void;
   onDisconnectOauth: () => void;
-  onAddScope: () => void;
-  onDeleteScope: (scopeId: string) => void;
   onCancel: () => void;
 }
 
@@ -111,7 +102,6 @@ export function ToolkitForm({
   toolkitTypeLocked,
   formState,
   mutationState,
-  scopeListState,
   form,
   isEdit,
   backPath,
@@ -128,8 +118,6 @@ export function ToolkitForm({
   onCredentialsChange,
   onConnectOauth,
   onDisconnectOauth,
-  onAddScope,
-  onDeleteScope,
   onCancel,
 }: ToolkitFormProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits");
@@ -509,15 +497,6 @@ export function ToolkitForm({
               key={form.key("enabled")}
               {...form.getInputProps("enabled", { type: "checkbox" })}
             />
-
-            {/* Scope section (edit mode only) */}
-            {isEdit && agentId == null && (
-              <ToolkitScopeSection
-                scopeListState={scopeListState}
-                onAddScope={onAddScope}
-                onDeleteScope={onDeleteScope}
-              />
-            )}
 
             {mutationState.type === "IDLE" && mutationState.error && (
               <Alert color="red">{mutationState.error}</Alert>

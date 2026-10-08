@@ -9,7 +9,7 @@ from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from azents.core.enums import MCPOAuthConnectionStatus, ToolkitScopeType
+from azents.core.enums import MCPOAuthConnectionStatus
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -17,14 +17,6 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
     """Return enum values stored in the DB."""
     return [v.value for v in enum_cls]
-
-
-toolkit_scope_type_enum = ENUM(
-    ToolkitScopeType,
-    name="toolkit_scope_type",
-    create_type=False,
-    values_callable=_enum_values,
-)
 
 
 mcp_oauth_connection_status_enum = ENUM(
@@ -107,49 +99,6 @@ class RDBToolkitConfig(RDBModel):
         IX_WORKSPACE_ID,
         IX_OWNER_AGENT_ID,
     )
-
-
-class RDBToolkitScope(RDBModel):
-    """ToolkitScope table.
-
-    Workspace where a Toolkit can be used. For ``scope_type=WORKSPACE``,
-    ``scope_id`` is ``workspace_id``.
-    """
-
-    __tablename__ = "toolkit_scopes"
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    toolkit_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("toolkit_configs.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    scope_type: Mapped[ToolkitScopeType] = mapped_column(
-        toolkit_scope_type_enum,
-        nullable=False,
-    )
-    scope_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        server_default=sa.func.now(),
-    )
-
-    UQ_TOOLKIT_SCOPE = sa.UniqueConstraint(
-        "toolkit_id",
-        "scope_type",
-        "scope_id",
-        name="uq_toolkit_scopes_toolkit_scope_id",
-    )
-    IX_TOOLKIT_ID = sa.Index("ix_toolkit_scopes_toolkit_id", "toolkit_id")
-
-    __table_args__ = (UQ_TOOLKIT_SCOPE, IX_TOOLKIT_ID)
 
 
 class RDBAgentToolkit(RDBModel):
