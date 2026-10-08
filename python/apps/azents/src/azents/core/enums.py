@@ -826,12 +826,6 @@ class JoinRequestStatus(enum.StrEnum):
     MUTED = "muted"
 
 
-class ToolkitScopeType(enum.StrEnum):
-    """Toolkit assignment scope type."""
-
-    WORKSPACE = "workspace"
-
-
 class MCPOAuthConnectionStatus(enum.StrEnum):
     """MCP OAuth connection lifecycle status."""
 

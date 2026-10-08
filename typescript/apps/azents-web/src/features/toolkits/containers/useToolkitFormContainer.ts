@@ -34,7 +34,6 @@ import type { ToolkitFormValues } from "../schemas";
 import type { ToolkitConfigProjection } from "../toolkit-config-projection";
 import type {
   MutationState,
-  ScopeListState,
   ToolkitConfigFormState,
   ToolkitListState,
 } from "../types";
@@ -57,7 +56,6 @@ export interface ToolkitFormContainerOutput {
   toolkitTypeLocked: boolean;
   formState: ToolkitConfigFormState;
   mutationState: MutationState;
-  scopeListState: ScopeListState;
   form: UseFormReturnType<ToolkitFormValues>;
   isEdit: boolean;
   backPath: string;
@@ -77,8 +75,6 @@ export interface ToolkitFormContainerOutput {
   onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
   onConnectOauth: () => void;
   onDisconnectOauth: () => void;
-  onAddScope: () => void;
-  onDeleteScope: (scopeId: string) => void;
   onCancel: () => void;
 }
 
@@ -212,10 +208,6 @@ export function useToolkitFormContainer(
     { handle, agentId: agentId ?? "", toolkitConfigId: toolkitId ?? "" },
     { enabled: isEditMode && agentId != null },
   );
-  const scopesQuery = trpc.toolkit.listScopes.useQuery(
-    { handle, toolkitId: toolkitId ?? "" },
-    { enabled: isEditMode && agentId == null },
-  );
   const toolkitQuery =
     agentId == null ? workspaceToolkitQuery : agentToolkitQuery;
 
@@ -265,25 +257,6 @@ export function useToolkitFormContainer(
     toolkitQuery.data,
     toolkitQuery.isError,
     toolkitQuery.isLoading,
-  ]);
-
-  const scopeListState: ScopeListState = useMemo(() => {
-    if (!isEditMode || agentId != null) {
-      return { type: "READY", scopes: [] };
-    }
-    if (scopesQuery.isLoading) {
-      return { type: "LOADING" };
-    }
-    if (scopesQuery.isError) {
-      return { type: "ERROR" };
-    }
-    return { type: "READY", scopes: scopesQuery.data?.items ?? [] };
-  }, [
-    agentId,
-    isEditMode,
-    scopesQuery.data,
-    scopesQuery.isError,
-    scopesQuery.isLoading,
   ]);
 
   const createMutation = trpc.toolkit.createConfig.useMutation({
@@ -365,20 +338,6 @@ export function useToolkitFormContainer(
     },
     onError: (error) => {
       setMutationState({ type: "IDLE", error: error.message });
-    },
-  });
-  const createScopeMutation = trpc.toolkit.createScope.useMutation({
-    onSuccess: () => {
-      if (toolkitId) {
-        void utils.toolkit.listScopes.invalidate({ handle, toolkitId });
-      }
-    },
-  });
-  const deleteScopeMutation = trpc.toolkit.deleteScope.useMutation({
-    onSuccess: () => {
-      if (toolkitId) {
-        void utils.toolkit.listScopes.invalidate({ handle, toolkitId });
-      }
     },
   });
   const connectOauthMutation = trpc.toolkit.connectOauth.useMutation();
@@ -684,21 +643,6 @@ export function useToolkitFormContainer(
   );
   const showOauthConnection =
     formState.type === "EDIT" && toolkitProjectionUsesOauth(configProjection);
-  const onAddScope = useCallback((): void => {
-    if (!toolkitId) {
-      return;
-    }
-    createScopeMutation.mutate({ handle, toolkitId });
-  }, [createScopeMutation, handle, toolkitId]);
-  const onDeleteScope = useCallback(
-    (scopeId: string): void => {
-      if (!toolkitId) {
-        return;
-      }
-      deleteScopeMutation.mutate({ handle, toolkitId, scopeId });
-    },
-    [deleteScopeMutation, handle, toolkitId],
-  );
 
   return {
     configProjection,
@@ -708,7 +652,6 @@ export function useToolkitFormContainer(
     toolkitTypeLocked: initialToolkitType != null,
     formState,
     mutationState,
-    scopeListState,
     form,
     isEdit: isEditMode,
     backPath,
@@ -731,8 +674,6 @@ export function useToolkitFormContainer(
     onCredentialsChange,
     onConnectOauth,
     onDisconnectOauth,
-    onAddScope,
-    onDeleteScope,
     onCancel: () => {
       if (mutationState.type === "SUBMITTING") {
         return;

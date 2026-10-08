@@ -8,17 +8,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.selectable import Subquery
 
 from azents.core.crypto import CredentialCipher
-from azents.core.enums import ToolkitScopeType
 from azents.core.toolkit_errors import (
     DuplicateAgentToolkit,
-    DuplicateScope,
     NotFound,
 )
 from azents.rdb.models.toolkit import (
     RDBAgentToolkit,
     RDBAgentToolkitNamespaceReservation,
     RDBToolkitConfig,
-    RDBToolkitScope,
 )
 from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from azents.rdb.session_capabilities import ReadSession, WriteSession
@@ -32,8 +29,6 @@ from .data import (
     EffectiveToolkitSource,
     ToolkitConfig,
     ToolkitCreate,
-    ToolkitScope,
-    ToolkitScopeCreate,
     ToolkitUpdate,
 )
 
@@ -363,7 +358,7 @@ class ToolkitRepository:
     ) -> list[ToolkitConfig]:
         """Fetch Toolkits available to workspace user.
 
-        Return enabled WORKSPACE-scoped Toolkits for workspace members.
+        Return enabled Workspace-shared Toolkits for current Workspace members.
 
         :param session: Database session
         :param workspace_id: Workspace ID
@@ -380,16 +375,12 @@ class ToolkitRepository:
         )
         stmt = (
             sa.select(RDBToolkitConfig)
-            .join(RDBToolkitScope, RDBToolkitScope.toolkit_id == RDBToolkitConfig.id)
             .where(
                 workspace_user_exists,
                 RDBToolkitConfig.workspace_id == workspace_id,
                 RDBToolkitConfig.enabled == True,  # noqa: E712
                 RDBToolkitConfig.owner_agent_id.is_(None),
-                RDBToolkitScope.scope_type == ToolkitScopeType.WORKSPACE,
-                RDBToolkitScope.scope_id == workspace_id,
             )
-            .distinct()
             .order_by(RDBToolkitConfig.created_at.desc())
         )
         result = await session.read_session.execute(stmt)
@@ -430,92 +421,6 @@ class ToolkitRepository:
             revision=rdb.revision,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
-        )
-
-
-class ToolkitScopeRepository:
-    """ToolkitScope repository."""
-
-    async def create(
-        self,
-        session: WriteSession,
-        create: ToolkitScopeCreate,
-    ) -> Result[ToolkitScope, DuplicateScope]:
-        """Create ToolkitScope.
-
-        :param session: Database session
-        :param create: Create data
-        :return: Created ToolkitScope or error
-        """
-        try:
-            rdb_scope = RDBToolkitScope(
-                toolkit_id=create.toolkit_id,
-                scope_type=create.scope_type,
-                scope_id=create.scope_id,
-            )
-            session.write_session.add(rdb_scope)
-            await session.write_session.flush()
-            return Success(self._build(rdb_scope))
-        except IntegrityError as e:
-            await session.write_session.rollback()
-            if is_constrained_by(e, RDBToolkitScope.UQ_TOOLKIT_SCOPE):
-                return Failure(
-                    DuplicateScope(
-                        toolkit_id=create.toolkit_id,
-                        scope_type=create.scope_type,
-                        scope_id=create.scope_id,
-                    )
-                )
-            raise
-
-    async def list_by_toolkit(
-        self, session: ReadSession, toolkit_id: str
-    ) -> list[ToolkitScope]:
-        """Fetch all Scopes of Toolkit.
-
-        :param session: Database session
-        :param toolkit_id: Toolkit ID
-        :return: ToolkitScope list
-        """
-        result = await session.read_session.execute(
-            sa.select(RDBToolkitScope)
-            .where(RDBToolkitScope.toolkit_id == toolkit_id)
-            .order_by(RDBToolkitScope.created_at.asc())
-        )
-        return [self._build(rdb) for rdb in result.scalars().all()]
-
-    async def get_by_id(
-        self, session: ReadSession, scope_id: str
-    ) -> ToolkitScope | None:
-        """Fetch ToolkitScope by ID.
-
-        :param session: Database session
-        :param scope_id: Scope ID
-        :return: ToolkitScope or None
-        """
-        rdb = await session.read_session.get(RDBToolkitScope, scope_id)
-        if rdb is None:
-            return None
-        return self._build(rdb)
-
-    async def delete_by_id(self, session: WriteSession, scope_id: str) -> None:
-        """Delete ToolkitScope by ID.
-
-        :param session: Database session
-        :param scope_id: Scope ID
-        """
-        await session.write_session.execute(
-            sa.delete(RDBToolkitScope).where(RDBToolkitScope.id == scope_id)
-        )
-
-    def _build(self, rdb: RDBToolkitScope) -> ToolkitScope:
-        """Convert RDB model to domain model."""
-        return ToolkitScope(
-            id=rdb.id,
-            toolkit_id=rdb.toolkit_id,
-            scope_type=rdb.scope_type,
-            scope_id=rdb.scope_id,
-            created_at=rdb.created_at,
         )
 
 
@@ -636,5 +541,4 @@ class AgentToolkitRepository:
 __all__ = [
     "AgentToolkitRepository",
     "ToolkitRepository",
-    "ToolkitScopeRepository",
 ]

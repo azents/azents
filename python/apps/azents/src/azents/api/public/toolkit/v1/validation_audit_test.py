@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from azents.api.public.toolkit.v1 import (
     attach_toolkit_to_agent,
     create_toolkit_config,
-    create_toolkit_scope,
+    detach_toolkit_from_agent,
 )
 from azents.api.public.toolkit.v1.data import (
     AgentToolkitAttachRequest,
@@ -15,10 +15,10 @@ from azents.api.public.toolkit.v1.data import (
 )
 from azents.core.auth.deps import WorkspaceMember
 from azents.core.auth.permissions import Permissions
-from azents.core.enums import ToolkitScopeType, WorkspaceUserRole
+from azents.core.enums import WorkspaceUserRole
 from azents.core.toolkit_errors import (
+    AgentToolkitNotFound,
     DuplicateAgentToolkit,
-    DuplicateScope,
     NotFound,
 )
 from azents.core.toolkit_identifiers import (
@@ -31,6 +31,7 @@ from azents.engine.tools.mcp import McpToolkitProvider
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
+    AgentToolkitNotBelongToAgent,
     AgentToolkitOutput,
     InvalidConfig,
     InvalidCredentials,
@@ -40,8 +41,6 @@ from azents.services.toolkit.data import (
     ToolkitCreateInput,
     ToolkitNotAvailable,
     ToolkitOutput,
-    ToolkitScopeCreateInput,
-    ToolkitScopeOutput,
 )
 
 
@@ -74,16 +73,17 @@ class _ValidationService(ToolkitService):
         assert error is not None
         return Failure(error)
 
-    async def create_scope(
-        self, create: ToolkitScopeCreateInput, *, workspace_id: str
-    ) -> Result[ToolkitScopeOutput, NotFound | NotBelongToWorkspace | DuplicateScope]:
-        return Failure(
-            DuplicateScope(
-                toolkit_id=create.toolkit_id,
-                scope_type=ToolkitScopeType.WORKSPACE,
-                scope_id=workspace_id,
-            )
-        )
+    async def detach_from_agent(
+        self,
+        agent_toolkit_id: str,
+        *,
+        agent_id: str,
+        workspace_id: str,
+    ) -> Result[
+        None,
+        AgentToolkitNotBelongToAgent | AgentNotBelongToWorkspace | AgentToolkitNotFound,
+    ]:
+        return Failure(AgentToolkitNotFound(agent_toolkit_id=agent_toolkit_id))
 
     async def attach_to_agent(
         self,
@@ -205,13 +205,16 @@ async def test_nameless_generic_mcp_maps_to_name_field_422() -> None:
     ]
 
 
-async def test_duplicate_workspace_scope_maps_to_409() -> None:
+async def test_missing_agent_attachment_maps_to_404() -> None:
     with pytest.raises(HTTPException) as raised:
-        await create_toolkit_scope(
-            _owner(), _ValidationService(), toolkit_config_id="toolkit-1"
+        await detach_toolkit_from_agent(
+            _owner(),
+            _ValidationService(),
+            agent_id="agent-1",
+            agent_toolkit_id="missing-attachment",
         )
-    assert raised.value.status_code == 409
-    assert raised.value.detail == "Scope already exists."
+    assert raised.value.status_code == 404
+    assert raised.value.detail == "Agent toolkit not found."
 
 
 async def test_duplicate_agent_attachment_maps_to_409() -> None:

@@ -1614,9 +1614,6 @@
     "enabledLabel": "有効状態",
     "alwaysExposeToolsLabel": "ツールを常に表示",
     "alwaysExposeToolsDescription": "このツールキットのすべてのツールをツール検索なしでモデルに常時表示します。",
-    "scopesSection": "スコープ",
-    "noScopes": "設定されたスコープはありません",
-    "scopeWorkspace": "ワークスペース",
     "deleteConfirm": "このツールキットを削除しますか？",
     "cancel": "キャンセル",
     "delete": "削除",
@@ -1726,7 +1723,6 @@
       "addEntry": "変数を追加",
       "entryLimitReached": "最大{max}件まで登録できます"
     },
-    "addWorkspaceScope": "ワークスペーススコープを追加",
     "oauthConnection": {
       "title": "OAuth 接続",
       "statusNotConnected": "未接続",

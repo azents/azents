@@ -2,8 +2,6 @@
 
 import dataclasses
 
-from azents.core.enums import ToolkitScopeType
-
 
 @dataclasses.dataclass(frozen=True)
 class NotFound:
@@ -13,19 +11,10 @@ class NotFound:
 
 
 @dataclasses.dataclass(frozen=True)
-class ScopeNotFound:
-    """ToolkitScope not found."""
+class AgentToolkitNotFound:
+    """Agent Toolkit attachment not found."""
 
-    scope_id: str
-
-
-@dataclasses.dataclass(frozen=True)
-class DuplicateScope:
-    """Same scope already exists."""
-
-    toolkit_id: str
-    scope_type: ToolkitScopeType
-    scope_id: str
+    agent_toolkit_id: str
 
 
 @dataclasses.dataclass(frozen=True)

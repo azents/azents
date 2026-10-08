@@ -547,9 +547,6 @@ __all__ = [
     "ToolkitConfigUpdateRequest",
     "ToolkitListResponse",
     "ToolkitResponse",
-    "ToolkitScopeListResponse",
-    "ToolkitScopeResponse",
-    "ToolkitScopeType",
     "UnsupportedMediaPolicy",
     "UpdateMyProfileRequest",
     "UpdateMyUserRequest",
@@ -1138,9 +1135,6 @@ from azentspublicclient.models.toolkit_config_response import ToolkitConfigRespo
 from azentspublicclient.models.toolkit_config_update_request import ToolkitConfigUpdateRequest as ToolkitConfigUpdateRequest
 from azentspublicclient.models.toolkit_list_response import ToolkitListResponse as ToolkitListResponse
 from azentspublicclient.models.toolkit_response import ToolkitResponse as ToolkitResponse
-from azentspublicclient.models.toolkit_scope_list_response import ToolkitScopeListResponse as ToolkitScopeListResponse
-from azentspublicclient.models.toolkit_scope_response import ToolkitScopeResponse as ToolkitScopeResponse
-from azentspublicclient.models.toolkit_scope_type import ToolkitScopeType as ToolkitScopeType
 from azentspublicclient.models.unsupported_media_policy import UnsupportedMediaPolicy as UnsupportedMediaPolicy
 from azentspublicclient.models.update_my_profile_request import UpdateMyProfileRequest as UpdateMyProfileRequest
 from azentspublicclient.models.update_my_user_request import UpdateMyUserRequest as UpdateMyUserRequest

@@ -3,7 +3,6 @@
 import type {
   ToolkitConfigResponse,
   ToolkitResponse,
-  ToolkitScopeResponse,
 } from "@azents/public-client";
 
 /** Toolkit Config list state */
@@ -22,12 +21,6 @@ export type ToolkitConfigFormState =
 /** Mutation state */
 export type MutationState =
   { type: "IDLE"; error: string | null } | { type: "SUBMITTING" };
-
-/** Scope list state */
-export type ScopeListState =
-  | { type: "LOADING" }
-  | { type: "ERROR" }
-  | { type: "READY"; scopes: ToolkitScopeResponse[] };
 
 /** Toolkit (tool definition) list state */
 export type ToolkitListState =

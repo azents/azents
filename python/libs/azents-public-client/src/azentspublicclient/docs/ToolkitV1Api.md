@@ -7,10 +7,8 @@ Method | HTTP request | Description
 [**toolkit_v1_attach_toolkit_to_agent**](ToolkitV1Api.md#toolkit_v1_attach_toolkit_to_agent) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | Attach Toolkit To Agent
 [**toolkit_v1_create_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_create_agent_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs | Create Agent Toolkit Config
 [**toolkit_v1_create_toolkit_config**](ToolkitV1Api.md#toolkit_v1_create_toolkit_config) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs | Create Toolkit Config
-[**toolkit_v1_create_toolkit_scope**](ToolkitV1Api.md#toolkit_v1_create_toolkit_scope) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | Create Toolkit Scope
 [**toolkit_v1_delete_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_delete_agent_toolkit_config) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Delete Agent Toolkit Config
 [**toolkit_v1_delete_toolkit_config**](ToolkitV1Api.md#toolkit_v1_delete_toolkit_config) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Delete Toolkit Config
-[**toolkit_v1_delete_toolkit_scope**](ToolkitV1Api.md#toolkit_v1_delete_toolkit_scope) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes/{scope_id} | Delete Toolkit Scope
 [**toolkit_v1_detach_toolkit_from_agent**](ToolkitV1Api.md#toolkit_v1_detach_toolkit_from_agent) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits/{agent_toolkit_id} | Detach Toolkit From Agent
 [**toolkit_v1_get_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_get_agent_toolkit_config) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Get Agent Toolkit Config
 [**toolkit_v1_get_toolkit_config**](ToolkitV1Api.md#toolkit_v1_get_toolkit_config) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Get Toolkit Config
@@ -18,7 +16,6 @@ Method | HTTP request | Description
 [**toolkit_v1_list_agent_toolkits**](ToolkitV1Api.md#toolkit_v1_list_agent_toolkits) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkits | List Agent Toolkits
 [**toolkit_v1_list_available_toolkit_configs**](ToolkitV1Api.md#toolkit_v1_list_available_toolkit_configs) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/available | List Available Toolkit Configs
 [**toolkit_v1_list_toolkit_configs**](ToolkitV1Api.md#toolkit_v1_list_toolkit_configs) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs | List Toolkit Configs
-[**toolkit_v1_list_toolkit_scopes**](ToolkitV1Api.md#toolkit_v1_list_toolkit_scopes) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes | List Toolkit Scopes
 [**toolkit_v1_list_toolkits**](ToolkitV1Api.md#toolkit_v1_list_toolkits) | **GET** /toolkit/v1/toolkits | List Toolkits
 [**toolkit_v1_update_agent_toolkit_config**](ToolkitV1Api.md#toolkit_v1_update_agent_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_config_id} | Update Agent Toolkit Config
 [**toolkit_v1_update_toolkit_config**](ToolkitV1Api.md#toolkit_v1_update_toolkit_config) | **PATCH** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_config_id} | Update Toolkit Config
@@ -278,89 +275,6 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
-# **toolkit_v1_create_toolkit_scope**
-> ToolkitScopeResponse toolkit_v1_create_toolkit_scope(toolkit_config_id, handle)
-
-Create Toolkit Scope
-
-Create a Toolkit Scope.
-
-Requires Toolkit write permission.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.toolkit_scope_response import ToolkitScopeResponse
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str | 
-    handle = 'handle_example' # str | 
-
-    try:
-        # Create Toolkit Scope
-        api_response = api_instance.toolkit_v1_create_toolkit_scope(toolkit_config_id, handle)
-        print("The response of ToolkitV1Api->toolkit_v1_create_toolkit_scope:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ToolkitV1Api->toolkit_v1_create_toolkit_scope: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  | 
- **handle** | **str**|  | 
-
-### Return type
-
-[**ToolkitScopeResponse**](ToolkitScopeResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**201** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
 # **toolkit_v1_delete_agent_toolkit_config**
 > toolkit_v1_delete_agent_toolkit_config(agent_id, toolkit_config_id, handle)
 
@@ -497,88 +411,6 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 Name | Type | Description  | Notes
 ------------- | ------------- | ------------- | -------------
  **toolkit_config_id** | **str**|  | 
- **handle** | **str**|  | 
-
-### Return type
-
-void (empty response body)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**204** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **toolkit_v1_delete_toolkit_scope**
-> toolkit_v1_delete_toolkit_scope(toolkit_config_id, scope_id, handle)
-
-Delete Toolkit Scope
-
-Delete a Toolkit Scope.
-
-Requires Toolkit write permission.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str | 
-    scope_id = 'scope_id_example' # str | 
-    handle = 'handle_example' # str | 
-
-    try:
-        # Delete Toolkit Scope
-        api_instance.toolkit_v1_delete_toolkit_scope(toolkit_config_id, scope_id, handle)
-    except Exception as e:
-        print("Exception when calling ToolkitV1Api->toolkit_v1_delete_toolkit_scope: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  | 
- **scope_id** | **str**|  | 
  **handle** | **str**|  | 
 
 ### Return type
@@ -1158,89 +990,6 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ToolkitConfigListResponse**](ToolkitConfigListResponse.md)
-
-### Authorization
-
-[HTTPBearer](../README.md#HTTPBearer)
-
-### HTTP request headers
-
- - **Content-Type**: Not defined
- - **Accept**: application/json
-
-### HTTP response details
-
-| Status code | Description | Response headers |
-|-------------|-------------|------------------|
-**200** | Successful Response |  -  |
-**422** | Validation Error |  -  |
-
-[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
-
-# **toolkit_v1_list_toolkit_scopes**
-> ToolkitScopeListResponse toolkit_v1_list_toolkit_scopes(toolkit_config_id, handle)
-
-List Toolkit Scopes
-
-List Scopes for a Toolkit.
-
-Requires Toolkit write permission.
-
-### Example
-
-* Bearer Authentication (HTTPBearer):
-
-```python
-import azentspublicclient
-from azentspublicclient.models.toolkit_scope_list_response import ToolkitScopeListResponse
-from azentspublicclient.rest import ApiException
-from pprint import pprint
-
-# Defining the host is optional and defaults to http://localhost
-# See configuration.py for a list of all supported configuration parameters.
-configuration = azentspublicclient.Configuration(
-    host = "http://localhost"
-)
-
-# The client must configure the authentication and authorization parameters
-# in accordance with the API server security policy.
-# Examples for each auth method are provided below, use the example that
-# satisfies your auth use case.
-
-# Configure Bearer authorization: HTTPBearer
-configuration = azentspublicclient.Configuration(
-    access_token = os.environ["BEARER_TOKEN"]
-)
-
-# Enter a context with an instance of the API client
-with azentspublicclient.ApiClient(configuration) as api_client:
-    # Create an instance of the API class
-    api_instance = azentspublicclient.ToolkitV1Api(api_client)
-    toolkit_config_id = 'toolkit_config_id_example' # str | 
-    handle = 'handle_example' # str | 
-
-    try:
-        # List Toolkit Scopes
-        api_response = api_instance.toolkit_v1_list_toolkit_scopes(toolkit_config_id, handle)
-        print("The response of ToolkitV1Api->toolkit_v1_list_toolkit_scopes:\n")
-        pprint(api_response)
-    except Exception as e:
-        print("Exception when calling ToolkitV1Api->toolkit_v1_list_toolkit_scopes: %s\n" % e)
-```
-
-
-
-### Parameters
-
-
-Name | Type | Description  | Notes
-------------- | ------------- | ------------- | -------------
- **toolkit_config_id** | **str**|  | 
- **handle** | **str**|  | 
-
-### Return type
-
-[**ToolkitScopeListResponse**](ToolkitScopeListResponse.md)
 
 ### Authorization
 

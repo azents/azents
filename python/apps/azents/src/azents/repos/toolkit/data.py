@@ -8,8 +8,6 @@ from typing import Annotated, Any
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
-from azents.core.enums import ToolkitScopeType
-
 
 class ToolkitConfig(BaseModel):
     """Toolkit Config domain model (toolkit type + config stored in DB)."""
@@ -33,16 +31,6 @@ class ToolkitConfig(BaseModel):
     revision: int = Field(description="Persisted source revision")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
-
-
-class ToolkitScope(BaseModel):
-    """ToolkitScope domain model."""
-
-    id: str = Field(description="Scope ID")
-    toolkit_id: str = Field(description="Toolkit ID")
-    scope_type: ToolkitScopeType = Field(description="Scope type")
-    scope_id: str = Field(description="Scope target ID")
-    created_at: datetime.datetime = Field(description="Created time")
 
 
 class AgentToolkit(BaseModel):
@@ -91,14 +79,6 @@ class ToolkitUpdate(TypedDict, total=False):
             description="Whether every tool bypasses Tool Search and remains visible"
         ),
     ]
-
-
-class ToolkitScopeCreate(BaseModel):
-    """ToolkitScope create schema."""
-
-    toolkit_id: str = Field(description="Toolkit ID")
-    scope_type: ToolkitScopeType = Field(description="Scope type")
-    scope_id: str = Field(description="Scope target ID")
 
 
 class AgentToolkitCreate(BaseModel):

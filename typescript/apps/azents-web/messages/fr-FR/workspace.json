@@ -1614,9 +1614,6 @@
     "enabledLabel": "Activé",
     "alwaysExposeToolsLabel": "Toujours exposer les outils",
     "alwaysExposeToolsDescription": "Garde tous les outils de ce toolkit visibles par le modèle sans passer par la recherche d’outils.",
-    "scopesSection": "Portées",
-    "noScopes": "Aucune portée configurée",
-    "scopeWorkspace": "Espace de travail",
     "deleteConfirm": "Voulez-vous vraiment supprimer ce toolkit ?",
     "cancel": "Annuler",
     "delete": "Supprimer",
@@ -1726,7 +1723,6 @@
       "addEntry": "Ajouter une variable",
       "entryLimitReached": "{max} entrées maximum"
     },
-    "addWorkspaceScope": "Ajouter la portée de l’espace de travail",
     "oauthConnection": {
       "title": "Connexion OAuth",
       "statusNotConnected": "Non connecté",

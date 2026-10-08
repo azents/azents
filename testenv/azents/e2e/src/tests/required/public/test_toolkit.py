@@ -416,80 +416,6 @@ class TestToolkitCrud:
 
 
 # ---------------------------------------------------------------------------
-# Scope t
-# ---------------------------------------------------------------------------
-
-
-class TestToolkitScope:
-    """Toolkit Scope t t."""
-
-    def test_auto_created_workspace_scope(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """Toolkit create t Workspace Scopet t createt."""
-        owner_token, handle, _, _ = _setup_workspace(
-            public_api_client, admin_api_client
-        )
-        api = ToolkitV1Api(public_api_client)
-        headers = {"Authorization": f"Bearer {owner_token}"}
-
-        toolkit_id = _create_toolkit(
-            public_api_client, token=owner_token, handle=handle
-        )
-
-        # workspace_idt toolkit responset fetch
-        toolkit = api.toolkit_v1_get_toolkit_config(
-            handle=handle, toolkit_config_id=toolkit_id, _headers=headers
-        )
-        workspace_id = toolkit.workspace_id
-
-        # Toolkit create t workspace scopet t createt
-        scopes = api.toolkit_v1_list_toolkit_scopes(
-            handle=handle, toolkit_config_id=toolkit_id, _headers=headers
-        )
-        assert len(scopes.items) == 1
-        assert scopes.items[0].scope_type == "workspace"
-        assert scopes.items[0].scope_id == workspace_id
-
-    def test_delete_scope(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-    ) -> None:
-        """Scope delete t listt t."""
-        owner_token, handle, _, _ = _setup_workspace(
-            public_api_client, admin_api_client
-        )
-        api = ToolkitV1Api(public_api_client)
-        headers = {"Authorization": f"Bearer {owner_token}"}
-
-        toolkit_id = _create_toolkit(
-            public_api_client, token=owner_token, handle=handle
-        )
-
-        # t createt workspace scopet t delete
-        scopes = api.toolkit_v1_list_toolkit_scopes(
-            handle=handle, toolkit_config_id=toolkit_id, _headers=headers
-        )
-        assert len(scopes.items) == 1
-        auto_scope = scopes.items[0]
-
-        api.toolkit_v1_delete_toolkit_scope(
-            handle=handle,
-            toolkit_config_id=toolkit_id,
-            scope_id=auto_scope.id,
-            _headers=headers,
-        )
-
-        scopes_after = api.toolkit_v1_list_toolkit_scopes(
-            handle=handle, toolkit_config_id=toolkit_id, _headers=headers
-        )
-        assert len(scopes_after.items) == 0
-
-
-# ---------------------------------------------------------------------------
 # t Toolkit + Agent t
 # ---------------------------------------------------------------------------
 
@@ -497,13 +423,13 @@ class TestToolkitScope:
 class TestToolkitAvailableAndAttach:
     """t Toolkit fetch + Agent t t."""
 
-    def test_member_sees_workspace_scoped_toolkit(
+    def test_member_discovers_and_attaches_enabled_workspace_shared_toolkit(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Workspace t Toolkitt t membert t t."""
-        owner_token, handle, _, _ = _setup_workspace(
+        """A member can attach an enabled shared Toolkit without visibility setup."""
+        owner_token, handle, integration_id, model_selection = _setup_workspace(
             public_api_client, admin_api_client
         )
         member_token = _add_member(
@@ -518,14 +444,27 @@ class TestToolkitAvailableAndAttach:
             public_api_client, token=owner_token, handle=handle, name="WS Toolkit"
         )
 
-        # Workspace scopet t createt t t t
-
-        # membert t list fetch
         available = api.toolkit_v1_list_available_toolkit_configs(
             handle=handle,
             _headers={"Authorization": f"Bearer {member_token}"},
         )
         assert any(t.id == toolkit_id for t in available.items)
+        agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        attached = api.toolkit_v1_attach_toolkit_to_agent(
+            handle=handle,
+            agent_id=agent_id,
+            agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                toolkit_id=toolkit_id
+            ),
+            _headers={"Authorization": f"Bearer {member_token}"},
+        )
+        assert attached.toolkit_id == toolkit_id
 
     def test_disabled_toolkit_not_available(
         self,
@@ -547,12 +486,53 @@ class TestToolkitAvailableAndAttach:
             enabled=False,
         )
 
-        # Workspace scopet t createt t t t
-
         available = api.toolkit_v1_list_available_toolkit_configs(
             handle=handle, _headers=headers
         )
         assert not any(t.id == toolkit_id for t in available.items)
+
+    def test_other_workspace_toolkit_is_not_discovered_or_attached(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+    ) -> None:
+        """Scope removal preserves exact Workspace discovery and effect admission."""
+        owner_token, handle, integration_id, model_selection = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        other_token, other_handle, _, _ = _setup_workspace(
+            public_api_client, admin_api_client
+        )
+        other_toolkit_id = _create_toolkit(
+            public_api_client, token=other_token, handle=other_handle
+        )
+        headers = {"Authorization": f"Bearer {owner_token}"}
+        api = ToolkitV1Api(public_api_client)
+        available = api.toolkit_v1_list_available_toolkit_configs(
+            handle=handle, _headers=headers
+        )
+        assert all(item.id != other_toolkit_id for item in available.items)
+        agent_id = _create_agent(
+            public_api_client,
+            token=owner_token,
+            handle=handle,
+            integration_id=integration_id,
+            model_selection=model_selection,
+        )
+        with pytest.raises(ApiException) as rejected:
+            api.toolkit_v1_attach_toolkit_to_agent(
+                handle=handle,
+                agent_id=agent_id,
+                agent_toolkit_attach_request=AgentToolkitAttachRequest(
+                    toolkit_id=other_toolkit_id
+                ),
+                _headers=headers,
+            )
+        assert rejected.value.status == 404
+        attached = api.toolkit_v1_list_agent_toolkits(
+            handle=handle, agent_id=agent_id, _headers=headers
+        )
+        assert attached.items == []
 
     def test_attach_and_detach_toolkit(
         self,
@@ -569,8 +549,6 @@ class TestToolkitAvailableAndAttach:
         toolkit_id = _create_toolkit(
             public_api_client, token=owner_token, handle=handle
         )
-
-        # Workspace scopet t createt t t t
 
         agent_id = _create_agent(
             public_api_client,
@@ -675,12 +653,12 @@ class TestToolkitAvailableAndAttach:
         ]
         assert stored_slugs == [duplicate_slug, duplicate_slug]
 
-    def test_unavailable_toolkit_returns_403(
+    def test_disabled_toolkit_cannot_be_attached(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
-        """Scope t Toolkitt t t t 403t returnt."""
+        """Removing visibility scope does not bypass the disabled-state guard."""
         owner_token, handle, integration_id, model_selection = _setup_workspace(
             public_api_client, admin_api_client
         )
@@ -688,20 +666,8 @@ class TestToolkitAvailableAndAttach:
         headers = {"Authorization": f"Bearer {owner_token}"}
 
         toolkit_id = _create_toolkit(
-            public_api_client, token=owner_token, handle=handle
+            public_api_client, token=owner_token, handle=handle, enabled=False
         )
-
-        # t createt workspace scopet deletet scope t statet t
-        scopes = api.toolkit_v1_list_toolkit_scopes(
-            handle=handle, toolkit_config_id=toolkit_id, _headers=headers
-        )
-        for s in scopes.items:
-            api.toolkit_v1_delete_toolkit_scope(
-                handle=handle,
-                toolkit_config_id=toolkit_id,
-                scope_id=s.id,
-                _headers=headers,
-            )
 
         agent_id = _create_agent(
             public_api_client,

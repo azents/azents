@@ -164,7 +164,7 @@ class AgentToolkitOperationsRepository:
         ToolkitConfig,
         AgentWorkspaceMismatch | AgentManagementDenied | PlatformAuthorityRejected,
     ]:
-        """Revalidate owner and namespace; create without a Scope or attachment."""
+        """Revalidate owner and namespace; create an Agent-owned Toolkit."""
         if create.owner_agent_id != agent_id or create.workspace_id != workspace_id:
             return Failure(AgentWorkspaceMismatch(agent_id=agent_id))
         async with self.session_manager() as session:
