@@ -314,7 +314,15 @@ def test_agent_owned_toolkit_owner_management_and_member_legacy_view(
             (By.XPATH, f"//button[.//*[normalize-space()={shared_name!r}]]")
         )
     ).click()
-    _assert_visible_text(browser_driver, shared_name)
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.XPATH,
+                "//div[contains(@class, 'mantine-Card-root')]"
+                f"//*[normalize-space()={shared_name!r}]",
+            )
+        )
+    )
     current_search_value = browser_driver.find_element(By.ID, search_id).is_selected()
     assert current_search_value is dirty_search_value
     unchanged_agent = AgentV1Api(public_api_client).agent_v1_get_agent(
