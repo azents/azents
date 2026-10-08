@@ -13,6 +13,7 @@ from azents.engine.model_stream import ModelStreamCallContext
 from azents.engine.provider_errors import map_model_provider_error
 from azents.engine.run.provider_failure import (
     ModelProviderFailureCategory,
+    ModelProviderFailureRetryability,
     UnclassifiedModelProviderError,
 )
 
@@ -58,6 +59,50 @@ def test_sdk_authentication_preserves_scalar_evidence_and_redacts_secrets(
     assert failure.route_model == "publisher/exact/model"
     assert "sk-supersecret123" not in str(failure)
     assert failure.provider_message == "api_key=[REDACTED] invalid"
+
+
+@pytest.mark.parametrize("provider", ["xai", "xai_oauth"])
+@pytest.mark.parametrize("body_shape", ["scalar", "message", "nested"])
+def test_xai_credit_exhaustion_403_is_quota(provider: str, body_shape: str) -> None:
+    """The observed xAI subscription error advances the quota fallback chain."""
+    message = (
+        "You have run out of credits or need a Grok subscription. "
+        "Add credits at https://grok.com/?_s=usage or upgrade at "
+        "https://grok.com/supergrok."
+    )
+    body = (
+        message
+        if body_shape == "scalar"
+        else {"message": message}
+        if body_shape == "message"
+        else {"error": {"message": message}}
+    )
+    response = httpx2.Response(
+        403, request=httpx2.Request("POST", "https://synthetic.test/responses")
+    )
+    error = openai.PermissionDeniedError(
+        "Error code: 403 - " + str(body), response=response, body=body
+    )
+    context = ModelStreamCallContext(
+        call_kind="sampling",
+        provider=provider,
+        provider_integration_id="integration",
+        model="grok-4.5",
+        session_id="session",
+        run_id="run",
+        attempt_number=1,
+        check_stop=None,
+    )
+
+    failure = map_model_provider_error(error, call_context=context)
+
+    assert failure.category is ModelProviderFailureCategory.QUOTA_OR_BILLING
+    assert failure.retryability is ModelProviderFailureRetryability.USER_ACTION_REQUIRED
+    assert failure.status_code == 403
+    assert failure.provider_message == message
+    assert failure.provider_error_type == "PermissionDeniedError"
+    assert failure.route_provider == provider
+    assert failure.route_model == "grok-4.5"
 
 
 def test_wrapped_model_http_error_keeps_original_billing_and_retry_evidence() -> None:

@@ -103,6 +103,75 @@ def test_usage_limit_reached_is_user_visible_quota_failure() -> None:
     assert isinstance(failure, ModelCallError)
 
 
+@pytest.mark.parametrize(
+    ("provider", "status_code", "message", "expected"),
+    [
+        (
+            "xai_oauth",
+            403,
+            "Access to this model requires permission.",
+            ModelProviderFailureCategory.PERMISSION,
+        ),
+        (
+            "xai",
+            403,
+            "Insufficient permissions to access billing information.",
+            ModelProviderFailureCategory.PERMISSION,
+        ),
+        (
+            "openai",
+            403,
+            "You have run out of credits or need a Grok subscription.",
+            ModelProviderFailureCategory.PERMISSION,
+        ),
+        (
+            "xai_oauth",
+            401,
+            "You have run out of credits or need a Grok subscription.",
+            ModelProviderFailureCategory.AUTHENTICATION,
+        ),
+        (
+            "xai_oauth",
+            429,
+            "You have run out of credits or need a Grok subscription.",
+            ModelProviderFailureCategory.RATE_LIMIT,
+        ),
+        (
+            "xai_oauth",
+            403,
+            "Request denied. You have run out of credits or need a Grok subscription.",
+            ModelProviderFailureCategory.PERMISSION,
+        ),
+        (
+            "xai_oauth",
+            403,
+            None,
+            ModelProviderFailureCategory.PERMISSION,
+        ),
+    ],
+)
+def test_xai_quota_message_override_preserves_other_failures(
+    provider: str,
+    status_code: int,
+    message: str | None,
+    expected: ModelProviderFailureCategory,
+) -> None:
+    """Only the provider-specific exhausted-credit 403 changes classification."""
+    failure = model_provider_failure(
+        operation="sampling",
+        provider=provider,
+        model="model",
+        integration="integration",
+        provider_message=message,
+        status_code=status_code,
+        provider_code=None,
+        provider_error_type=None,
+        provider_error_param=None,
+    )
+
+    assert failure.category is expected
+
+
 def test_preserves_exact_internal_route_identity_beside_bounded_diagnostics() -> None:
     """Quota routing retains exact identifiers without exposing them as diagnostics."""
     exact_model = f"custom model/{'x' * 120}"

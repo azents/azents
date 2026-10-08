@@ -42,6 +42,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
+    LLMProvider,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -916,8 +917,9 @@ class _Engine:
 class _QuotaThenSuccessEngine(_Engine):
     """Fail one sampling candidate with quota, then complete on fallback."""
 
-    def __init__(self) -> None:
+    def __init__(self, failure: ModelProviderFailure) -> None:
         self.requests: list[RunRequest] = []
+        self.failure = failure
 
     def run(
         self,
@@ -934,21 +936,7 @@ class _QuotaThenSuccessEngine(_Engine):
         async def iterator() -> AsyncIterator[Emit]:
             self.requests.append(request)
             if len(self.requests) == 1:
-                inference_state = request.inference_state
-                assert inference_state is not None
-                raise model_provider_failure(
-                    operation="sampling",
-                    provider=request.provider.value,
-                    model=request.model,
-                    integration=(
-                        inference_state.model_selection.llm_provider_integration_id
-                    ),
-                    provider_message="Quota exceeded.",
-                    status_code=402,
-                    provider_code="billing_limit",
-                    provider_error_type="billing_error",
-                    provider_error_param=None,
-                )
+                raise self.failure
             yield ephemeral(RunComplete(run_id=context.run_id))
 
         return iterator()
@@ -6630,12 +6618,17 @@ async def test_timeout_failure_uses_full_budget_with_stable_attempt_codes() -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "provider", [LLMProvider.OPENAI, LLMProvider.XAI, LLMProvider.XAI_OAUTH]
+)
 async def test_quota_progresses_candidate_before_generic_retry(
     monkeypatch: pytest.MonkeyPatch,
+    provider: LLMProvider,
 ) -> None:
     """A Primary quota dispatches fallback without consuming retry budget."""
     primary = make_test_model_selection(
         integration_id="integration-primary",
+        provider=provider,
         model_identifier=f"gpt primary/{'x' * 120}",
     )
     fallback = make_test_model_selection(
@@ -6664,7 +6657,24 @@ async def test_quota_progresses_candidate_before_generic_retry(
             "selectable_model_options": [option],
         }
     )
-    engine = _QuotaThenSuccessEngine()
+    xai = provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}
+    engine = _QuotaThenSuccessEngine(
+        model_provider_failure(
+            operation="sampling",
+            provider=provider.value,
+            model=primary.model_identifier,
+            integration=primary.llm_provider_integration_id,
+            provider_message=(
+                "You have run out of credits or need a Grok subscription."
+                if xai
+                else "Quota exceeded."
+            ),
+            status_code=403 if xai else 402,
+            provider_code=None if xai else "billing_limit",
+            provider_error_type="PermissionDeniedError" if xai else "billing_error",
+            provider_error_param=None,
+        )
+    )
     lifecycle = _SessionLifecycle()
     live_event_projector = _LiveEventProjector()
     executor = _executor(

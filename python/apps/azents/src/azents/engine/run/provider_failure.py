@@ -252,18 +252,28 @@ def model_provider_failure(
     safe_code = sanitize_provider_identifier(provider_code)
     safe_error_type = sanitize_provider_identifier(provider_error_type)
     safe_error_param = sanitize_provider_error_param(provider_error_param)
+    safe_message = sanitize_provider_message(provider_message)
     resolved_category = category or classify_model_provider_failure(
         status_code=status_code,
         provider_code=safe_code,
         provider_error_type=safe_error_type,
     )
+    # xAI reports exhausted credits/subscription as a generic SDK permission error.
+    if (
+        category is None
+        and provider in {"xai", "xai_oauth"}
+        and status_code == 403
+        and safe_message is not None
+        and safe_message.casefold().startswith(
+            "you have run out of credits or need a grok subscription."
+        )
+    ):
+        resolved_category = ModelProviderFailureCategory.QUOTA_OR_BILLING
     return ModelProviderFailure(
         operation=operation,
         category=resolved_category,
         retryability=provider_failure_retryability(resolved_category),
-        provider_message=(
-            provider_message if isinstance(provider_message, str) else None
-        ),
+        provider_message=safe_message,
         status_code=status_code,
         provider_code=safe_code,
         provider_error_type=safe_error_type,
