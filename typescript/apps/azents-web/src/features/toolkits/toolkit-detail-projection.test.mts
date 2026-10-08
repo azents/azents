@@ -45,7 +45,7 @@ void test("detail projection never dumps credentials or unknown config fields", 
   assert.equal(JSON.stringify(view).includes(secret), false);
   assert.deepEqual(
     view.find((field) => field.label === "server"),
-    { label: "server", value: "https://example.com/mcp" },
+    { label: "server", value: "https://example.com" },
   );
   assert.deepEqual(
     projectToolkitDetails(toolkit("plugin", { api_key: secret })),
@@ -82,6 +82,25 @@ void test("configured scopes remain distinct from granted OAuth token scope", ()
   assert.equal(
     view.find((field) => field.label === "grantedScope")?.value,
     "read",
+  );
+});
+
+void test("server details omit credential-bearing paths without changing stored URLs", () => {
+  const value = toolkit("mcp", {
+    server_url:
+      "https://example.com:8443/mcp/private-api-key?key=secret#private",
+  });
+  assert.deepEqual(
+    projectToolkitDetails(value).find((field) => field.label === "server"),
+    { label: "server", value: "https://example.com:8443" },
+  );
+  assert.equal(
+    value.config.server_url,
+    "https://example.com:8443/mcp/private-api-key?key=secret#private",
+  );
+  assert.equal(
+    safeToolkitResourceUrl("https://example.com/mcp/%73ecret-key"),
+    "https://example.com",
   );
 });
 

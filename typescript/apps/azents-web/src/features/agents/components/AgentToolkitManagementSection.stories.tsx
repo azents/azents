@@ -164,6 +164,34 @@ export const DeleteConfirmation = {
   },
 } satisfies Story;
 
+export const DeleteFailure = {
+  args: {
+    editor: { type: "DETAIL", toolkitConfigId: "toolkit-1" },
+    deleteTarget: item,
+    mutationState: {
+      type: "ERROR",
+      message: "The toolkit could not be deleted. Try again.",
+    },
+    onConfirmDelete: fn(),
+    onCancelDelete: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    const dialog = within(
+      body.getByRole("dialog", { name: "Delete agent-only toolkit" }),
+    );
+    await expect(
+      dialog.getByText("The toolkit could not be deleted. Try again."),
+    ).toBeVisible();
+    const retry = dialog.getByRole("button", { name: "Delete toolkit" });
+    await expect(retry).toBeEnabled();
+    await userEvent.click(retry);
+    await expect(args.onConfirmDelete).toHaveBeenCalledOnce();
+    await userEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+    await expect(args.onCancelDelete).toHaveBeenCalledOnce();
+  },
+} satisfies Story;
+
 export const NewToolkitCatalog = {
   args: {
     editor: { type: "CATALOG", tab: "new" },

@@ -580,6 +580,9 @@ export function ManagedAgentToolkitSectionView(
         centered
       >
         <Stack>
+          {props.mutationState.type === "ERROR" && (
+            <Alert color="red">{props.mutationState.message}</Alert>
+          )}
           <Text size="sm">
             {t("toolkitManagement.deleteDescription", {
               name: props.deleteTarget?.toolkit.name ?? "",

@@ -65,7 +65,7 @@ function displayList(value?: string[] | null): string | null {
   return value != null && value.length > 0 ? value.join(", ") : null;
 }
 
-/** Display a resource location without userinfo, query or fragment material. */
+/** Display only HTTP(S) origin; credentials may also occur in URL paths. */
 export function safeToolkitResourceUrl(value: unknown): string | null {
   const parsed = text.parse(value);
   if (parsed == null) {
@@ -80,7 +80,7 @@ export function safeToolkitResourceUrl(value: unknown): string | null {
     ) {
       return null;
     }
-    return `${url.origin}${url.pathname}`;
+    return url.origin;
   } catch {
     return null;
   }
