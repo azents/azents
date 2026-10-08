@@ -64,6 +64,19 @@ class RuntimeWebPolicyError(ValueError):
         self.code = code
 
 
+def parse_return_target(value: object) -> str:
+    """Validate an origin-relative browser destination without rewriting it."""
+    if (
+        not isinstance(value, str)
+        or not value.startswith("/")
+        or value.startswith("//")
+        or "\\" in value
+        or any(ord(character) <= 32 or ord(character) == 127 for character in value)
+    ):
+        raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
+    return value
+
+
 @dataclasses.dataclass(frozen=True)
 class RuntimeWebTarget:
     """Host-derived public target."""

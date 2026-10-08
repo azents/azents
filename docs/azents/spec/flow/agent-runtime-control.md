@@ -109,7 +109,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_web_gateway.py
   - infra/charts/azents/**
-last_verified_at: 2026-10-07
+last_verified_at: 2026-10-08
 spec_version: 103
 ---
 
@@ -358,6 +358,12 @@ retaining request history or depending on Redis.
 Programmatic requests receive bounded `401`, `409`, `410`, `429`, `502`, or `503`
 responses as applicable; safe browser navigation is redirected only to the exact
 configured Main Web authentication or Off-service activation route.
+Those redirects carry the original origin-relative path and query as `return_to`.
+Main Web preserves the inherited browser fragment through login and the identity
+exchange, then resumes the original URL on the authorized service origin instead
+of its index page. The same target survives Off-service activation. The navigation
+target never supplies an origin or replaces service access authority; external,
+protocol-relative, backslash and control-character targets fail closed.
 
 Gateway authentication is browser-vendor and version neutral and does not use
 User-Agent Client Hints, an allowlist, or a browser-proof cookie. HTTP and WebSocket

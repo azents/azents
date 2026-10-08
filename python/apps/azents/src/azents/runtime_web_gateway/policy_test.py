@@ -7,6 +7,7 @@ from azents.runtime_web_gateway.policy import (
     RuntimeWebPolicyError,
     normalize_request_headers,
     normalize_response_headers,
+    parse_return_target,
     parse_target_host,
 )
 from azents.runtime_web_gateway.settings import RuntimeWebGatewayConfig
@@ -24,6 +25,35 @@ _CONFIG = RuntimeWebGatewayConfig(
     request_body_bytes=64 * 1024 * 1024,
     permissions_policy="camera=()",
 )
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["/", "/catalog/item?tag=one&tag=two#details", "/items/%E2%9C%93?next=%2Fbasket"],
+)
+def test_return_target_preserves_origin_relative_destination(target: str) -> None:
+    assert parse_return_target(target) == target
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        None,
+        "",
+        "https://evil.test/",
+        "//evil.test/",
+        "/\\evil.test/",
+        "/\nfoo",
+        "/\rfoo",
+        "/\x00foo",
+        "/ foo",
+    ],
+)
+def test_return_target_rejects_external_or_ambiguous_destination(
+    target: object,
+) -> None:
+    with pytest.raises(RuntimeWebPolicyError):
+        parse_return_target(target)
 
 
 def test_host_parser_accepts_one_lowercase_endpoint_label_or_broker() -> None:

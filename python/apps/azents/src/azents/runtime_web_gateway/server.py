@@ -87,6 +87,7 @@ from azents.runtime_web_gateway.policy import (
     RuntimeWebPolicyError,
     normalize_request_headers,
     normalize_response_headers,
+    parse_return_target,
     parse_target_host,
 )
 from azents.runtime_web_gateway.session_runtime import (
@@ -689,6 +690,7 @@ async def _broker_bind(
     _require_broker_request(request, state)
     form = await request.post()
     initiation_id = form.get("initiation_id")
+    return_target = parse_return_target(form.get("return_target"))
     if not isinstance(initiation_id, str) or len(initiation_id) != 32:
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
     try:
@@ -707,7 +709,7 @@ async def _broker_bind(
     response = web.Response(
         text=_auto_post_document(
             destination=destination,
-            fields={"initiation_id": initiation_id},
+            fields={"initiation_id": initiation_id, "return_target": return_target},
         ),
         content_type="text/html",
         headers=_security_page_headers(
@@ -742,6 +744,7 @@ async def _broker_redeem(
         )
     form = await request.post()
     ticket = form.get("ticket")
+    return_target = parse_return_target(form.get("return_target"))
     if not isinstance(ticket, str):
         raise RuntimeWebPolicyError(RuntimeWebPolicyCode.BAD_REQUEST)
     try:
@@ -769,7 +772,7 @@ async def _broker_redeem(
         )
     destination = (
         f"{_public_scheme(state.config)}://"
-        f"{service.hostname_key}.{state.config.service_suffix}/"
+        f"{service.hostname_key}.{state.config.service_suffix}{return_target}"
     )
     response = web.Response(
         text=_completion_document(destination),
@@ -822,7 +825,7 @@ async def _endpoint(
     navigation = _safe_navigation(request)
     if identity_secret is None:
         if navigation:
-            return _auth_navigation(state.config, service.id)
+            return _auth_navigation(state.config, service.id, request.raw_path)
         return _bounded_error(
             request,
             state.config,
@@ -1580,13 +1583,13 @@ def _authority_error(
 ) -> web.StreamResponse:
     if code is RuntimeWebGatewayAuthorityCode.UNAUTHENTICATED:
         if _safe_navigation(request):
-            return _auth_navigation(config, service_id)
+            return _auth_navigation(config, service_id, request.raw_path)
         return _bounded_error(request, config, status=401, code=code.value)
     if code is RuntimeWebGatewayAuthorityCode.NOT_FOUND:
         return _bounded_error(request, config, status=404, code=code.value)
     if code is RuntimeWebGatewayAuthorityCode.GONE:
         if _safe_navigation(request):
-            return _activation_navigation(config, service_id)
+            return _activation_navigation(config, service_id, request.raw_path)
         return _bounded_error(request, config, status=410, code=code.value)
     return _bounded_error(request, config, status=503, code=code.value)
 
@@ -1648,11 +1651,12 @@ def _bounded_error(
 def _auth_navigation(
     config: RuntimeWebGatewayConfig,
     service_id: str,
+    return_target: str,
 ) -> web.Response:
-    destination = (
-        f"{config.main_web_origin}/runtime-web/auth?"
-        f"service_id={urllib.parse.quote(service_id, safe='')}"
+    query = urllib.parse.urlencode(
+        {"service_id": service_id, "return_to": parse_return_target(return_target)}
     )
+    destination = f"{config.main_web_origin}/runtime-web/auth?{query}"
     return web.HTTPSeeOther(
         destination,
         headers=_security_headers(config),
@@ -1662,11 +1666,12 @@ def _auth_navigation(
 def _activation_navigation(
     config: RuntimeWebGatewayConfig,
     service_id: str,
+    return_target: str,
 ) -> web.Response:
-    destination = (
-        f"{config.main_web_origin}/runtime-web/activate?"
-        f"service_id={urllib.parse.quote(service_id, safe='')}"
+    query = urllib.parse.urlencode(
+        {"service_id": service_id, "return_to": parse_return_target(return_target)}
     )
+    destination = f"{config.main_web_origin}/runtime-web/activate?{query}"
     return web.HTTPSeeOther(
         destination,
         headers=_security_headers(config),

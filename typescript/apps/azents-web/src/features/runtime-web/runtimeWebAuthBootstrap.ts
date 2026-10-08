@@ -6,6 +6,7 @@ declare global {
     __azentsRuntimeWebAuth?: {
       root: HTMLElement;
       serviceId: string | null;
+      returnTarget: string;
       result: Promise<RuntimeWebAuthResult>;
     };
   }
@@ -27,16 +28,30 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
     });
   }
   const serviceId = root.dataset.serviceId ?? null;
+  const suppliedTarget = root.dataset.returnTarget;
+  if (typeof suppliedTarget !== "string") {
+    return Promise.resolve({
+      type: "ERROR",
+      message: root.dataset.invalidResponse ?? "",
+    });
+  }
+  let returnTarget = suppliedTarget;
+  if (!returnTarget.includes("#")) {
+    returnTarget += window.location.hash;
+  }
   const mainWebOrigin = root.dataset.mainWebOrigin;
   if (mainWebOrigin && window.location.origin !== mainWebOrigin) {
+    const currentTarget =
+      window.location.pathname + window.location.search + window.location.hash;
     window.location.replace(
-      `${mainWebOrigin}/runtime-web/auth?service_id=${encodeURIComponent(serviceId ?? "")}`,
+      `${mainWebOrigin}/runtime-web/auth?service_id=${encodeURIComponent(serviceId ?? "")}&return_to=${encodeURIComponent(currentTarget)}`,
     );
     return Promise.resolve({ type: "NAVIGATING" });
   }
   if (
     window.__azentsRuntimeWebAuth?.root === root &&
-    window.__azentsRuntimeWebAuth.serviceId === serviceId
+    window.__azentsRuntimeWebAuth.serviceId === serviceId &&
+    window.__azentsRuntimeWebAuth.returnTarget === returnTarget
   ) {
     return window.__azentsRuntimeWebAuth.result;
   }
@@ -46,7 +61,7 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serviceId }),
+        body: JSON.stringify({ serviceId, returnTarget }),
       });
       const body: unknown = await response.json();
       if (!response.ok) {
@@ -83,6 +98,11 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
           input.name = "initiation_id";
           input.value = body.initiationId;
           form.append(input);
+          const target = document.createElement("input");
+          target.type = "hidden";
+          target.name = "return_target";
+          target.value = returnTarget;
+          form.append(target);
           document.body.append(form);
           form.submit();
           return { type: "NAVIGATING" };
@@ -99,7 +119,7 @@ export function startRuntimeWebAuth(): Promise<RuntimeWebAuthResult> {
       };
     }
   })();
-  window.__azentsRuntimeWebAuth = { root, serviceId, result };
+  window.__azentsRuntimeWebAuth = { root, serviceId, returnTarget, result };
   return result;
 }
 

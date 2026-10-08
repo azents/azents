@@ -7,6 +7,7 @@ const meta = {
   args: {
     serviceId: "01a0a4dfd3fb7b88b7ecf202d86f3bd3",
     mainWebOrigin: "https://web.example.com",
+    returnTarget: "/",
     state: { type: "CHECKING" },
     onRetry: fn(),
   },

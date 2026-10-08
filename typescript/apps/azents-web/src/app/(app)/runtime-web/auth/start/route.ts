@@ -12,12 +12,17 @@ import {
   runtimeWebConfiguration,
 } from "@/shared/lib/runtime-web-auth";
 import {
+  runtimeWebReturnDestination,
+  runtimeWebReturnTarget,
+} from "@/shared/lib/runtime-web-return-target";
+import {
   createApiClientWithAccessToken,
   getFreshAccessToken,
 } from "@/trpc/context";
 
 interface StartRequest {
   serviceId: string;
+  returnTarget: string;
 }
 
 function isStartRequest(value: unknown): value is StartRequest {
@@ -26,7 +31,9 @@ function isStartRequest(value: unknown): value is StartRequest {
     value !== null &&
     "serviceId" in value &&
     typeof value.serviceId === "string" &&
-    /^[a-zA-Z0-9_-]{32}$/.test(value.serviceId)
+    /^[a-zA-Z0-9_-]{32}$/.test(value.serviceId) &&
+    "returnTarget" in value &&
+    runtimeWebReturnTarget(value.returnTarget) !== null
   );
 }
 
@@ -93,7 +100,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       throwOnError: true,
     });
     const response = NextResponse.json(
-      { mode: "shared_cookie", destination: service.url },
+      {
+        mode: "shared_cookie",
+        destination: runtimeWebReturnDestination(
+          service.url,
+          body.returnTarget,
+        ),
+      },
       { headers: resHeaders },
     );
     response.cookies.set(configuration.identityCookieName, identity.secret, {

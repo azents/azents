@@ -1,6 +1,11 @@
 "use client";
 
+import { useHash } from "@mantine/hooks";
 import { useCallback, useMemo } from "react";
+import {
+  runtimeWebReturnDestination,
+  runtimeWebReturnTargetWithFragment,
+} from "@/shared/lib/runtime-web-return-target";
 import { trpc } from "@/trpc/client";
 import type {
   RuntimeWebActivationState,
@@ -9,10 +14,12 @@ import type {
 
 export interface RuntimeWebActivationContainerProps {
   serviceId: string;
+  returnTarget: string;
 }
 
 export interface RuntimeWebActivationContainerOutput {
   state: RuntimeWebActivationState;
+  applicationUrl: string | null;
   onTurnOn: (duration: RuntimeWebDurationSeconds) => void;
   onRetry: () => void;
 }
@@ -23,7 +30,9 @@ function errorMessage(error: unknown): string {
 
 export function useRuntimeWebActivationContainer({
   serviceId,
+  returnTarget,
 }: RuntimeWebActivationContainerProps): RuntimeWebActivationContainerOutput {
+  const [fragment] = useHash();
   const utils = trpc.useUtils();
   const input = useMemo(() => ({ serviceId }), [serviceId]);
   const query = trpc.runtimeWeb.getById.useQuery(input, {
@@ -39,7 +48,15 @@ export function useRuntimeWebActivationContainer({
         void invalidate();
         return;
       }
-      window.location.assign(service.url);
+      window.location.assign(
+        runtimeWebReturnDestination(
+          service.url,
+          runtimeWebReturnTargetWithFragment(
+            returnTarget,
+            window.location.hash,
+          ),
+        ),
+      );
     },
   });
 
@@ -83,6 +100,12 @@ export function useRuntimeWebActivationContainer({
 
   return {
     state,
+    applicationUrl: query.data?.url
+      ? runtimeWebReturnDestination(
+          query.data.url,
+          runtimeWebReturnTargetWithFragment(returnTarget, fragment),
+        )
+      : null,
     onTurnOn,
     onRetry: () => {
       void utils.runtimeWeb.getById.invalidate(input);

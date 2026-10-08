@@ -99,6 +99,7 @@ code_paths:
   - typescript/apps/azents-web/src/shared/lib/locale.ts
   - typescript/apps/azents-web/src/shared/lib/request-origin*
   - typescript/apps/azents-web/src/shared/lib/runtime-web-auth*
+  - typescript/apps/azents-web/src/shared/lib/runtime-web-return-target*
   - typescript/apps/azents-web/src/shared/providers/account-locale-sync.tsx
   - typescript/apps/azents-web/src/shared/providers/locale.tsx
   - typescript/apps/azents-web/src/i18n/request.ts
@@ -532,6 +533,17 @@ Workspace and Agent ownership before the user may choose 1, 6, or 24 hours and t
 the service On with its displayed revision. Activation does not create an approval
 request, replace browser identity authority, or put a credential in the URL.
 
+Authentication and Off-service activation preserve the original service path,
+query string (including duplicate keys and percent encoding), and browser fragment.
+The Gateway carries an origin-relative `return_to` through the Main Web route;
+the browser adds the fragment and retains it through any required Main Web login.
+Shared-cookie completion and the separate-domain native POST chain return to that
+target on the service's authorized canonical origin. Activation completion keeps
+the same target when turning the service On. Absolute or protocol-relative
+destinations, backslashes, ASCII whitespace and control characters are rejected
+at the trusted navigation boundaries. Return targets are presentation data, not
+identity or service-access authority, and create no persisted binding state.
+
 Shared-cookie mode mints the identity through the authenticated Public API and writes
 it from a trusted Main Web response to the configured parent cookie domain.
 Separate-domain mode creates an opaque initiation ID plus a Main-origin-only binding,
@@ -759,6 +771,10 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
+
+- **2026-10-08** — Preserved Runtime Web service path, query and fragment through
+  authentication, Main Web login and Off-service activation without changing
+  the authentication screen design or identity authority.
 
 - **2026-10-08** — Removed application-bundle hydration from Runtime Web
   authentication bootstrap while preserving the existing screen and identity

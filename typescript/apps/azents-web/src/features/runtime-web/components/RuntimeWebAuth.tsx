@@ -14,6 +14,7 @@ import type { RuntimeWebAuthState } from "../types";
 interface RuntimeWebAuthProps {
   serviceId: string;
   mainWebOrigin: string | null;
+  returnTarget: string;
   state: RuntimeWebAuthState;
   onRetry: () => void;
 }
@@ -21,6 +22,7 @@ interface RuntimeWebAuthProps {
 export function RuntimeWebAuth({
   serviceId,
   mainWebOrigin,
+  returnTarget,
   state,
   onRetry,
 }: RuntimeWebAuthProps): React.ReactElement {
@@ -33,6 +35,7 @@ export function RuntimeWebAuth({
       py="xl"
       data-service-id={serviceId}
       data-main-web-origin={mainWebOrigin ?? ""}
+      data-return-target={returnTarget}
       data-invalid-response={t("auth.invalidResponse")}
       data-failed-message={t("auth.failed")}
     >

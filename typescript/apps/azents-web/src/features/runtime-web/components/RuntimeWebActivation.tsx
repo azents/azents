@@ -36,6 +36,7 @@ function durationValue(value: string | null): RuntimeWebDurationSeconds | null {
 
 export function RuntimeWebActivation({
   state,
+  applicationUrl,
   onTurnOn,
   onRetry,
 }: RuntimeWebActivationContainerOutput): React.ReactElement {
@@ -116,10 +117,10 @@ export function RuntimeWebActivation({
           {service.on ? (
             <Stack gap="sm">
               <Alert color="green">{t("activation.alreadyOn")}</Alert>
-              {service.url !== null ? (
+              {applicationUrl !== null ? (
                 <Button
                   component="a"
-                  href={service.url}
+                  href={applicationUrl}
                   rightSection={<IconExternalLink size={rem(16)} />}
                 >
                   {t("actions.open")}
