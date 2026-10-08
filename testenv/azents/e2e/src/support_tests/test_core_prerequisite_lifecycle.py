@@ -119,4 +119,5 @@ def test_observability_write_failure_is_non_fatal(
             completed=False,
             wall_seconds=1.0,
             task_timings={},
+            readiness_timings={},
         )

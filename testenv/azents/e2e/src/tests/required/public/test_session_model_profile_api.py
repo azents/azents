@@ -11,8 +11,8 @@ from tests.required.public.test_per_prompt_inference_profile import (
     _headers,
     _history,
     _response_object,
-    _setup_profile_agent,
     _wait_for_session_profile,
+    setup_profile_api_agent,
 )
 
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
@@ -73,7 +73,7 @@ def test_complete_profile_is_idempotent_side_effect_free(
     enabled_execution_options: list[str],
 ) -> None:
     """Save and reload complete speed intent without a message/provider call."""
-    token, agent_id, session_id = _setup_profile_agent(
+    token, agent_id, session_id = setup_profile_api_agent(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
@@ -167,7 +167,7 @@ def test_model_profile_rejects_invalid_input_without_side_effects(
     expected_detail: str | None,
 ) -> None:
     """Reject invalid profiles atomically, preserving a saved Ultrafast choice."""
-    token, agent_id, session_id = _setup_profile_agent(
+    token, agent_id, session_id = setup_profile_api_agent(
         public_api_client,
         admin_api_client,
         azents_public_server_url,

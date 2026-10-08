@@ -9,7 +9,7 @@ from azentsadminclient.models.file_lifecycle_settings_update_request import (
 )
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 
-from support.utils import create_chat_session_with_agent
+from support.utils import create_agent_setup
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -78,11 +78,13 @@ def test_archive_list_restore_and_hard_delete_absence(
     """Archive is reversible, listed separately, and has no hard-delete route."""
     system_api = SystemV1Api(admin_api_client)
     _set_retention(system_api, 30)
-    token, _, agent_id = create_chat_session_with_agent(
+    setup = create_agent_setup(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
     )
+    token = setup.access_token
+    agent_id = setup.agent_id
     session_id = _create_secondary_session(
         server_url=azents_public_server_url,
         token=token,
@@ -153,11 +155,13 @@ def test_zero_day_archive_waits_for_scheduler_purge(
     system_api = SystemV1Api(admin_api_client)
     _set_retention(system_api, 0)
     try:
-        token, _, agent_id = create_chat_session_with_agent(
+        setup = create_agent_setup(
             public_api_client,
             admin_api_client,
             azents_public_server_url,
         )
+        token = setup.access_token
+        agent_id = setup.agent_id
         session_id = _create_secondary_session(
             server_url=azents_public_server_url,
             token=token,
