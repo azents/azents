@@ -25,7 +25,7 @@ Open each predecessor PR before the next implementation phase. Create the comple
 - `/root/github-user-persistence`: user domain DTOs, encrypted active/candidate models, completed repository operations, migration/tests. Return transient affected-token facts instead of persisting cleanup rows.
 - `/root/github-user-service`: SDK-backed service/API sequencing and tests. Cleanup expected failures are logged and do not undo/block local effects. No cleanup proof, retry API or completion owner.
 - `/root/github-user-provider`: provider SDK adapter and parent deletion integration; no cleanup-based blocker or grant-wide revocation.
-- `/root/github-user-ui`: current UI/tRPC/callback/locales/story/state tests. Preserve stopped work and adapt to regenerated simplified contracts after backend update.
+- `/root`: remaining UI/tRPC/callback/locales/story/state implementation and all validation, followed by phase-3 execution/product verification after the UI PR. The earlier UI role's partial work is preserved; implementation proceeds directly without waiting on delegated owners.
 - `/root`: shared contract integration, generation, all integrated checks/review requests/PRs/CI and final evidence.
 
 All provider I/O remains outside completed repository transactions. Setup and current execution authority stay fail-closed. Token revocation uses the exact captured affected token/App, never a newer connection's token or another authority. A failed attempt can leave the non-expiring token valid at GitHub; local use and state still end.

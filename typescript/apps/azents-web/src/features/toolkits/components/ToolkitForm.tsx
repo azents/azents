@@ -26,6 +26,9 @@ import {
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { normalizeGitHubUserCredentialEdits } from "../github-user-credentials";
+import { isGitHubUserMode } from "../github-user-oauth-state";
+import { GitHubUserAuthorizationPage } from "../GitHubUserAuthorizationPage";
 import { AwsConfigFields } from "./AwsConfigFields";
 import { BraveSearchConfigFields } from "./BraveSearchConfigFields";
 import { EnvVarConfigFields } from "./EnvVarConfigFields";
@@ -71,6 +74,7 @@ export interface ToolkitFormProps {
   onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
   onConnectOauth: () => void;
   onDisconnectOauth: () => void;
+  onUserSetupPendingChange?: (pending: boolean) => void;
   onCancel: () => void;
 }
 
@@ -118,6 +122,7 @@ export function ToolkitForm({
   onCredentialsChange,
   onConnectOauth,
   onDisconnectOauth,
+  onUserSetupPendingChange,
   onCancel,
 }: ToolkitFormProps): React.ReactElement {
   const t = useTranslations("workspace.toolkits");
@@ -257,6 +262,11 @@ export function ToolkitForm({
 
                 {currentToolSlug === "github" && (
                   <GithubConfigFields
+                    savedAuthType={
+                      formState.type === "EDIT"
+                        ? String(formState.config.config.github_auth_type)
+                        : void 0
+                    }
                     config={form.getValues().config}
                     onConfigChange={onConfigChange}
                     credentials={form.getValues().credentials ?? null}
@@ -277,6 +287,34 @@ export function ToolkitForm({
                     })}
                   />
                 )}
+
+                {currentToolSlug === "github" &&
+                  formState.type === "EDIT" &&
+                  isGitHubUserMode(
+                    formState.config.config.github_auth_type,
+                  ) && (
+                    <GitHubUserAuthorizationPage
+                      toolkit={formState.config}
+                      onPendingChange={onUserSetupPendingChange}
+                      context={{
+                        handle,
+                        toolkitId: formState.config.id,
+                        agentId,
+                        returnView: "EDIT",
+                        returnPath:
+                          agentId == null
+                            ? `/w/${handle}/toolkits/${formState.config.id}/edit`
+                            : `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
+                      }}
+                      registrationDirty={
+                        form.getValues().config.github_auth_type !==
+                          formState.config.config.github_auth_type ||
+                        normalizeGitHubUserCredentialEdits(
+                          form.getValues().credentials ?? null,
+                        ) != null
+                      }
+                    />
+                  )}
 
                 {currentToolSlug === "notion" && (
                   <NotionConfigFields

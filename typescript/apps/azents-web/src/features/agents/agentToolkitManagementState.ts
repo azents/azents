@@ -51,6 +51,9 @@ export function canAuthorizeAgentToolkitOAuth(
     return false;
   }
   return (
+    (item.toolkit.toolkit_type === "github" &&
+      (item.toolkit.config.github_auth_type === "github_app_user" ||
+        item.toolkit.config.github_auth_type === "github_app_platform_user")) ||
     item.toolkit.toolkit_type === "notion" ||
     item.toolkit.toolkit_type === "sentry" ||
     (item.toolkit.toolkit_type === "mcp" &&

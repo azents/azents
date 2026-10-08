@@ -1,5 +1,7 @@
 import { rem, Text } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
+import { githubUserAuthorizationFixture } from "@/features/toolkits/components/github-user-story-fixtures";
+import { GitHubUserAuthorization } from "@/features/toolkits/components/GitHubUserAuthorization";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { ManagedAgentToolkitSectionView } from "./ManagedAgentToolkitSection";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
@@ -57,6 +59,7 @@ const meta = {
     canAuthorizeShared: true,
     authorizationPendingId: null,
     onAuthorize: () => {},
+    onGithubUserPopupAccepted: () => {},
     onStartAdd: () => {},
     onCatalogTabChange: fn(),
     onConfigureType: fn(),
@@ -79,6 +82,75 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Ready = {} satisfies Story;
+
+const userItem: AgentToolkitManagementItemResponse = {
+  ...item,
+  toolkit: {
+    ...item.toolkit,
+    toolkit_type: "github",
+    name: "GitHub user delegation",
+    config: { github_auth_type: "github_app_user" },
+  },
+};
+export const GitHubUserDirectAuthorize = {
+  args: {
+    state: {
+      type: "READY",
+      items: [userItem],
+      toolkitTypes: [{ value: "github", label: "GitHub" }],
+      availableShared: [],
+    },
+    onAuthorize: fn(),
+  },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole("button", { name: "Authorize" }),
+    );
+    await expect(args.onAuthorize).toHaveBeenCalledWith(userItem);
+  },
+} satisfies Story;
+
+export const GitHubUserDetails = {
+  args: {
+    ...GitHubUserDirectAuthorize.args,
+    editor: { type: "DETAIL", toolkitConfigId: "toolkit-1" },
+    githubUserView: (
+      <GitHubUserAuthorization {...githubUserAuthorizationFixture} />
+    ),
+  },
+} satisfies Story;
+
+export const SharedGitHubUserRestricted = {
+  args: {
+    state: {
+      type: "READY",
+      items: [
+        {
+          ...userItem,
+          ownership_scope: "workspace_shared",
+          agent_toolkit_id: "attachment",
+        },
+      ],
+      toolkitTypes: [{ value: "github", label: "GitHub" }],
+      availableShared: [],
+    },
+    canAuthorizeShared: false,
+    editor: { type: "DETAIL", toolkitConfigId: "toolkit-1" },
+    githubUserView: <Text>Private GitHub connection controls</Text>,
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(
+      page.queryByText("Private GitHub connection controls"),
+    ).not.toBeInTheDocument();
+    await expect(
+      page.queryByRole("button", { name: "Authorize" }),
+    ).not.toBeInTheDocument();
+    await expect(
+      page.queryByRole("button", { name: "Disconnect account" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
 
 export const MobileReady = {
   parameters: { testViewport: { width: 390, height: 844 } },

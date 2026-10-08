@@ -19,6 +19,8 @@ import { IconArrowLeft, IconLock, IconPlus } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ToolkitTypeIcon } from "@/features/toolkits/components/ToolkitTypeIcon";
+import { isGitHubUserMode } from "@/features/toolkits/github-user-oauth-state";
+import { GitHubUserAuthorizationPage } from "@/features/toolkits/GitHubUserAuthorizationPage";
 import { projectToolkitDetails } from "@/features/toolkits/toolkit-detail-projection";
 import { ToolkitFormPage } from "@/features/toolkits/ToolkitFormPage";
 import { createReactContainer } from "@/shared/lib/createReactContainer";
@@ -40,6 +42,7 @@ export interface ManagedToolkitCardProps {
   onEdit: () => void;
   onToggle: () => void;
   onDelete: () => void;
+  userConnectionView?: ReactNode;
 }
 
 function ToolkitIdentity({
@@ -158,7 +161,12 @@ export function ManagedToolkitCard(
           pt="xs"
           style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}
         >
-          <Button variant="subtle" size="xs" onClick={props.onDetails}>
+          <Button
+            variant="subtle"
+            size="xs"
+            onClick={props.onDetails}
+            disabled={props.pending || props.authorizationPending}
+          >
             {t("catalog.details")}
           </Button>
           <AuthorizationAction {...props} />
@@ -196,6 +204,7 @@ export function ToolkitConnectionDetails(
       <Text size="xs" c="dimmed">
         {t("catalog.permissionHint")}
       </Text>
+      {props.userConnectionView}
       <Text size="xs" c="dimmed">
         {t("catalog.readinessHint")}
       </Text>
@@ -313,7 +322,10 @@ function CatalogTile({
 }
 
 export function ManagedAgentToolkitSectionView(
-  props: AgentToolkitManagementContainerOutput & { setupView?: ReactNode },
+  props: AgentToolkitManagementContainerOutput & {
+    setupView?: ReactNode;
+    githubUserView?: ReactNode;
+  },
 ): React.ReactElement {
   const t = useTranslations("workspace.agents");
   const { editor, state } = props;
@@ -327,7 +339,7 @@ export function ManagedAgentToolkitSectionView(
   ): ManagedToolkitCardProps {
     return {
       item,
-      pending: props.pending,
+      pending: props.pending || props.setupPending,
       canAuthorizeShared: props.canAuthorizeShared,
       authorizationPending: props.authorizationPendingId === item.toolkit.id,
       workspaceEditHref: `/w/${props.handle}/toolkits/${item.toolkit.id}/edit`,
@@ -341,6 +353,35 @@ export function ManagedAgentToolkitSectionView(
       onEdit: () => props.onEdit(item.toolkit.id),
       onToggle: () => props.onToggle(item),
       onDelete: () => props.onRequestDelete(item),
+      userConnectionView:
+        item.toolkit.toolkit_type === "github" &&
+        isGitHubUserMode(item.toolkit.config.github_auth_type) &&
+        (item.ownership_scope === "agent_only" || props.canAuthorizeShared) &&
+        editor.type === "DETAIL" &&
+        editor.toolkitConfigId === item.toolkit.id
+          ? (props.githubUserView ?? (
+              <GitHubUserAuthorizationPage
+                key={item.toolkit.id}
+                toolkit={item.toolkit}
+                context={{
+                  handle: props.handle,
+                  toolkitId: item.toolkit.id,
+                  ...(item.ownership_scope === "agent_only" && {
+                    agentId: props.agentId,
+                  }),
+                  returnView: "DETAIL",
+                  returnPath: `/w/${props.handle}/agents/${props.agentId}/settings/capabilities#agent-toolkits`,
+                }}
+                initialPopup={
+                  props.githubUserPopup?.toolkitId === item.toolkit.id
+                    ? props.githubUserPopup.popup
+                    : null
+                }
+                onPendingChange={props.onSetupPendingChange}
+                onInitialPopupAccepted={props.onGithubUserPopupAccepted}
+              />
+            ))
+          : null,
     };
   }
   const modalTitle =

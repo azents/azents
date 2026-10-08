@@ -9,6 +9,7 @@
 
 import { useForm, type UseFormReturnType } from "@mantine/form";
 import { useWindowEvent } from "@mantine/hooks";
+import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import {
   type FormEventHandler,
@@ -24,6 +25,10 @@ import {
 } from "@/shared/lib/toolkit-identifiers";
 import { isRecord } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
+import {
+  missingNewGitHubUserRegistration,
+  normalizeGitHubUserCredentialEdits,
+} from "../github-user-credentials";
 import { toolkitFormSchema } from "../schemas";
 import {
   hydrateToolkitConfig,
@@ -70,6 +75,7 @@ export interface ToolkitFormContainerOutput {
     disconnect: boolean;
   };
   onSubmit: FormEventHandler<HTMLFormElement>;
+  onUserSetupPendingChange: (pending: boolean) => void;
   onToolSelect: (toolSlug: string | null) => void;
   onConfigChange: (config: Record<string, unknown>) => void;
   onCredentialsChange: (credentials: Record<string, unknown> | null) => void;
@@ -150,6 +156,7 @@ export function useToolkitFormContainer(
     initialToolkitType,
   } = props;
   const router = useRouter();
+  const t = useTranslations("workspace.toolkits");
   const utils = trpc.useUtils();
   const isEditMode = toolkitId != null;
   const backPath =
@@ -373,7 +380,26 @@ export function useToolkitFormContainer(
   const submitForm = useCallback(
     (values: ToolkitFormValues): void => {
       setMutationState({ type: "SUBMITTING" });
-      const credentials = normalizeCredentialEdits(values.credentials ?? null);
+      const credentials =
+        values.toolkitType === "github"
+          ? normalizeGitHubUserCredentialEdits(values.credentials ?? null)
+          : normalizeCredentialEdits(values.credentials ?? null);
+      if (
+        values.toolkitType === "github" &&
+        values.config.github_auth_type === "github_app_user" &&
+        !(
+          formState.type === "EDIT" &&
+          formState.config.has_credentials &&
+          formState.config.config.github_auth_type === "github_app_user"
+        ) &&
+        missingNewGitHubUserRegistration(credentials).length > 0
+      ) {
+        setMutationState({
+          type: "IDLE",
+          error: t("github.registrationRequired"),
+        });
+        return;
+      }
 
       if (agentId) {
         if (isEditMode && toolkitId) {
@@ -441,8 +467,10 @@ export function useToolkitFormContainer(
       agentId,
       createAgentMutation,
       createMutation,
+      formState,
       handle,
       isEditMode,
+      t,
       toolkitId,
       updateAgentMutation,
       updateMutation,
@@ -669,6 +697,7 @@ export function useToolkitFormContainer(
         disconnectAgentOauthMutation.isPending,
     },
     onSubmit,
+    onUserSetupPendingChange: props.onPendingChange ?? (() => {}),
     onToolSelect,
     onConfigChange,
     onCredentialsChange,

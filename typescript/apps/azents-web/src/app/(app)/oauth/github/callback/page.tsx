@@ -27,6 +27,7 @@ export default async function Page({
       installationId={installationId}
       code={code}
       state={state}
+      providerError={typeof params.error === "string" ? params.error : null}
     />
   );
 }

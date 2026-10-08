@@ -13,7 +13,13 @@ const strings = z.preprocess(
 );
 const mcpAuth = z.enum(["none", "header", "bearer", "oauth2"]).catch("none");
 const githubAuth = z
-  .enum(["pat", "github_app", "github_app_platform"])
+  .enum([
+    "pat",
+    "github_app",
+    "github_app_platform",
+    "github_app_user",
+    "github_app_platform_user",
+  ])
   .catch("pat");
 const shellSchema = z.object({
   allowed_domains: strings,
@@ -114,7 +120,10 @@ export function hydrateToolkitConfig(
     case "github":
       return {
         config: projection.config,
-        credentials: { type: projection.config.github_auth_type },
+        credentials:
+          projection.config.github_auth_type === "github_app_platform_user"
+            ? null
+            : { type: projection.config.github_auth_type },
       };
     case "envvar":
       return { config: projection.config, credentials: { values: {} } };

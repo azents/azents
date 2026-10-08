@@ -31,6 +31,25 @@ const sentry: AgentToolkitManagementItemResponse = {
 };
 
 void test("offers inline OAuth only for authorized managers and OAuth toolkits requiring it", () => {
+  for (const mode of ["github_app_user", "github_app_platform_user"]) {
+    const item = {
+      ...sentry,
+      toolkit: {
+        ...sentry.toolkit,
+        toolkit_type: "github",
+        config: { github_auth_type: mode },
+      },
+    };
+    assert.equal(canAuthorizeAgentToolkitOAuth(item, true), true);
+    assert.equal(canAuthorizeAgentToolkitOAuth(item, false), false);
+    assert.equal(
+      canAuthorizeAgentToolkitOAuth(
+        { ...item, ownership_scope: "agent_only" },
+        false,
+      ),
+      true,
+    );
+  }
   assert.equal(canAuthorizeAgentToolkitOAuth(sentry, true), true);
   assert.equal(canAuthorizeAgentToolkitOAuth(sentry, false), false);
   assert.equal(

@@ -43,6 +43,7 @@ import { normalizeCredentialEdits } from "@/shared/lib/redacted-credentials";
 import { normalizeExplicitToolkitSlug } from "@/shared/lib/toolkit-identifiers";
 import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
+import { githubUserRouter } from "./github-user";
 
 const toolkitSlugInput = z.string().refine((value) => {
   const normalized = normalizeExplicitToolkitSlug(value);
@@ -50,6 +51,7 @@ const toolkitSlugInput = z.string().refine((value) => {
 });
 
 export const toolkitRouter = router({
+  githubUser: githubUserRouter,
   /**
    * Platform-provided Toolkit list
    */

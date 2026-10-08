@@ -4,6 +4,8 @@ import type { ToolkitConfigResponse } from "@azents/public-client";
 export interface ToolkitDetailField {
   label:
     | "slug"
+    | "executionAccount"
+    | "appIdentity"
     | "authType"
     | "server"
     | "configuredScope"
@@ -175,6 +177,13 @@ export function projectToolkitDetails(
   if (toolkit.oauth_connection != null) {
     add("grantedScope", displayText(toolkit.oauth_connection.scope));
     add("expires", displayText(toolkit.oauth_connection.expires_at));
+  }
+  if (toolkit.github_user_connection != null) {
+    add(
+      "executionAccount",
+      displayText(toolkit.github_user_connection.account_login),
+    );
+    add("appIdentity", displayText(toolkit.github_user_connection.app_id));
   }
   return fields;
 }
