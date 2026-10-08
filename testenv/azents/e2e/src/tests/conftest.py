@@ -1204,6 +1204,10 @@ def _configure_azents_server_container(
         .with_env("AZ_SYSTEM_BOOTSTRAP_SETUP_TOKEN", system_bootstrap_setup_token)
         .with_env("AZ_REDIS_URL", "redis://valkey:6379")
         .with_env("AZ_WEB_URL", _MAIN_WEB_BROWSER_URL)
+        .with_env(
+            "AZ_TESTENV_GITHUB_PLATFORM_VALIDATION_BASE_URL",
+            _GITHUB_VALIDATION_INTERNAL_URL,
+        )
         .with_env("AZ_WORKSPACE_S3_BUCKET", s3_bucket_name)
         .with_env("AZ_WORKSPACE_S3_PREFIX", "v1")
         .with_env("AZ_WORKSPACE_S3_ENDPOINT_URL", "http://rustfs:9000")

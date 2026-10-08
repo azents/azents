@@ -274,6 +274,29 @@ async def test_exchange_stages_verified_identity_without_activation() -> None:
     )
 
 
+@pytest.mark.parametrize("testenv_enabled", [False, True])
+async def test_synthetic_browser_origin_requires_explicit_testenv(
+    monkeypatch: pytest.MonkeyPatch, testenv_enabled: bool
+) -> None:
+    h = _harness()
+    monkeypatch.setattr(service_module, "create_github_app_jwt", lambda *args: "jwt")
+    service = dataclasses.replace(
+        h.service,
+        config=Config.model_construct(
+            web_url="https://app.test",
+            testenv_api_enabled=testenv_enabled,
+            testenv_github_platform_validation_base_url="http://synthetic.test:8082",
+        ),
+    )
+    output = await service.connect(h.requester)
+    url = urlsplit(output.authorization_url)
+    assert url.netloc == ("synthetic.test:8082" if testenv_enabled else "github.com")
+    assert url.path == "/login/oauth/authorize"
+    assert parse_qs(url.query)["redirect_uri"] == [
+        "https://app.test/oauth/github/callback"
+    ]
+
+
 async def test_context_failure_never_calls_provider() -> None:
     h = _harness()
     h.repository.claim_exchange.side_effect = GitHubUserOAuthError(

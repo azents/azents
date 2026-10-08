@@ -1,7 +1,12 @@
 """Injectable GitHub SDK operations for user-account orchestration."""
 
 import dataclasses
+from typing import Annotated
 
+from fastapi import Depends
+
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.github_auth import GitHubClientFactory, create_github_client
 from azents.core.github_user_auth import (
     GitHubUserAccessPage,
@@ -14,6 +19,7 @@ from azents.core.github_user_auth import (
     list_user_access,
     revoke_user_token,
 )
+from azents.core.github_user_testenv import github_user_testenv_client_factory
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,7 +64,7 @@ class GitHubUserProvider:
         )
 
     async def revoke(self, *, client_id: str, client_secret: str, token: str) -> None:
-        """Require successful exact-token provider revocation."""
+        """Attempt exact-token revocation and expose expected failure to its caller."""
         await revoke_user_token(
             client_id=client_id,
             client_secret=client_secret,
@@ -67,6 +73,14 @@ class GitHubUserProvider:
         )
 
 
-def get_github_user_provider() -> GitHubUserProvider:
+def get_github_user_provider(
+    config: Annotated[Config, Depends(get_config)],
+) -> GitHubUserProvider:
     """Compose the production provider with the supported SDK client factory."""
-    return GitHubUserProvider(client_factory=create_github_client)
+    base_url = config.testenv_github_platform_validation_base_url
+    factory = (
+        github_user_testenv_client_factory(base_url)
+        if config.testenv_api_enabled and base_url is not None
+        else create_github_client
+    )
+    return GitHubUserProvider(client_factory=factory)

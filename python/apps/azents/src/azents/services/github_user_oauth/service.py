@@ -240,14 +240,26 @@ class GitHubUserOAuthService:
         await self.cleanup_revocations(result.revocations)
         attempt = result.attempt
         state = f"github_user.{attempt.id}.{nonce}"
-        authorization_url = "https://github.com/login/oauth/authorize?" + urlencode(
-            {
-                "client_id": registration.client_id,
-                "redirect_uri": attempt.redirect_uri,
-                "state": state,
-                "code_challenge": pkce.code_challenge,
-                "code_challenge_method": "S256",
-            }
+        authorization_origin = "https://github.com"
+        if (
+            self.config.testenv_api_enabled
+            and self.config.testenv_github_platform_validation_base_url is not None
+        ):
+            authorization_origin = (
+                self.config.testenv_github_platform_validation_base_url.rstrip("/")
+            )
+        authorization_url = (
+            authorization_origin
+            + "/login/oauth/authorize?"
+            + urlencode(
+                {
+                    "client_id": registration.client_id,
+                    "redirect_uri": attempt.redirect_uri,
+                    "state": state,
+                    "code_challenge": pkce.code_challenge,
+                    "code_challenge_method": "S256",
+                }
+            )
         )
         return GitHubUserConnectOutput(
             attempt_id=attempt.id,

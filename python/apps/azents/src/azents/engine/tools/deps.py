@@ -62,6 +62,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.services.github_user_oauth.runtime import GitHubUserRuntimeService
 from azents.services.memory_vfs import MemoryVfsReadBackend
 from azents.services.runtime_web.service import (
     RuntimeWebService,
@@ -93,6 +94,7 @@ def get_toolkit_registry(
     config: Annotated[Config, Depends(get_config)],
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
     github_runtime: Annotated[PlatformGitHubAppRuntimeService, Depends()],
+    github_user_runtime: Annotated[GitHubUserRuntimeService, Depends()],
 ) -> dict[str, ToolkitProvider[Any]]:
     """Create the Toolkit registry.
 
@@ -109,6 +111,13 @@ def get_toolkit_registry(
         ),
         "github": GitHubToolkitProvider(
             platform_runtime=github_runtime,
+            user_runtime=github_user_runtime,
+            user_mcp_server_url=(
+                config.testenv_github_platform_validation_base_url.rstrip("/") + "/mcp"
+                if config.testenv_api_enabled
+                and config.testenv_github_platform_validation_base_url is not None
+                else None
+            ),
             snapshot_factory=repositories.snapshots,
         ),
         "notion": NotionToolkitProvider(
