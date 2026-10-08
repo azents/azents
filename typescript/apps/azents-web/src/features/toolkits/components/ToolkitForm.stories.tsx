@@ -210,6 +210,9 @@ export const Submitting = {
     await expect(
       within(canvasElement).getByRole("button", { name: "Add" }),
     ).toHaveAttribute("data-loading", "true");
+    await expect(
+      within(canvasElement).getByRole("button", { name: "Cancel" }),
+    ).toBeDisabled();
   },
 } satisfies Story;
 

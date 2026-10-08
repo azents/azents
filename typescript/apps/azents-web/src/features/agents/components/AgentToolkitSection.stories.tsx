@@ -1,7 +1,10 @@
 import { rem } from "@mantine/core";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { ManagedToolkitCard } from "./AgentToolkitSection";
+import {
+  ManagedToolkitCard,
+  ToolkitConnectionDetails,
+} from "./ManagedAgentToolkitSection";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -44,6 +47,7 @@ const meta = {
     authorizationPending: false,
     workspaceEditHref: "/w/acme/toolkits/toolkit-1/edit",
     onAuthorize: fn(),
+    onDetails: fn(),
     onDetach: () => {},
     onEdit: () => {},
     onToggle: () => {},
@@ -72,7 +76,10 @@ export const WorkspaceSentryAuthorizationRequired = {
     const canvas = within(canvasElement);
     await userEvent.click(canvas.getByRole("button", { name: "Authorize" }));
     await expect(args.onAuthorize).toHaveBeenCalledOnce();
-    await expect(canvas.getByRole("button", { name: "Detach" })).toBeVisible();
+    await expect(
+      canvas.getByRole("button", { name: "View details" }),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("button", { name: "Detach" })).toBeNull();
   },
 } satisfies Story;
 
@@ -98,7 +105,9 @@ export const WorkspaceSentryWithoutManagerPermission = {
     await expect(
       canvas.queryByRole("button", { name: "Authorize" }),
     ).toBeNull();
-    await expect(canvas.getByRole("button", { name: "Detach" })).toBeVisible();
+    await expect(
+      canvas.getByRole("button", { name: "View details" }),
+    ).toBeVisible();
   },
 } satisfies Story;
 
@@ -159,5 +168,28 @@ export const AgentOnlyDisabled = {
         enabled: false,
       },
     },
+  },
+} satisfies Story;
+
+export const Details = {
+  render: (args) => <ToolkitConnectionDetails {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Detach" })).toBeVisible();
+    await expect(
+      canvas.getByRole("link", { name: "Manage in Workspace ↗" }),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const RestrictedSharedDetails = {
+  ...Details,
+  args: { canAuthorizeShared: false },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("button", { name: "Detach" })).toBeVisible();
+    await expect(
+      canvas.queryByRole("link", { name: "Manage in Workspace ↗" }),
+    ).toBeNull();
   },
 } satisfies Story;
