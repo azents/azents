@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-10-07
+updated: 2026-10-08
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -87,6 +87,11 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/api/chat/upload/route.ts
   - typescript/apps/azents-web/src/app/(app)/api/trpc/**
   - typescript/apps/azents-web/src/app/(app)/runtime-web/auth/**
+  - typescript/apps/azents-web/src/features/runtime-web/runtimeWebAuthBootstrap*
+  - typescript/apps/azents-web/src/features/runtime-web/RuntimeWebAuthPage.tsx
+  - typescript/apps/azents-web/src/features/runtime-web/containers/RuntimeWebAuthContainer.tsx
+  - typescript/apps/azents-web/src/features/runtime-web/components/RuntimeWebAuth.tsx
+  - typescript/apps/azents-web/src/features/runtime-web/containers/useRuntimeWebAuthContainer.ts
   - typescript/apps/azents-web/src/shared/lib/auth-cookie-policy*
   - typescript/apps/azents-web/src/shared/lib/cookies.ts
   - typescript/apps/azents-web/src/shared/lib/getInitialAuthState.ts
@@ -125,7 +130,7 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-10-07
+last_verified_at: 2026-10-08
 spec_version: 29
 ---
 
@@ -498,6 +503,16 @@ the ordinary Refine/SPA redirect contract instead.
 
 ### 3.10 Runtime Web browser identity
 
+The Main Web authentication connection screen starts its existing same-origin
+JSON POST through a self-contained inline bootstrap in the initial HTML. It does
+not wait for Next.js static assets or React hydration. Client navigation invokes
+the same bootstrap as an enhancement; a document-local guard prevents duplicate
+identity issuance when hydration follows inline execution. The checking, error,
+and retry presentation retains the same Mantine layout and localized copy.
+An authentication document rendered at another origin first performs a full
+navigation to the configured Main Web authentication route; it never submits
+the Main Web authentication request to a Runtime application's origin.
+
 Runtime Web never exposes the Main Web access token, refresh token, Gateway identity,
 broker binding, or one-time ticket to application JavaScript or a URL. Production
 Main Web access and refresh cookies use host-only `__Host-` names, `Secure`,
@@ -744,6 +759,10 @@ Admin Web `/login` selects one of two modes from Admin bootstrap status. An empt
 Admin-issued signup/password-reset token management and other instance-wide operations remain on Admin Web/Admin API. Workspace-scoped product administration remains on Main Web/Public API.
 
 ## 9. Changelog
+
+- **2026-10-08** — Removed application-bundle hydration from Runtime Web
+  authentication bootstrap while preserving the existing screen and identity
+  exchange protocol.
 
 - **2026-10-07** — Added instance login availability lookup without an email and
   single-screen email/password login when email delivery is disabled.
