@@ -1,17 +1,25 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { useLoginStepForm } from "../containers/useLoginStepForm";
 import { LoginStep } from "./LoginStep";
-import type { LoginState } from "../types";
+import type { LoginState, LoginStepContainerProps } from "../types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const submitEmail = (): void => {};
 const requestSignupEmail = (): void => {};
 
+function LoginStepStory(
+  props: Omit<LoginStepContainerProps, "form">,
+): React.ReactElement {
+  const form = useLoginStepForm(props);
+  return <LoginStep {...props} form={form} />;
+}
+
 const meta = {
-  component: LoginStep,
+  component: LoginStepStory,
   args: {
     emailAvailable: true,
   },
-} satisfies Meta<typeof LoginStep>;
+} satisfies Meta<typeof LoginStepStory>;
 
 export default meta;
 
@@ -109,6 +117,31 @@ export const PasswordError = {
   args: {
     ...PasswordOnly.args,
     state: { type: "IDLE", error: "Invalid email or password." },
+  },
+} satisfies Story;
+
+export const PasswordAutofill = {
+  args: { ...PasswordOnly.args, onSubmit: fn() },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement);
+    const email = canvas.getByRole("textbox", { name: "Email" });
+    const password = canvas.getByLabelText(/^Password/);
+    const submit = canvas.getByRole("button", { name: "Log in" });
+    if (
+      !(email instanceof HTMLInputElement) ||
+      !(password instanceof HTMLInputElement)
+    ) {
+      throw new Error("Login autofill fixtures must be input elements.");
+    }
+    await expect(submit).toBeDisabled();
+    email.value = "  autofilled@example.com  ";
+    password.value = "autofilled-password";
+    await waitFor(() => expect(submit).toBeEnabled());
+    await userEvent.click(submit);
+    await expect(args.onSubmit).toHaveBeenCalledWith(
+      "autofilled@example.com",
+      "autofilled-password",
+    );
   },
 } satisfies Story;
 
