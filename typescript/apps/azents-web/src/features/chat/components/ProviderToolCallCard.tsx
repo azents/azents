@@ -27,6 +27,8 @@ import {
 } from "./providerToolCallPresentation";
 import { providerWebSearchPresentation } from "./providerWebSearchPresentation";
 import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
+import { ToolFailureOutput } from "./ToolFailureOutput";
+import { ToolInputContent } from "./ToolInputContent";
 import type { ProviderToolCall } from "../types";
 import type { ReactElement } from "react";
 
@@ -60,13 +62,7 @@ function RawProviderToolDetails({
           <Text size="xs" c="dimmed" mb="xs">
             {t("arguments")}
           </Text>
-          <ScrollArea.Autosize
-            mah={rem(240)}
-            scrollbarSize={activityDetailScrollbarSize}
-            {...activityDetailScrollAreaProps}
-          >
-            <Code block>{toolCall.arguments}</Code>
-          </ScrollArea.Autosize>
+          <ToolInputContent input={toolCall.arguments} />
         </Box>
       ) : null}
       {hasOutput ? (
@@ -74,13 +70,17 @@ function RawProviderToolDetails({
           <Text size="xs" c="dimmed" mb="xs">
             {t("result")}
           </Text>
-          <ScrollArea.Autosize
-            mah={rem(240)}
-            scrollbarSize={activityDetailScrollbarSize}
-            {...activityDetailScrollAreaProps}
-          >
-            <Code block>{toolCall.output}</Code>
-          </ScrollArea.Autosize>
+          {toolCall.status === "failed" ? (
+            <ToolFailureOutput output={toolCall.output ?? ""} />
+          ) : (
+            <ScrollArea.Autosize
+              mah={rem(240)}
+              scrollbarSize={activityDetailScrollbarSize}
+              {...activityDetailScrollAreaProps}
+            >
+              <Code block>{toolCall.output}</Code>
+            </ScrollArea.Autosize>
+          )}
         </Box>
       ) : null}
     </Stack>
@@ -138,9 +138,13 @@ export function ProviderToolCallCard({
           </Box>
         ) : null}
         {webSearch.summary !== null ? (
-          <Text size="xs" c="dimmed">
-            {webSearch.summary}
-          </Text>
+          toolCall.status === "failed" ? (
+            <ToolFailureOutput output={webSearch.summary} />
+          ) : (
+            <Text size="xs" c="dimmed">
+              {webSearch.summary}
+            </Text>
+          )
         ) : null}
         {webSearch.results.map((result) => (
           <Box
@@ -184,12 +188,24 @@ export function ProviderToolCallCard({
         ))}
       </Stack>
     ) : null;
-  const detail =
+  const primaryDetail =
     webSearchDetail ??
     rawDetails ??
     (visibleAttachments.length > 0 && !showAttachmentsDirectly ? (
       <FileAttachmentList files={visibleAttachments} />
     ) : null);
+  const detail =
+    webSearchDetail !== null &&
+    toolCall.status === "failed" &&
+    (toolCall.output?.trim().length ?? 0) > 0 &&
+    webSearch?.summary !== toolCall.output ? (
+      <Stack gap="sm">
+        <RawProviderToolDetails toolCall={{ ...toolCall, arguments: "" }} />
+        {primaryDetail}
+      </Stack>
+    ) : (
+      primaryDetail
+    );
 
   return (
     <>

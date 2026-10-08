@@ -195,7 +195,7 @@ api_routes:
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ticket
   - /terminal/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/ws
-last_verified_at: 2026-10-07
+last_verified_at: 2026-10-08
 spec_version: 187
 ---
 
@@ -1171,7 +1171,18 @@ Activity-row grid for vertical padding, disclosure-chevron space, icon size, tex
 right-side action placement. A missing disclosure keeps the same leading slot, and right-side status or
 actions do not shift the left summary columns. Every client or provider Tool row reserves and renders a
 sibling Raw data `…` action even when its retained arguments and result are empty. Its dialog always presents
-the canonical technical tool name before retained arguments and result. A validated specialized
+the canonical technical tool name before retained arguments and result. JSON object arguments
+render as individually labeled top-level fields in both client-tool and provider-tool details.
+String values preserve literal line breaks without JSON quoting or escaping; nested objects and
+arrays remain indented JSON, and scalar values retain their JSON representation. Numeric tokens,
+including large identifiers and precise decimals, preserve their original lexemes without rounding. Empty objects
+remain visible as `{}`; freeform, incomplete, and non-object input remains unchanged.
+Expanded failed tool rows also show their retained failure output even when a specialized detail
+would otherwise omit it; existing output details do not repeat the same failure message.
+Failure output preserves line breaks and wraps long lines and unbroken strings to the available
+width rather than requiring horizontal scrolling, including in the detail dialog. Successful
+output retains its existing presentation.
+A validated specialized
 client tool row shows its localized action, privacy-reviewed resource identity or bounded qualifier, and
 minimal semantic detail. Memory content, Goal/Todo text, Skill bodies, messages, tasks, tool-search queries,
 file URIs, and search patterns remain expanded-only or Raw-only according to the renderer. Generic rows
