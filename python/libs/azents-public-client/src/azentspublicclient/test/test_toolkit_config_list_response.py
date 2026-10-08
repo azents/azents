@@ -58,6 +58,17 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                             type = 'github_platform_app', 
                             status = 'reconnect_required', 
                             reason = 'app_identity_changed', ), 
+                        github_user_connection = azentspublicclient.models.git_hub_user_connection_summary_response.GitHubUserConnectionSummaryResponse(
+                            id = '', 
+                            account_id = 56, 
+                            account_login = '', 
+                            account_avatar_url = '', 
+                            app_id = '', 
+                            source = 'platform_user', 
+                            status = 'connected', 
+                            failure_reason = '', 
+                            cleanup_pending = True, ), 
+                        github_user_cleanup_pending = True, 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
@@ -87,6 +98,17 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                             type = 'github_platform_app', 
                             status = 'reconnect_required', 
                             reason = 'app_identity_changed', ), 
+                        github_user_connection = azentspublicclient.models.git_hub_user_connection_summary_response.GitHubUserConnectionSummaryResponse(
+                            id = '', 
+                            account_id = 56, 
+                            account_login = '', 
+                            account_avatar_url = '', 
+                            app_id = '', 
+                            source = 'platform_user', 
+                            status = 'connected', 
+                            failure_reason = '', 
+                            cleanup_pending = True, ), 
+                        github_user_cleanup_pending = True, 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],

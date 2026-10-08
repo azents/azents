@@ -9,6 +9,7 @@ from fastapi import Depends
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
 from azents.core.github_system_setting import PlatformGitHubAppConfig
+from azents.core.github_user_oauth import GitHubUserConnectionSummary
 from azents.core.system_setting import (
     SystemSettingFieldSource,
     SystemSettingSection,
@@ -24,6 +25,7 @@ from azents.rdb.session import SessionManager
 from azents.rdb.session_capabilities import ReadSession, WriteSession
 from azents.repos.agent import AgentRepository
 from azents.repos.github_user_installation import GithubUserInstallationRepository
+from azents.repos.github_user_oauth.guards import cleanup_pending, read_summary
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.mcp_oauth_connection.data import MCPOAuthConnectionSummary
 from azents.repos.system_setting.repository import SystemSettingRepository
@@ -50,6 +52,10 @@ from .data import (
     ToolkitUnavailable,
     ToolkitWithOAuth,
     ToolkitWorkspaceMismatch,
+)
+from .github_user_guard import (
+    guard_user_registration_update,
+    guard_user_toolkit_delete,
 )
 
 _PLATFORM_NOT_CONFIGURED = "GitHub Platform App is not configured."
@@ -250,6 +256,9 @@ class ToolkitOperationsRepository:
                 return Failure(ToolkitWorkspaceMismatch(toolkit_id=toolkit_id))
             if toolkit.toolkit_type != expected_toolkit_type:
                 return Failure(NotFound(toolkit_id=toolkit_id))
+            await guard_user_registration_update(
+                session, toolkit, update, repository=self.toolkit_repository
+            )
             transaction_update = ToolkitUpdate(**update)
             if slug_reset_canonical_name is not None:
                 transaction_update["slug"] = resolve_default_toolkit_slug(
@@ -297,6 +306,9 @@ class ToolkitOperationsRepository:
             )
             if isinstance(toolkit_result, Failure):
                 return Failure(toolkit_result.error)
+            await guard_user_toolkit_delete(
+                session, toolkit_result.value, repository=self.toolkit_repository
+            )
             await self.toolkit_repository.delete_by_id(session, toolkit_id)
             return Success(None)
 
@@ -422,6 +434,18 @@ class ToolkitOperationsRepository:
                 session,
                 toolkit_id,
             )
+
+    async def get_github_user_summary(
+        self, toolkit_id: str
+    ) -> GitHubUserConnectionSummary | None:
+        """Read only allowlisted GitHub account facts in a completed operation."""
+        async with self.session_manager() as session:
+            return await read_summary(session, toolkit_id)
+
+    async def github_user_cleanup_pending(self, toolkit_id: str) -> bool:
+        """Read incomplete cleanup without exposing retired credential material."""
+        async with self.session_manager() as session:
+            return await cleanup_pending(session, toolkit_id)
 
     async def _get_workspace_toolkit(
         self,

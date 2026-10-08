@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from azents.core.agent_errors import NotFound
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
+from azents.core.github_user_oauth import GitHubUserErrorCode, GitHubUserOAuthError
 from azents.core.historical_memory_settings import (
     HistoricalMemorySettingsScope,
 )
@@ -519,12 +520,20 @@ async def delete_agent(
 
     Only administrators or workspace owners can request it.
     """
-    result = await service.delete_by_id(
-        agent_id,
-        workspace_id=member.workspace_id,
-        workspace_user_id=member.workspace_user_id,
-        role=member.role,
-    )
+    try:
+        result = await service.delete_by_id(
+            agent_id,
+            workspace_id=member.workspace_id,
+            workspace_user_id=member.workspace_user_id,
+            role=member.role,
+        )
+    except GitHubUserOAuthError as error:
+        if error.code is not GitHubUserErrorCode.CLEANUP_REQUIRED:
+            raise
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": error.code.value, "message": str(error)},
+        ) from None
     if result.success:
         value = result.value
         return AgentDecommissionResponse.convert_from(value)

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permissions
+from azents.core.github_user_oauth import GitHubUserRequester
 from azents.core.toolkit_errors import (
     AgentToolkitNotFound,
     DuplicateAgentToolkit,
@@ -18,6 +19,7 @@ from azents.core.toolkit_errors import (
 from azents.core.tools import ToolkitProvider
 from azents.engine.tools.deps import get_toolkit_registry
 from azents.services.agent.data import NotAdmin
+from azents.services.github_user_oauth.service import GitHubUserOAuthService
 from azents.services.toolkit import ToolkitService
 from azents.services.toolkit.data import (
     AgentNotBelongToWorkspace,
@@ -47,6 +49,8 @@ from .data import (
     ToolkitListResponse,
     ToolkitResponse,
 )
+from .github_user import _management_errors as github_user_management_errors
+from .github_user import router as github_user_router
 from .oauth import router as oauth_router
 
 router = APIRouter()
@@ -242,12 +246,13 @@ async def update_toolkit_config(
             detail="Toolkit management permission required.",
         )
 
-    result = await service.update_by_id(
-        toolkit_config_id,
-        request_body,
-        workspace_id=member.workspace_id,
-        user_id=member.user_id,
-    )
+    with github_user_management_errors():
+        result = await service.update_by_id(
+            toolkit_config_id,
+            request_body,
+            workspace_id=member.workspace_id,
+            user_id=member.user_id,
+        )
     if result.success:
         value = result.value
         return ToolkitConfigResponse.model_validate(value, from_attributes=True)
@@ -285,6 +290,7 @@ async def update_toolkit_config(
 async def delete_toolkit_config(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ToolkitService, Depends()],
+    github_user_service: Annotated[GitHubUserOAuthService, Depends()],
     *,
     toolkit_config_id: str,
 ) -> None:
@@ -298,9 +304,30 @@ async def delete_toolkit_config(
             detail="Toolkit management permission required.",
         )
 
-    result = await service.delete_by_id(
-        toolkit_config_id, workspace_id=member.workspace_id
-    )
+    with github_user_management_errors():
+        existing = await service.get_by_id(
+            toolkit_config_id, workspace_id=member.workspace_id
+        )
+        if (
+            existing.success
+            and existing.value.toolkit_type == "github"
+            and (
+                existing.value.config.get("github_auth_type")
+                in ("github_app_user", "github_app_platform_user")
+            )
+        ):
+            await github_user_service.disconnect(
+                GitHubUserRequester(
+                    user_id=member.user_id,
+                    session_id=member.session_id,
+                    workspace_id=member.workspace_id,
+                    agent_id=None,
+                    toolkit_id=toolkit_config_id,
+                )
+            )
+        result = await service.delete_by_id(
+            toolkit_config_id, workspace_id=member.workspace_id
+        )
     if result.success:
         return
     else:
@@ -497,15 +524,16 @@ async def update_agent_toolkit_config(
     request_body: AgentToolkitConfigUpdateRequest,
 ) -> ToolkitConfigResponse:
     """Update one ToolkitConfig owned by the path Agent."""
-    result = await service.update_agent_owned(
-        agent_id,
-        toolkit_config_id,
-        request_body,
-        workspace_id=member.workspace_id,
-        workspace_user_id=member.workspace_user_id,
-        user_id=member.user_id,
-        role=member.role,
-    )
+    with github_user_management_errors():
+        result = await service.update_agent_owned(
+            agent_id,
+            toolkit_config_id,
+            request_body,
+            workspace_id=member.workspace_id,
+            workspace_user_id=member.workspace_user_id,
+            user_id=member.user_id,
+            role=member.role,
+        )
     if result.success:
         return ToolkitConfigResponse.model_validate(
             result.value,
@@ -544,18 +572,44 @@ async def update_agent_toolkit_config(
 async def delete_agent_toolkit_config(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
     service: Annotated[ToolkitService, Depends()],
+    github_user_service: Annotated[GitHubUserOAuthService, Depends()],
     *,
     agent_id: str,
     toolkit_config_id: str,
 ) -> None:
     """Delete one ToolkitConfig owned by the path Agent."""
-    result = await service.delete_agent_owned(
-        agent_id,
-        toolkit_config_id,
-        workspace_id=member.workspace_id,
-        workspace_user_id=member.workspace_user_id,
-        role=member.role,
-    )
+    with github_user_management_errors():
+        existing = await service.get_agent_owned(
+            agent_id,
+            toolkit_config_id,
+            workspace_id=member.workspace_id,
+            workspace_user_id=member.workspace_user_id,
+            role=member.role,
+        )
+        if (
+            existing.success
+            and existing.value.toolkit_type == "github"
+            and (
+                existing.value.config.get("github_auth_type")
+                in ("github_app_user", "github_app_platform_user")
+            )
+        ):
+            await github_user_service.disconnect(
+                GitHubUserRequester(
+                    user_id=member.user_id,
+                    session_id=member.session_id,
+                    workspace_id=member.workspace_id,
+                    agent_id=agent_id,
+                    toolkit_id=toolkit_config_id,
+                )
+            )
+        result = await service.delete_agent_owned(
+            agent_id,
+            toolkit_config_id,
+            workspace_id=member.workspace_id,
+            workspace_user_id=member.workspace_user_id,
+            role=member.role,
+        )
     if result.success:
         return
     error = result.error
@@ -757,4 +811,10 @@ def mount(mounter: RouteMounter) -> None:
         prefix="/toolkit/v1",
         tag="Toolkit OAuth v1",
         description="Toolkit OAuth2 connection flow.",
+    )
+    mounter(
+        github_user_router,
+        prefix="/toolkit/v1",
+        tag="GitHub User Toolkit v1",
+        description="GitHub user-account authorization and token cleanup.",
     )

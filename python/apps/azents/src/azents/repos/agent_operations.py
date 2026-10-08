@@ -32,6 +32,7 @@ from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.github_user_oauth.parent_guards import assert_agent_delete_allowed
 from azents.repos.runtime_profile.availability import (
     RuntimeProfileAvailabilityRepository,
 )
@@ -413,6 +414,7 @@ class AgentOperationsRepository:
             )
             if settings.archived_session_retention_days is None:
                 return Failure(AgentOperationUnlimitedRetention(agent_id=agent_id))
+            await assert_agent_delete_allowed(session, agent_id=agent_id)
             decommissioned = await self.agent_repository.mark_decommissioning(
                 session,
                 agent_id,

@@ -25,8 +25,11 @@ from azents.core.github_auth import (
 )
 from azents.core.github_credentials import (
     GitHubInstallationTarget,
+    GitHubSecrets,
     GitHubSecretsApp,
     GitHubSecretsAppPlatform,
+    GitHubSecretsAppPlatformUser,
+    GitHubSecretsAppUser,
     GitHubSecretsPAT,
 )
 from azents.core.mcp_transport import test_mcp_transport
@@ -66,8 +69,9 @@ from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
-_GitHubSecretsUnion = GitHubSecretsPAT | GitHubSecretsApp | GitHubSecretsAppPlatform
-_github_secrets_adapter = TypeAdapter[_GitHubSecretsUnion](_GitHubSecretsUnion)
+_github_secrets_adapter: TypeAdapter[GitHubSecrets] = TypeAdapter(
+    GitHubSecrets, config=ConfigDict(hide_input_in_errors=True)
+)
 
 _GITHUB_SERVER_URL = "https://api.githubcopilot.com/mcp/"
 _GITHUB_AUTH_TYPE = "bearer"
@@ -961,6 +965,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     platform.private_key,
                     first.installation_id,
                 )
+            case GitHubSecretsAppUser() | GitHubSecretsAppPlatformUser():
+                raise ValueError("GitHub user-account authorization is required.")
             case _ as unreachable:
                 assert_never(unreachable)
 
@@ -1012,6 +1018,11 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
         :param context: Resolve context
         :return: Credential-bound GitHubToolkit instance
         """
+        if config.github_auth_type in (
+            "github_app_user",
+            "github_app_platform_user",
+        ):
+            raise ValueError("GitHub user-account execution is not yet available.")
         mcp_config = _build_mcp_config(config)
 
         proxy_url = context.mcp_proxy_url
@@ -1051,6 +1062,8 @@ class GitHubToolkitProvider(ToolkitProvider[GitHubToolkitConfig]):
                     context,
                     proxy_url=proxy_url,
                 )
+            case GitHubSecretsAppUser() | GitHubSecretsAppPlatformUser():
+                raise ValueError("GitHub user-account authorization is required.")
             case _ as unreachable:
                 assert_never(unreachable)
 

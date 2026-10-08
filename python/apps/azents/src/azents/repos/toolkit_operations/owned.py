@@ -36,6 +36,10 @@ from azents.repos.toolkit_operations.data import (
     PlatformAuthorityRejected,
     PlatformToolkitAuthority,
 )
+from azents.repos.toolkit_operations.github_user_guard import (
+    guard_user_registration_update,
+    guard_user_toolkit_delete,
+)
 from azents.repos.toolkit_operations.owned_data import (
     AgentManagementDenied,
     AgentManagementSnapshot,
@@ -236,6 +240,9 @@ class AgentToolkitOperationsRepository:
                 )
                 if error is not None:
                     return Failure(error)
+            await guard_user_registration_update(
+                session, toolkit, update, repository=self.toolkit_repo
+            )
             transaction_update = ToolkitUpdate(**update)
             if slug_reset_canonical_name is not None:
                 transaction_update["slug"] = resolve_default_toolkit_slug(
@@ -511,6 +518,9 @@ class AgentToolkitOperationsRepository:
                     pass
                 case _:
                     assert_never(access)
+            await guard_user_toolkit_delete(
+                session, toolkit, repository=self.toolkit_repo
+            )
             await self.toolkit_repo.delete_by_id(session, toolkit_id)
         return Success(None)
 

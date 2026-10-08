@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field, computed_field
 from typing_extensions import TypedDict
 
+from azents.core.github_user_oauth import GitHubUserConnectionSummary
 from azents.repos.mcp_oauth_connection.data import (
     MCPOAuthConnection,
     MCPOAuthConnectionSummary,
@@ -37,6 +38,14 @@ class ToolkitOutput(ToolkitConfig):
     authorization_state: PlatformGitHubAppAuthorizationState | None = Field(
         default=None,
         description="Redacted provider authorization state",
+    )
+
+    github_user_connection: GitHubUserConnectionSummary | None = Field(
+        default=None, description="Redacted GitHub user-account connection metadata"
+    )
+    github_user_cleanup_pending: bool = Field(
+        default=False,
+        description="Whether retired GitHub user token cleanup is incomplete",
     )
 
     # The type checker cannot infer the Pydantic computed_field/property combination.

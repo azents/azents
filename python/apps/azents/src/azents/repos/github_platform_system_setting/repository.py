@@ -19,7 +19,9 @@ class PlatformGitHubAppSystemSettingRepository:
     def _platform_toolkit_filter() -> tuple[sa.ColumnElement[bool], ...]:
         return (
             RDBToolkitConfig.toolkit_type == "github",
-            RDBToolkitConfig.config["github_auth_type"].astext == "github_app_platform",
+            RDBToolkitConfig.config["github_auth_type"].astext.in_(
+                ("github_app_platform", "github_app_platform_user")
+            ),
         )
 
     async def get_installation_impact(

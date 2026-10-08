@@ -49,6 +49,7 @@ async def test_owned_update_preserves_lock_order_and_allows_duplicate_slug() -> 
             owner_agent_id="agent-1",
             workspace_id="workspace-1",
             slug="old",
+            toolkit_type="mcp",
             enabled=True,
         )
 
@@ -133,6 +134,7 @@ async def test_owned_blank_slug_reset_uses_locked_current_name() -> None:
         workspace_id="workspace-1",
         name="Current Production",
         slug="old",
+        toolkit_type="mcp",
     )
     toolkit_repo = AsyncMock(spec=ToolkitRepository)
     toolkit_repo.get_by_id.return_value = toolkit

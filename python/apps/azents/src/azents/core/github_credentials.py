@@ -5,7 +5,7 @@ Defines credential models for GitHub authentication modes.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class GitHubSecretsPAT(BaseModel):
@@ -60,8 +60,39 @@ class GitHubSecretsAppPlatform(BaseModel):
     )
 
 
+class GitHubSecretsAppUser(BaseModel):
+    """BYOA registration for a separately stored user-account connection."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    type: Literal["github_app_user"] = "github_app_user"
+    app_id: str = Field(min_length=1, description="GitHub App ID")
+    private_key: str = Field(min_length=1, repr=False, description="App private key")
+    client_id: str = Field(min_length=1, description="GitHub App OAuth client ID")
+    client_secret: str = Field(
+        min_length=1,
+        repr=False,
+        description="Write-only GitHub App OAuth client secret",
+    )
+
+
+class GitHubSecretsAppPlatformUser(BaseModel):
+    """Server-bound Platform registration for a user-account connection."""
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    type: Literal["github_app_platform_user"] = "github_app_platform_user"
+    app_id: str = Field(
+        min_length=1, description="Internal Platform App identity binding"
+    )
+
+
 GitHubSecrets = Annotated[
-    GitHubSecretsPAT | GitHubSecretsApp | GitHubSecretsAppPlatform,
+    GitHubSecretsPAT
+    | GitHubSecretsApp
+    | GitHubSecretsAppPlatform
+    | GitHubSecretsAppUser
+    | GitHubSecretsAppPlatformUser,
     Field(discriminator="type"),
 ]
 """GitHub Toolkit credential discriminated union."""

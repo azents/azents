@@ -239,6 +239,26 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_validate_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/validate | Validate Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate | Validate Multi Slack Connection
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_access**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_access) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/access | Agent Access
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_cancel**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/attempt | Agent Cancel
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_cleanup_retry**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_cleanup_retry) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry | Agent Cleanup Retry
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_confirm**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_confirm) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/confirm | Agent Confirm
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_connect**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_connect) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/connect | Agent Connect
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_disconnect**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/connection | Agent Disconnect
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_exchange**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_exchange) | **POST** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/exchange | Agent Exchange
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_review**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_review) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/attempts/{attempt_id} | Agent Review
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_setup_availability**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_setup_availability) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/github/setup-availability | Agent Setup Availability
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_agent_status**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_agent_status) | **GET** /toolkit/v1/workspaces/{handle}/agents/{agent_id}/toolkit-configs/{toolkit_id}/github-user/status | Agent Status
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_access**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_access) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/access | Shared Access
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_cancel**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_cancel) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/attempt | Shared Cancel
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_cleanup_retry**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_cleanup_retry) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/cleanup-retry | Shared Cleanup Retry
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_confirm**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_confirm) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/confirm | Shared Confirm
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_connect**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_connect) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/connect | Shared Connect
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_disconnect**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_disconnect) | **DELETE** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/connection | Shared Disconnect
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_exchange**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_exchange) | **POST** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/exchange | Shared Exchange
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_review**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_review) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/attempts/{attempt_id} | Shared Review
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_setup_availability**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_setup_availability) | **GET** /toolkit/v1/workspaces/{handle}/github/setup-availability | Shared Setup Availability
+*GitHubUserToolkitV1Api* | [**github_user_toolkit_v1_shared_status**](azentspublicclient/docs/GitHubUserToolkitV1Api.md#github_user_toolkit_v1_shared_status) | **GET** /toolkit/v1/workspaces/{handle}/toolkit-configs/{toolkit_id}/github-user/status | Shared Status
 *HealthV1Api* | [**health_v1_liveness**](azentspublicclient/docs/HealthV1Api.md#health_v1_liveness) | **GET** /health/v1/liveness | Liveness
 *HealthV1Api* | [**health_v1_readiness**](azentspublicclient/docs/HealthV1Api.md#health_v1_readiness) | **GET** /health/v1/readiness | Readiness
 *InvitationV1Api* | [**invitation_v1_accept_invitation**](azentspublicclient/docs/InvitationV1Api.md#invitation_v1_accept_invitation) | **POST** /invitation/v1/invitations/{invitation_id}/accept | Accept Invitation
@@ -572,6 +592,19 @@ Class | Method | HTTP request | Description
  - [GitHubPlatformInstallationsRequest](azentspublicclient/docs/GitHubPlatformInstallationsRequest.md)
  - [GitHubPlatformInstallationsResponse](azentspublicclient/docs/GitHubPlatformInstallationsResponse.md)
  - [GitHubPlatformOAuthUrlResponse](azentspublicclient/docs/GitHubPlatformOAuthUrlResponse.md)
+ - [GitHubSetupAvailability](azentspublicclient/docs/GitHubSetupAvailability.md)
+ - [GitHubUserAccessPage](azentspublicclient/docs/GitHubUserAccessPage.md)
+ - [GitHubUserAttemptRequest](azentspublicclient/docs/GitHubUserAttemptRequest.md)
+ - [GitHubUserCandidateSummary](azentspublicclient/docs/GitHubUserCandidateSummary.md)
+ - [GitHubUserConnectOutput](azentspublicclient/docs/GitHubUserConnectOutput.md)
+ - [GitHubUserConnectionStatus](azentspublicclient/docs/GitHubUserConnectionStatus.md)
+ - [GitHubUserConnectionSummary](azentspublicclient/docs/GitHubUserConnectionSummary.md)
+ - [GitHubUserConnectionSummaryResponse](azentspublicclient/docs/GitHubUserConnectionSummaryResponse.md)
+ - [GitHubUserExchangeRequest](azentspublicclient/docs/GitHubUserExchangeRequest.md)
+ - [GitHubUserInstallation](azentspublicclient/docs/GitHubUserInstallation.md)
+ - [GitHubUserRepository](azentspublicclient/docs/GitHubUserRepository.md)
+ - [GitHubUserRepositoryPermissions](azentspublicclient/docs/GitHubUserRepositoryPermissions.md)
+ - [GitHubUserStatusOutput](azentspublicclient/docs/GitHubUserStatusOutput.md)
  - [GitRefEntryResponse](azentspublicclient/docs/GitRefEntryResponse.md)
  - [GitRefPreviewResponse](azentspublicclient/docs/GitRefPreviewResponse.md)
  - [GitWorktreeWorkspaceItemResponse](azentspublicclient/docs/GitWorktreeWorkspaceItemResponse.md)
