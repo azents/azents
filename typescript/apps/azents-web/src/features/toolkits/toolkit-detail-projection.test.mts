@@ -66,6 +66,38 @@ void test("environment entries reveal names only, including unmasked entries", (
 });
 
 void test("configured scopes remain distinct from granted OAuth token scope", () => {
+  const github = toolkit("github", {
+    github_auth_type: "github_app_user",
+    toolsets: ["repos"],
+    token: "hidden",
+    client_secret: "hidden",
+  });
+  github.github_user_connection = {
+    id: "connection",
+    account_id: 1,
+    account_login: "verified-user",
+    account_avatar_url: null,
+    app_id: "42",
+    source: "byoa_user",
+    status: "connected",
+    failure_reason: null,
+  };
+  const fields = projectToolkitDetails(github);
+  assert.equal(
+    fields.find((field) => field.label === "executionAccount")?.value,
+    "verified-user",
+  );
+  assert.equal(
+    fields.find((field) => field.label === "appIdentity")?.value,
+    "42",
+  );
+  assert.equal(
+    fields.some(
+      (field) => field.label === "grantedScope" || field.label === "expires",
+    ),
+    false,
+  );
+  assert.equal(JSON.stringify(fields).includes("hidden"), false);
   const value = toolkit("mcp", { scopes: ["read", "write"] });
   value.oauth_connection = {
     status: "connected",

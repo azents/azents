@@ -21,7 +21,6 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
 import {
   IconAlertTriangle,
   IconEdit,
@@ -30,7 +29,6 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useCallback, useState } from "react";
 import type { ToolkitListContainerOutput } from "../containers/useToolkitListContainer";
 import type { ToolkitConfigResponse } from "@azents/public-client";
 
@@ -39,26 +37,6 @@ export function ToolkitList(
 ): React.ReactElement {
   const { handle, listState, onDelete, onToggleEnabled } = props;
   const t = useTranslations("workspace.toolkits");
-
-  const [deleteOpened, { open: openDelete, close: closeDelete }] =
-    useDisclosure(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-
-  const handleDeleteClick = useCallback(
-    (toolkitId: string): void => {
-      setDeleteTarget(toolkitId);
-      openDelete();
-    },
-    [openDelete],
-  );
-
-  const handleDeleteConfirm = useCallback((): void => {
-    if (deleteTarget) {
-      onDelete(deleteTarget);
-      setDeleteTarget(null);
-      closeDelete();
-    }
-  }, [deleteTarget, onDelete, closeDelete]);
 
   const basePath = `/w/${handle}/toolkits`;
 
@@ -93,24 +71,41 @@ export function ToolkitList(
               key={toolkit.id}
               toolkit={toolkit}
               basePath={basePath}
-              onDelete={handleDeleteClick}
+              onDelete={onDelete}
               onToggleEnabled={onToggleEnabled}
             />
           ))}
 
         <Modal
-          opened={deleteOpened}
-          onClose={closeDelete}
+          opened={props.deleteTarget != null}
+          onClose={props.onCancelDelete}
+          closeOnEscape={props.deleteState.type !== "PENDING"}
+          withCloseButton={props.deleteState.type !== "PENDING"}
           title={t("delete")}
           centered
         >
           <Stack gap="md">
+            {props.deleteState.type === "ERROR" && (
+              <Alert color="red">
+                <Stack>
+                  <Text size="sm">{props.deleteState.message}</Text>
+                </Stack>
+              </Alert>
+            )}
             <Text>{t("deleteConfirm")}</Text>
             <Group justify="flex-end">
-              <Button variant="default" onClick={closeDelete}>
+              <Button
+                variant="default"
+                onClick={props.onCancelDelete}
+                disabled={props.deleteState.type === "PENDING"}
+              >
                 {t("cancel")}
               </Button>
-              <Button color="red" onClick={handleDeleteConfirm}>
+              <Button
+                color="red"
+                onClick={props.onConfirmDelete}
+                loading={props.deleteState.type === "PENDING"}
+              >
                 {t("delete")}
               </Button>
             </Group>

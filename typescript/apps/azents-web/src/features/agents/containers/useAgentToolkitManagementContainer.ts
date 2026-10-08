@@ -1,8 +1,14 @@
 "use client";
 
-import { useWindowEvent } from "@mantine/hooks";
+import { useSessionStorage, useWindowEvent } from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  consumeGitHubUserPopupHandoff,
+  deserializeGitHubUserContext,
+  GITHUB_USER_CONTEXT_KEY,
+  isGitHubUserMode,
+} from "@/features/toolkits/github-user-oauth-state";
 import { trpc } from "@/trpc/client";
 import {
   type AgentToolkitEditorState,
@@ -13,6 +19,7 @@ import {
   decodeAgentToolkitOAuthCallback,
   projectAgentToolkitManagementState,
 } from "../agentToolkitManagementState";
+import type { GitHubUserContext } from "@/features/toolkits/github-user-oauth-state";
 import type { AgentToolkitManagementItemResponse } from "@azents/public-client";
 
 export interface AgentToolkitManagementContainerProps {
@@ -32,6 +39,8 @@ export interface AgentToolkitManagementContainerOutput extends AgentToolkitManag
   deletePending: boolean;
   canAuthorizeShared: boolean;
   authorizationPendingId: string | null;
+  githubUserPopup?: { toolkitId: string; popup: Window } | null;
+  onGithubUserPopupAccepted: (popup: Window) => void;
   onAuthorize: (item: AgentToolkitManagementItemResponse) => void;
   onStartAdd: () => void;
   onCatalogTabChange: (tab: "new" | "workspace") => void;
@@ -69,6 +78,23 @@ export function useAgentToolkitManagementContainer({
     string | null
   >(null);
   const oauthPopup = useRef<Window | null>(null);
+  const [githubUserPopup, setGithubUserPopup] = useState<{
+    toolkitId: string;
+    popup: Window;
+  } | null>(null);
+  const onGithubUserPopupAccepted = useCallback(
+    (acceptedPopup: Window): void => {
+      setGithubUserPopup((current) =>
+        consumeGitHubUserPopupHandoff(current, acceptedPopup),
+      );
+    },
+    [],
+  );
+  const [, saveGithubContext] = useSessionStorage<GitHubUserContext | null>({
+    key: GITHUB_USER_CONTEXT_KEY,
+    defaultValue: null,
+    deserialize: deserializeGitHubUserContext,
+  });
   const query = trpc.toolkit.listAgentManagement.useQuery({ handle, agentId });
   const definitionsQuery = trpc.toolkit.listToolkits.useQuery();
   const memberQuery = trpc.workspaceMember.me.useQuery({ handle });
@@ -106,6 +132,15 @@ export function useAgentToolkitManagementContainer({
       setMutationState({ type: "ERROR", message: error.message }),
   });
   const deleteMutation = trpc.toolkit.removeAgentConfig.useMutation({
+    onSettled: async () => {
+      await Promise.allSettled([
+        invalidate(),
+        utils.toolkit.githubUser.status.invalidate(),
+        utils.toolkit.githubUser.access.invalidate(),
+        utils.toolkit.githubUser.review.invalidate(),
+        utils.toolkit.getAgentConfig.invalidate(),
+      ]);
+    },
     onSuccess: async () => {
       setMutationState({ type: "IDLE" });
       setDeleteTarget(null);
@@ -137,7 +172,8 @@ export function useAgentToolkitManagementContainer({
     (item: AgentToolkitManagementItemResponse): void => {
       if (
         !canAuthorizeAgentToolkitOAuth(item, canAuthorizeShared) ||
-        authorizationPendingId != null
+        authorizationPendingId != null ||
+        setupPending
       ) {
         return;
       }
@@ -146,6 +182,30 @@ export function useAgentToolkitManagementContainer({
         return;
       }
       setMutationState({ type: "IDLE" });
+      if (
+        item.toolkit.toolkit_type === "github" &&
+        isGitHubUserMode(item.toolkit.config.github_auth_type)
+      ) {
+        setEditor({ type: "DETAIL", toolkitConfigId: item.toolkit.id });
+        saveGithubContext({
+          handle,
+          toolkitId: item.toolkit.id,
+          ...(item.ownership_scope === "agent_only" && { agentId }),
+          returnView: "DETAIL",
+          returnPath: `/w/${handle}/agents/${agentId}/settings/capabilities#agent-toolkits`,
+        });
+        const reserved = window.open(
+          "about:blank",
+          "_blank",
+          "width=1024,height=768",
+        );
+        if (reserved == null) {
+          setMutationState({ type: "ERROR", message: t("popupBlocked") });
+          return;
+        }
+        setGithubUserPopup({ toolkitId: item.toolkit.id, popup: reserved });
+        return;
+      }
       // Reserve a popup in the click handler before awaiting the OAuth URL.
       const popup = window.open(
         "about:blank",
@@ -202,6 +262,8 @@ export function useAgentToolkitManagementContainer({
       connectAgentMutation,
       connectSharedMutation,
       handle,
+      saveGithubContext,
+      setupPending,
       t,
     ],
   );
@@ -233,6 +295,7 @@ export function useAgentToolkitManagementContainer({
       return;
     }
     setEditor({ type: "CLOSED" });
+    setGithubUserPopup(null);
     void invalidate();
   }, [invalidate, setupPending, attachMutation.isPending]);
 
@@ -255,6 +318,8 @@ export function useAgentToolkitManagementContainer({
     deletePending: deleteMutation.isPending,
     canAuthorizeShared,
     authorizationPendingId,
+    githubUserPopup,
+    onGithubUserPopupAccepted,
     onAuthorize,
     onStartAdd: () => {
       setMutationState({ type: "IDLE" });

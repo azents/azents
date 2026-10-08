@@ -6,6 +6,31 @@ import {
   toolkitProjectionUsesOauth,
 } from "./toolkit-config-projection.ts";
 
+void test("all five GitHub modes hydrate without falling back or generic OAuth discovery", () => {
+  for (const mode of [
+    "pat",
+    "github_app",
+    "github_app_platform",
+    "github_app_user",
+    "github_app_platform_user",
+  ]) {
+    const projection = projectToolkitConfig("github", {
+      github_auth_type: mode,
+    });
+    assert.ok(projection.type === "github");
+    assert.equal(projection.config.github_auth_type, mode);
+    assert.deepEqual(
+      hydrateToolkitConfig("github", { github_auth_type: mode }).credentials,
+      mode === "github_app_platform_user" ? null : { type: mode },
+    );
+    assert.equal(toolkitProjectionUsesOauth(projection), false);
+  }
+  const defaultProjection = projectToolkitConfig("github", {});
+  assert.ok(defaultProjection.type === "github");
+  assert.equal(defaultProjection.config.github_auth_type, "pat");
+  assert.equal(defaultProjection.config.inject_runtime_environment, false);
+});
+
 void test("known Toolkit projections preserve field filtering and historical defaults", () => {
   const mcp = projectToolkitConfig("mcp", {
     server_url: 7,

@@ -5,7 +5,12 @@ import { createTranslator } from "next-intl";
 import { z } from "zod/v4";
 
 const messageSchema = z.object({
-  toolkits: z.object({ github: z.record(z.string(), z.string()) }),
+  toolkits: z.object({
+    github: z.object({
+      runtimeEnvironmentWarningBody: z.string(),
+      runtimeEnvironmentToggleDescription: z.string(),
+    }),
+  }),
 });
 
 void test("GitHub Runtime warning messages preserve literal installation IDs in every locale", async () => {
@@ -28,10 +33,11 @@ void test("GitHub Runtime warning messages preserve literal installation IDs in 
       namespace: "toolkits.github",
       onError: (error) => errors.push(error),
     });
-    for (const key of [
+    const warningKeys: Array<keyof typeof messages.toolkits.github> = [
       "runtimeEnvironmentWarningBody",
       "runtimeEnvironmentToggleDescription",
-    ]) {
+    ];
+    for (const key of warningKeys) {
       const text = t(key);
       assert.ok(text.includes("GITHUB_TOKEN_INSTALLATION_<id>"), locale);
       assert.equal(text.includes("workspace.toolkits.github."), false, locale);

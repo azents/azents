@@ -3,22 +3,33 @@ import { getTranslations } from "next-intl/server";
 import { GitHubAppInstallResult } from "./components/GitHubAppInstallResult";
 import { GitHubInstallationsCodeRelay } from "./components/GitHubInstallationsCodeRelay";
 import { OAuthMcpCallbackResult } from "./components/OAuthMcpCallbackResult";
+import { GitHubUserOAuthCallbackPage } from "./GitHubUserOAuthCallbackPage";
 
 interface GitHubOAuthCallbackPageProps {
   installationId: string | null;
   code: string | null;
   state: string | null;
+  providerError?: string | null;
 }
 
 export async function GitHubOAuthCallbackPage({
   installationId,
   code,
   state,
+  providerError = null,
 }: GitHubOAuthCallbackPageProps): Promise<React.ReactElement> {
   const t = await getTranslations("oauth");
 
   let content: React.ReactElement;
-  if (installationId !== null) {
+  if (state?.startsWith("github_user.") === true) {
+    content = (
+      <GitHubUserOAuthCallbackPage
+        code={code}
+        state={state}
+        providerError={providerError}
+      />
+    );
+  } else if (installationId !== null) {
     content = <GitHubAppInstallResult installationId={installationId} />;
   } else if (code !== null && state !== null) {
     content = <GitHubInstallationsCodeRelay code={code} state={state} />;
